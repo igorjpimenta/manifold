@@ -146,18 +146,15 @@ describe("writePendingResult / readPendingResult / clearPendingResult", () => {
 });
 
 describe("state survives being loaded as a distinct module instance (regression: jiti/CJS vs native-ESM split)", () => {
-  // Real incident (2026-09-13, caught via a live fixture pipeline, not by
-  // any unit test): extensions/pipeclaw/** loads through jiti's CJS
-  // transpilation (engine/executor-subagent.js, agent/tools/submit-score.js
-  // — see extensions/pipeclaw/node_modules/.cache/jiti/*.cjs), while
-  // pipeline files under workspace/.pipelines/** load via native ESM `await
-  // import(url)` (engine/loader.js). Both import this file by the same
-  // file:// URL, but jiti and native ESM do not share a module registry —
-  // each produces its OWN separate instance, each with its own state. A
-  // plain module-scope `const` Map silently split into two disconnected
-  // copies: submit-score.js's writePendingResult (jiti-loaded) never
-  // reached score-llm.js's readPendingResult (native-ESM-loaded) — same
-  // process, same file, same invocationId, `stored` was always null.
+  // extensions/pipeclaw/** loads through jiti's CJS transpilation while
+  // pipeline files under workspace/.pipelines/** load via native ESM
+  // `await import(url)`. Both import this file by the same file:// URL,
+  // but jiti and native ESM do not share a module registry — each
+  // produces its OWN separate instance, each with its own state. A plain
+  // module-scope `const` Map silently split into two disconnected copies:
+  // one loader's writePendingResult never reached the other's
+  // readPendingResult — same process, same file, same invocationId,
+  // `stored` was always null.
   //
   // This test can't reproduce jiti's CJS transpilation itself (that's a
   // build-tool concern, not something node:test exercises), but it proves

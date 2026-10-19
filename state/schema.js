@@ -30,9 +30,9 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   // signal a bare nullable resultJson can't provide on its own (not
   // dispatched vs. dispatched-not-complete vs. complete-with-null-result).
   // resultTooLargeBytes carried the real size when a result was capped
-  // instead of stored — removed 2026-08-19 (see writeResult() in
-  // state/node-executions.js). Only non-null on rows written before that;
-  // every write since always sets it null.
+  // instead of stored (see writeResult() in
+  // state/node-executions.js). Only non-null on legacy rows written
+  // before the cap's removal; every write since always sets it null.
   resultJson:          text('result_json'),
   resultWrittenAt:     integer('result_written_at'),
   resultTooLargeBytes: integer('result_too_large_bytes'),
@@ -56,14 +56,12 @@ export const flowNodeExecutions = sqliteTable('flow_node_executions', {
 // flow_branches (old-model branch storage, from the pre-childFlows
 // branchService era) is still a real table in runtime.sqlite — read
 // directly via raw SQL by state/node-executions.js, never through Drizzle
-// — but its `flowBranches` schema export here had zero importers anywhere
-// in the codebase. Deleted 2026-08-12 (dead-code cleanup).
+// — and deliberately has no schema export here: nothing imports one.
 
 // Deliberately thin — pipeline_id/branch_item_id/failure_node/recovery_hint/
-// resolved status all used to be stored here and are now reconstructed at
-// read time via invocation_id/execution_id joining to flow_node_invocations/
-// flow_node_executions (see failure-store.js's deriveFailureContext). This
-// table went from 21 columns to 6.
+// resolved status are reconstructed at read time via invocation_id/
+// execution_id joining to flow_node_invocations/flow_node_executions
+// (see failure-store.js's deriveFailureContext), not stored here.
 export const failureEvents = sqliteTable('failure_events', {
   id:             text('id').primaryKey(),
   flowId:         text('flow_id').notNull(),

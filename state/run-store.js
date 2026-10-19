@@ -33,8 +33,7 @@ const LEGACY_PREFIX = "graph-flow:";
 // real terminal set instead of hand-rolling their own allowlist of active
 // statuses — a `status !== "running" && status !== "blocked"` check misses
 // "queued" (an admission-pool wait, very much non-terminal) and wrongly
-// refuses to cancel it. Confirmed live 2026-09-25: both cli.js's and
-// dashboard/server.js's cancel handlers had exactly that gap.
+// refuses to cancel it.
 export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "skipped"];
 export const TERMINAL_STATUS_SET = new Set(TERMINAL_STATUSES);
 const TERMINAL_SET = TERMINAL_STATUS_SET;
@@ -109,8 +108,8 @@ const MIGRATIONS = [
   `ALTER TABLE flow_runs ADD COLUMN status_reason TEXT;
    UPDATE flow_runs SET status_reason = blocked_summary WHERE blocked_summary IS NOT NULL;`,
 
-  // v6: drop blocked_summary now that v5's backfill + every read/write site
-  // migration is confirmed live.
+  // v6: drop blocked_summary — v5's backfill copied its values into
+  // status_reason and no read/write site references it anymore.
   `ALTER TABLE flow_runs DROP COLUMN blocked_summary`,
 
   // v7: drop current_step. Invocation pre-creation (enter()
@@ -393,10 +392,11 @@ async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH, legacyDbP
     },
 
     // Atomic combination of stampStateJson() + cancelFlow(), for
-    // state-store.js's cancel() — previously two separate sequential
-    // awaited writes (a crash between them could leave state_json updated
-    // but status not flipped to 'cancelled', or vice versa). One
-    // db.batch() call commits both inside a single transaction instead.
+    // state-store.js's cancel(): the state_json stamp and the cancel
+    // status flip must commit together — as two separate awaited writes a
+    // crash between them could leave state_json updated but status not
+    // flipped to 'cancelled', or vice versa. One db.batch() call commits
+    // both inside a single transaction instead.
     // Returns the same { cancelled } shape cancelFlow() alone returns,
     // read from that statement's own rowsAffected within the batch —
     // db.batch() preserves each query's normal per-statement result shape,

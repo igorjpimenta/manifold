@@ -9,7 +9,7 @@
 // batch-writer.js's periodic flush() (used by state/node-executions.js —
 // single-shot db.batch()/client.batch()).
 //
-// Confirmed real via ad-hoc scripts against @libsql/client directly:
+// Known @libsql/client hazards this serialization works around:
 //   1. A plain client.execute()/db.update()/db.batch() issued on the SAME
 //      connection while a transaction() (or a raw BEGIN/COMMIT, e.g.
 //      state/migrator.js's own pattern) is open can fail INSTANTLY,
@@ -18,10 +18,8 @@
 //      statements in progress").
 //   2. Even across two SEPARATE connections to the same file (which does
 //      avoid #1's corruption), multiple concurrent calls queued on ONE
-//      client object each seem to pay close to the FULL busy_timeout
-//      independently rather than exiting as soon as the real, much
-//      shorter lock clears — 10 concurrent single-row inserts against a
-//      connection holding a ~30ms lock took ~22 real seconds to resolve.
+//      client object each pay close to the FULL busy_timeout independently
+//      rather than exiting as soon as the real, much shorter lock clears.
 //
 // Resolved for the writers this test exercises: admission-queue-store,
 // run-store, batch-writer (covering node-executions' batched path), and
@@ -29,15 +27,11 @@
 // withSharedWrite(dbPath, fn) — one in-process queue plus SQLITE_BUSY
 // retry, keyed per dbPath rather than owned by any one store, so they all
 // serialize against each other instead of racing on the same connection.
-// failure-store.js was the last of these confirmed live 2026-09-25: a
-// burst of concurrent recordEngineFailure() calls threw SQLITE_BUSY into
-// an unrelated admission-queue-store release() transaction, permanently
-// leaking that flow's admission slot with no retry (state-store.js's
-// triggerAdmissionRelease is fire-and-forget). node-health-store.js,
-// session-index.js, discuss-store.js, and pipeline-registry.js also share
-// this connection via getSharedDb() but are NOT yet migrated onto
-// withSharedWrite — the same corruption risk this test checks for is
-// still open between them and everything above until they are.
+// node-health-store.js, session-index.js, discuss-store.js, and
+// pipeline-registry.js also share this connection via getSharedDb() but
+// are NOT yet migrated onto withSharedWrite — the same corruption risk
+// this test checks for is still open between them and everything above
+// until they are.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -150,9 +144,9 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
       ops.push(flushBatchWriter(dbPath).catch((err) => errors.push(`flushBatchWriter: ${err?.message ?? err}`)));
 
       // Category 4: real failure-store.js writes (recordEngineFailure ->
-      // upsertFailureRow) — confirmed live 2026-09-25 to throw SQLITE_BUSY
-      // into an unrelated admission-queue-store release() transaction
-      // before this file's own withSharedWrite migration.
+      // upsertFailureRow) mixed into the same contention round — a burst
+      // of these must not corrupt an unrelated admission-queue-store
+      // release() transaction.
       for (let i = 0; i < CALLER_COUNT; i++) {
         ops.push(
           failureStore.recordEngineFailure({

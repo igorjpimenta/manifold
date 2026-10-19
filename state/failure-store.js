@@ -408,17 +408,15 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, legacyDbPath 
   // the Done section by "most recently resolved" and windows it to the
   // last 7 days.
   //
-  // A second mechanism used to live here — "cross-flow supersession":
-  // treating a LATER invocation of the same (pipeline_id, node_id,
-  // subflow_key) tuple, in ANY flow, reaching a clean terminal status as
-  // resolving THIS failure too. subflow_key isn't always a real
-  // per-item identity — single-item retry-cascade nodes
-  // (e.g. SUBMIT's selector: () => [{id:"only"}]) use a constant literal
-  // key for every dispatch regardless of which item they're cascading
-  // for, so the tuple match collapsed across unrelated items and could
-  // falsely mark one job's failure resolved because a different job's
-  // dispatch of the same node happened to succeed later. Every flow's
-  // own failure now stays open until that exact flow_id itself resolves.
+  // Do not extend resolution to cross-flow supersession — matching a
+  // LATER invocation of the same (pipeline_id, node_id, subflow_key)
+  // tuple in ANY flow:
+  // subflow_key isn't always a real per-item identity — single-item
+  // retry-cascade nodes use a constant literal key for every dispatch —
+  // so tuple matching collapses distinct items and can falsely mark one
+  // job's failure resolved because a different job's dispatch of the same
+  // node succeeded later. Every flow's own failure stays open until that
+  // exact flow_id itself resolves.
   async function computeResolvedAt(row) {
     try {
       const flowRows = await db.select({ status: flowRuns.status, updatedAt: flowRuns.updatedAt }).from(flowRuns).where(eq(flowRuns.flowId, row.flow_id)).limit(1);
@@ -428,16 +426,9 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, legacyDbPath 
     return null;
   }
 
-  // recordFromTerminalState/scanStateForSoftError deleted outright —
-  // their entire job was
-  // detecting a soft `blockedReason`/`_error`/`mode` marker left in
-  // a flow's own state at a clean __end__ (Phase 1.5 had already deleted
-  // this function's other half, the rootErrors sweep). Once STAMP and
-  // CACHE_SAVE — the last two soft-error producers anywhere in
-  // `.pipelines`/`.shared` — were converted to throw, there were zero
-  // producers left for the scan to ever find; every failure now persists
-  // to failure_events directly from the engine's own throw-catch paths
-  // (recordEngineFailure, called from executor-persist.js/executor.js).
+  // Failures persist to failure_events directly from the engine's
+  // throw-catch paths (recordEngineFailure); no terminal-state soft-marker
+  // scan feeds this table.
 
   // ── Reads ──────────────────────────────────────────────────────────
   // `resolved` is computed at read time now (see deriveFailureContext),

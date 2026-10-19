@@ -222,9 +222,8 @@ describe("getNodeVersionAt / getNodeVersionsBatch — point-in-time correctness"
   // an edge case — every flow that dispatched before this feature first
   // started tracking pipelines has real invocations older than anything
   // reconcile ever saw. Falls back to the earliest known version rather
-  // than null (confirmed live: without this, every already-running
-  // pipeline's tree regressed to kind:null for every invocation older
-  // than the restart that first shipped this feature).
+  // than null: returning null would lose correct rendering for every
+  // invocation older than tracking began.
   test("a timestamp before any version was ever registered falls back to the EARLIEST known version, not null", async () => {
     const store = makeStore();
     await store.reconcilePipelineVersions(pipelinesMap([{ id: "p1", nodes: { A: { kind: "code" } } }]));

@@ -42,9 +42,9 @@ const MIGRATIONS = [
      PRIMARY KEY (flow_id, item_id)
    );
    CREATE INDEX IF NOT EXISTS idx_discuss_updated ON discuss_state(updated_at)`,
-  // v2: components_json column (was previously an ad-hoc ALTER TABLE migration)
-  // Function migration guards against duplicate-column on existing installs
-  // that already had this column from the pre-migrator ALTER TABLE path.
+  // v2: components_json column.
+  // Function migration guards against duplicate-column: existing installs
+  // may already carry the column from an older migration path.
   async (client) => {
     const { rows } = await client.execute("SELECT name FROM pragma_table_info('discuss_state')");
     const cols = rows.map((r) => r.name);

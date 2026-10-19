@@ -30,17 +30,11 @@ import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-// Option B, Phase B0 originally
-// added a 64KB size cap here: over cap, resultJson was dropped entirely
-// (later changed to a field-level trim) and resultTooLargeBytes recorded
-// the real size instead. Removed 2026-08-19 after the cap silently ate a
-// live SCAN result's accessToken/bidderId (small fields bundled alongside
-// a large `listings` array) and broke a downstream node's read with no
-// error for two days — no cap width was going to be both safe for real
-// payloads and small enough to matter, so writeResult() now always stores
-// the full result. resultTooLargeBytes and the legacy-row handling in
-// result-replay.js/needs-resolver.js stay in place read-only, for rows
-// written before this change that are no longer recoverable.
+// No size cap on resultJson: no cap width is both safe for real payloads
+// and small enough to matter, so writeResult() always stores the full
+// result. resultTooLargeBytes and the legacy-row handling in
+// result-replay.js/needs-resolver.js stay in place read-only, for
+// pre-existing rows whose capped result cannot be recovered.
 
 const MIGRATIONS = [
   // v1: original flow_step_timings shape.
@@ -292,19 +286,14 @@ const MIGRATIONS = [
   // in its own WHERE clause and in a NOT EXISTS subquery added alongside
   // it). Neither column was covered by an existing index — idx_invocations_
   // pipe_node leads with pipeline_id, which that query never filters on —
-  // so SQLite fell back to a full scan of flow_runs (driving the join)
-  // plus a second per-row scan inside the correlated subquery. Confirmed
-  // live 2026-09-25 against this Mac's real runtime.sqlite (123k invocation
-  // rows, 37k flow_runs rows after the day's backlog): EXPLAIN QUERY PLAN
-  // showed exactly that shape, and the query itself never returned in any
-  // reasonable time. This index turns both the outer filter and the
-  // subquery's exact (node_id, subflow_key) lookup into direct index
-  // searches instead. IF NOT EXISTS: this was applied directly to this
-  // Mac's live runtime.sqlite as an urgent same-day mitigation, ahead of
-  // this migration itself deploying — the migrator tracks applied versions
-  // in _schema_version, not actual schema state, so a plain CREATE INDEX
-  // here would throw "index already exists" the moment this migration
-  // actually runs against that already-patched database.
+  // so SQLite falls back to a full scan of flow_runs (driving the join)
+  // plus a second per-row scan inside the correlated subquery; the query
+  // effectively never completes. This index turns both the outer filter
+  // and the subquery's exact (node_id, subflow_key) lookup into direct
+  // index searches instead. IF NOT EXISTS: the migrator tracks applied
+  // versions in _schema_version, not actual schema state, so a database
+  // that already carries this index (e.g. patched out-of-band ahead of the
+  // migration) would throw "index already exists" without it.
   async (client) => {
     await client.execute(`CREATE INDEX IF NOT EXISTS idx_invocations_node_subflow ON flow_node_invocations (node_id, subflow_key)`);
   },
@@ -617,11 +606,10 @@ async function _createStore(dbPath) {
         return { invocationId, executionId };
       },
 
-      // Option B, Phase B0 — writes an invocation's own resultJson once it
-      // completes, no size cap (see
-      // this file's own header comment for why the cap was removed
-      // 2026-08-19). resultTooLargeBytes is always written null here now —
-      // it only carries a real value on rows written before that removal.
+      // Writes an invocation's own resultJson once it completes, no size
+      // cap (see this file's own header comment). resultTooLargeBytes is
+      // always written null here — it only carries a real value on legacy
+      // rows that predate the cap's removal.
       //
       // Two things this deliberately isn't: (1) it doesn't throw on
       // ordinary failure — same fire-and-forget contract as write() above,
@@ -845,22 +833,18 @@ async function _createStore(dbPath) {
       //     column, unlike the random-UUID id) breaks the tie deterministically.
       async listResultsForFlow(flowId) {
         try {
-          // result_written_at IS NOT NULL is load-bearing, not an optimization
-          // (2026-08-17, found chasing a B4 write-cutover hang): without it, a
-          // node that re-enters itself (a loop-back, or any revisit) creates a
-          // NEW in-flight invocation whose invoked_at is later than its own
-          // prior completed invocation — the per-node dedup below keeps only
-          // the latest row BY INVOCATION, so it would keep that in-flight,
-          // not-yet-written row and silently drop the earlier COMPLETED one
-          // entirely, even though the caller (assembleState(), read from
-          // INSIDE that very re-entry's own dispatch) needs exactly that
-          // prior value to compute its own next result. Pre-B4 this was
-          // harmless — baseState (the still-accumulating state_json) always
-          // carried the real value forward as a fallback the dedup gap never
-          // got to matter. Once B4 made baseState entry-only, the fallback
-          // disappeared and a LOOP node's edge condition never advanced —
-          // confirmed via a standalone repro that hung at 100% CPU, endlessly
-          // re-dispatching the same node forever.
+          // result_written_at IS NOT NULL is load-bearing, not an
+          // optimization: without it, a node that re-enters itself (a
+          // loop-back, or any revisit) creates a NEW in-flight invocation
+          // whose invoked_at is later than its own prior completed
+          // invocation — the per-node dedup below keeps only the latest
+          // row BY INVOCATION, so it would keep that in-flight,
+          // not-yet-written row and silently drop the earlier COMPLETED
+          // one entirely, even though the caller (assembleState(), read
+          // from INSIDE that very re-entry's own dispatch) needs exactly
+          // that prior value to compute its own next result. The failure
+          // mode is silent and livelocks: a LOOP node's edge condition
+          // never advances and the node re-dispatches forever.
           const { rows } = await client.execute({
             sql: `SELECT node_id, visit_seq, result_json, result_written_at, result_too_large_bytes
                     FROM flow_node_invocations

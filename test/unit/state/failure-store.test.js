@@ -329,13 +329,10 @@ describe("createFailureStore — DB setup", () => {
 
 // ─── summarize — still a raw-stored column ────────────────────────────────────
 //
-// classifyKind and its whole describe block (blob text → failure_kind
-// classification) are gone — Phase 5 (2026-08-11): classifyKind's only caller
-// was recordFromTerminalState's
-// soft-marker block, deleted the same phase once STAMP/CACHE_SAVE (the
-// last two soft `_error` producers) were converted to throw. summarize
-// itself remains live (recordEngineFailure still calls it) — coverage
-// below rerouted through that path instead.
+// summarize remains live — recordEngineFailure still calls it — and the
+// coverage below exercises it through that path. (classifyKind has no
+// describe block here: the classification path it belonged to no longer
+// exists.)
 
 describe("summarize — via failure_summary (still a raw column)", () => {
   test("stores long string truncated to 280 chars with ellipsis", async () => {
@@ -513,16 +510,16 @@ describe("computeResolvedAt — via get()", () => {
     store.close();
   });
 
-  // Cross-flow supersession (the old mechanism b) was removed 2026-08-24:
-  // it matched a LATER invocation of the same (pipeline_id, node_id,
-  // subflow_key) tuple, in ANY flow, as resolving THIS failure — but
-  // subflow_key isn't always a real per-item identity (single-item
-  // retry-cascade nodes like SUBMIT dispatch every item under the same
-  // constant literal key), so it could falsely resolve one job's failure
-  // because an unrelated job's later dispatch of the same node succeeded.
-  // These tests now prove that stays false: a later, unrelated dispatch
-  // of the identical tuple must NOT resolve this failure, root or
-  // subflow-child alike — resolution is same-flow-completion only.
+  // Cross-flow supersession — matching a LATER invocation of the same
+  // (pipeline_id, node_id, subflow_key) tuple, in ANY flow, as resolving
+  // THIS failure — must stay false: subflow_key isn't always a real
+  // per-item identity (single-item retry-cascade nodes like SUBMIT
+  // dispatch every item under the same constant literal key), so tuple
+  // matching would falsely resolve one job's failure because an unrelated
+  // job's later dispatch of the same node succeeded. These tests prove a
+  // later, unrelated dispatch of the identical tuple does NOT resolve
+  // this failure, root or subflow-child alike — resolution is
+  // same-flow-completion only.
   async function seedChildOutcome(store, { pipelineId = "pipe", nodeId = "SUBMIT", subflowKey = "job-1", invokedAt = Date.now(), childStatus = "succeeded", childUpdatedAt = Date.now() }) {
     await ensureInvocationsTable(store);
     const parentInvocationId = randomUUID();
@@ -766,17 +763,8 @@ describe("get()", () => {
   });
 });
 
-// recordFromTerminalState() and its own describe blocks (soft-marker
-// detection + failureEmitter coverage) are gone — FAILURE_SEMANTICS_REVIEW
-// .design.md Phase 5 (2026-08-11): the function's entire remaining job was
-// the "1. Soft failure marker" scan (scanStateForSoftError); Phase 1.5 had
-// already deleted its other half (the rootErrors sweep). Once STAMP/
-// CACHE_SAVE — the last two soft `_error` producers — were converted to
-// throw, there was nothing left for the scan to ever find, so the whole
-// function (and its sole call site in engine/executor.js) was deleted
-// outright rather than kept as a permanent no-op. failureEmitter coverage
-// survives via recordEngineFailure()'s own test below (same emit call,
-// same payload shape) — nothing lost.
+// failureEmitter coverage lives in recordEngineFailure()'s describe below
+// — same emit call, same payload shape.
 
 // ─── recordEngineFailure() ────────────────────────────────────────────────────
 

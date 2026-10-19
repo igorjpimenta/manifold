@@ -296,10 +296,8 @@ describe("admission-queue-store — get() / listByStatus()", () => {
 //
 // Fires many real, genuinely concurrent admit() calls (Promise.all, not
 // sequential awaits) against one real sqlite file, with a limit well below
-// the caller count — exactly the shape of the confirmed live incident (5
-// freelancer SCORE_LLM dispatches, batch-started within 3.6 seconds). If
-// admit()'s count-then-claim weren't atomic, this would be expected to
-// overshoot the limit under real concurrent load, the same way any
+// the caller count. If admit()'s count-then-claim weren't atomic, this
+// would overshoot the limit under real concurrent load — the same way any
 // count-then-claim check that doesn't happen inside admit()'s own
 // transaction would.
 
