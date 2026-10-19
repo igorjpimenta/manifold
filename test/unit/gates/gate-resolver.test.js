@@ -1393,7 +1393,7 @@ describe("applyResolutionsAndResume — root-gate apply() hook", () => {
         approvalPending: { [itemId]: { decision: "approve", source: "cli", decidedAt: Date.now() } },
       },
     });
-    // No pipelineLookup passed — mirrors every call site before this change.
+    // No pipelineLookup passed — mirrors every production call site.
     const { resolver, store } = makeResolver(flow);
     await resolver.maybeResolveFlow(flowId);
     assert.equal(store.setRunning.mock.calls.length, 1, "resolution should still proceed normally");

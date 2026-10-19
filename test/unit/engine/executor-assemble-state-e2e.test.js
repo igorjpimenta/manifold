@@ -114,11 +114,11 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
 
-    // B4: state_json is entry-only now — A/B/C never land
+    // B4: state_json is entry-only — A/B/C never land
     // there at all. assembleState() is the only source for a node's own
-    // output; this test used to prove the two views agreed, now it proves
-    // the cutover actually happened (real stateJson has nothing to compare
-    // against) and that assembleState() alone is still correct.
+    // output; this test proves the cutover actually happened (real
+    // stateJson has nothing to compare against) and that assembleState()
+    // alone is still correct.
     assert.equal(flow.stateJson.A, undefined, "state_json must not carry node output post-B4");
     assert.equal(flow.stateJson.B, undefined);
     assert.equal(flow.stateJson.C, undefined);
@@ -325,14 +325,13 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
   });
 
   test("a result well over the old cap, flat small+bulk fields: assembled state keeps ALL fields, including the bulk one", async () => {
-    // Regression coverage for the freelance_freelancer-proposal's SCAN
-    // incident: a flat (unwrapped) node result mixing tiny scalars
-    // (accessToken, bidderId) with a large array (listings) used to lose
-    // EVERYTHING (and, briefly during an intermediate fix, just the bulk
-    // field) once the whole result crossed the 64KB cap — the tiny fields
+    // Regression coverage for a flat (unwrapped) node result mixing tiny
+    // scalars (accessToken, bidderId) with a large array (listings) that
+    // lost EVERYTHING (and, under an intermediate fix, just the bulk
+    // field) once the whole result crossed the size cap — the tiny fields
     // a much-later node (SUBMIT_CODE) depended on vanished with no error
-    // until that unrelated node failed days later. The cap itself is now
-    // gone, so nothing gets dropped at all.
+    // until that unrelated node failed. The cap itself is now gone, so
+    // nothing gets dropped at all.
     harness = await makeHarness({
       test_oversize_mixed: {
         id: "test_oversize_mixed",

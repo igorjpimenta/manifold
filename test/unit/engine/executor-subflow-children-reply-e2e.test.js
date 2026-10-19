@@ -178,10 +178,10 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// Default bumped above the sibling e2e files' 20-30ms — REPLY's branch has
+// Raised above the sibling e2e files' default — REPLY's branch has
 // one more hop before GATE (FETCH_THREAD → DRAFT_REPLY → GATE) than
 // TOUCH's template, and a full-suite concurrent run showed this margin
-// mattered under load (a real, if rare, flake — not a fixture bug).
+// mattered under load.
 function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

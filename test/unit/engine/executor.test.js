@@ -27,17 +27,11 @@ function makeNodeExecutionsStore() {
   // the full accumulated blob as a fallback baseState. Once B4 made
   // state_json entry-only, any test pipeline whose edge function reads a
   // prior node's own output (e.g. `state.WORK ? "__end__" : "WORK"`) would
-  // see it as permanently undefined and loop forever — found live via a
-  // hung suite. `enter()` used to return null (no invocationId), with
-  // results correlated by "the {flowId,nodeId} the most recent write()
-  // call named" — safe only because executor.js used to call write()
-  // immediately before writeResult() for the same dispatch. The write-
-  // order fix (SCORE_LLM "edge returned no next node"
-  // regression) made writeResult() commit BEFORE write() instead, so that
-  // assumption no longer holds. enter() now returns a deterministic
+  // see it as permanently undefined and loop forever.
+  // enter() returns a deterministic
   // per-{flowId,nodeId} invocationId (mirroring makeSpyNodeExecutionsStore's
   // real invocationId tracking below) and writeResult() correlates through
-  // that map instead — order-independent, matching how the real store and
+  // that map — order-independent, matching how the real store and
   // the spy both already work.
   const resultsByFlow = new Map();
   const invocationMeta = new Map();
@@ -128,12 +122,11 @@ function makeSpyNodeExecutionsStore({ findCurrentStep: findCurrentStepOverride =
       const id = latestInvocationByKey.get(`${flowId}::${nodeId}`);
       return id ? { id, visitSeq: 1 } : null;
     },
-    // async, matching the real store's contract — executor.js's own
-    // safeWriteExecution had a live missing-`await` bug on exactly this
-    // call (found via live-trigger verification, not by any
-    // unit test, precisely because this mock used to be synchronous and
-    // so silently tolerated it: `written` came back as an unresolved
-    // Promise, and `written.invocationId` was always undefined). Keeping
+    // async, matching the real store's contract — a synchronous
+    // safeWriteExecution call site (executor.js's own
+    // missing-`await` class of bug: `written` came back as an unresolved
+    // Promise, and `written.invocationId` was always undefined) is
+    // tolerated by a synchronous mock. Keeping
     // this genuinely async is what makes that class of regression fail a
     // test instead of only failing in production.
     write: async (args) => {
@@ -822,16 +815,16 @@ describe("runFlow — writeResult commits before last_step advances", () => {
     assert.equal(store.get(r.flowId)?.status, "succeeded");
   });
 
-  // Previously only { ok:false, reason:"race" } produced a logger.warn, and
-  // even then last_step still advanced regardless of reason —
-  // "no-invocation-id"/"no-such-invocation"/"unserializable"/"db-error" (and
-  // a genuine throw from writeResult itself) left last_step pointing at a
-  // node whose result was never durably written, with only a log line to
-  // show for it: the very next runFlow() iteration's edge resolution would
-  // then dead-end with "no next node", hiding the real cause (regression:
-  // SCORE_LLM "edge returned no next node"). Fixed: any
-  // non-"race" writeResult failure now fails the flow outright with the
-  // real reason, instead of silently advancing past the node.
+  // "race" means a CONCURRENT writer already committed real content for
+  // this exact invocation — advancing is correct, the data genuinely is
+  // there, just not from this call. For every other reason
+  // ("no-invocation-id"/"no-such-invocation"/"unserializable"/"db-error",
+  // or a genuine throw from writeResult itself), no one wrote: last_step
+  // must not point at a node whose result was never durably written —
+  // the next runFlow() iteration's edge resolution would dead-end with
+  // "no next node", hiding the real cause (the SCORE_LLM
+  // "edge returned no next node" shape). Any non-"race" writeResult
+  // failure fails the flow outright with the real reason.
   it("fails the flow (not a silent advance) when writeResult fails for a reason other than race", async () => {
     const pipeline = makePipeline({
       nodes: { WORK: { kind: "code", run: () => ({ WORK: { done: true } }) } },
@@ -1343,8 +1336,8 @@ describe("runFlow — cascade-kind flow: failure_events persistence", () => {
 });
 
 // ── blocked-wait reason synthesis (describeWaitFallback) ────────────────────
-// Regression coverage for the generic `blocked at ${nodeId}` fallback that
-// used to fire for every waitJson-returning node kind, discarding real data
+// The generic `blocked at ${nodeId}` fallback that
+// fires for every waitJson-returning node kind, discarding real data
 // (pending-item count, child-flow count) that was already in scope. Only
 // human-gate and children-pending ever reach this fallback — every other
 // wait kind (resource-lock, agent-semaphore, needs-gateway-handoff,
@@ -1402,7 +1395,7 @@ describe("runFlow — blocked-wait reason synthesis", () => {
 // (executor-nodes.js) for ANY "agent"-kind node regardless of which kind of
 // flow it's running inside — not specific to cascade sub-nodes, though
 // those are exactly the nodes that need this opt-in now that kind:"fallback"
-// (which used to apply this unconditionally to every agent entry) is gone.
+// (which applied this unconditionally to every agent entry) is gone.
 
 // Methods return Promises — the real store is async, and a sync mock here
 // would let a missing `await` at the call site pass green.

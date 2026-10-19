@@ -130,9 +130,8 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// 60ms, not 20ms — matches executor-loop-children-reply-e2e.test.js's own
-// bump: a full-suite concurrent run showed the tighter margin flakes under
-// load (a real, if rare, timing flake — not a fixture bug).
+// Raised above the sibling e2e files' tighter default — a full-suite
+// concurrent run showed the tighter margin flakes under load.
 // Also drains detached promotion resumes — a flow woken by another flow's
 // slot release runs on its own tick, not inline in the releaser's call.
 async function flush(ms = 60) {
@@ -248,10 +247,9 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
   });
 
-  // node.concurrency used to be accepted but silently
-  // unenforced under childFlows:true (found investigating a real CPU/memory
-  // contention incident from an unthrottled 10-wide SCORE fan-out) — then,
-  // after a design iteration, collapsed from a per-node numeric cap to a
+  // Under childFlows:true, node.concurrency is silently
+  // unenforced — an unthrottled wide SCORE fan-out
+  // creates real CPU/memory contention — so it collapsed to a
   // single boolean-gated, shared-pool budget (state/admission-queue-store.js).
   // This is the full-stack regression test — real executor, real state-store, real
   // admission-queue-store + promotion wiring

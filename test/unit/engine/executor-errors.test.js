@@ -27,9 +27,7 @@ describe("fetchSessionError", () => {
   });
   it("returns null when DB file does not exist (best-effort)", async () => {
     // The tasks DB may or may not exist in test; the function must not throw,
-    // and must not leak an async rejection after the test ends — it used to
-    // destructure a non-existent `sqlite` key off the un-awaited openDb()
-    // promise, so it always returned null and orphaned the rejection.
+    // and must not leak an async rejection after the test ends.
     const result = await fetchSessionError("no-such-session-key-" + Math.random());
     assert.ok(result === null || typeof result === "string");
   });

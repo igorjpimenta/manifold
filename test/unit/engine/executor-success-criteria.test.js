@@ -30,13 +30,11 @@ function makeNodeExecutionsStore() {
   // (executor.js), so this mock needs to actually track results or every
   // sc-* fixture's node output silently vanishes before reaching them.
   //
-  // enter() used to return null, with results correlated by "the
-  // {flowId,nodeId} the most recent write() call named" — safe only
-  // because executor.js used to call write() immediately before
-  // writeResult() for the same dispatch. The write-order fix (SCORE_LLM
-  // "edge returned no next node" regression) made writeResult()
-  // commit BEFORE write() instead, so that assumption no longer holds.
-  // Correlate through a real invocationId map instead — order-independent.
+  // enter() must return an invocationId, with results correlated by
+  // that id — the write-ordering (writeResult() may commit BEFORE
+  // write() for the same dispatch) makes correlating by "the
+  // {flowId,nodeId} the most recent write() call named" unsafe.
+  // Correlate through a real invocationId map — order-independent.
   const resultsByFlow = new Map();
   const invocationMeta = new Map();
   return {

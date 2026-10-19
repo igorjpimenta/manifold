@@ -55,7 +55,7 @@ await mock.module(new URL("../../../locks/lock.js", import.meta.url).href, {
       try {
         // Small artificial delay — gives the test a real window to poll the
         // blocked caller's status mid-wait, same technique as the sibling
-        // fetch-profiles E2E's 5ms per-child delay.
+        // fetch-profiles E2E's per-child delay.
         await new Promise((r) => setTimeout(r, 30));
         return await fn();
       } finally {
@@ -174,8 +174,8 @@ async function flush(harness, flowId, { timeoutMs = 3000, pollMs = 15 } = {}) {
 }
 
 // Polls a child's own flow_runs row until it reports the given status, or
-// times out — used to catch the transient 'queued' state, which a fixed
-// delay can't reliably land on across a full-suite run's varying load.
+// times out — a fixed delay can't reliably land on the transient 'queued'
+// state across a full-suite run's varying load.
 async function waitForStatus(harness, flowId, status, { timeoutMs = 2000, pollMs = 5 } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

@@ -104,9 +104,9 @@ function buildPipelines() {
       state: {},
       nodes: {
         // B4: shortlist must come from a real node's own
-        // stateUpdate, not a raw store.setRunning() injection like this
-        // test used to do — a manually-seeded, non-node-output field is
-        // exactly what state_json narrowing now correctly stops carrying
+        // stateUpdate, not a raw store.setRunning() injection — a
+        // manually-seeded, non-node-output field is exactly what
+        // state_json narrowing now correctly stops carrying
         // forward. This mirrors how a real pipeline would actually shape
         // it: whatever node runs before a childFlows subflow returns the
         // selector's input as part of its own output.

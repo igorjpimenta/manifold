@@ -163,8 +163,8 @@ async function childFlowIds(harness, parentFlowId, nodeId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// 60ms, not 20ms — matches the majority of the other *-e2e files' own bump:
-// a full-suite concurrent run showed the tighter margin flakes under load.
+// Raised above the sibling e2e files' tighter default — a full-suite
+// concurrent run showed the tighter margin flakes under load.
 function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

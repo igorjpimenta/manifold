@@ -101,8 +101,8 @@ describe("runSubagentTurn — tool-fired race", () => {
     // runSubagentTurn doesn't call waitForToolSignal until AFTER `await
     // subagent.run(...)` resolves (at least one microtask later) — calling
     // notifyToolFired synchronously here would fire before anything is
-    // listening (found this the hard way: passed locally on timing, hung
-    // for the full 60s default test timeout in CI). setImmediate flushes
+    // listening (passing locally on timing, hanging for the full default
+    // test timeout in CI). setImmediate flushes
     // the whole microtask queue first, guaranteeing the waiter is
     // registered before we notify it.
     await new Promise((resolve) => setImmediate(resolve));
