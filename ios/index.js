@@ -195,13 +195,9 @@ export function registerIosRoutes(api, { gateResolver, executor, runStore, nodeE
   };
 
   // ── PipelineProgress lifecycle → update _runningFlows / _recentTerminals ──
-  // Used to be driven by live-bridge.js's own live_activity.start/update/end
-  // PipelineProgress broadcasts through relay.broadcast above. Those were
-  // removed when pipeclaw.run.* absorbed PipelineProgress — index.js's
-  // _wsRunEventsListener now fans the same buildRunPatch payload out
-  // in-process via liveActivityEmitter (top-level flows only) alongside
-  // its WS broadcast, so this tracker stays fed from one source instead of
-  // needing its own parallel event.
+  // Fed only from pipeclaw.run.patch via liveActivityEmitter (fanned out
+  // in-process by _wsRunEventsListener alongside its WS broadcast, top-level
+  // flows only) — do not add a parallel live-bridge broadcast path.
   liveActivityEmitter.on("pipeclaw.run.patch", (patch) => {
     try {
       const flowId = patch?.flowId;

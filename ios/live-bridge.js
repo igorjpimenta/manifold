@@ -82,13 +82,9 @@ export function createLiveBridge({
     }
   });
 
-  // PipelineProgress (live_activity.start/update/end for activityType
-  // "PipelineProgress") used to be projected here from flow.step.changed/
-  // flow.terminal. Removed — pipeclaw.run.started/updated/ended (see
-  // index.js's buildRunPatch) now carries the same information
-  // (pipelineDisplayName/pipelineEmoji/currentNodeId added specifically
-  // for this) on the SAME per-revision cadence flow.step.changed used to
-  // drive, so this was pure duplication.
+  // PipelineProgress is deliberately not projected here —
+  // pipeclaw.run.started/updated/ended (index.js's buildRunPatch) carries
+  // that information; a parallel flow.step.changed projection would duplicate it.
 
   on(flowEmitter, "flow.terminal", ({ flowId }) => {
     if (stopped) return;
@@ -168,13 +164,10 @@ export function createLiveBridge({
           updatedAt: flow.updatedAt,
         });
       }
-      // The `else if (flow.status === "running")` branch that used to seed
-      // PipelineProgress tracking via a synthetic flow.step.changed emit
-      // is gone — that tracking no longer exists (pipeclaw.run.* is the
-      // sole source now, and it doesn't need per-process Set/Map seeding
-      // the way the old dedup-by-Map live-push did). A freshly-connected
-      // client still learns about already-running flows via snapshot()'s
-      // own runStore.listActive() query on its first reconcile.
+      // No synthetic flow.step.changed seed for running flows —
+      // pipeclaw.run.* needs no per-process Set/Map seeding. A
+      // freshly-connected client learns about already-running flows via
+      // snapshot()'s own runStore.listActive() query on first reconcile.
     }
   }
 
@@ -205,20 +198,14 @@ export function createLiveBridge({
       } catch {}
     }
 
-    // PipelineProgress's live-push half moved to pipeclaw.run.* (see
-    // index.js's buildRunPatch) — no more per-step-change broadcast
-    // duplication. The reconnect/snapshot half does NOT live here
-    // anymore either: `messages` (this function's return value) feeds
-    // /pipeclaw/ios/state's `open` array, which InboxAPI.swift's
-    // InboxClient.fetch() strictly decodes as [InboxActivity] — every
-    // element MUST have activityId/activityType/attributes/contentState.
-    // A `{ type: "pipeclaw.run.updated", ...buildRunPatch(...) }` entry
-    // (tried here previously) has none of those fields, so the whole
-    // array decode throws the moment one appears — a real regression
-    // (client showed "pipeclaw/ios/state decode: ... is missing").
-    // ios/index.js's STATE_PATH handler now builds a separate
-    // `runningPipelines` array straight from its own already-live
-    // _runningFlows map instead, so `open` stays homogeneous.
+    // `messages` (this function's return value) feeds /pipeclaw/ios/state's
+    // `open` array, which InboxAPI.swift's InboxClient.fetch() strictly
+    // decodes as [InboxActivity] — every element MUST have
+    // activityId/activityType/attributes/contentState; anything else makes
+    // the whole array decode throw. Run patches (buildRunPatch) therefore
+    // live in a separate `runningPipelines` array that ios/index.js's
+    // STATE_PATH handler builds from its _runningFlows map — do not push
+    // them into `open`.
     if (enableAgentRunning) {
       for (const [key] of openAgentRunning) {
         const flowId = key.slice(0, 36);
