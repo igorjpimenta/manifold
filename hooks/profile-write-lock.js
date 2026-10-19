@@ -1,14 +1,13 @@
-// extensions/pipeclaw/hooks/profile-write-lock.js — before_tool_call/
+// hooks/profile-write-lock.js — before_tool_call/
 // after_tool_call pair: when an agent calls the `edit` tool against
 // PROFILE.md, hold a real lock around JUST that write.
 //
 // Deliberately scoped to the edit call itself, not the whole agent turn
 // that leads up to it (read → think → edit) — the underlying lock
-// primitive (extensions/pipeclaw/locks/lock.js) lets a real holder keep a
-// lock as long as it needs, so holding it across an LLM turn of uncertain
-// duration is *possible*, but every other consumer of this same lock
-// (gap-answers.js's settleGapAnswer, prime-nodes.js's applyTbdFills) is a
-// fast, deterministic, millisecond-scale critical section — holding it for
+// primitive (locks/lock.js) lets a real holder keep a lock as long as it
+// needs, but every other consumer of this same lock (gap-answers.js's
+// settleGapAnswer, prime-nodes.js's applyTbdFills) is a fast,
+// deterministic, millisecond-scale critical section — holding it for
 // several seconds of agent reasoning would make every one of those
 // contend against a single slow Thoth turn instead of each other. Scoping
 // to just the edit call keeps this lock's hold time in the same class as
@@ -26,16 +25,12 @@
 // `{text, runId}` (see report-draft-blocked.js's header for why every
 // agent-side signal in this codebase flows through a file side-channel,
 // never direct tool-call introspection). output.runId and this hook's
-// event.runId are the same identifier for a given agent dispatch — verified
-// by tracing both sides, not assumed: the in-repo half is
-// executor-subagent.js's dispatchAgentWithRetry (output.runId =
-// runResult.runId from subagent.run()); the other half is the gateway's
-// embedded-run harness, which is outside this tree and cannot be re-derived
-// from anything in it.
+// event.runId are the same identifier for a given agent dispatch: the
+// in-repo half is executor-subagent.js's dispatchAgentWithRetry
+// (output.runId = runResult.runId from subagent.run()); the other half is
+// the gateway's embedded-run harness, outside this tree.
 
-import { acquireLock } from "../locks/lock.js";
-import { lockNameForFile } from "file:///Users/herculano/.openclaw/workspace/.shared/common/lib/file-lock.js";
-import { PROFILE_PATH } from "file:///Users/herculano/.openclaw/workspace/.shared/freelance/profile/lib/paths.js";
+import { acquireLock, lockNameForFile } from "../locks/lock.js";
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -55,10 +50,19 @@ const ACQUIRE_TIMEOUT_MS = 30_000;
 // lock.js default.
 const STALE_MS = 3 * 60_000;
 
-const RESULTS_DIR = path.join(os.homedir(), ".openclaw", "locks", "profile-edit-results");
+// Defaults reproduce the live deployment byte-for-byte: PROFILE.md in the
+// workspace .shared tree, edit-result markers under ~/.openclaw/locks.
+// Both are parameters so tests and non-default installs can point them at
+// fixtures without mocking os.homedir for this module.
+const DEFAULT_PROFILE_PATH = path.join(os.homedir(), ".openclaw", "workspace", ".shared", "freelance", "profile", "PROFILE.md");
+const DEFAULT_RESULTS_DIR = path.join(os.homedir(), ".openclaw", "locks", "profile-edit-results");
 
-function resultPathFor(runId) {
-  return path.join(RESULTS_DIR, `${runId}.json`);
+// Exported for SETTLE_GAP_ANSWER.apply() (workspace
+// freelance-propose-nodes.js) to read+consume — same path convention on
+// both sides by construction; the optional resultsDir must match whatever
+// registerProfileWriteLock was called with.
+export function profileEditResultPathFor(runId, { resultsDir = DEFAULT_RESULTS_DIR } = {}) {
+  return path.join(resultsDir, `${runId}.json`);
 }
 
 // toolCallId -> the lock object acquired for that specific call, so
@@ -66,12 +70,12 @@ function resultPathFor(runId) {
 // a name-only lookup — matters if calls ever overlap across sessions).
 const heldLocks = new Map();
 
-export function registerProfileWriteLock(api) {
+export function registerProfileWriteLock(api, { profilePath = DEFAULT_PROFILE_PATH, resultsDir = DEFAULT_RESULTS_DIR } = {}) {
   api.on("before_tool_call", async (event) => {
     if (event?.toolName !== EDIT_TOOL_NAME) return;
-    if (event?.params?.path !== PROFILE_PATH) return;
+    if (event?.params?.path !== profilePath) return;
     api?.logger?.info?.(`profile-write-lock: acquiring for PROFILE.md edit (runId=${event.runId ?? "?"}, toolCallId=${event.toolCallId ?? "?"})`);
-    const lock = await acquireLock(lockNameForFile(PROFILE_PATH), { timeoutMs: ACQUIRE_TIMEOUT_MS, staleMs: STALE_MS });
+    const lock = await acquireLock(lockNameForFile(profilePath), { timeoutMs: ACQUIRE_TIMEOUT_MS, staleMs: STALE_MS });
     if (event.toolCallId) heldLocks.set(event.toolCallId, lock);
     api?.logger?.info?.(`profile-write-lock: acquired (runId=${event.runId ?? "?"})`);
   }, { priority: 50, timeoutMs: ACQUIRE_TIMEOUT_MS + 5_000 });
@@ -81,7 +85,7 @@ export function registerProfileWriteLock(api) {
   // is wrapped defensively so a failure in one doesn't skip the other.
   api.on("after_tool_call", async (event) => {
     if (event?.toolName !== EDIT_TOOL_NAME) return;
-    if (event?.params?.path !== PROFILE_PATH) return;
+    if (event?.params?.path !== profilePath) return;
 
     const toolCallId = event.toolCallId;
     const lock = toolCallId ? heldLocks.get(toolCallId) : null;
@@ -91,8 +95,8 @@ export function registerProfileWriteLock(api) {
 
     if (!event.runId) return;
     try {
-      await mkdir(RESULTS_DIR, { recursive: true });
-      await writeFile(resultPathFor(event.runId), JSON.stringify({
+      await mkdir(resultsDir, { recursive: true });
+      await writeFile(profileEditResultPathFor(event.runId, { resultsDir }), JSON.stringify({
         success: !event.error,
         error: event.error ? String(event.error?.message ?? event.error) : null,
         at: new Date().toISOString(),
@@ -103,7 +107,4 @@ export function registerProfileWriteLock(api) {
   });
 }
 
-// Exported for SETTLE_GAP_ANSWER.apply() to read+consume — kept here
-// (not duplicated) so the write side and read side of this marker file
-// can never drift on its path convention.
-export { resultPathFor as profileEditResultPathFor, RESULTS_DIR as PROFILE_EDIT_RESULTS_DIR };
+export { DEFAULT_RESULTS_DIR as PROFILE_EDIT_RESULTS_DIR };
