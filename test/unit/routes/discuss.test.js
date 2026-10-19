@@ -102,9 +102,8 @@ describe("registerDiscussHandlers — return shape", () => {
 
 // ── resolveDiscussTarget — mid-batch (running) ────────────────────────────
 // While a loop node's worker pool is still active (flow.status === "running"),
-// waitJson stays null. The mid-batch branchService resolution path has been
-// removed — resolveDiscussTarget now ALWAYS 503s with gate_transition when
-// flow.status === "running" and waitJson is null.
+// waitJson stays null. resolveDiscussTarget ALWAYS rejects with
+// gate_transition when flow.status === "running" and waitJson is null.
 
 describe("registerDiscussHandlers — resolveDiscussTarget mid-batch (running)", () => {
   test("always 503s with gate_transition when flow is running and waitJson is null", () => {

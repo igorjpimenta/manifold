@@ -165,16 +165,13 @@ export function registerOperatorRoutes({
             //
             // Must carry the same dependency set as the primary `store` and
             // index.js's own createCancelStore factory (nodeExecutionsStore,
-            // resumeParentRef, pipelinesRef, failureStore, admissionQueueStore)
-            // — this ad-hoc construction used to pass only `runStore`, which
-            // silently no-ops BOTH triggerAdmissionRelease (missing
-            // admissionQueueStore) and triggerParentResume (missing
-            // nodeExecutionsStore/resumeParentRef) inside state-store.js's own
-            // cancel()/finish()/fail(). Confirmed live: a flow cancelled
-            // through this exact fallback leaked its flow-start admission
-            // permanently (never released back to the shared pool), and a
-            // cancelled subflow child would have left its parent waiting on
-            // "children-pending" forever, since neither release path ever ran.
+            // resumeParentRef, pipelinesRef, failureStore, admissionQueueStore):
+            // state-store.js's cancel()/finish()/fail() silently no-op
+            // triggerAdmissionRelease without admissionQueueStore and
+            // triggerParentResume without nodeExecutionsStore/resumeParentRef —
+            // a fallback missing either leaks the flow's start/child-dispatch
+            // admission slot permanently and leaves a waiting parent on
+            // "children-pending" forever.
             const flowOwnerKey = sqlFlow.ownerKey ?? ownerSessionKey;
             const cancelStore =
               flowOwnerKey === ownerSessionKey

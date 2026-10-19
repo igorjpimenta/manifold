@@ -311,16 +311,14 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
 
 // ── cancel handler: ownerKey-mismatch fallback ──────────────────────────────
 //
-// Regression coverage for the leak found live 2026-09-24: when the primary
-// executor.cancel() reports "Flow not found." (the flow belongs to a
-// different ownerKey — legacy graph-flow-owner flows, or any flow this
-// process's default store doesn't recognize), the handler builds a second,
-// ad-hoc state-store bound to the flow's real ownerKey and retries through
-// it. That construction used to pass only `{ runStore }`, silently dropping
-// admissionQueueStore and resumeParentRef — both state-store.js internals
-// (triggerAdmissionRelease, triggerParentResume) no-op without them, so a
-// flow cancelled this way permanently leaked its flow-start/child-dispatch
-// admission slot and never woke a waiting parent.
+// When the primary executor.cancel() reports "Flow not found." (the flow
+// belongs to a different ownerKey — legacy graph-flow-owner flows, or any
+// flow this process's default store doesn't recognize), the handler builds a
+// second, ad-hoc state-store bound to the flow's real ownerKey and retries
+// through it. That store MUST carry admissionQueueStore and resumeParentRef:
+// state-store.js internals (triggerAdmissionRelease, triggerParentResume)
+// no-op without them, permanently leaking the flow-start/child-dispatch
+// admission slot and never waking a waiting parent.
 describe("registerOperatorRoutes — cancel handler ownerKey mismatch fallback", { skip: SKIP_MSG }, () => {
   test("builds the fallback cancelStore with the full dependency set, not just runStore", async () => {
     createStateStoreCalls.length = 0;

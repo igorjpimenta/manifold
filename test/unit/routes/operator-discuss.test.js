@@ -200,11 +200,9 @@ describe("selectDiscussProvider", () => {
 });
 
 // ── createDiscussHistoryHandler — bounded JSONL read ─────────────────────────
-// Regression coverage for the discuss-history timeout bug: a long session
-// JSONL used to be parsed in full, synchronously, on the gateway's single
-// event loop — under contention from a concurrent (up to 360s) discuss turn,
-// that could push this handler past the client's history-load timeout. The
-// handler now tails the file to MAX_HISTORY_LINES before parsing.
+// The handler must tail the session file to MAX_HISTORY_LINES before parsing:
+// an unbounded synchronous parse on the gateway's single event loop can stall
+// past the client's (much tighter) history-load timeout.
 
 describe("createDiscussHistoryHandler — bounded JSONL read", () => {
   const writeSession = (homeDir, agentId, sessionId, lines) => {

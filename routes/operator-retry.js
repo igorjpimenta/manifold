@@ -117,8 +117,7 @@ export function createRetryFailure({
     // already names the exact flow to walk and re-run. A subflow item runs
     // as a real child flow with its own flow_id (executor-subflow-children.js),
     // so branch_item_id (sourced from flow_node_invocations.subflow_key, the
-    // CURRENT per-item dispatch key, not the pre-childFlows flow_branches
-    // table this used to gate on) is purely descriptive here — it doesn't
+    // per-item dispatch key) is purely descriptive here — it doesn't
     // change which flow gets retried.
     {
       // ── Flow-level retry ─────────────────────────────────────────────────────
@@ -188,11 +187,8 @@ export function createRetryFailure({
         try { cur = typeof e === "function" ? e(state) : (typeof e === "string" ? e : null); }
         catch { cur = null; }
       }
-      // Was derived from state.errors[], filtering out dotted "node.branchKey"
-      // composites (the old convention executor-branch.js used to mark a
-      // subflow-internal error) via a string .includes(".") check. subflow_key
-      // IS NULL is the exact structural replacement — a real column instead
-      // of an inferred string shape.
+      // subflow_key IS NULL is the structural filter for top-level errors —
+      // a real column, not an inferred string shape.
       //
       // queryErrorsByFlow returns EVERY historical errored execution, not
       // just the latest attempt per node — a node that failed once, was
