@@ -833,7 +833,7 @@ describe("reviveOrphanFlows", () => {
 
       await admissionQueueStore.admit({ kind: "flow-start", flowId: freshFlow.flowId });
 
-      // Default minAgeMs (30s) — this admission is milliseconds old.
+      // Freshly admitted — younger than the default minAgeMs grace, so it must not count as stuck.
       const result = await reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, logger: makeLogger() });
 
       assert.equal(result.stuckAdmissionsResumed, 0);
@@ -991,7 +991,7 @@ describe("reviveOrphanFlows", () => {
         nodeExecutionsStore: makeNodeExecutionsStoreFromFlows([]),
         runStore, admissionQueueStore,
         // In production, boot-time rows all predate this process's own
-        // start, so the real 30s grace window is trivially satisfied. This
+        // start, so the real grace window is trivially satisfied. This
         // test admits its row moments before calling reviveOrphanFlows, so
         // it needs the override to exercise the pass at all.
         stuckAdmissionMinAgeMs: 0,

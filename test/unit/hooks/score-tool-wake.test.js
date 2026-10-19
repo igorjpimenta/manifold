@@ -1,8 +1,7 @@
 // Unit tests for the after_tool_call hook that wakes a waiting SCORE_LLM
 // dispatch the instant submit_score fires — see score-tool-wake.js's own
-// header comment for the failure class this fixes (788 occurrences of
-// SCORE_LLM's "parse error: no valid score" where the real submit_score
-// call landed after the node had already been marked failed).
+// header comment for the failure class this fixes (a real submit_score
+// call landing after the node had already been marked failed).
 
 import { describe, it, mock, beforeEach } from "node:test";
 import assert from "node:assert/strict";

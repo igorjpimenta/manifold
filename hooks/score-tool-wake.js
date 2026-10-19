@@ -6,9 +6,8 @@
 // score when the WHOLE underlying agent run reaches its own natural end,
 // or when timeoutMs expires — even though the tool call already carried
 // everything apply() needs the moment it landed. The answer does land in
-// flight — well after the node has already been marked failed — with nothing
-// listening for it: 788 SCORE_LLM "parse error: no valid score" failures
-// traced to exactly this.
+// flight — well after the node has already been marked failed — with
+// nothing listening for it.
 //
 // Mirrors hooks/profile-write-lock.js's after_tool_call registration and
 // its event.runId correlation (that file's own header comment: output.runId
