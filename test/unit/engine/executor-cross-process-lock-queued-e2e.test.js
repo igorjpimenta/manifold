@@ -34,7 +34,7 @@ let lockCalls = [];
 let holderActive = false;
 let releaseHolder = null;
 
-await mock.module("file:///Users/herculano/.openclaw/extensions/pipeclaw/locks/lock.js", {
+await mock.module(new URL("../../../locks/lock.js", import.meta.url).href, {
   exports: {
     // Lock-owner plumbing executor-nodes.js imports — inert here: this
     // stand-in's withLock doesn't model owners.
@@ -68,10 +68,10 @@ await mock.module("file:///Users/herculano/.openclaw/extensions/pipeclaw/locks/l
   },
 });
 
-const { createRunStore } = await import("file:///Users/herculano/.openclaw/extensions/pipeclaw/state/run-store.js");
-const { createNodeExecutionsStore } = await import("file:///Users/herculano/.openclaw/extensions/pipeclaw/state/node-executions.js");
-const { createStateStore } = await import("file:///Users/herculano/.openclaw/extensions/pipeclaw/state/state-store.js");
-const { createExecutor } = await import("file:///Users/herculano/.openclaw/extensions/pipeclaw/engine/executor.js");
+const { createRunStore } = await import("../../../state/run-store.js");
+const { createNodeExecutionsStore } = await import("../../../state/node-executions.js");
+const { createStateStore } = await import("../../../state/state-store.js");
+const { createExecutor } = await import("../../../engine/executor.js");
 
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
