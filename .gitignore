@@ -8,3 +8,6 @@ dist/
 .citmp/
 *.log
 .DS_Store
+*.local
+.vite
+tsconfig.tsbuildinfo
