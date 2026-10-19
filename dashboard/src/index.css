@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body {
+    @apply m-0 bg-bg text-fg;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  a { @apply text-accent no-underline; }
+  a:hover { @apply underline; }
+}
+
+@layer components {
+  /* shared card / table tweaks the design system expects everywhere */
+  .scrollable-pre {
+    @apply font-mono text-xs bg-bg border border-border rounded p-2 overflow-auto max-h-96;
+  }
+}
+
+@layer utilities {
+  /* opacity-modulated text color helpers (matching the v0 .dim usage). */
+  .text-dim { color: theme('colors.fg.dim'); }
+}
