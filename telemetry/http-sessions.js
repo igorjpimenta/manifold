@@ -1,4 +1,5 @@
 // /pipeclaw/telemetry/sessions/parts — session transcript from lcm.db.
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openDb } from "../state/db.js";
@@ -7,12 +8,19 @@ const LCM_DB_PATH = path.join(os.homedir(), ".openclaw", "lcm.db");
 
 // Opened once and shared across all requests. readOnly handles are safe for
 // concurrent reads. Lazy so a missing lcm.db at startup doesn't crash the route.
-let _lcmDb = null;
-function sharedLcmDb() {
-  if (!_lcmDb) {
-    _lcmDb = openDb(LCM_DB_PATH, { readonly: true }).sqlite;
+// The existsSync check must run BEFORE openDb: openDb's createClient queues a
+// file connection that rejects with nobody awaiting it when the file is
+// absent, and that unobserved rejection surfaces as a process-level failure
+// (or a test-runner file failure) instead of reaching the 503 below.
+let _lcm = null;
+async function sharedLcmDb() {
+  if (!fs.existsSync(LCM_DB_PATH)) {
+    throw new Error("lcm.db not found");
   }
-  return _lcmDb;
+  if (!_lcm) {
+    _lcm = await openDb(LCM_DB_PATH, { readonly: true });
+  }
+  return _lcm;
 }
 
 export function registerSessionRoutes({ api, logger, json, bad }) {
@@ -27,10 +35,10 @@ export function registerSessionRoutes({ api, logger, json, bad }) {
       if (!sessionKey) return bad(res, "session_key required");
       let lcm;
       try {
-        lcm = sharedLcmDb();
+        lcm = await sharedLcmDb();
       } catch (err) {
         logger?.warn?.(`lineage[sessions/parts] lcm.db open failed: ${err?.message}`);
-        _lcmDb = null;  // reset so next request retries the open
+        _lcm = null;  // reset so next request retries the open
         return json(res, { error: "lcm.db not available" }, 503);
       }
       try {
@@ -60,7 +68,8 @@ export function registerSessionRoutes({ api, logger, json, bad }) {
           order     = "DESC";
         }
 
-        const rawRows = lcm.prepare(`
+        const rawRows = Array.from((await lcm.client.execute({
+          sql: `
           SELECT mp.part_id, mp.part_type, mp.ordinal,
                  m.seq, m.role,
                  datetime(m.created_at, 'localtime') AS msg_ts,
@@ -79,7 +88,9 @@ export function registerSessionRoutes({ api, logger, json, bad }) {
             AND mp.part_type IN ('text','reasoning','tool','patch','compaction')
           ORDER BY m.seq ${order}, mp.ordinal ${order}
           LIMIT ?
-        `).all(sessionKey, ...seqArgs, limit);
+        `,
+          args: [sessionKey, ...seqArgs, limit],
+        })).rows);
 
         // DESC queries come back newest-first — re-sort ascending for the client.
         const rows = order === "DESC"
@@ -91,20 +102,26 @@ export function registerSessionRoutes({ api, logger, json, bad }) {
 
         let hasMore = false;
         if (firstSeq != null) {
-          hasMore = lcm.prepare(`
+          hasMore = (await lcm.client.execute({
+            sql: `
             SELECT 1 FROM messages m
             JOIN conversations c ON c.conversation_id = m.conversation_id
             WHERE c.session_key = ? AND m.seq < ? LIMIT 1
-          `).get(sessionKey, firstSeq) != null;
+          `,
+            args: [sessionKey, firstSeq],
+          })).rows.length > 0;
         }
 
         let hasMoreNewer = false;
         if (lastSeq != null) {
-          hasMoreNewer = lcm.prepare(`
+          hasMoreNewer = (await lcm.client.execute({
+            sql: `
             SELECT 1 FROM messages m
             JOIN conversations c ON c.conversation_id = m.conversation_id
             WHERE c.session_key = ? AND m.seq > ? LIMIT 1
-          `).get(sessionKey, lastSeq) != null;
+          `,
+            args: [sessionKey, lastSeq],
+          })).rows.length > 0;
         }
 
         return json(res, { sessionKey, parts: rows, hasMore, hasMoreNewer, firstSeq, lastSeq });

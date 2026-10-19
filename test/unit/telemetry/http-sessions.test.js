@@ -1,6 +1,20 @@
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
-import { registerSessionRoutes } from "../../../telemetry/http-sessions.js";
+
+// homedir is mocked BEFORE the first import of the route: its lcm.db path is
+// computed once at module load, so a later mock would miss it. The fake home
+// has no .openclaw/lcm.db, which pins the suite to the unavailable path on
+// every machine regardless of whether a real lcm.db exists.
+const FAKE_HOME = "/fake-home";
+await mock.module("node:os", {
+  exports: {
+    homedir() {
+      return FAKE_HOME;
+    },
+  },
+});
+
+const { registerSessionRoutes } = await import("../../../telemetry/http-sessions.js");
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -62,9 +76,9 @@ describe("registerSessionRoutes", () => {
     const req = makeReq("/pipeclaw/telemetry/sessions/parts?session_key=agent%3Atest%3Anonexistent%3Asession");
     const res = makeRes();
     await def.handler(req, res);
-    // Either 503 (lcm.db not available) or 200/500 depending on whether lcm.db exists.
-    // In either case, the response must be valid JSON.
+    assert.equal(res.statusCode, 503);
     const body = JSON.parse(res._body);
     assert.ok(typeof body === "object");
+    assert.ok(body.error.includes("lcm.db"));
   });
 });
