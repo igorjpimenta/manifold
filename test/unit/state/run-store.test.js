@@ -293,9 +293,8 @@ describe("createRunStore — casFinish / casFail / casSkip", () => {
     store.close();
   });
 
-  // Regression test: casSkipStmt used to hardcode status_reason (formerly
-  // blocked_summary) = NULL, silently dropping the node's own
-  // _skipped.reason. Confirms the fix — the reason param now actually lands.
+  // The reason param must actually land in statusReason — a casSkipStmt
+  // that writes NULL there silently drops the node's own _skipped.reason.
   test("casSkip: reason param persists to statusReason (regression: used to be silently dropped)", async () => {
     const store = await makeStore();
     const f = fakeFlow({ status: "running", revision: 0 });
@@ -817,13 +816,12 @@ describe("createRunStore — listActive()", () => {
 
 // ─── TERMINAL_STATUSES / TERMINAL_STATUS_SET ───────────────────────────────────
 //
-// Exported specifically so callers deciding "is this flow cancellable /
-// already done" (cli.js's and dashboard/server.js's cancel handlers) check
-// against the real terminal set instead of hand-rolling their own allowlist
-// of active statuses. Regression for a confirmed live bug (2026-09-25): both
-// handlers used `status !== "running" && status !== "blocked"`, which
-// misses "queued" (a real, non-terminal admission-pool wait) and wrongly
-// refused to cancel a queued flow, reporting it as "already terminal".
+// Exported so callers deciding "is this flow cancellable / already done"
+// check against the real terminal set instead of hand-rolling their own
+// allowlist of active statuses. A `status !== "running" && status !==
+// "blocked"` check misses "queued" (a real, non-terminal admission-pool
+// wait) and wrongly refuses to cancel it, reporting it as "already
+// terminal".
 describe("TERMINAL_STATUSES / TERMINAL_STATUS_SET", () => {
   test("contains exactly the four real terminal statuses", () => {
     assert.deepEqual([...TERMINAL_STATUSES].sort(), ["cancelled", "failed", "skipped", "succeeded"]);

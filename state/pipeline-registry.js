@@ -230,9 +230,9 @@ async function _createStore(dbPath) {
   // onto `queries` instead of executed here — reconcilePipelineVersions
   // commits every pipeline's and every node's pair, plus the orphan-
   // retirement pass, in ONE client.batch() call at the end. That makes the
-  // whole SCD2 rotation atomic (a crash mid-reconcile used to be able to
-  // leave a pipeline with zero active version rows — retired-with-no-
-  // replacement) and collapses what was N individual round-trips into one.
+  // whole SCD2 rotation atomic — otherwise a crash mid-reconcile could
+  // leave a pipeline with zero active version rows (retired-with-no-
+  // replacement) — and collapses what was N individual round-trips into one.
   async function _reconcileOnePipeline(pipelineId, pipeline, now, queries) {
     const hash = pipelineContentHash(pipeline);
     const active = await _activePipelineRow(pipelineId);
@@ -407,10 +407,7 @@ async function _createStore(dbPath) {
   // naive SCD2 read -- would silently regress correct rendering for
   // every already-existing flow the moment this feature ships, which is
   // a worse outcome than an occasional wrong guess for the rare node
-  // that changed in that exact gap. Confirmed live: without this
-  // fallback, every already-running pipeline's tree rendered kind:null
-  // for every invocation older than the gateway restart that first
-  // shipped this feature.
+  // that changed in that exact gap.
   function findVersionRowAt(versions, atMs) {
     if (!versions?.length) return null;
     const exact = versions.find((v) => v.registeredAt <= atMs && (v.retiredAt == null || v.retiredAt > atMs));
