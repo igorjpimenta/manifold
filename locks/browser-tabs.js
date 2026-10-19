@@ -23,23 +23,21 @@
 // else pre-existing, is left alone.
 //
 // Talks to the openclaw-browser plugin via its `openclaw browser` CLI, not
-// the plugin's own HTTP control server (port gatewayPort+2), which 500s on
-// every request on this Node version — a `TypeError: Cannot set property
-// signal of #<IncomingMessage> which has only a getter` in the vendored
-// package's own middleware, outside this git tree and so not fixable here.
-// A direct in-process import of the vendored package's internal dispatcher
-// was also considered and rejected: that module's filename is a content
-// hash that changes on every `openclaw` version bump, which would silently
-// break this on the next upgrade. The CLI is the stable surface (it is also
-// what check-login.js's cookie-bridge step already shells out to) — see the
-// project's own prior-art note: "openclaw has no MCP client in plugin
+// the plugin's own HTTP control server (port gatewayPort+2), whose vendored
+// middleware fails every request — a bug outside this git tree and so not
+// fixable here. A direct in-process import of the vendored package's internal
+// dispatcher was also considered and rejected: that module's filename is a
+// content hash that changes on every `openclaw` version bump, which would
+// silently break this on the next upgrade. The CLI is the stable surface (it
+// is also what check-login.js's cookie-bridge step already shells out to) —
+// see the project's own prior-art note: "openclaw has no MCP client in plugin
 // runtime — spawn the CLI directly".
 //
-// Cost: each CLI invocation is ~2-3s (plugin-boot overhead every call, not
-// something that warms up). listTabs (before) + openTab (if empty) +
+// Cost: each CLI invocation carries plugin-boot overhead (no warm-up), so
+// invocations aren't cheap. listTabs (before) + openTab (if empty) +
 // listTabs (after) are sequential/causally dependent and can't be
-// collapsed — but closeTab calls run in parallel (Promise.all); measured, N
-// closes cost roughly the same wall-clock as one (~2.5s for 3 tabs, not 3x).
+// collapsed — but closeTab calls run in parallel (Promise.all), so N closes
+// cost roughly the same wall-clock as one.
 // Worth preserving rather than re-deriving: each close is a separate CLI
 // spawn at the per-invocation cost above, so nothing about the code shape
 // implies the parallelism is what keeps it flat.
