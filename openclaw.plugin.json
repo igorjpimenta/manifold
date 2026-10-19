@@ -1,0 +1,73 @@
+{
+  "id": "pipeclaw",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true,
+    "onConfigPaths": ["plugins.entries.pipeclaw"]
+  },
+  "contracts": {
+    "tools": [
+      "pipeclaw_start",
+      "pipeclaw_send_chat",
+      "propose_draft",
+      "propose_draft_meta",
+      "submit_draft",
+      "report_draft_blocked",
+      "report_draft_skip",
+      "submit_score"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "pipelinesDir": { "type": "string" },
+      "ownerSessionKey": { "type": "string" },
+      "dashboardEnabled": { "type": "boolean" },
+      "dashboardPort": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+      "dashboardHost": { "type": "string" },
+      "pipeclawParrot": {
+        "type": "object",
+        "description": "pipeclaw-parrot channel config. pipeclaw-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
+        "additionalProperties": false,
+        "properties": {
+          "defaultAgent": {
+            "type": "string",
+            "description": "Default agent for the pipeclaw-parrot channel. Used when the blocked gate node does not declare its own discuss.agent."
+          }
+        }
+      },
+      "ios": {
+        "type": "object",
+        "description": "Config for the embedded live-activity/iOS push module (absorbed from live-activity-bridge plugin).",
+        "additionalProperties": false,
+        "properties": {
+          "pollIntervalMs": { "type": "integer", "minimum": 200 },
+          "pipelinesDir": { "type": "string" },
+          "activities": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "agentApproval":    { "type": "boolean" },
+              "pipelineProgress": { "type": "boolean" },
+              "agentRunning":     { "type": "boolean" }
+            }
+          }
+        }
+      },
+      "taskflowRevive": {
+        "type": "object",
+        "description": "Config for boot-time task orphan cleanup (absorbed from taskflow-revive plugin).",
+        "additionalProperties": false,
+        "properties": {
+          "startupDelayMs": { "type": "number", "minimum": 0 }
+        }
+      },
+      "globalConcurrency": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+      }
+    }
+  }
+}
