@@ -170,6 +170,17 @@ export function lockPathFor(name) {
   return path.join(LOCKS_DIR, `${safeName(name)}.lock`);
 }
 
+// Lock name for a file-keyed mutex. The `file:` prefix plus
+// path.resolve() normalization must stay byte-identical to the derivation
+// the workspace's file-lock helpers use (withFileLock) — every reader and
+// writer of the same file (e.g. PROFILE.md: hooks/profile-read-gate.js
+// vs gap-answers.js) derives its lock name here, and a divergent
+// derivation would silently put them on two different locks that never
+// exclude each other.
+export function lockNameForFile(filePath) {
+  return `file:${path.resolve(filePath)}`;
+}
+
 function isPidAlive(pid) {
   try {
     process.kill(pid, 0);
