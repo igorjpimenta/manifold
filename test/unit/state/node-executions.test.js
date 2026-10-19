@@ -250,7 +250,7 @@ describe("write()", () => {
 
 // ─── writeResult() ───────────────────────────────────────────────────────────
 // Option B, Phase B0 — additive
-// resultJson write. No size cap (removed 2026-08-19 — see node-executions.js's
+// resultJson write. No size cap (see node-executions.js's
 // own header comment): a result of any size is always stored in full,
 // resultTooLargeBytes always written null.
 
@@ -292,11 +292,11 @@ describe("writeResult()", () => {
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "SCAN", enteredAt: 1, exitedAt: 2, kind: "fresh" });
     // Same shape as the real SCAN node: tiny scalar fields (accessToken,
-    // bidderId) bundled flat alongside a large `listings` array. Regression
-    // coverage for the 2026-08-19 incident where SUBMIT_CODE failed days
-    // later with "missing accessToken/bidderId from SCAN" because the
-    // whole result — including the tiny fields — was silently dropped for
-    // being over the (now-removed) size cap.
+    // bidderId) bundled flat alongside a large `listings` array — the
+    // shape where a size cap once silently dropped the whole result,
+    // including the tiny fields a later node (SUBMIT_CODE) depended on,
+    // failing only when that unrelated node failed. No size cap remains,
+    // so nothing is dropped.
     const big = {
       accessToken: "tok-abc123",
       bidderId: 987654,
@@ -520,9 +520,7 @@ describe("listResultsForFlow()", () => {
     assert.equal(results[0].resultTooLargeBytes, null);
   });
 
-  // Was: "a dispatch with no resultJson written yet still appears, with
-  // resultWrittenAt null". Changed 2026-08-17 chasing a real B4 write-
-  // cutover hang: the not-yet-written row must be excluded from the SQL
+  // A dispatch with no resultJson written yet must be excluded from the SQL
   // result entirely, not merely filtered by assembleState() after the
   // fact — the per-node dedup below keeps only ONE row per node_id, so if
   // that slot were occupied by an in-flight (unwritten) row, an EARLIER
@@ -727,13 +725,10 @@ describe("schema", () => {
   // common/lib/freelance-filter-node.js) filters flow_node_invocations by
   // node_id and correlates on subflow_key, in both its own WHERE clause and
   // a NOT EXISTS subquery — neither column was covered by an existing
-  // index. Confirmed live 2026-09-25 against a 123k-row production
-  // runtime.sqlite: without this index, SQLite fell back to a full scan of
+  // index. Without this index, SQLite falls back to a full scan of
   // flow_runs (driving the join) plus a second per-row scan inside the
-  // correlated subquery, and the query never returned in any reasonable
-  // time; EXPLAIN QUERY PLAN after adding it showed direct
-  // (node_id, subflow_key) index searches throughout, and the same query
-  // returned in 44ms.
+  // correlated subquery; with it, the plan uses direct
+  // (node_id, subflow_key) index searches throughout.
   test("idx_invocations_node_subflow index exists on flow_node_invocations (node_id, subflow_key)", async () => {
     const store = await makeIsolatedStore();
     const { rows } = await store._db.execute({
@@ -1428,10 +1423,10 @@ describe("findOrCreateInvocation()", () => {
 
   // ── guard (cross-flow atomic dedup) ────────────────────────────────────
   //
-  // Regression coverage for the live incident (2026-09-25): the per-flow
+  // The per-flow
   // unique index above only ever prevented the SAME flowId from double-
   // dispatching an identity — it never had an opinion on two DIFFERENT
-  // parent flows (e.g. two overlapping freelance_freelancer-proposal scans)
+  // parent flows (e.g. two overlapping scans)
   // both deciding to dispatch the same (nodeId, subflowKey). `guard` closes
   // that gap by running inside this call's own withSharedWrite turn, right
   // before the insert — see the function's own header comment.

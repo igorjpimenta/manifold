@@ -176,10 +176,9 @@ function sleep(ms) {
 }
 
 // Polls until the parent flow reaches a terminal status, instead of a fixed
-// short delay — this test's mock withLock adds a real 5ms-per-child
+// short delay — this test's mock withLock adds a real per-child
 // artificial delay (see above) on top of normal dispatch overhead, which a
-// fixed ~20-60ms flush() (fine for every other E2E in this series, none of
-// which add artificial per-child delays) isn't reliably enough time for
+// fixed flush() isn't reliably enough time for
 // under a full-suite run's concurrent load. Bounded so a genuine hang still
 // fails loudly rather than hanging the suite.
 async function flush(harness, flowId, { timeoutMs = 3000, pollMs = 15 } = {}) {

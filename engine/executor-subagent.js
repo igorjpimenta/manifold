@@ -2,12 +2,12 @@ import { GatewayHandoffNeeded, isRequestScopedSubagentError, fetchSessionError }
 import { usesNamedParams } from "./executor-helpers.js";
 import { waitForToolSignal } from "../state/tool-handoff.js";
 
-// agent.wait falls back to a 30s window when timeoutMs is omitted, and answers
-// a lapsed window with the same bare "timeout" status a timed-out run gets —
-// waitForRun drops endedAt, so the two can't be told apart to re-wait. Asking
-// for the gateway's maximum timer delay (setSafeTimeout clamps anything larger)
-// makes the run's own end the only thing that settles the wait; the runtime's
-// agents.defaults.timeoutSeconds still bounds the run itself.
+// A lapsed agent.wait window answers with the same bare "timeout" status a
+// timed-out run gets — waitForRun drops endedAt, so the two can't be told
+// apart to re-wait. Asking for the gateway's maximum timer delay
+// (setSafeTimeout clamps anything larger) makes the run's own end the only
+// thing that settles the wait; the runtime's agents.defaults.timeoutSeconds
+// still bounds the run itself.
 const WAIT_UNTIL_RUN_ENDS_MS = 2_147_483_647;
 
 export function createSubagentDispatch({ getSubagent, sessionIndex, logger }) {

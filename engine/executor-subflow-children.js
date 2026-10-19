@@ -67,10 +67,10 @@ function deriveSubflowKey(node, item) {
 // ancestor's own resultJson/entry fields — not inherited wholesale at
 // spawn time.
 function buildChildInitialState(state, item, itemIndex) {
-  // Captured before spawn — so single-item retry-cascades (selector: () =>
-  // [{id:"only"}], used to structure a code -> infra-recovery -> agent-
-  // fallback chain, not a real per-item fan-out) can still reach the real
-  // parent-branch item their inner nodes need — without this, `item` below
+  // Captured before spawn — so a single-item retry-cascade (selector: () =>
+  // [{id:"only"}], structuring a code -> infra-recovery -> agent-fallback
+  // chain, not a real per-item fan-out) can still reach the real
+  // parent-branch item its inner nodes need — without this, `item` below
   // silently replaces the real listing/candidate/conversation object with
   // the cascade's own placeholder, and any inner node reading
   // `state.item.id`/`.jobId` for the real target id gets the literal string

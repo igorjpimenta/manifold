@@ -14,7 +14,7 @@ import { getSubflowGroup, getAllSubflowGroups } from "../../../state/subflow-sta
 
 // Post-group_id-drop, an invocation's own nodeId IS the group/loop-node id
 // (see subflow-state.js's normalizeChildAsBranchRow comment) — fixtures below
-// use `nodeId` where they used to use `groupId`.
+// use `nodeId` as the group id.
 function fakeStores({ invocations = [], children = [] } = {}) {
   const nodeExecutionsStore = {
     listInvocationIdsForNode: (flowId, nodeId) =>

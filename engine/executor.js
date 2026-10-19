@@ -45,12 +45,10 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     return gateSubagent(getWorkingSubagent?.() ?? api.runtime?.subagent);
   }
 
-  // Injectable for tests (defaults to the real singleton in production) —
-  // was previously a hardcoded getNodeExecutionsStore() call with no
-  // override, which meant every test constructing a real createExecutor()
-  // wrote its fixture rows into the real ~/.openclaw/runtime.sqlite. store/
-  // branchService/failureStore etc. above already followed this DI
-  // pattern; this was the one exception.
+  // Injectable for tests (defaults to the real singleton in production).
+  // A test constructing a real createExecutor() without this override would
+  // write its fixture rows into the real ~/.openclaw/runtime.sqlite; store/
+  // branchService/failureStore etc. above already follow this DI pattern.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
 
   // Wraps nodeExecutions.write() for the write-then-fail call sites below —
@@ -151,20 +149,16 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     // reading state._subflowGroups.SCORE to resolve each shortlisted
     // listing's score data) — same reason dispatchCodeEntry
     // (executor-nodes.js) enriches state before calling a "code" node's
-    // run(). Subflow dispatch never did this enrichment, so any such
-    // selector silently saw undefined subflow groups and resolved to zero
-    // items regardless of how many upstream branches actually succeeded —
-    // confirmed live on a freelance-proposal pipeline's PROPOSE node, dating
-    // back to the childFlows migration, since dispatchSubflowChildren has
-    // never enriched state itself, only dispatchCodeEntry has.
+    // run(). Subflow dispatch never does this enrichment, so any such
+    // selector silently sees undefined subflow groups and resolves to zero
+    // items regardless of how many upstream branches actually succeeded.
     //
-    // The first live read-site cutover: assembleState(baseState: state)
-    // replaces enrichWithSubflows(state, ...) here. It subsumes
-    // enrichWithSubflows's own _subflowGroups computation (same
-    // getAllSubflowGroups call, folded in) and additionally overlays each
-    // node's resultJson on top of the real stateJson passed as baseState —
-    // verified a no-op against real flows in B1 (resultJson-derived values
-    // are byte-identical to state_json's today), so this is the same
+    // assembleState(baseState: state) replaces enrichWithSubflows(state, ...)
+    // here: it subsumes enrichWithSubflows's own _subflowGroups computation
+    // (same getAllSubflowGroups call, folded in) and additionally overlays
+    // each node's resultJson on top of the real stateJson passed as
+    // baseState. The overlay is a no-op against real flows (resultJson-derived
+    // values are byte-identical to state_json's), so this is the same
     // "additive, verified before cutover" pattern as every prior phase,
     // scoped to the single narrowest read site (node.selector) rather than
     // all 5 root call sites at once.
@@ -357,27 +351,25 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
         return;
       }
       if (nextNodeId === "__end__") {
-        // The 6th root read site, previously flagged as "deliberately left
-        // untouched" — enrichWithSubflows only ever added _subflowGroups
-        // onto raw `state`, no resultJson replay at all. Harmless while
-        // state_json still carried the full accumulated blob; broken the
-        // moment the state-write filter cutover made it entry-only
-        // (pipeline.display() and successCriteria() both read node output
-        // through here — found live via 2 failing tests once that filter
-        // shipped). assembleState() replaces it, same as every other root
-        // call site.
+        // This root read site carries the same resultJson-replay need as
+        // every other: pipeline.display() and successCriteria() both read
+        // node output through here. assembleState() replaces the old
+        // enrichWithSubflows, which only ever added _subflowGroups onto raw
+        // `state` and never replayed resultJson at all. Harmless while
+        // state_json still carried the full accumulated blob; broken once
+        // the state-write filter made it entry-only.
         const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
         await runAuditIfConfigured({ flowId, pipeline, state: enrichedState, logger });
         // failureStore.recordFromTerminalState's soft-marker scan was
         // deleted — zero soft-error producers remain anywhere in
         // `.pipelines`/`.shared`; every failure now persists directly from
         // this file's own throw-catch paths via recordEngineFailure.
-        // finalState is enrichedState-based, not state-based — a
-        // node's own output (e.g. a runAudit-only sentinel field like
+        // finalState is enrichedState-based, not state-based — a node's own
+        // output (e.g. a runAudit-only sentinel field like
         // `_successCriteriaReason`) only exists via resultJson replay now,
         // so finalState._successCriteriaReason below would silently read
         // undefined off raw `state` otherwise. Safe to carry _subflowGroups
-        // through here too (previously avoided): the persist-layer filter
+        // through here too: the persist-layer filter
         // (executor-persist.js's toPersistableState) already narrows
         // whatever's passed to persistFailRetrying/persistSkipRetrying/
         // persistFinishRetrying down to entry-only fields regardless of
@@ -649,13 +641,11 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       }
 
       const freshAfterNode = (await store.get(flowId)) ?? { stateJson: state, revision: flow.revision };
-      // Used to be `newState = applyUpdate(..., stateUpdate)` — a wide
-      // merge of this node's own output onto freshAfterNode.stateJson.
-      // That merge's node-output contribution
-      // never actually reached the database: every persist call below
-      // filters its `state:` argument down to entry/bookkeeping fields
-      // only (executor-persist.js's toPersistableState), so the merge was
-      // computed just to be discarded every single dispatch. A node's own
+      // entryState is taken directly from freshAfterNode.stateJson, not
+      // recomputed as a merge of this node's own output. Every persist call
+      // below filters its `state:` argument down to entry/bookkeeping fields
+      // only (executor-persist.js's toPersistableState), so a wide merge of
+      // the node's output here would never reach the database. A node's own
       // output reaches result_json separately, via writeResult(invocationId,
       // stateUpdate) further down — entirely independent of this variable.
       // freshAfterNode.stateJson is already entry-only (it was itself
@@ -741,13 +731,14 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
         // genuinely is there, just not from this call. Every other reason
         // ("no-invocation-id"/"no-such-invocation"/"unserializable"/
         // "db-error"/a genuine throw, normalized via the catch above) means
-        // NO ONE wrote anything. The revival-race investigation found that
-        // advancing last_step here used to be unconditional regardless of
-        // reason — the exact shape of the SCORE_LLM "edge returned no next
-        // node" incident and the boot-revival gap it left uncovered (see
-        // reviveAgentKindOrphan below), just reached via the fresh-dispatch
-        // path instead of revival. Fail the flow outright for any non-race
-        // reason instead of silently continuing.
+        // NO ONE wrote anything. Advancing last_step in that case would
+        // move the flow past this node with its output never durably
+        // written: the next runFlow() iteration's assembleState() reads
+        // nothing for this node, and resolveEdge() dead-ends with "no next
+        // node" — the SCORE_LLM "edge returned no next node" shape, and the
+        // boot-revival gap it left uncovered (see reviveAgentKindOrphan
+        // below). Fail the flow outright for any non-race reason instead of
+        // silently continuing, so the operator sees the true cause.
         if (reason !== "race") {
           const msg = `resultJson write failed (${reason})`;
           logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} ${msg}`);
@@ -1024,16 +1015,16 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       // this exact invocation — advancing is correct, the data genuinely is
       // there, just not from this call. Every other reason (db-error,
       // no-such-invocation, no-invocation-id, unserializable, threw) means
-      // NO ONE wrote anything: advancing last_step here used to be
-      // unconditional, past this node with its output never durably
-      // written. The fix: the very next runFlow() iteration's
-      // assembleState() then reads nothing for this node, and resolveEdge()
-      // dead-ends with "no next node" — deterministic given the failure, not
-      // a race, and completely swallowing the REAL reason behind a generic
-      // edge-resolution message. Fail the flow outright instead — same shape
-      // as persistRunningRetrying's own CAS-failure branch just below — so
-      // the operator sees the true cause and can retry this one node, rather
-      // than a downstream "no next node" that hides it.
+      // NO ONE wrote anything: advancing here would move last_step past
+      // this node with its output never durably written. The next runFlow()
+      // iteration's assembleState() then reads nothing for this node, and
+      // resolveEdge() dead-ends with "no next node" — deterministic given
+      // the failure, not a race, and completely swallowing the REAL reason
+      // behind a generic edge-resolution message. Fail the flow outright
+      // instead — same shape as persistRunningRetrying's own CAS-failure
+      // branch just below — so the operator sees the true cause and can
+      // retry this one node, rather than a downstream "no next node" that
+      // hides it.
       if (reason !== "race") {
         const msg = `resultJson write failed (${reason})`;
         logger.warn(`pipeclaw revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);

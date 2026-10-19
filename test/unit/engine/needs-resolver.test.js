@@ -84,7 +84,7 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
 
   it("a legacy pre-cap-removal row (resultJson null, resultTooLargeBytes set) resolves ready with the _resultTooLarge marker, same as assembleState()", async () => {
     // node-executions.js's writeResult() no longer caps results at all
-    // (removed 2026-08-19) and never sets resultTooLargeBytes on a new
+    // and never sets resultTooLargeBytes on a new
     // write — this row shape can only come from before that removal,
     // where the real value was genuinely never stored.
     const { runStore, nodeExecutionsStore } = makeStore({

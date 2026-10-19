@@ -147,9 +147,8 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// 60ms, not 20ms — matches executor-loop-children-reply-e2e.test.js's own
-// bump: a full-suite concurrent run showed the tighter margin flakes under
-// load (a real, if rare, timing flake — not a fixture bug).
+// Raised above the sibling e2e files' tighter default — a full-suite
+// concurrent run showed the tighter margin flakes under load.
 function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -280,10 +279,10 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc" }]);
-    // The child's runFlow is dispatched fire-and-forget, so this used to sleep
-    // and hope it had reached its gate. Under CI load it hadn't, and the
-    // assertion read an undefined waitJson — the failure that blocked the
-    // deploy for this very commit. gate.opened on any flow other than the
+    // The child's runFlow is dispatched fire-and-forget, so a fixed sleep
+    // and hoping it had reached its gate is unreliable: under CI load it
+    // hadn't, and the assertion read an undefined waitJson.
+    // gate.opened on any flow other than the
     // parent is exactly the condition being waited for.
     const childAtGate = waitForGateOpen((q) => q.flowId !== record.flowId);
     await executor.runFlow(record.flowId);

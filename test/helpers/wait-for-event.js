@@ -3,12 +3,10 @@
 //
 // The engine E2E tests used `await flush()` — a fixed setTimeout — to bridge
 // the gap between triggering work and asserting on its result. That is wrong in
-// both directions at once: too long on a fast machine (a settle taking 3ms
-// still costs the full 60ms) and too short on a loaded CI runner (the suite
-// runs ~4x slower there, and the assertion fires while the flow is still
-// running). The constant had already been bumped 20ms -> 60ms for exactly that
-// reason, and it flaked again in CI at 60ms — bumping it a third time only
-// moves the threshold.
+// both directions at once: too long on a fast machine and too short on a
+// loaded CI runner (the suite runs several times slower there, so the
+// assertion fires while the flow is still running). Bumping the constant only
+// moves the threshold — it never makes a fixed delay reliable.
 //
 // None of that guessing is necessary: state-store already announces every
 // transition on process.nextTick. The signal exists; the tests just weren't

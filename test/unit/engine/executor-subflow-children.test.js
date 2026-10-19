@@ -142,14 +142,14 @@ describe("dispatchSubflowChildren", () => {
     assert.deepEqual(Object.keys(child.stateJson).sort(), ["item", "itemIndex", "pipelineId"], "no parent-cloned field survives the spawn beyond what spawn-child.js itself sets");
   });
 
-  // Regression test for a real incident: a single-item retry-cascade node
-  // (selector: () => [{id:"only"}], used to structure a code -> infra-
-  // recovery -> agent-fallback chain, not a real per-item fan-out) clobbers
+  // Regression for a single-item retry-cascade node
+  // (selector: () => [{id:"only"}], structuring a code -> infra-
+  // recovery -> agent-fallback chain, not a real per-item fan-out): it clobbers
   // the parent branch's own real item (e.g. a listing/candidate/
   // conversation) with its own placeholder — several cascades' inner code
   // nodes were written assuming state.item still held the real object,
-  // silently operating on the literal string "only" instead (confirmed
-  // live: SUBMIT_CODE bidding on https://www.workana.com/messages/bid/only).
+  // silently operating on the literal string "only" instead (e.g.
+  // SUBMIT_CODE bidding on https://www.workana.com/messages/bid/only).
   // parentItem preserves the real parent item specifically so a single-item
   // cascade's own inner nodes can still reach it.
   test("parentItem carries the PARENT branch's real item, even when this node's own selector returns a placeholder — the single-item retry-cascade case", async () => {
@@ -665,9 +665,9 @@ describe("dispatchSubflowChildren", () => {
 
   // node.dispatchGuard — the atomic cross-flow recheck (state/node-
   // executions.js's `guard` param, threaded through spawn-child.js).
-  // Regression coverage for the live incident (2026-09-25): two parent
+  // Two parent
   // flow-start runs whose FILTER scans overlapped both decided to dispatch
-  // PROPOSE for the same 6 listings before either had committed anything —
+  // PROPOSE for the same listings before either had committed anything —
   // node.selector's own bulk decision can't see a sibling parent's
   // uncommitted work, so the guard has to run right at commit time instead.
   describe("node.dispatchGuard", () => {
