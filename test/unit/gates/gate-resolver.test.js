@@ -1130,7 +1130,7 @@ describe("applyResolutionsAndResume — revision_conflict retry loop", () => {
     // chained `await new Promise(r => setTimeout(r, N))` calls in
     // practice here — the promise never settled and tests hung),
     // collapse every setTimeout delay (inner backoff AND the outer
-    // round-scheduling delay) down to a real, near-instant 0ms timer.
+    // round-scheduling delay) down to a real, near-instant timer.
     // Real timers still exercise the exact same code paths and ordering
     // — only the wall-clock cost changes — and `await` naturally waits
     // out however many real event-loop ticks the chain takes.
@@ -1173,7 +1173,7 @@ describe("applyResolutionsAndResume — revision_conflict retry loop", () => {
       assert.equal(callCount, 5, "round 1 should retry exactly 5 times before scheduling round 2");
       // Inspect the FIRST warn call specifically — round 1's own
       // exhaustion message — rather than requiring rounds 2/3 to not
-      // yet have happened (with real 0ms timers they may well have
+      // yet have happened (with real timers they may well have
       // already started running in the background by the time this
       // assertion runs).
       const firstWarn = logger.calls.warn[0]?.join(" ") ?? "";
