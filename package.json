@@ -5,6 +5,20 @@
   "license": "UNLICENSED",
   "description": "LangGraph-style pipeline executor for openclaw. Loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs, dispatching nodes to agents via runtime.subagent.run with explicit state-graph routing.",
   "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./errors": "./engine/executor-errors.js",
+    "./lock": "./locks/lock.js",
+    "./elevation": "./elevation.js",
+    "./digest": "./telemetry/digest-push.js",
+    "./tool-handoff": "./state/tool-handoff.js",
+    "./profile-lock": "./hooks/profile-write-lock.js",
+    "./ios-auth": "./ios/auth.js",
+    "./state/db": "./state/db.js",
+    "./state/batch-writer": "./state/batch-writer.js",
+    "./state/schema": "./state/schema.js",
+    "./state/migrator": "./state/migrator.js"
+  },
   "scripts": {
     "test": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/**/*.test.js'",
     "test:unit": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/unit/**/*.test.js'",
