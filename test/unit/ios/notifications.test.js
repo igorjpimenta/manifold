@@ -14,7 +14,7 @@ import { NotificationKinds, buildPayload } from "../../../ios/notifications.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SWIFT_KINDS = path.resolve(
-  HERE, "../../../../../clients/ios/Sources/Shared/NotificationKinds.swift",
+  HERE, "../../fixtures/NotificationKinds.swift",
 );
 
 /** Raw values from the `enum NotificationKind: String, CaseIterable` body. */
