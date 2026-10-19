@@ -8,7 +8,7 @@
   "contracts": {
     "tools": [
       "pipeclaw_start",
-      "pipeclaw_send_chat",
+      "pipeclaw_send_push",
       "propose_draft",
       "propose_draft_meta",
       "submit_draft",
