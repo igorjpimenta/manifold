@@ -700,25 +700,19 @@ export function registerRunRoutes({
       const isSubflowNode = kind === "subflow";
       const kids = isSubflowNode ? (childrenByNodeId.get(inv.nodeId) ?? []) : [];
       // A node's own execution row carries no success/failure signal at all
-      // (Phase 1.5 — flow_node_executions is a pure identity/timing ledger;
+      // (flow_node_executions is a pure identity/timing ledger;
       // failedExecutionIds above is the only way to know a given attempt
       // failed). Absent that, the only way to recover status is by
       // cross-referencing the FLOW's own status — which only ever applies
       // to the LAST invocation in this list (a flow can't be mid-dispatch
       // or have skipped/blocked at an earlier, already-superseded node).
-      // Previously compared against flow.currentStep to confirm this WAS
-      // actually the in-flight node — dead code: current_step was dropped
-      // from flow_runs in migration v7 (state/run-store.js "Phase 2.5"),
-      // so that field is always undefined and the comparison always false.
-      // Unneeded anyway: invocations is already ordered ascending by
-      // invoked_at (listInvocationsForFlow), so idx === lastIdx already
-      // and only ever means "the most recently invoked node for this
-      // flow" — exactly what the dead comparison was trying to confirm.
-      // Also previously gated on !isTerminal(flow.status), which silently
-      // dropped a flow's real terminal status (succeeded/failed/
-      // cancelled/skipped) on its own last node whenever that node's own
-      // execution recorded no error — e.g. a cascade flow that exhausted
-      // every root node without any single root's OWN dispatch erroring.
+      // invocations is already ordered ascending by invoked_at
+      // (listInvocationsForFlow), so idx === lastIdx already and only ever
+      // means "the most recently invoked node for this flow" — no extra
+      // currentStep/isTerminal gate: comparing a dropped field is always
+      // false, and gating on !isTerminal would drop a terminal flow's real
+      // status from its own last node whenever that node's execution
+      // recorded no error, defaulting a failed flow to "succeeded".
       let status;
       if (inv.latestExecutionId && failedExecutionIds.has(inv.latestExecutionId)) {
         status = "failed";

@@ -19,11 +19,12 @@
 import { listDevicePairing } from "openclaw/plugin-sdk/device-bootstrap";
 import { timingSafeEqual } from "node:crypto";
 
-// Paired-device list is on-disk — cache the parse for 30s so every incoming
-// bridge request (each of these routes is auth-checked per-call, including
-// hot ones like /pipeclaw/ios/state that the app can poll frequently) doesn't
-// re-read and re-parse the JSON file from scratch. Revocation is visible
-// within one TTL window; acceptable for an operator-grade tool.
+// Paired-device list is on-disk — cache the parse across the TTL below so
+// every incoming bridge request (each of these routes is auth-checked
+// per-call, including hot ones like /pipeclaw/ios/state that the app can
+// poll frequently) doesn't re-read and re-parse the JSON file from scratch.
+// Revocation is visible within one TTL window; acceptable for an
+// operator-grade tool.
 const PAIRED_CACHE_TTL_MS = 30_000;
 let pairedCache = { ts: 0, devices: [] };
 

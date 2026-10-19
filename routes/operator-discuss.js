@@ -348,7 +348,7 @@ export function createDiscussHandler({
 // regardless of session length. Without this, a long-running discuss session's
 // JSONL grows unbounded and this handler's parse loop — running on the same
 // single-threaded gateway event loop as every other elevated route, including
-// the up-to-360s discuss-turn call — can stall long enough for the client's
+// long-running discuss-turn calls — can stall long enough for the client's
 // (much tighter) discuss-history GET timeout to fire first. Discuss is a chat
 // view; the most recent turns are what matters, so tailing is an acceptable
 // trade rather than a silent correctness loss.

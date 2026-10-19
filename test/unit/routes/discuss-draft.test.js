@@ -2,12 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { persistRevisedDraft, persistRevisedMeta } from "../../../routes/discuss-draft.js";
 
-// The real `store` (state/state-store.js) has every method declared `async`
-// (get, setWaiting, ...) -- persistRevisedDraft/persistRevisedMeta previously
-// called them without `await`, which a synchronous mock here would never
-// catch (a plain return value and an unawaited Promise are both "not null"
-// to a caller that doesn't read a field off either). Every mock below is
-// async so this suite actually exercises the real await path.
+// The real `store` (state/state-store.js) has every method declared `async`.
+// A synchronous mock can't catch a missing await (a plain return value and an
+// unawaited Promise are both "not null" to a caller that doesn't read a field
+// off either), so every mock below is async to exercise the real await path.
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 

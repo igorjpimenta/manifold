@@ -220,15 +220,9 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
   });
 
   test("the LAST invocation on a TERMINAL flow (failed) mirrors that terminal status too, not just running/blocked/queued/skipped", async () => {
-    // Regression test for the real bug this fix closes: status computation
-    // was previously gated on !isTerminal(flow.status), so a flow that
-    // ended failed/cancelled with no error recorded on its own last node's
-    // execution (e.g. a cascade flow that exhausted every root node
-    // without any single root's OWN dispatch erroring — cascade nodes DO
-    // record their own error, per cascadeAttemptFor's tests, but a
-    // non-cascade terminal failure can still reach here with a clean last
-    // execution row) silently fell through to the default "succeeded" —
-    // a green dot on a flow the operator can plainly see failed.
+    // A terminal flow whose last node's own execution recorded no error must
+    // still mirror the flow's terminal status — defaulting to "succeeded"
+    // would show a green row on a flow the operator can plainly see failed.
     resetMocks();
     const flow = { flowId: "flow-terminal-fail", status: "failed", stateJson: { pipelineId: "team_pipe" } };
     listInvocationsForFlowImpl = () => [
@@ -296,10 +290,6 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
   });
 
   test("a flow with a subflow node scored via multiple item invocations shows ONE row, not one per item", async () => {
-    // Regression test for the real bug this fix addresses: a SCORE node
-    // that scored 9 listings in one dispatch used to surface as 9 separate
-    // "SCORE" tree rows (one per item invocation) instead of one "SCORE"
-    // row with 9 children — confirmed against live production data.
     resetMocks();
     const flow = { flowId: "flow-multi", status: "succeeded", currentStep: null, stateJson: { pipelineId: "team_pipe" } };
     listInvocationsForFlowImpl = () => [
