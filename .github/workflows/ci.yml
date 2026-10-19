@@ -34,3 +34,14 @@ jobs:
       - name: unit tests
         if: '!cancelled()'
         run: npm run test:unit
+
+      - name: Dashboard deps
+        if: '!cancelled()'
+        run: npm ci --no-audit --no-fund --prefix dashboard
+
+      - name: Dashboard typecheck and build
+        if: '!cancelled()'
+        working-directory: dashboard
+        run: |
+          npx tsc -b
+          npx vite build
