@@ -740,14 +740,12 @@ describe("acquireLock — onWouldBlock hook", () => {
   });
 });
 
-// ─── acquireLock — cooldown (2026-09-08 Workana Turnstile incident) ─────────
+// ─── acquireLock — cooldown ─────────────────────────────────────────────────
 //
 // Serialization alone (the lock's core job) doesn't stop back-to-back
 // Cloudflare Turnstile challenges in the same browser session from
-// escalating each other's bot-risk score — three SUBMIT_CODE dispatches
-// serialized correctly but ran seconds apart, and Cloudflare treated the
-// resulting cadence as suspicious. cooldownMs/cooldownJitterMs make the
-// NEXT acquirer wait out a minimum gap since the resource was last
+// escalating each other's bot-risk score. cooldownMs/cooldownJitterMs make
+// the NEXT acquirer wait out a minimum gap since the resource was last
 // released, on top of ordinary mutual exclusion.
 
 describe("acquireLock — cooldown", () => {
