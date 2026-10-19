@@ -1,0 +1,202 @@
+// Draft persistence helpers for discuss handlers.
+// These functions mutate flow waitJson (via store.setWaiting) and optionally
+// sync the updated body/fields to the pipeline's draft file on disk.
+import { parseFrontmatterOrdered, serializeFrontmatter, looksLikeMetaNarration, findDraftPathForItem } from "./discuss-helpers.js";
+
+async function writeDraftBodyToFile(draftPath, newBody, logger) {
+  try {
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const raw = await readFile(draftPath, "utf-8");
+    const [entries] = parseFrontmatterOrdered(raw);
+    const out = entries.length > 0
+      ? serializeFrontmatter(entries, newBody)
+      : newBody;
+    await writeFile(draftPath, out, "utf-8");
+    return { ok: true };
+  } catch (err) {
+    logger?.warn?.(`pipeclaw apply-draft body write failed for ${draftPath}: ${err?.message ?? err}`);
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+}
+
+async function writeDraftMetaToFile(draftPath, fields, logger) {
+  try {
+    const { readFile, writeFile } = await import("node:fs/promises");
+    const raw = await readFile(draftPath, "utf-8");
+    const [entries, body] = parseFrontmatterOrdered(raw);
+    const seen = new Set();
+    const next = entries.map(([k, v]) => {
+      if (Object.prototype.hasOwnProperty.call(fields, k)) {
+        seen.add(k);
+        return [k, String(fields[k])];
+      }
+      return [k, v];
+    });
+    for (const [k, v] of Object.entries(fields)) {
+      if (!seen.has(k)) next.push([k, String(v)]);
+    }
+    const out = serializeFrontmatter(next, body);
+    await writeFile(draftPath, out, "utf-8");
+    return { ok: true };
+  } catch (err) {
+    logger?.warn?.(`pipeclaw apply-draft meta write failed for ${draftPath}: ${err?.message ?? err}`);
+    return { ok: false, error: err?.message ?? String(err) };
+  }
+}
+
+export async function persistRevisedDraft({ flowId, itemId, newDraft, source, store, logger }) {
+  if (source !== "ios" && looksLikeMetaNarration(newDraft)) {
+    return { applied: false, code: "rejected_meta_narration" };
+  }
+  {
+    const flow = await store.get(flowId);
+    if (!flow) return { applied: false, code: "flow_not_found" };
+  }
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const flow = await store.get(flowId);
+    if (!flow) return { applied: false, code: "flow_not_found" };
+    if (flow.waitJson?.kind !== "human-gate" && flow.waitJson?.kind !== "gate") return { applied: false, code: "not_a_gate" };
+    const items = Array.isArray(flow.waitJson?.items) ? flow.waitJson.items : [];
+    const targetItemId = itemId ?? items[0]?.itemId;
+    const idx = items.findIndex((it) => it?.itemId === targetItemId);
+    if (idx < 0) return { applied: false, code: "item_not_found" };
+    const nextItems = items.map((it, i) => {
+      if (i !== idx) return it;
+      return {
+        ...it,
+        requestPayload: {
+          ...(it.requestPayload ?? {}),
+          editableText: newDraft,
+        },
+      };
+    });
+    const result = await store.setWaiting({
+      flowId,
+      expectedRevision: flow.revision,
+      lastStep: flow.lastStep,
+      stateJson: flow.stateJson,
+      waitJson: { ...flow.waitJson, items: nextItems },
+      statusReason: flow.statusReason,
+    });
+    if (result.applied) return { applied: true };
+    if (result.code !== "revision_conflict") return { applied: false, code: result.code };
+    await new Promise((r) => setTimeout(r, 25 + attempt * 25));
+  }
+  return { applied: false, code: "retry_exhausted" };
+}
+
+// Field `type`s that a gate-layout.js declares for genuinely numeric data
+// (currency amounts, day counts). A value destined for one of these MUST
+// arrive as a real JS number — propose_draft_meta already sends budget/
+// period that way; a numeric string (e.g. from a lenient client) is
+// rejected outright rather than silently coerced, so a malformed edit
+// fails loudly instead of writing a value nothing validated.
+const NUMERIC_FIELD_TYPES = new Set(["money", "number"]);
+
+function collectLayoutFieldTypes(layout) {
+  const types = {};
+  if (!Array.isArray(layout)) return types;
+  for (const entry of layout) {
+    if (!entry) continue;
+    if (entry.kind === "field" && typeof entry.id === "string" && typeof entry.type === "string") {
+      types[entry.id] = entry.type;
+    } else if (entry.kind === "field-group" && Array.isArray(entry.fields)) {
+      for (const f of entry.fields) {
+        if (f && typeof f.id === "string" && typeof f.type === "string") types[f.id] = f.type;
+      }
+    }
+  }
+  return types;
+}
+
+export async function persistRevisedMeta({ flowId, itemId, fields, store, logger }) {
+  if (!fields || typeof fields !== "object" || Object.keys(fields).length === 0) {
+    return { applied: false, code: "empty_fields" };
+  }
+  {
+    const flow = await store.get(flowId);
+    if (!flow) return { applied: false, code: "flow_not_found" };
+  }
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const flow = await store.get(flowId);
+    if (!flow) return { applied: false, code: "flow_not_found" };
+    if (flow.waitJson?.kind !== "human-gate" && flow.waitJson?.kind !== "gate") return { applied: false, code: "not_a_gate" };
+    const items = Array.isArray(flow.waitJson?.items) ? flow.waitJson.items : [];
+    const targetItemId = itemId ?? items[0]?.itemId;
+    const idx = items.findIndex((it) => it?.itemId === targetItemId);
+    if (idx < 0) return { applied: false, code: "item_not_found" };
+    // Reject the whole call if any field the pipeline declares numeric
+    // (type: "money"/"number" in its own gate-layout.js) is being set to
+    // something other than a real number — e.g. a numeric-looking string.
+    // Fields the layout doesn't know about (legacy callers, unknown ids)
+    // fall through unchecked since there's no declared type to enforce.
+    const fieldTypes = collectLayoutFieldTypes(items[idx]?.requestPayload?.layout);
+    for (const [key, v] of Object.entries(fields)) {
+      const declaredType = fieldTypes[key];
+      if (declaredType && NUMERIC_FIELD_TYPES.has(declaredType) && typeof v !== "number") {
+        return { applied: false, code: "invalid_field_type", field: key, expectedType: "number" };
+      }
+    }
+    const nextItems = items.map((it, i) => {
+      if (i !== idx) return it;
+      const rp = it.requestPayload ?? {};
+      // Legacy shape — no current gate-layout.js produces a top-level
+      // requestPayload.editableFields (executor-helpers.js enforces every
+      // gate declares `layout` explicitly), but patch it too in case
+      // anything still reads it.
+      const isPatchable = (v) => typeof v === "string" || typeof v === "number";
+      const nextFieldsArr = Array.isArray(rp.editableFields)
+        ? rp.editableFields.map((f) => {
+            if (!f || typeof f.id !== "string") return f;
+            const v = fields[f.id];
+            if (!isPatchable(v)) return f;
+            return { ...f, value: String(v) };
+          })
+        : rp.editableFields;
+      // Real shape — gate-projector.js's projectGateItem() serves
+      // rp.layout verbatim to iOS, so a budget/timeframe/language edit
+      // has to land here or the chip never reflects it, regardless of
+      // editableMeta/editableFields getting updated correctly.
+      const nextLayout = Array.isArray(rp.layout)
+        ? rp.layout.map((entry) => {
+            if (!entry) return entry;
+            if (entry.kind === "field" && typeof entry.id === "string" && isPatchable(fields[entry.id])) {
+              return { ...entry, value: String(fields[entry.id]) };
+            }
+            if (entry.kind === "field-group" && Array.isArray(entry.fields)) {
+              return {
+                ...entry,
+                fields: entry.fields.map((f) =>
+                  f && typeof f.id === "string" && isPatchable(fields[f.id])
+                    ? { ...f, value: String(fields[f.id]) }
+                    : f
+                ),
+              };
+            }
+            return entry;
+          })
+        : rp.layout;
+      return {
+        ...it,
+        requestPayload: {
+          ...rp,
+          editableMeta: { ...(rp.editableMeta ?? {}), ...fields },
+          editableFields: nextFieldsArr,
+          layout: nextLayout,
+        },
+      };
+    });
+    const result = await store.setWaiting({
+      flowId,
+      expectedRevision: flow.revision,
+      lastStep: flow.lastStep,
+      stateJson: flow.stateJson,
+      waitJson: { ...flow.waitJson, items: nextItems },
+      statusReason: flow.statusReason,
+    });
+    if (result.applied) return { applied: true };
+    if (result.code !== "revision_conflict") return { applied: false, code: result.code };
+    await new Promise((r) => setTimeout(r, 25 + attempt * 25));
+  }
+  return { applied: false, code: "retry_exhausted" };
+}
