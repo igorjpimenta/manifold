@@ -2,11 +2,9 @@
 //
 // Drafting agents (e.g. content-writer's write-workana-proposal skill) call
 // this instead of hand-writing a markdown file with YAML frontmatter via
-// shell heredoc. Hand-typed frontmatter has repeatedly drifted — most
-// often the `job-id` field, which agents used to have to infer from
-// filenames instead of copying the literal value their prompt supplies.
-// This tool takes structured params and stamps the frontmatter itself,
-// deterministically.
+// shell heredoc, because hand-typed frontmatter drifts — most often the
+// `job-id` field. This tool takes structured params and stamps the
+// frontmatter itself, deterministically.
 //
 // jobId defaults to an auto-resolved value (resolveGateContext, shared.js)
 // derived from the calling session's own lineage record — the same
@@ -44,11 +42,8 @@
 // stamped on this session's lineage row (executor-nodes.js's recordSpawn
 // for a plain kind:"agent" dispatch doesn't pass one), so
 // resolveGateContext's stricter flow_id-AND-item_key requirement always
-// returned null here, silently defaulting every Freelancer.com draft to
-// "timeframe" regardless of its own proposalMeta opt-in. Confirmed live
-// 2026-09-17 (jobs 40717459/40717651: the agent correctly omitted
-// timeframe per its skill, submit_draft rejected it, no draft was ever
-// written).
+// returns null here, silently defaulting the draft to "timeframe" regardless
+// of the pipeline's own proposalMeta opt-in.
 
 import { writeFile, readFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";

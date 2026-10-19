@@ -30,23 +30,19 @@ async function ensurePipelinesLoaded(pipelinesRef, logger) {
   pipelinesRef.value = loaded;
 }
 
-// Every `openclaw pipeclaw <subcommand>` invocation was observed to never
-// exit on its own after a successful run (confirmed via
-// `process._getActiveHandles()`/`_getActiveRequests()` staying empty for
-// 30+ seconds while the process stayed alive — not a leftover socket or
-// timer Node's own introspection can see, so waiting it out isn't an
-// option; something opened during the plugin boot phase, before any
-// subcommand-specific code even runs, holds the process open regardless
-// of which subcommand ran). An explicit exit is the only reliable fix.
+// No subcommand exits on its own after a successful run: something opened
+// during the plugin boot phase, before any subcommand-specific code even
+// runs, holds the process open regardless of which subcommand ran, and it
+// isn't a leftover socket or timer that Node's own introspection exposes,
+// so waiting it out isn't an option. An explicit exit is the only reliable
+// fix.
 //
 // Only safe to wrap an action once its own async work is FULLY done —
-// several commands used to schedule follow-on work via a bare setImmediate/
-// setTimeout and return before it fires (fire-and-forget, correct for a
-// long-lived HTTP/Telegram/dashboard/iOS caller). Exiting right after such
-// an action returns would silently drop that scheduled work entirely. Every
-// command below either already fully awaited its own work (start/rerun) or
-// was changed to: retry via routes/operator-retry.js's awaitCompletion,
-// approve via gates/gate-resolver.js's awaitCompletion (which also covers
+// fire-and-forget follow-on work scheduled as setImmediate/setTimeout (fine
+// for a long-lived HTTP/Telegram/dashboard/iOS caller) is dropped by the
+// exit below. Every command must await its own work to completion: retry
+// via routes/operator-retry.js's awaitCompletion, approve via
+// gates/gate-resolver.js's awaitCompletion (which also covers
 // applyResolutionsAndResume's own multi-round setTimeout-based retry chain
 // on sustained revision contention, not just its setImmediate resume).
 // Drains detached promotion resumes before exiting: any command that
@@ -383,11 +379,6 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
         process.exit(1);
       }
       let record;
-      // executor.rerun is async — the missing `await` here used to leave
-      // `record` a pending Promise, so `record.flowId` below was always
-      // undefined and every subsequent call in this handler operated on a
-      // bogus flowId. Real, separate bug from the childFlows orphaning
-      // issue, caught while fixing that.
       try { record = await executor.rerun(sourceFlowId, argsOverride); }
       catch (err) {
         console.error(`pipeclaw: rerun failed: ${err.message}`);
@@ -428,13 +419,9 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       }
       // executor.cancel() releases this flow's admission slot (and wakes a
       // waiting parent) via state-store.js's own triggerAdmissionRelease /
-      // triggerParentResume before its promise resolves — state-store.js's
-      // terminal transitions now await triggerAdmissionRelease directly
-      // (it used to fire detached, which is what let a short-lived CLI
-      // invocation's process.exit() race ahead of the release landing;
-      // confirmed live 2026-09-25 on this exact command). No second
-      // explicit release needed here anymore — by the time `cancel()`
-      // above returns, the real one has already happened.
+      // triggerParentResume before its promise resolves, so no second
+      // explicit release is needed here — by the time `cancel()` above
+      // returns, the real one has already landed.
       console.log(`pipeclaw: cancelled ${flowId.slice(0, 8)} (was ${flow.status})`);
     }));
 
@@ -486,18 +473,13 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       }
       await waitForFlowSettlement(flowId, { store, runStore, nodeExecutionsStore, logger });
       // By now the flow is guaranteed terminal or gate-blocked (see
-      // waitForFlowSettlement's own contract) — either way it should have
-      // already released its own admission via state-store.js's
-      // setWaiting/terminal hooks, fire-and-forget. But this CLI invocation
-      // is short-lived: withExit's process.exit() right after this action
-      // returns gives that background release no guarantee of finishing
-      // first. Confirmed live 2026-09-25: four flows force-resumed this way
-      // reached status='failed' correctly but kept their child-dispatch
-      // admission 'admitted' forever, because process.exit() raced ahead of
-      // the fire-and-forget release's own DB round-trip — the exact bug
-      // already fixed for `cancel` above, reproduced here since this
-      // command didn't have the same explicit-await guard. releaseByFlow is
-      // a safe no-op for whichever kind doesn't apply, and for one the
+      // waitForFlowSettlement's own contract) — either way its admission
+      // release went out via state-store.js's setWaiting/terminal hooks,
+      // fire-and-forget. This CLI invocation is short-lived: withExit's
+      // process.exit() right after this action returns gives that
+      // background release no guarantee of finishing its DB round-trip
+      // first, so release explicitly here before exiting. releaseByFlow is
+      // a safe no-op for whichever kind doesn't apply, and for the one the
       // internal call already handled.
       if (admissionQueueStore) {
         const results = await Promise.all([

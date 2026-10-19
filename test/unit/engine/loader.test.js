@@ -650,12 +650,12 @@ describe("validatePipeline — loop node (branch mode)", () => {
     assert.ok(loaded, "branch-mode without groupId should load");
   });
 
-  // Both "explicit custom groupId" collision scenarios that used to be
-  // tested here are impossible now — childFlows:true (mandatory on every
-  // loop node) forbids setting .groupId at all (see "throws when .childFlows
-  // is true and a custom .groupId is also set" in the childFlows describe
-  // block below), and an implicit-groupId collision between two loop nodes'
-  // own ids can't happen since node ids are already unique JS object keys.
+  // No custom-groupId collision coverage here: childFlows:true (mandatory
+  // on every loop node) forbids setting .groupId at all (see "throws when
+  // .childFlows is true and a custom .groupId is also set" in the childFlows
+  // describe block below), and an implicit-groupId collision between two
+  // loop nodes' own ids can't happen since node ids are already unique JS
+  // object keys.
 
   test("throws when branch sub-node has unknown kind", async () => {
     const loaded = await tryLoad(`
@@ -688,10 +688,8 @@ describe("validatePipeline — loop node (branch mode)", () => {
   });
 
   // A branch sub-node human-gate under childFlows:true (mandatory on every
-  // loop node) DOES require .pendingSelector — see "validatePipeline — loop
-  // node childFlows"'s own "REQUIRES .pendingSelector" test below, which
-  // supersedes what used to be tested here for the now-removed plain,
-  // non-childFlows branch mode.
+  // loop node) DOES require .pendingSelector — covered by "validatePipeline
+  // — loop node childFlows"'s own "REQUIRES .pendingSelector" test below.
 
   test("branch sub-node human-gate: throws when .apply is present but not a function", async () => {
     const loaded = await tryLoad(`
@@ -1825,11 +1823,7 @@ describe('validatePipeline — "needs:"', () => {
 // that resolves its own pipelineId to a per-item subflow's compound id
 // (e.g. "freelance_freelancer-proposal::PROPOSE" — exactly what
 // session_lineage records for a DRAFT-node dispatch) and looks it up via
-// pipelinesRef.value.get(pipelineId) would silently miss the parent's
-// config. Confirmed live 2026-09-17: this exact gap, stacked with
-// submit-draft.js's pipelineId resolution gap (see that file's own test),
-// made every Freelancer.com draft fall back to "timeframe" instead of the
-// pipeline's declared "period".
+// pipelinesRef.value.get(pipelineId) silently misses the parent's config.
 describe("registerSubflowChildren — proposalMeta propagation to synthetic children", () => {
   let dir, cleanup;
 

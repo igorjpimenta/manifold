@@ -213,13 +213,11 @@ describe("createPipelinesWatcher — onReload timing/ordering", () => {
 // the stale PARENT entry alive as long as its index.js is still on disk,
 // but a synthetic subflow-child pipeline (id `${parentId}::${nodeId}`,
 // minted in-memory by loader.js's registerSubflowChildren) has no
-// directory of its own to stat, so it used to be dropped unconditionally
-// every time this happened — even though the parent survived right next
-// to it. Confirmed live in production (freelance_freelancer-proposal's
-// SCORE subflow, 2026-08-17): every child spawned during the ~4.5h gap
-// failed at pipeline resolution with "pipeline not loaded", and the
-// parent's own cascade-redirect retry couldn't recover either, since it
-// hits the exact same missing map entry.
+// directory of its own to stat, so it must be kept alive alongside its
+// parent whenever the parent survives. Otherwise the child fails at
+// pipeline resolution with "pipeline not loaded", and the parent's own
+// cascade-redirect retry can't recover either — it hits the exact same
+// missing map entry.
 describe("createPipelinesWatcher — synthetic subflow-child pipelines survive a transient parent reload failure", () => {
   test("a synthetic child entry survives when its parent's index.js transiently fails to import but is still on disk", async () => {
     const { dir, cleanup } = await makeTempPipelinesDir();
