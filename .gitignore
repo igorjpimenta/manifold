@@ -1,0 +1,10 @@
+# No trailing slash on purpose: `node_modules/` matches directories only, so a
+# symlink of that name slips through and gets committed — npm then dies before
+# the test runner starts (exit 216), which reads as a broken runner rather than
+# a packaging problem.
+node_modules
+.doppler/
+dist/
+.citmp/
+*.log
+.DS_Store
