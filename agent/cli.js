@@ -1,0 +1,677 @@
+// cli.js — registers the `openclaw pipeclaw <subcommand>` CLI surface.
+//
+// IMPORTANT: CLI handlers run in a separate openclaw process from the gateway,
+// so the `pipelinesRef` populated by the gateway's loader-service is NOT
+// visible here. Every CLI handler that needs pipeline definitions must
+// re-load them from disk on demand via ensurePipelinesLoaded(). Similarly,
+// the executor loop runs in-process here (sync await), so CLI commands
+// `start`, `rerun`, `retry`, and `approve` all block until the flow reaches
+// terminal or blocked.
+
+import { loadPipelines } from "../engine/loader.js";
+import { listPaused, pause as pauseFlow, resume as resumeFlow } from "../gates/paused-flows.js";
+import { createGateResolver } from "../gates/gate-resolver.js";
+import path from "node:path";
+import os from "node:os";
+import { spawn } from "node:child_process";
+import { getNodeExecutionsStore } from "../state/node-executions.js";
+import { TERMINAL_STATUS_SET } from "../state/run-store.js";
+import { createFailureStore } from "../state/failure-store.js";
+import { createRetryFailure } from "../routes/operator-retry.js";
+import { waitForFlowSettlement } from "../engine/wait-for-flow-settlement.js";
+import { flipToRunningAndResume } from "../engine/child-resume-trigger.js";
+import { wakePromotedRelease, drainDetachedResumes } from "../engine/admission-promotion-resume.js";
+
+const PIPELINES_DIR = path.join(os.homedir(), ".openclaw", "workspace", ".pipelines");
+
+async function ensurePipelinesLoaded(pipelinesRef, logger) {
+  if (pipelinesRef.value && pipelinesRef.value.size > 0) return;
+  const loaded = await loadPipelines(PIPELINES_DIR, logger);
+  pipelinesRef.value = loaded;
+}
+
+// Every `openclaw pipeclaw <subcommand>` invocation was observed to never
+// exit on its own after a successful run (confirmed via
+// `process._getActiveHandles()`/`_getActiveRequests()` staying empty for
+// 30+ seconds while the process stayed alive — not a leftover socket or
+// timer Node's own introspection can see, so waiting it out isn't an
+// option; something opened during the plugin boot phase, before any
+// subcommand-specific code even runs, holds the process open regardless
+// of which subcommand ran). An explicit exit is the only reliable fix.
+//
+// Only safe to wrap an action once its own async work is FULLY done —
+// several commands used to schedule follow-on work via a bare setImmediate/
+// setTimeout and return before it fires (fire-and-forget, correct for a
+// long-lived HTTP/Telegram/dashboard/iOS caller). Exiting right after such
+// an action returns would silently drop that scheduled work entirely. Every
+// command below either already fully awaited its own work (start/rerun) or
+// was changed to: retry via routes/operator-retry.js's awaitCompletion,
+// approve via gates/gate-resolver.js's awaitCompletion (which also covers
+// applyResolutionsAndResume's own multi-round setTimeout-based retry chain
+// on sustained revision contention, not just its setImmediate resume).
+// Drains detached promotion resumes before exiting: any command that
+// releases an admission can promote another flow, whose run is scheduled on
+// a later tick (engine/admission-promotion-resume.js) — process.exit()
+// right after would drop it with the row already flipped to 'running'.
+function withExit(action) {
+  return async (...args) => {
+    await action(...args);
+    await drainDetachedResumes();
+    process.exit(0);
+  };
+}
+
+export function registerCliCommands({ program, executor, store, pipelinesRef, logger, dashboardUrl, api, nodeHealthStore, ownerSessionKey, runStore, nodeExecutionsStore, admissionQueueStore }) {
+  const root = program.command("pipeclaw");
+  root.description("Run state-graph pipelines defined in workspace/.pipelines/");
+  const failureStore = createFailureStore({ logger, nodeExecutionsStore });
+
+  // pipeclaw list
+  root
+    .command("list")
+    .description("List loaded pipelines (from workspace/.pipelines/)")
+    .action(withExit(async () => {
+      await ensurePipelinesLoaded(pipelinesRef, logger);
+      const all = [...pipelinesRef.value.values()];
+      if (all.length === 0) {
+        console.log("pipeclaw: no pipelines loaded.");
+        return;
+      }
+      for (const p of all) {
+        console.log(`  ${p.id}`);
+        if (p.goal) console.log(`    goal: ${p.goal}`);
+        console.log(`    nodes: ${Object.keys(p.nodes).length}, file: ${p._filepath}`);
+      }
+    }));
+
+  // pipeclaw start <pipelineId>
+  root
+    .command("start <pipelineId>")
+    .description("Start a new run of a pipeline. Blocks until the flow reaches terminal or human-gate.")
+    .option("--args <json>", "JSON-encoded args to merge into initial state", "")
+    .action(withExit(async (pipelineId, options) => {
+      await ensurePipelinesLoaded(pipelinesRef, logger);
+      const args = options.args ? safeParseJson(options.args) : {};
+      if (args === null) {
+        console.error(`pipeclaw: --args must be valid JSON`);
+        process.exit(1);
+      }
+      try {
+        const triggeredBy = {
+          kind: "cli",
+          label: `CLI · ${process.env.USER ?? "unknown"}`,
+          ts: Date.now(),
+        };
+        const record = await executor.start(pipelineId, args ?? {}, triggeredBy);
+        // Mint a synthetic trigger edge so the lineage tree shows a CLI
+        // anchor above this flow — mirrors the HTTP handler's behavior.
+        try {
+          const synthSession = `agent:operator:cli:${record.flowId}`;
+          await api?.runtime?.lineage?.recordTrigger?.({
+            flowId: record.flowId,
+            runId: record.stateJson?.runId ?? null,
+            pipelineId,
+            parentSessionKey: synthSession,
+            rootKind:  "explicit",
+            rootLabel: pipelineId,
+          });
+        } catch (err) {
+          logger?.warn?.(`pipeclaw start (cli): lineage edge skipped: ${err?.message ?? err}`);
+        }
+        console.log(`pipeclaw: started ${pipelineId} → flowId=${record.flowId}`);
+        // The shared admission pool was full at start() time — the flow is
+        // durably queued (state/admission-queue-store.js) and will run once
+        // a slot frees, but that promotion happens via the long-running
+        // GATEWAY process's own resume wiring, not this one-shot CLI
+        // process. Nothing left for this invocation to usefully wait on —
+        // runFlow() would just no-op immediately (engine/executor.js's own
+        // isQueued guard) rather than actually drive it to completion.
+        if (record.status === "queued") {
+          console.log(`  queued — waiting for a shared admission slot; will run automatically once the gateway has capacity`);
+          return;
+        }
+        console.log(`  driving executor loop in-process; ctrl-c to stop\n`);
+        await executor.runFlow(record.flowId, "fresh");
+        // The await above only resolves once THIS flow itself goes
+        // blocked/terminal — a childFlows:true subflow node fires its
+        // children via a bare setImmediate and returns immediately, so
+        // without this, withExit's process.exit(0) below would kill those
+        // children (and any of their own descendants) before they ever
+        // ran. See wait-for-flow-settlement.js's header for the full
+        // incident this fixes.
+        await waitForFlowSettlement(record.flowId, { store, runStore, nodeExecutionsStore, logger });
+        const final = await store.get(record.flowId);
+        console.log(`\npipeclaw: ${record.flowId} → ${final?.status ?? "?"} (step=${final?.lastStep ?? "?"})`);
+      } catch (err) {
+        console.error(`pipeclaw: start failed: ${err.message}`);
+        process.exit(1);
+      }
+    }));
+
+  // pipeclaw status <flowId>
+  root
+    .command("status <flowId>")
+    .description("Show current state and pending gates of a flow run")
+    .action(withExit(async (flowId) => {
+      const flow = await store.get(flowId);
+      if (!flow) {
+        console.error(`pipeclaw: flow not found: ${flowId}`);
+        process.exit(1);
+      }
+      const state = flow.stateJson ?? {};
+      console.log(`pipeclaw: ${flow.flowId}`);
+      console.log(`  pipeline:   ${state.pipelineId ?? "?"}`);
+      console.log(`  status:     ${flow.status}`);
+      console.log(`  step:       ${flow.lastStep}`);
+      console.log(`  revision:   ${flow.revision}`);
+      if (flow.waitJson) {
+        const kind = flow.waitJson.kind ?? "?";
+        const pending = flow.waitJson.pending ?? [];
+        console.log(`  waiting:    ${kind} (${pending.length} pending)`);
+        if (Array.isArray(pending) && pending.length > 0) {
+          for (const id of pending) console.log(`    • ${id}`);
+        }
+      }
+      console.log(`  state keys: ${Object.keys(state).join(", ")}`);
+      const flowErrors = await failureStore.queryErrorsByFlow(flow.flowId);
+      if (flowErrors.length) {
+        console.log(`  errors (${flowErrors.length}):`);
+        for (const e of flowErrors.slice(-5)) {
+          console.log(`    • ${e.nodeId}: ${e.message}`);
+        }
+      }
+    }));
+
+  // pipeclaw retry <flowId>
+  //
+  // README.md's CLI table documented this command since before task #267's
+  // audit, but nothing ever registered it — the only working path to
+  // routes/operator-retry.js's retryFailureBranch (which takes a failure
+  // *id*, not a flowId) was the /pipeclaw/_elev/retry-failure HTTP route.
+  // Closes that gap: looks up the flow's own most recent OPEN failure_events
+  // row (retryFailureBranch's own topology walk resolves the correct node
+  // to retry from regardless of which of a flow's open failures is passed,
+  // so ties don't matter — see that file's own `rootNode` derivation),
+  // then retries it the exact same way the HTTP route does — same code,
+  // same "works identically for a root-level flow and a childFlows
+  // subflow-item flow" fix this command exists to expose (a subflow item
+  // runs as a real flow_runs child with its own flowId, so this needs no
+  // special-casing for that case at all).
+  //
+  // Blocks until every retried flow reaches terminal or blocked — same
+  // "drives the executor loop in-process, in this one-shot CLI process"
+  // constraint `start` documents at the top of this file, and for the same
+  // reason: retryFailureBranch's own default behavior schedules the actual
+  // re-run via setImmediate and returns before it fires, which is correct
+  // for HTTP/Telegram callers (a long-lived process that keeps going) but
+  // fatal for a one-shot CLI process — it would exit before that scheduled
+  // work ever ran. Passing awaitCompletion:true switches it to await the
+  // retry directly instead.
+  root
+    .command("retry <flowId>")
+    .description("Retry a flow's most recent open failure (root-level or a childFlows subflow item). Blocks until the retried flow(s) reach terminal or blocked.")
+    .action(withExit(async (flowId) => {
+      await ensurePipelinesLoaded(pipelinesRef, logger);
+      const openFailures = (await failureStore.list({ resolved: false, limit: 1000 }))
+        .filter((f) => f.flow_id === flowId);
+      if (openFailures.length === 0) {
+        console.error(`pipeclaw: no open failure found for flow ${flowId}`);
+        process.exit(1);
+      }
+      const failure = openFailures.reduce((a, b) => (a.failed_at >= b.failed_at ? a : b));
+      const { retryFailureBranch } = createRetryFailure({
+        store, readStore: runStore, failureStore, pipelinesRef, executor, runStore, ownerSessionKey, admissionQueueStore, logger, api,
+      });
+      const result = await retryFailureBranch({ id: failure.id, via: "cli", awaitCompletion: true });
+      if (result.code !== "ok") {
+        console.error(`pipeclaw: retry failed (${result.code}): ${result.reason ?? "unknown"}`);
+        process.exit(1);
+      }
+      // retryFailureBranch's own awaitCompletion:true only awaits the ONE
+      // runFlow()/resume() call for the retried flow itself — if that
+      // retry re-enters a childFlows:true subflow node, the freshly
+      // (re-)spawned children fire via a bare setImmediate and are still
+      // in flight here. See wait-for-flow-settlement.js's header.
+      if (result.mode === "cascade-redirect") {
+        const okResults = result.results.filter((r) => r.code === "ok");
+        console.log(`pipeclaw: retry for ${flowId} — redirected to ${result.redirectedTo.length} underlying failure(s), ${okResults.length} retried`);
+        for (const r of okResults) {
+          await waitForFlowSettlement(r.flowId, { store, runStore, nodeExecutionsStore, logger });
+          const final = await store.get(r.flowId);
+          console.log(`  • ${r.flowId} → ${final?.status ?? "?"} (failureNode=${r.failureNode}, rootNode=${r.rootNode}, cleared=[${r.cleared.join(",")}])`);
+        }
+      } else {
+        await waitForFlowSettlement(flowId, { store, runStore, nodeExecutionsStore, logger });
+        const final = await store.get(flowId);
+        console.log(`pipeclaw: retry for ${flowId} → ${final?.status ?? "?"} (failureNode=${result.failureNode}, rootNode=${result.rootNode}, cleared=[${result.cleared.join(",")}])`);
+      }
+    }));
+
+  // pipeclaw node-health status [pipelineId]
+  // pipeclaw node-health reset <pipelineId> <nodeId>
+  //
+  // Both live under one `node-health` parent command — Commander's
+  // `.command(nameAndArgs)` only reads the first whitespace-delimited
+  // token as the command name, so two top-level `.command("node-health
+  // ...")` calls would collide ("cannot add command 'node-health' as
+  // already have command 'node-health'"), crashing CLI registration for
+  // every `pipeclaw` subcommand, not just these two.
+  const nodeHealthCmd = root
+    .command("node-health")
+    .description("Inspect or reset a node's agent-dispatch circuit breaker.");
+
+  // Lists nodes currently blocked by the circuit breaker — any "agent"-kind
+  // node that opts in via node.circuitBreaker: true is eligible (see
+  // executor-nodes.js's dispatchAgentEntry), including cascade sub-nodes
+  // dispatched as part of a kind:"subflow" node's own child flow. --all
+  // includes resolved history instead of only active blocks.
+  nodeHealthCmd
+    .command("status [pipelineId]")
+    .description("List nodes currently blocked (unhealthy) by the circuit breaker.")
+    .option("--all", "Include resolved history, not just active blocks", false)
+    .action(withExit(async (pipelineId, options) => {
+      const rows = await nodeHealthStore.list(pipelineId, options.all ? {} : { status: "blocked" });
+      if (rows.length === 0) {
+        console.log(pipelineId ? `pipeclaw: no node-health blocks for ${pipelineId}` : "pipeclaw: no node-health blocks");
+        return;
+      }
+      for (const r of rows) {
+        const when = new Date(r.created_at).toISOString();
+        console.log(`${r.status.padEnd(9)} ${r.pipeline_id}/${r.node_id}  (${when})`);
+        console.log(`  reason: ${r.reason}`);
+        if (r.blocked_by_flow_id) console.log(`  flow:   ${r.blocked_by_flow_id.slice(0, 8)}`);
+        if (r.status === "resolved") console.log(`  resolved via: ${r.resolved_via ?? "?"}`);
+      }
+    }));
+
+  // Flags the active block resolved (row is kept for history, not deleted
+  // — see state/node-health-store.js). Does not itself retry any flow;
+  // the node simply becomes eligible for dispatch again on its next visit.
+  nodeHealthCmd
+    .command("reset <pipelineId> <nodeId>")
+    .description("Clear an unhealthy block so the node can be tried again.")
+    .action(withExit(async (pipelineId, nodeId) => {
+      const result = await nodeHealthStore.reset(pipelineId, nodeId, { via: "cli" });
+      if (result.reset === 0) {
+        console.log(`pipeclaw: ${pipelineId}/${nodeId} was not blocked; nothing to reset`);
+        return;
+      }
+      console.log(`pipeclaw: ${pipelineId}/${nodeId} reset — eligible for dispatch again`);
+    }));
+
+  // pipeclaw approve <flowId> <itemId> <decision> [text]
+  //
+  // Blocks until the resumed flow reaches terminal or blocked again — same
+  // reasoning as `retry` above: gates/gate-resolver.js's
+  // applyResolutionsAndResume schedules the actual setRunning + executor.
+  // resume via setImmediate (and, on sustained revision contention, a
+  // further live retry round via setTimeout) and returns before either
+  // fires, which is correct for the long-lived HTTP/Telegram/dashboard/iOS
+  // callers that share this resolver but fatal for this one-shot CLI
+  // process. Passing awaitCompletion:true switches it to await all of that
+  // directly instead.
+  root
+    .command("approve <flowId> <itemId> <decision>")
+    .description("Approve, reject, or edit a pending item on a gate node. Blocks until the resumed flow reaches terminal or blocked again.")
+    .option("--text <text>", "Edited text (only with decision=edit)")
+    .action(withExit(async (flowId, itemId, decision, options) => {
+      decision = String(decision).toLowerCase();
+      if (!["approve", "reject", "edit"].includes(decision)) {
+        console.error(`pipeclaw: decision must be approve|reject|edit`);
+        process.exit(1);
+      }
+      if (decision === "edit" && !options.text) {
+        console.error(`pipeclaw: edit requires --text`);
+        process.exit(1);
+      }
+
+      // Same channel-agnostic resolver the TG callback handler, the
+      // dashboard, and the /pipeclaw/gate/resolve route use. Spun up
+      // here against this CLI process's own store + executor — the
+      // gateway has its own resolver instance, but writes still serialize
+      // through the underlying SQL store so cross-process resolution is
+      // safe. recordItemDecision drives setRunning + executor.resume
+      // internally once all items decide.
+      const gateResolver = createGateResolver({
+        api: { logger },
+        store,
+        executor,
+        pipelineLookup: (pipelineId) => pipelinesRef.value.get(pipelineId),
+        admissionQueueStore,
+      });
+      // executor.resume (fired from inside applyResolutionsAndResume) needs
+      // the pipeline definition loaded in this CLI process's pipelinesRef.
+      await ensurePipelinesLoaded(pipelinesRef, logger);
+
+      const result = await gateResolver.recordItemDecision({
+        flowId,
+        itemId,
+        decision,
+        source: "cli",
+        editedText: options.text,
+        awaitCompletion: true,
+      });
+      if (!result.ok) {
+        console.error(`pipeclaw: ${result.code}`);
+        process.exit(1);
+      }
+      // recordItemDecision's own awaitCompletion:true only awaits the ONE
+      // executor.resume() call for THIS flow — if resuming re-enters a
+      // childFlows:true subflow node, freshly spawned children fire via a
+      // bare setImmediate and are still in flight here. See
+      // wait-for-flow-settlement.js's header.
+      await waitForFlowSettlement(flowId, { store, runStore, nodeExecutionsStore, logger });
+      const final = await store.get(flowId);
+      console.log(
+        `pipeclaw: ${decision} "${itemId}" (${result.status})` +
+        (final ? ` — flow → ${final.status ?? "?"} (step=${final.lastStep ?? "?"})` : "")
+      );
+    }));
+
+  // pipeclaw rerun <sourceFlowId> — start a fresh run of the same pipeline
+  // with the same args (or overridden via --args). Stamps state.rerunOf so
+  // the lineage is queryable. Subject to the singleton-per-pipeline guard.
+  root
+    .command("rerun <sourceFlowId>")
+    .description("Start a fresh run of the source flow's pipeline (new flowId, fresh state)")
+    .option("--args <json>", "JSON-encoded args; overrides the source flow's args", "")
+    .action(withExit(async (sourceFlowId, options) => {
+      await ensurePipelinesLoaded(pipelinesRef, logger);
+      const argsOverride = options.args ? safeParseJson(options.args) : undefined;
+      if (options.args && argsOverride === null) {
+        console.error(`pipeclaw: --args must be valid JSON`);
+        process.exit(1);
+      }
+      let record;
+      // executor.rerun is async — the missing `await` here used to leave
+      // `record` a pending Promise, so `record.flowId` below was always
+      // undefined and every subsequent call in this handler operated on a
+      // bogus flowId. Real, separate bug from the childFlows orphaning
+      // issue, caught while fixing that.
+      try { record = await executor.rerun(sourceFlowId, argsOverride); }
+      catch (err) {
+        console.error(`pipeclaw: rerun failed: ${err.message}`);
+        process.exit(1);
+      }
+      console.log(`pipeclaw: re-ran ${sourceFlowId.slice(0, 8)} → flowId=${record.flowId}`);
+      try { await executor.runFlow(record.flowId, "fresh"); }
+      catch { /* ignore — error surface is the next status read */ }
+      // See wait-for-flow-settlement.js's header — the runFlow() await
+      // above only resolves once THIS flow itself goes blocked/terminal,
+      // not any childFlows:true children it spawned along the way.
+      await waitForFlowSettlement(record.flowId, { store, runStore, nodeExecutionsStore, logger });
+      const final = await store.get(record.flowId);
+      console.log(`pipeclaw: ${record.flowId.slice(0, 8)} → ${final?.status ?? "?"} (step=${final?.lastStep ?? "?"})`);
+    }));
+
+  // pipeclaw cancel <flowId> — terminal transition for a non-terminal flow.
+  // Does not preempt in-flight subagent calls; they finish and their results
+  // are discarded (the executor's setRunning fails the revision check).
+  root
+    .command("cancel <flowId>")
+    .description("Cancel a running, blocked, or waiting flow (terminal; cannot be undone)")
+    .option("--reason <text>", "Why this flow is being cancelled (recorded on the run)")
+    .action(withExit(async (flowId, options) => {
+      const flow = await store.get(flowId);
+      if (!flow) {
+        console.error(`pipeclaw: flow not found: ${flowId}`);
+        process.exit(1);
+      }
+      if (TERMINAL_STATUS_SET.has(flow.status)) {
+        console.error(`pipeclaw: flow is already terminal (status=${flow.status}); nothing to cancel`);
+        process.exit(1);
+      }
+      const result = await executor.cancel(flowId, options.reason ?? null);
+      if (!result?.cancelled) {
+        console.error(`pipeclaw: cancel did not apply: ${result?.reason ?? "unknown"}`);
+        process.exit(1);
+      }
+      // executor.cancel() releases this flow's admission slot (and wakes a
+      // waiting parent) via state-store.js's own triggerAdmissionRelease /
+      // triggerParentResume before its promise resolves — state-store.js's
+      // terminal transitions now await triggerAdmissionRelease directly
+      // (it used to fire detached, which is what let a short-lived CLI
+      // invocation's process.exit() race ahead of the release landing;
+      // confirmed live 2026-09-25 on this exact command). No second
+      // explicit release needed here anymore — by the time `cancel()`
+      // above returns, the real one has already happened.
+      console.log(`pipeclaw: cancelled ${flowId.slice(0, 8)} (was ${flow.status})`);
+    }));
+
+  // pipeclaw resume-admitted <flowId> — recovery for an "orphaned
+  // promotion": a flow stuck status='queued' whose flow-start/child-dispatch
+  // admission row is already 'admitted' (it holds a live pool slot) because
+  // some past release() promoted it and the promotion's resume was dropped
+  // (see engine/admission-promotion-resume.js's header). Deliberately does
+  // NOT call admissionQueueStore.admit() — the flow already holds a valid
+  // slot, and every "resume a queued flow" path that admits unconditionally
+  // (admitAndSetRunning, used by retry/approve/gate-resolve) would create a
+  // SECOND admission row here, permanently shrinking the shared pool by one
+  // more slot exactly like the bug this command recovers from. Refuses to
+  // run unless it can confirm the flow genuinely already holds that slot —
+  // this is a recovery tool for the specific stuck state, not a way to cut
+  // the queue.
+  root
+    .command("resume-admitted <flowId>")
+    .description("Force-resume a flow stuck 'queued' that already holds a live flow-start/child-dispatch admission slot (an orphaned promotion). Refuses if the flow doesn't already hold that slot.")
+    .action(withExit(async (flowId) => {
+      const flow = await store.get(flowId);
+      if (!flow) {
+        console.error(`pipeclaw: flow not found: ${flowId}`);
+        process.exit(1);
+      }
+      if (flow.status !== "queued") {
+        console.error(`pipeclaw: flow is not queued (status=${flow.status}); nothing to force-resume`);
+        process.exit(1);
+      }
+      const kind = flow.waitJson?.kind;
+      if (kind !== "flow-start" && kind !== "child-dispatch") {
+        console.error(`pipeclaw: wait kind "${kind ?? "?"}" isn't resumable this way — only flow-start/child-dispatch hold a durable admission with no in-process waiter of their own`);
+        process.exit(1);
+      }
+      if (!admissionQueueStore) {
+        console.error("pipeclaw: no admissionQueueStore wired in");
+        process.exit(1);
+      }
+      const admitted = await admissionQueueStore.listByStatus("admitted");
+      const held = admitted.find((r) => r.flowId === flowId && r.kind === kind);
+      if (!held) {
+        console.error(`pipeclaw: flow does not hold a live '${kind}' admission — it's genuinely still queued, not orphaned. Wait for the normal release/promotion cycle instead of forcing this.`);
+        process.exit(1);
+      }
+      const result = await flipToRunningAndResume({ parentFlowId: flowId, runStore, resume: executor.resume, logger, api });
+      if (!result.resumed) {
+        console.error(`pipeclaw: force-resume did not apply: ${result.reason ?? "unknown"}`);
+        process.exit(1);
+      }
+      await waitForFlowSettlement(flowId, { store, runStore, nodeExecutionsStore, logger });
+      // By now the flow is guaranteed terminal or gate-blocked (see
+      // waitForFlowSettlement's own contract) — either way it should have
+      // already released its own admission via state-store.js's
+      // setWaiting/terminal hooks, fire-and-forget. But this CLI invocation
+      // is short-lived: withExit's process.exit() right after this action
+      // returns gives that background release no guarantee of finishing
+      // first. Confirmed live 2026-09-25: four flows force-resumed this way
+      // reached status='failed' correctly but kept their child-dispatch
+      // admission 'admitted' forever, because process.exit() raced ahead of
+      // the fire-and-forget release's own DB round-trip — the exact bug
+      // already fixed for `cancel` above, reproduced here since this
+      // command didn't have the same explicit-await guard. releaseByFlow is
+      // a safe no-op for whichever kind doesn't apply, and for one the
+      // internal call already handled.
+      if (admissionQueueStore) {
+        const results = await Promise.all([
+          admissionQueueStore.releaseByFlow({ flowId, kind: "flow-start" }).catch(() => ({ released: false, promoted: null })),
+          admissionQueueStore.releaseByFlow({ flowId, kind: "child-dispatch" }).catch(() => ({ released: false, promoted: null })),
+        ]);
+        await wakePromotedRelease(results, {
+          runStore, resume: executor.resume, logger, api, context: "pipeclaw resume-admitted: cleanup-release",
+        });
+      }
+      const final = await store.get(flowId);
+      console.log(`pipeclaw: force-resumed ${flowId.slice(0, 8)} → ${final?.status ?? "?"}`);
+    }));
+
+  // pipeclaw release-leaked-admission <flowId> — recovery for the OTHER
+  // admission-pool failure mode (see engine/admission-promotion-resume.js's
+  // header for the orphaned-promotion one resume-admitted above handles): a
+  // flow_admission_queue row is only ever supposed to exist while its owning
+  // flow is genuinely non-terminal. If a terminal transition's own release
+  // (state-store.js's triggerAdmissionRelease) doesn't fire or doesn't land
+  // — a bug in the releasing code path, or a process exiting before that
+  // fire-and-forget write commits — the row is a leak: a dead flow
+  // permanently holding a live pool slot. boot/flow-revival.js sweeps for
+  // exactly this at every boot; this is the same check and release, scoped
+  // to one caller-specified flowId instead of a full-table scan, for when
+  // restarting the gateway isn't the right lever.
+  root
+    .command("release-leaked-admission <flowId>")
+    .description("Release a terminal flow's leaked flow_admission_queue row (status=admitted/queued for a flow that already finished) and resume whatever gets promoted into the freed slot.")
+    .action(withExit(async (flowId) => {
+      const flow = await store.get(flowId);
+      if (!flow) {
+        console.error(`pipeclaw: flow not found: ${flowId}`);
+        process.exit(1);
+      }
+      if (!TERMINAL_STATUS_SET.has(flow.status)) {
+        console.error(`pipeclaw: flow is not terminal (status=${flow.status}) — this command only cleans up a leak on an already-finished flow; use resume-admitted or cancel for a live one`);
+        process.exit(1);
+      }
+      if (!admissionQueueStore) {
+        console.error("pipeclaw: no admissionQueueStore wired in");
+        process.exit(1);
+      }
+      let releasedCount = 0;
+      for (const kind of ["flow-start", "child-dispatch"]) {
+        const result = await admissionQueueStore.releaseByFlow({ flowId, kind });
+        if (!result.released) continue;
+        releasedCount++;
+        console.log(`pipeclaw: released leaked ${kind} admission for ${flowId.slice(0, 8)}`);
+        if (result.promoted) {
+          const r = await wakePromotedRelease(result, {
+            runStore, resume: executor.resume, logger, api, context: `pipeclaw release-leaked-admission [${flowId.slice(0, 8)}]`,
+          });
+          console.log(`  promoted ${result.promoted.flowId.slice(0, 8)} (${result.promoted.kind}) into the freed slot — resumed=${r.resumed}${r.resumed ? "" : ` reason=${r.reason}`}`);
+        }
+      }
+      if (releasedCount === 0) {
+        console.log(`pipeclaw: flow ${flowId.slice(0, 8)} held no live admission — nothing to release`);
+      }
+    }));
+
+  // pipeclaw runs — list our managed runs
+  root
+    .command("runs")
+    .description("List flow runs created by pipeclaw")
+    .option("--status <s>", "Filter by status (running, blocked, succeeded, failed, cancelled)")
+    .action(withExit(async (options) => {
+      const all = await store.list();
+      const filtered = options.status ? all.filter((f) => f.status === options.status) : all;
+      if (filtered.length === 0) {
+        console.log(`pipeclaw: no runs${options.status ? ` with status=${options.status}` : ""}.`);
+        return;
+      }
+      filtered.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+      for (const f of filtered.slice(0, 30)) {
+        const pipelineId = f.stateJson?.pipelineId ?? "?";
+        const stamp = f.updatedAt ? new Date(f.updatedAt).toISOString().slice(0, 19).replace("T", " ") : "?";
+        console.log(`  ${f.flowId.slice(0, 8)}  ${f.status.padEnd(10)} ${pipelineId.padEnd(35)} step=${f.lastStep ?? "?"}  ${stamp}`);
+      }
+      if (filtered.length > 30) console.log(`  ... and ${filtered.length - 30} more`);
+    }));
+
+  // pipeclaw pause <flowId> — stop the before_dispatch hook from claiming
+  // operator messages for this flow. Useful when you want to talk to the
+  // main agent without disrupting an active Vulcan priming interview.
+  root
+    .command("pause <flowId>")
+    .description("Stop intercepting operator messages for this priming flow — operator can talk to the main agent. Use `resume` to re-engage.")
+    .action(withExit(async (flowId) => {
+      const record = await store.get(flowId);
+      if (!record) {
+        const matches = (await store.list()).filter((f) => f.flowId.startsWith(flowId));
+        if (matches.length === 1) flowId = matches[0].flowId;
+        else if (matches.length > 1) {
+          console.error(`pipeclaw: ambiguous prefix "${flowId}" — ${matches.length} matches`);
+          process.exit(1);
+        } else {
+          console.error(`pipeclaw: no flow found with id "${flowId}"`);
+          process.exit(1);
+        }
+      }
+      pauseFlow(flowId);
+      console.log(`pipeclaw: paused ${flowId.slice(0, 8)} — operator messages will route to the main agent. Resume with: openclaw pipeclaw resume ${flowId.slice(0, 8)}`);
+    }));
+
+  // pipeclaw resume <flowId> — re-engage the before_dispatch claim.
+  root
+    .command("resume <flowId>")
+    .description("Re-engage the priming claim for this flow — operator messages route back to the priming session.")
+    .action(withExit(async (flowId) => {
+      const matches = (await store.list()).filter((f) => f.flowId.startsWith(flowId));
+      if (matches.length === 1) flowId = matches[0].flowId;
+      else if (matches.length > 1) {
+        console.error(`pipeclaw: ambiguous prefix "${flowId}" — ${matches.length} matches`);
+        process.exit(1);
+      }
+      resumeFlow(flowId);
+      console.log(`pipeclaw: resumed ${flowId.slice(0, 8)} — operator messages will route to the priming session again.`);
+    }));
+
+  // pipeclaw dashboard — print URL and open the browser to the read-only UI.
+  // The dashboard service runs in the gateway process; the CLI just opens a
+  // window pointing at it. Doesn't check liveness — the user will see a
+  // connection error in their browser if the gateway isn't running.
+  root
+    .command("dashboard")
+    .description("Open the read-only pipeclaw dashboard in your browser.")
+    .option("--no-open", "Just print the URL; don't launch a browser.")
+    .option("--url <url>", "Override the URL to open (defaults to the configured dashboard host/port).")
+    .action(withExit((options) => {
+      const url = options.url || dashboardUrl || "http://127.0.0.1:7430";
+      console.log(`pipeclaw dashboard: ${url}`);
+      if (options.open === false) return;
+      const { cmd, args } = browserOpenCommand(url);
+      if (!cmd) {
+        console.log(`pipeclaw dashboard: no platform-appropriate opener; open the URL manually.`);
+        return;
+      }
+      try {
+        const child = spawn(cmd, args, { stdio: "ignore", detached: true });
+        child.on("error", (err) => console.log(`pipeclaw dashboard: opener "${cmd}" failed (${err.message}); open the URL manually.`));
+        child.unref();
+      } catch (err) {
+        console.log(`pipeclaw dashboard: failed to launch browser (${err.message}); open the URL manually.`);
+      }
+    }));
+
+  // pipeclaw paused — list paused flows
+  root
+    .command("paused")
+    .description("List flows currently paused (operator side-channel active).")
+    .action(withExit(async () => {
+      const paused = [...listPaused()];
+      if (paused.length === 0) {
+        console.log("pipeclaw: no flows are paused.");
+        return;
+      }
+      for (const flowId of paused) {
+        const f = await store.get(flowId);
+        const pipelineId = f?.stateJson?.pipelineId ?? "(unknown)";
+        console.log(`  ${flowId.slice(0, 8)}  ${pipelineId}  status=${f?.status ?? "(missing)"}`);
+      }
+    }));
+}
+
+function safeParseJson(s) {
+  try { return JSON.parse(s); } catch { return null; }
+}
+
+function browserOpenCommand(url) {
+  // Per-platform opener. macOS `open`, Linux `xdg-open`, Windows `start` via
+  // cmd /c. Returns { cmd, args } or { cmd: null } if the platform is unknown.
+  if (process.platform === "darwin") return { cmd: "open", args: [url] };
+  if (process.platform === "win32")  return { cmd: "cmd",  args: ["/c", "start", "", url] };
+  if (process.platform === "linux")  return { cmd: "xdg-open", args: [url] };
+  return { cmd: null, args: [] };
+}
