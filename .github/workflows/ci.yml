@@ -32,6 +32,12 @@ jobs:
       - name: Syntax sweep
         run: git ls-files -z '*.js' '*.mjs' | xargs -0 -P 8 -n 1 node --check
 
+      # Guards the portability invariant: an absolute `file://` import only
+      # resolves on the machine that wrote it. The checkout is the commit, so
+      # the bug is visible here even when a local run still passes.
+      - name: Imports resolve from a clean checkout
+        run: node scripts/ci/import-check.mjs
+
       - name: unit tests
         if: '!cancelled()'
         run: npm run test:unit
