@@ -162,6 +162,14 @@ export default definePluginEntry({
         minimum: 1,
         description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8.",
       },
+      profilePath: {
+        type: "string",
+        description: "Absolute path of the PROFILE.md file guarded by the before_tool_call read gate and edit lock (hooks/profile-read-gate.js, hooks/profile-write-lock.js). Default: ~/.openclaw/workspace/.shared/freelance/profile/PROFILE.md",
+      },
+      profileEditResultsDir: {
+        type: "string",
+        description: "Directory the edit lock writes one <runId>.json outcome marker per guarded PROFILE.md edit into (hooks/profile-write-lock.js). Default: ~/.openclaw/locks/profile-edit-results",
+      },
     },
   }),
   register: (api) => {
@@ -182,8 +190,12 @@ export default definePluginEntry({
 
     // Registered here (rather than deferred) since PROFILE.md reads/edits
     // can happen from the very first dispatched pipeline run after boot.
-    registerProfileReadGate(api);
-    registerProfileWriteLock(api);
+    // Both path options fall through to each hook's own os.homedir() default
+    // when the config key is absent or undefined, so a zero-config install
+    // acquires byte-identical lock names to the workspace-side PROFILE.md
+    // writers (gap-answers.js, prime-nodes.js) it shares that lock with.
+    registerProfileReadGate(api, { profilePath: userCfg.profilePath });
+    registerProfileWriteLock(api, { profilePath: userCfg.profilePath, resultsDir: userCfg.profileEditResultsDir });
     registerScoreToolWakeHook(api);
 
     const pipelinesRef = { value: new Map() };
