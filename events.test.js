@@ -86,7 +86,7 @@ describe("listener cap", () => {
 
 // ── failureEmitter ────────────────────────────────────────────────────────────
 
-import { failureEmitter, liveActivityEmitter } from "./events.js";
+import { failureEmitter } from "./events.js";
 
 describe("failureEmitter identity", () => {
   it("is an EventEmitter", () => {
@@ -129,43 +129,5 @@ describe("failureEmitter emit/on", () => {
     failureEmitter.emit("failure.created", { id: "2" });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].id, "1");
-  });
-});
-
-// ── liveActivityEmitter ───────────────────────────────────────────────────────
-
-describe("liveActivityEmitter identity", () => {
-  it("is an EventEmitter", () => {
-    assert.ok(liveActivityEmitter instanceof EventEmitter);
-  });
-
-  it("max listeners is set to 10", () => {
-    assert.equal(liveActivityEmitter.getMaxListeners(), 10);
-  });
-
-  it("same instance across imports (ESM cache dedup)", async () => {
-    const { liveActivityEmitter: again } = await import("./events.js");
-    assert.strictEqual(liveActivityEmitter, again);
-  });
-});
-
-describe("liveActivityEmitter emit/on", () => {
-  it("delivers broadcast payload to a listener", () => {
-    let received = null;
-    liveActivityEmitter.once("broadcast", (msg) => { received = msg; });
-    const msg = { type: "live_activity.start", activityId: "act1" };
-    liveActivityEmitter.emit("broadcast", msg);
-    assert.deepEqual(received, msg);
-  });
-
-  it("on/off round-trip — listener absent after off()", () => {
-    const calls = [];
-    const handler = (m) => calls.push(m);
-    liveActivityEmitter.on("broadcast", handler);
-    liveActivityEmitter.emit("broadcast", { type: "live_activity.end" });
-    liveActivityEmitter.off("broadcast", handler);
-    liveActivityEmitter.emit("broadcast", { type: "live_activity.start" });
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].type, "live_activity.end");
   });
 });

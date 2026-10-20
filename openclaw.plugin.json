@@ -37,24 +37,6 @@
           }
         }
       },
-      "ios": {
-        "type": "object",
-        "description": "Config for the embedded live-activity/iOS push module (absorbed from live-activity-bridge plugin).",
-        "additionalProperties": false,
-        "properties": {
-          "pollIntervalMs": { "type": "integer", "minimum": 200 },
-          "pipelinesDir": { "type": "string" },
-          "activities": {
-            "type": "object",
-            "additionalProperties": false,
-            "properties": {
-              "agentApproval":    { "type": "boolean" },
-              "pipelineProgress": { "type": "boolean" },
-              "agentRunning":     { "type": "boolean" }
-            }
-          }
-        }
-      },
       "taskflowRevive": {
         "type": "object",
         "description": "Config for boot-time task orphan cleanup (absorbed from taskflow-revive plugin).",

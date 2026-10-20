@@ -48,8 +48,8 @@ import { createPipeclawParrotChannelEntry } from "./channels/pipeclaw-parrot-cha
 
 // Route modules extracted from this file.
 import { createEmitSseEvent } from "./utils/sse.js";
-import { flowStateEmitter, liveActivityEmitter } from "./events.js";
-import { buildRunPatch as _buildRunPatch } from "./ios/gate-projector.js";
+import { flowStateEmitter } from "./events.js";
+import { buildRunPatch as _buildRunPatch } from "./utils/run-patch.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
@@ -57,7 +57,6 @@ import { registerFailureRoutes } from "./routes/failures.js";
 import { registerPipelineRoutes } from "./routes/pipelines.js";
 import { registerBudgetRoutes } from "./budget/index.js";
 import { registerTelemetry } from "./telemetry/index.js";
-import { registerIosRoutes } from "./ios/index.js";
 import { scanAndCleanup as taskflowScanAndCleanup } from "./boot/taskflow-revive.js";
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "./boot/flow-revival.js";
 
@@ -128,24 +127,6 @@ export default definePluginEntry({
           defaultAgent: {
             type: "string",
             description: "Default agent for the pipeclaw-parrot channel. Used when the blocked gate node does not declare its own discuss.agent.",
-          },
-        },
-      },
-      ios: {
-        type: "object",
-        description: "Config for the embedded live-activity/iOS push module.",
-        additionalProperties: false,
-        properties: {
-          pollIntervalMs: { type: "integer", minimum: 200 },
-          pipelinesDir: { type: "string" },
-          activities: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              agentApproval:    { type: "boolean" },
-              pipelineProgress: { type: "boolean" },
-              agentRunning:     { type: "boolean" },
-            },
           },
         },
       },
@@ -603,7 +584,6 @@ export default definePluginEntry({
 
     registerBudgetRoutes(api, { getBroadcast: () => _gatewayBroadcast });
     registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
-    registerIosRoutes(api, { gateResolver, executor, runStore, nodeExecutionsStore, invokeElevated });
 
     // ── Boot-time task orphan cleanup (absorbed from taskflow-revive) ─────────
 
@@ -684,11 +664,10 @@ export default definePluginEntry({
 
     // ── Run-state WS event broadcaster ──────────────────────────────────────
     // Subscribes to flowStateEmitter to broadcast targeted WS events when
-    // a flow starts, enters a gate, or ends. Replaces the broad SSE-driven
-    // refresh on iOS HomeView once iOS subscribes to these events.
+    // a flow starts, enters a gate, or ends. Replaces broad SSE-driven
+    // refresh once subscribed clients consume these events.
 
     let _wsRunEventsListener = null;
-    let _liveActivityListener = null;
     api.registerService({
       id: "pipeclaw-ws-run-events",
       start: async () => {
@@ -696,9 +675,8 @@ export default definePluginEntry({
         const knownStatuses = new Map();
 
         // Builds a RunSummary-shaped patch from the in-memory flow object.
-        // Shared with live-bridge.js's snapshot() (see
-        // ios/gate-projector.js's buildRunPatch) so the live-push and
-        // reconciliation paths can't drift.
+        // The wrapper binds the pipeline lookup; the pure builder lives in
+        // utils/run-patch.js.
         const buildRunPatch = (flow, now) =>
           _buildRunPatch(flow, now, { pipelineLookup: (id) => pipelinesRef.value.get(id) });
 
@@ -740,13 +718,11 @@ export default definePluginEntry({
             knownStatuses.set(flowId, status);
             const rawBroadcast = _gatewayBroadcast;
             if (!rawBroadcast) return;
-            // Every call below goes through here — see the "plugin."
-            // prefix note on _liveActivityListener further down this file
-            // for why: the gateway's event-scope allowlist silently drops
-            // any broadcast name that isn't recognized or "plugin."-
-            // prefixed. run.*/gate.opened/pipeline.* were all unprefixed,
-            // so none of them ever reached a client, always — not a
-            // timing/connection issue.
+            // Every call below goes through here: the gateway's event-scope
+            // allowlist silently drops any broadcast name that isn't
+            // recognized or "plugin."-prefixed. run.*/gate.opened/pipeline.*
+            // were all unprefixed, so none of them ever reached a client,
+            // always — not a timing/connection issue.
             const broadcast = (name, payload) => rawBroadcast(`plugin.${name}`, payload);
             const now = Date.now();
             // Gate pauses are always persisted as "blocked" — run-store.js's
@@ -799,17 +775,9 @@ export default definePluginEntry({
               }
             }
             // Rich patch — now truly per-revision, matching this line's own
-            // comment: iOS upserts without a re-fetch on every transition.
+            // comment: subscribed clients upsert without a re-fetch on every transition.
             const ownPatch = buildRunPatch(flow, now);
             try { broadcast("pipeclaw.run.updated", ownPatch); } catch {}
-            // Internal fan-out (not the WS broadcast above) — ios/index.js's
-            // OpsSummary APNs-push tracker (_runningFlows/_recentTerminals)
-            // consumes the same patch this WS event carries, top-level flows
-            // only (children aren't "a pipeline run" for
-            // Fleet-activity/Live-Activity purposes).
-            if (!flow.parentInvocationId) {
-              try { liveActivityEmitter.emit("pipeclaw.run.patch", ownPatch); } catch {}
-            }
             // If this is a child flow (spawned by a subflow node), also push a
             // subflow-aggregate patch to the parent so RunDetailView refreshes
             // the Branches section on every subflow state change, not just when
@@ -847,37 +815,11 @@ export default definePluginEntry({
           } catch {}
         };
         flowStateEmitter.on("change", _wsRunEventsListener);
-
-        // Forward live_activity.* and failure_event.start messages from
-        // the ios relay to WS clients. ios/index.js patches relay.broadcast
-        // to emit here; this listener then re-emits via _gatewayBroadcast so
-        // iOS WS subscribers get the same events as SSE clients.
-        //
-        // The gateway's own event-scope allowlist silently drops any
-        // broadcast event name that isn't explicitly recognized or
-        // prefixed "plugin." (confirmed against the gateway core source —
-        // no error, no log, just a dropped send). Every live_activity.*/
-        // failure_event.* name is unprefixed, so this whole path was a
-        // no-op for every client, always — not a connection/timing issue.
-        // utils/sse.js's emitSseEvent already does exactly this for
-        // discuss.* events (`plugin.${event.type}`); mirror that same,
-        // already-correct convention here rather than inventing a new one.
-        _liveActivityListener = (msg) => {
-          const name = typeof msg?.type === "string" ? msg.type : "message";
-          const broadcast = _gatewayBroadcast;
-          if (!broadcast) return;
-          try { broadcast(`plugin.${name}`, msg); } catch {}
-        };
-        liveActivityEmitter.on("broadcast", _liveActivityListener);
       },
       stop: async () => {
         if (_wsRunEventsListener) {
           flowStateEmitter.off("change", _wsRunEventsListener);
           _wsRunEventsListener = null;
-        }
-        if (_liveActivityListener) {
-          liveActivityEmitter.off("broadcast", _liveActivityListener);
-          _liveActivityListener = null;
         }
       },
     });
