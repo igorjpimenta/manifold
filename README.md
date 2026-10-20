@@ -7,7 +7,7 @@ for LLM agents doing engineering work in this plugin or building new
 pipelines that target it.
 
 **Source and install.** Install/update a release with
-`openclaw plugins install git:github.com/igorjpimenta/oc-pipeclaw@v<semver> --force`.
+`openclaw plugins install git:github.com/igorjpimenta/oc-pipeclaw@2026.10.20 --force`.
 Development clone: `~/.dev/job/igorpimenta/oc-pipeclaw`. Story worktrees are
 created at `<clone>/.doppler/worktrees/<story>`, and each story ships as its
 own PR (base `feat/plugin`).
