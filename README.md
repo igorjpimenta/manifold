@@ -23,6 +23,7 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `@igorjpimenta/oc-pipeclaw` | plugin entry (default) | openclaw runtime |
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
 | `…/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
+| `…/browser-tabs` | `browserProfileForLock`, `beginTabSession`, `endTabSession` | browser-lease extension |
 | `…/elevation` | `invokeElevated` | oc-config |
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | run/tool handoff helpers (`notifyToolFired`, `registerDispatch`, …) | oc-config |

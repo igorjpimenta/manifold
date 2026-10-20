@@ -45,6 +45,10 @@ const PUBLIC_API = {
     file: "./locks/lock.js",
     exports: ["withLock", "lockNameForFile", "acquireLock", "readLock", "lockPathFor"],
   },
+  "./browser-tabs": {
+    file: "./locks/browser-tabs.js",
+    exports: ["browserProfileForLock", "beginTabSession", "endTabSession"],
+  },
   "./elevation": { file: "./elevation.js", exports: ["invokeElevated"] },
   "./digest": {
     file: "./telemetry/digest-push.js",

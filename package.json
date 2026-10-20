@@ -9,6 +9,7 @@
     ".": "./index.js",
     "./errors": "./engine/executor-errors.js",
     "./lock": "./locks/lock.js",
+    "./browser-tabs": "./locks/browser-tabs.js",
     "./elevation": "./elevation.js",
     "./digest": "./telemetry/digest-push.js",
     "./tool-handoff": "./state/tool-handoff.js",
