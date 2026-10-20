@@ -1,0 +1,17 @@
+{
+  "name": "@igorjpimenta/oc-pipeclaw",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "LangGraph-style pipeline executor for openclaw. Loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs, dispatching nodes to agents via runtime.subagent.run with explicit state-graph routing.",
+  "type": "module",
+  "scripts": {
+    "test": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/**/*.test.js'",
+    "test:unit": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/unit/**/*.test.js'",
+    "test:integration": "./scripts/with-guard.sh node --test-timeout=60000 --test 'test/integration/*.test.js'"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.4",
+    "drizzle-orm": "^0.45.2"
+  }
+}

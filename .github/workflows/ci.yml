@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  js:
+    name: JS — install and syntax
+    runs-on: self-hosted
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # `node --check` only ever inspects its FIRST argument — hence -n 1.
+      # Batching would report a green sweep while checking a twentieth of the
+      # files.
+      - name: Syntax sweep
+        run: git ls-files -z '*.js' '*.mjs' | xargs -0 -P 8 -n 1 node --check
+
+  # The ubuntu leg only runs when the `ci-ubuntu` label is present — self-hosted is the default because hosted minutes are exhausted.
+  js-ubuntu:
+    if: contains(github.event.pull_request.labels.*.name, 'ci-ubuntu')
+    name: JS — install and syntax — ubuntu parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # `node --check` only ever inspects its FIRST argument — hence -n 1.
+      # Batching would report a green sweep while checking a twentieth of the
+      # files.
+      - name: Syntax sweep
+        run: git ls-files -z '*.js' '*.mjs' | xargs -0 -P 8 -n 1 node --check
