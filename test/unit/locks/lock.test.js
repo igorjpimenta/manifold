@@ -757,7 +757,9 @@ describe("acquireLock — cooldown", () => {
     const second = await acquireLock(name, {});
     const elapsed = Date.now() - start;
     await second.release();
-    assert.ok(elapsed < 50, `expected near-instant acquire, took ${elapsed}ms`);
+    // Smoke bound, not a latency guarantee: a lock round-trip is file I/O,
+    // so this only rules out a stuck acquire, not a slow one.
+    assert.ok(elapsed < 1000, `expected near-instant acquire, took ${elapsed}ms`);
   });
 
   test("cooldownMs set but no prior release recorded — first-ever acquire of a name does not wait", async () => {
@@ -766,7 +768,9 @@ describe("acquireLock — cooldown", () => {
     const lock = await acquireLock(name, { cooldownMs: 200 });
     const elapsed = Date.now() - start;
     await lock.release();
-    assert.ok(elapsed < 50, `expected no cooldown wait on first-ever acquire, took ${elapsed}ms`);
+    // Stays under the 200ms an erroneous wait would take, with margin over
+    // single-acquire file-I/O noise.
+    assert.ok(elapsed < 150, `expected no cooldown wait on first-ever acquire, took ${elapsed}ms`);
   });
 
   test("cooldownMs set — acquiring right after a release waits out the remaining gap", async () => {
@@ -784,12 +788,20 @@ describe("acquireLock — cooldown", () => {
     const name = "cooldown-already-elapsed";
     const first = await acquireLock(name, { cooldownMs: 50 });
     await first.release();
+    // An acquire that must wait out the window, measured first in the same
+    // process: the post-window acquire below must beat it. No absolute bound
+    // can express this — a 50ms erroneous wait hides inside file-I/O noise.
+    const enforcedStart = Date.now();
+    const second = await acquireLock(name, { cooldownMs: 50 });
+    const enforcedElapsed = Date.now() - enforcedStart;
+    await second.release();
+    assert.ok(enforcedElapsed >= 40, `expected the immediate re-acquire to wait out most of the 50ms window, waited ${enforcedElapsed}ms`);
     await new Promise((r) => setTimeout(r, 100));
     const start = Date.now();
-    const second = await acquireLock(name, { cooldownMs: 50 });
+    const third = await acquireLock(name, { cooldownMs: 50 });
     const elapsed = Date.now() - start;
-    await second.release();
-    assert.ok(elapsed < 50, `expected no additional wait once the cooldown window already passed, took ${elapsed}ms`);
+    await third.release();
+    assert.ok(elapsed < enforcedElapsed, `expected the post-window acquire (${elapsed}ms) to beat the enforced wait (${enforcedElapsed}ms)`);
   });
 
   test("cooldownJitterMs adds on top of cooldownMs, never less than the base", async () => {
@@ -812,7 +824,10 @@ describe("acquireLock — cooldown", () => {
     const second = await acquireLock(freshName, { cooldownMs: 200 });
     const elapsed = Date.now() - start;
     await second.release();
-    assert.ok(elapsed < 50, `a fresh lock name should never inherit another name's cooldown, took ${elapsed}ms`);
+    // Same bound rationale as the first-ever-acquire case above: stays under
+    // the 200ms an erroneous wait would take, with margin over single-acquire
+    // file-I/O noise.
+    assert.ok(elapsed < 150, `a fresh lock name should never inherit another name's cooldown, took ${elapsed}ms`);
   });
 
   test("withLock forwards cooldownMs through to acquireLock unchanged", async () => {
