@@ -138,7 +138,7 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
       }
       // Force the batch-writer flush to actually run NOW, concurrently
       // with the still-in-flight admit()/casSetRunning calls above, rather
-      // than waiting for its own 200ms timer (which could land after this
+      // than waiting for its own flush timer (which could land after this
       // round's transactions have all already committed, silently
       // defeating the point of this test).
       ops.push(flushBatchWriter(dbPath).catch((err) => errors.push(`flushBatchWriter: ${err?.message ?? err}`)));

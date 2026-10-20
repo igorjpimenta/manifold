@@ -266,7 +266,7 @@ describe("reapStale — PID alive but past staleMs (PID reuse case)", () => {
   test("PID alive and within staleMs — lock is NOT reaped", async () => {
     const name = "fresh-pid-not-reaped";
     const staleMs = 6 * 3600_000;
-    // since = 10 seconds ago — well within staleMs
+    // `since` well within staleMs — fresh, must not be reaped
     writeLockFile(name, { pid: process.pid, hostname: "testhost", since: Date.now() - 10_000, name });
     try {
       await assert.rejects(
@@ -282,7 +282,7 @@ describe("reapStale — PID alive but past staleMs (PID reuse case)", () => {
   test("staleMs boundary — 1ms before stale is fresh (no reap)", async () => {
     const name = "stale-boundary-fresh";
     const staleMs = 10_000; // 10 seconds
-    // since = 5 seconds ago — exactly half of staleMs, so fresh
+    // `since` exactly half of staleMs, so fresh
     writeLockFile(name, { pid: process.pid, hostname: "testhost", since: Date.now() - 5_000, name });
     try {
       await assert.rejects(
@@ -374,7 +374,7 @@ describe("acquireLock — timeout error message content", () => {
         () => acquireLock(name, { timeoutMs: 60, pollMs: 10, staleMs: 6 * 3600_000 }),
         (err) => {
           assert.ok(err.message.includes("ago"), `expected 'ago' in: ${err.message}`);
-          // Should show at least 7s (may be 7 or 8 depending on timing)
+          // May have ticked past the written `since` before the message rendered
           assert.match(err.message, /\d+s ago/, "should have Ns ago pattern");
           return true;
         },
@@ -592,7 +592,7 @@ describe("tryAcquire — exclusive lock file creation (via acquireLock behavior)
     const name = "try-acquire-false";
     writeLockFile(name, { pid: process.pid, hostname: "testhost", since: Date.now(), name });
     try {
-      // timeoutMs=60ms, pollMs=10ms — we expect a timeout (not immediate acquire).
+      // Holder is alive+fresh — we expect a timeout (not immediate acquire).
       await assert.rejects(
         () => acquireLock(name, { timeoutMs: 60, pollMs: 10, staleMs: 6 * 3600_000 }),
         /timeout/,
