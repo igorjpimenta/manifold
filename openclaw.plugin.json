@@ -1,0 +1,63 @@
+{
+  "id": "pipeclaw",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true,
+    "onConfigPaths": ["plugins.entries.pipeclaw"]
+  },
+  "contracts": {
+    "tools": [
+      "pipeclaw_start",
+      "pipeclaw_send_chat",
+      "propose_draft",
+      "propose_draft_meta",
+      "submit_draft",
+      "report_draft_blocked",
+      "report_draft_skip",
+      "submit_score"
+    ]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "pipelinesDir": { "type": "string" },
+      "ownerSessionKey": { "type": "string" },
+      "dashboardEnabled": { "type": "boolean" },
+      "dashboardPort": { "type": "integer", "minimum": 1024, "maximum": 65535 },
+      "dashboardHost": { "type": "string" },
+      "pipeclawParrot": {
+        "type": "object",
+        "description": "pipeclaw-parrot channel config. pipeclaw-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
+        "additionalProperties": false,
+        "properties": {
+          "defaultAgent": {
+            "type": "string",
+            "description": "Default agent for the pipeclaw-parrot channel. Used when the blocked gate node does not declare its own discuss.agent."
+          }
+        }
+      },
+      "taskflowRevive": {
+        "type": "object",
+        "description": "Config for boot-time task orphan cleanup (absorbed from taskflow-revive plugin).",
+        "additionalProperties": false,
+        "properties": {
+          "startupDelayMs": { "type": "number", "minimum": 0 }
+        }
+      },
+      "globalConcurrency": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+      },
+      "profilePath": {
+        "type": "string",
+        "description": "Absolute path of the PROFILE.md file guarded by the before_tool_call read gate and edit lock (hooks/profile-read-gate.js, hooks/profile-write-lock.js). Default: ~/.openclaw/workspace/.shared/freelance/profile/PROFILE.md"
+      },
+      "profileEditResultsDir": {
+        "type": "string",
+        "description": "Directory the edit lock writes one <runId>.json outcome marker per guarded PROFILE.md edit into (hooks/profile-write-lock.js). Default: ~/.openclaw/locks/profile-edit-results"
+      }
+    }
+  }
+}
