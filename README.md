@@ -12,6 +12,30 @@ Development clone: `~/.dev/job/igorpimenta/oc-pipeclaw`. Story worktrees are
 created at `<clone>/.doppler/worktrees/<story>`, and each story ships as its
 own PR (base `feat/plugin`).
 
+## Public API
+
+Consumers (oc-config, and later stories) install this repo as the
+`@igorjpimenta/oc-pipeclaw` git dependency and import **only** through these
+subpaths. Deep file paths are not a contract — only this table is.
+
+| Subpath | Exports | Consumed by |
+| --- | --- | --- |
+| `@igorjpimenta/oc-pipeclaw` | plugin entry (default) | openclaw runtime |
+| `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
+| `…/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
+| `…/elevation` | `invokeElevated` | oc-config |
+| `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
+| `…/tool-handoff` | run/tool handoff helpers (`notifyToolFired`, `registerDispatch`, …) | oc-config |
+| `…/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` | oc-config |
+| `…/ios-auth` | `authorizeBridgeRequest`, `sendUnauthorized` | oc-config |
+| `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
+| `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
+| `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |
+| `…/state/migrator` | `createMigrator` | sibling extension |
+
+The map is pinned by `test/unit/api/public-exports.test.js`; adding or
+removing an entry is a breaking change for the consumers above.
+
 Two companion docs hold deep-dive material split out of this file to keep
 it focused on orientation and quick reference:
 
