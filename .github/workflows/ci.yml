@@ -18,13 +18,38 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # No persisted credentials: the extraheader authenticates as this
+          # repo's GITHUB_TOKEN (oc-contracts-blind) and outranks the
+          # GIT_CONFIG rewrite on the npm step below.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: '25'
           cache: npm
 
-      - run: npm ci --no-audit --no-fund
+      # The oc-contracts git dependency is private. Presence check only —
+      # whether the token can actually read that repo is what npm ci proves.
+      - name: Authenticate private package resolution
+        env:
+          OC_CONTRACTS_TOKEN: ${{ secrets.OC_CONTRACTS_TOKEN }}
+        run: |
+          if [[ -z "$OC_CONTRACTS_TOKEN" ]]; then
+            echo "::error::OC_CONTRACTS_TOKEN is not set — cannot resolve the private oc-contracts package"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        env:
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/"
+          GIT_CONFIG_KEY_1: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
+          GIT_CONFIG_KEY_2: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_2: "git@github.com:"
+        run: npm ci --no-audit --no-fund
 
       # `node --check` only ever inspects its FIRST argument — hence -n 1.
       # Batching would report a green sweep while checking a twentieth of the
@@ -61,13 +86,38 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          # No persisted credentials: the extraheader authenticates as this
+          # repo's GITHUB_TOKEN (oc-contracts-blind) and outranks the
+          # GIT_CONFIG rewrite on the npm step below.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: '25'
           cache: npm
 
-      - run: npm ci --no-audit --no-fund
+      # The oc-contracts git dependency is private. Presence check only —
+      # whether the token can actually read that repo is what npm ci proves.
+      - name: Authenticate private package resolution
+        env:
+          OC_CONTRACTS_TOKEN: ${{ secrets.OC_CONTRACTS_TOKEN }}
+        run: |
+          if [[ -z "$OC_CONTRACTS_TOKEN" ]]; then
+            echo "::error::OC_CONTRACTS_TOKEN is not set — cannot resolve the private oc-contracts package"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        env:
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: "https://github.com/"
+          GIT_CONFIG_KEY_1: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
+          GIT_CONFIG_KEY_2: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_2: "git@github.com:"
+        run: npm ci --no-audit --no-fund
 
       # `node --check` only ever inspects its FIRST argument — hence -n 1.
       # Batching would report a green sweep while checking a twentieth of the
