@@ -36,6 +36,17 @@ jobs:
         if: '!cancelled()'
         run: npm run test:unit
 
+      - name: Dashboard deps
+        if: '!cancelled()'
+        run: npm ci --no-audit --no-fund --prefix dashboard
+
+      - name: Dashboard typecheck and build
+        if: '!cancelled()'
+        working-directory: dashboard
+        run: |
+          npx tsc -b
+          npx vite build
+
   # The ubuntu leg only runs when the `ci-ubuntu` label is present — self-hosted is the default because hosted minutes are exhausted.
   js-ubuntu:
     if: contains(github.event.pull_request.labels.*.name, 'ci-ubuntu')
@@ -61,3 +72,14 @@ jobs:
       - name: unit tests
         if: '!cancelled()'
         run: npm run test:unit
+
+      - name: Dashboard deps
+        if: '!cancelled()'
+        run: npm ci --no-audit --no-fund --prefix dashboard
+
+      - name: Dashboard typecheck and build
+        if: '!cancelled()'
+        working-directory: dashboard
+        run: |
+          npx tsc -b
+          npx vite build
