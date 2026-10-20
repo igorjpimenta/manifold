@@ -786,19 +786,21 @@ describe("acquireLock — cooldown", () => {
 
   test("cooldownMs set — acquiring well after the cooldown window has already elapsed does not wait", async () => {
     const name = "cooldown-already-elapsed";
-    const first = await acquireLock(name, { cooldownMs: 50 });
+    const first = await acquireLock(name, { cooldownMs: 200 });
     await first.release();
     // An acquire that must wait out the window, measured first in the same
     // process: the post-window acquire below must beat it. No absolute bound
-    // can express this — a 50ms erroneous wait hides inside file-I/O noise.
+    // can express this — an erroneous wait at cooldown scale hides inside
+    // file-I/O noise that has measured in the hundreds of milliseconds on
+    // loaded shared machines, so the window itself has to clear the noise.
     const enforcedStart = Date.now();
-    const second = await acquireLock(name, { cooldownMs: 50 });
+    const second = await acquireLock(name, { cooldownMs: 200 });
     const enforcedElapsed = Date.now() - enforcedStart;
     await second.release();
-    assert.ok(enforcedElapsed >= 40, `expected the immediate re-acquire to wait out most of the 50ms window, waited ${enforcedElapsed}ms`);
-    await new Promise((r) => setTimeout(r, 100));
+    assert.ok(enforcedElapsed >= 160, `expected the immediate re-acquire to wait out most of the 200ms window, waited ${enforcedElapsed}ms`);
+    await new Promise((r) => setTimeout(r, 250));
     const start = Date.now();
-    const third = await acquireLock(name, { cooldownMs: 50 });
+    const third = await acquireLock(name, { cooldownMs: 200 });
     const elapsed = Date.now() - start;
     await third.release();
     assert.ok(elapsed < enforcedElapsed, `expected the post-window acquire (${elapsed}ms) to beat the enforced wait (${enforcedElapsed}ms)`);
