@@ -32,6 +32,10 @@ jobs:
       - name: Syntax sweep
         run: git ls-files -z '*.js' '*.mjs' | xargs -0 -P 8 -n 1 node --check
 
+      - name: unit tests
+        if: '!cancelled()'
+        run: npm run test:unit
+
   # The ubuntu leg only runs when the `ci-ubuntu` label is present — self-hosted is the default because hosted minutes are exhausted.
   js-ubuntu:
     if: contains(github.event.pull_request.labels.*.name, 'ci-ubuntu')
@@ -53,3 +57,7 @@ jobs:
       # files.
       - name: Syntax sweep
         run: git ls-files -z '*.js' '*.mjs' | xargs -0 -P 8 -n 1 node --check
+
+      - name: unit tests
+        if: '!cancelled()'
+        run: npm run test:unit

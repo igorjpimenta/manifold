@@ -1,0 +1,65 @@
+// node-cost.js — lazy-singleton reader over lineage's cost_by_call table.
+// No new storage: lineage already tags every LLM call with pipeline_id +
+// node_id. This just exposes a percentile query so estimateNodeCost can
+// return historically-grounded low/high bounds instead of a static range.
+
+import path from "node:path";
+import { getSharedDb } from "./db.js";
+import os from "node:os";
+
+const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+
+const COST_SQL = `
+  SELECT cost_total FROM cost_by_call
+  WHERE pipeline_id = ? AND node_id = ? AND ts >= ?
+  ORDER BY cost_total ASC
+`;
+
+function percentile(sorted, p) {
+  const idx = p * (sorted.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
+}
+
+export function createNodeCostReader({ dbPath = DEFAULT_DB_PATH } = {}) {
+  let _client = null;
+
+  async function getClient() {
+    if (_client) return _client;
+    try {
+      ({ client: _client } = await getSharedDb(dbPath, { readonly: true }));
+    } catch {
+      _client = null;
+    }
+    return _client;
+  }
+
+  async function nodeCallStats(pipelineId, nodeId, { sinceDays = 30, minSamples = 3 } = {}) {
+    if (!pipelineId || !nodeId) return null;
+    const client = await getClient();
+    if (!client) return null;
+    const sinceTs = Date.now() - sinceDays * 86_400_000;
+    let rows;
+    try {
+      const result = await client.execute({ sql: COST_SQL, args: [pipelineId, nodeId, sinceTs] });
+      rows = result.rows;
+    } catch {
+      return null;
+    }
+    if (rows.length < minSamples) return null;
+    const costs = rows.map((r) => Number(r.cost_total)).sort((a, b) => a - b);
+    return {
+      p25: percentile(costs, 0.25),
+      p50: percentile(costs, 0.50),
+      p75: percentile(costs, 0.75),
+      sampleSize: costs.length,
+    };
+  }
+
+  return { nodeCallStats };
+}
+
+// Default singleton backed by ~/.openclaw/ops.sqlite
+const _default = createNodeCostReader();
+export const { nodeCallStats } = _default;
