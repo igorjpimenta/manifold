@@ -17,7 +17,6 @@ failureEmitter.setMaxListeners(10);
 
 // gate.opened  { flowId, nodeId, ... } — local trigger only (test
 // wait-for-event; the wire kind is produced thin at the WS boundary).
-// gate.closed was deleted: zero consumers, no wire kind (slice 1).
 export const gateEmitter = new EventEmitter();
 gateEmitter.setMaxListeners(10);
 
