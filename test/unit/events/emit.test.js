@@ -4,7 +4,7 @@
  * Verifies (mirroring test/unit/telemetry/broadcast.test.js conventions):
  *   - WS delivery uses the plugin. prefix + legacy wire name.
  *   - SSE delivery only for session/discuss kinds, with legacy type.
- *   - Envelope stamped (kind, v, emittedAtMs); legacy `type` dropped.
+ *   - Envelope stamped (kind, emittedAtMs); legacy `type` dropped.
  *   - Negative guards: getter undefined/null/throws → never rejects.
  *   - Validation faults reject (unknown kind, missing fields).
  */
@@ -43,7 +43,6 @@ describe("emit — gateway WS", () => {
     assert.equal(broadcast.calls[0].name, "plugin.gate.resolved");
     const payload = broadcast.calls[0].payload;
     assert.equal(payload.kind, "gate.resolved");
-    assert.equal(payload.v, 1);
     assert.equal(typeof payload.emittedAtMs, "number");
     assert.equal(payload.flowId, "f");
   });
