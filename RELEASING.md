@@ -24,9 +24,9 @@ ships tomorrow gets tomorrow's date.
 
 1. Merge every pending story PR into `main`. `main` receives code only
    through PRs; a tag push is not a branch push and never moves `main`.
-2. Open ONE release PR: bump `package.json` `version` and the README install
-   pin to the merge date, commit subject `chore(release): <version>`. No code
-   changes ride the release PR.
+2. Open ONE release PR: bump `package.json` `version`, commit subject
+   `chore(release): <version>`. No code changes ride the release PR; docs
+   keep the `@<version>` placeholder, the released tag is the record.
 3. Merge the release PR.
 4. On the merge commit: `git tag <version> -m "<version> — <summary>"`,
    then push the tag.
