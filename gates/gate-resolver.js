@@ -1,5 +1,5 @@
 import { getNodeExecutionsStore } from "../state/node-executions.js";
-import { gateEmitter } from "../events.js";
+import { createEmitter } from "../events/emit.js";
 import { assembleState } from "../engine/executor-helpers.js";
 import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
@@ -50,6 +50,10 @@ const VALID_SOURCES = ["ios", "dashboard", "cli", "pipeline"];
 
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;
+  // Canonical-kind fan-out for this resolver's WS emission (events/emit.js):
+  // validated envelope + `plugin.`-prefixed legacy wire names, never throws
+  // on transport faults — the same contract the inline broadcasts had.
+  const { emit } = createEmitter({ getBroadcast, logger });
   // Injectable for tests (defaults to the real singleton in production) —
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
@@ -296,12 +300,11 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       });
       if (result.applied) {
         logger.info(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: resolved ${newResultsThisPass.length} (${approvedIds.length} approve, ${rejectedIds.length} reject total)${undecidedCount > 0 ? `; ${undecidedCount} still awaiting` : ""}${result.queued ? "; queued — waiting for a shared admission slot to resume" : "; resuming"}`);
-        gateEmitter.emit("gate.closed", { flowId, nodeId });
-        // Two live constraints on this broadcast: the event name must carry
-        // the `plugin.pipeclaw.` prefix or the scope allowlist silently
-        // drops it, and RunSummaryPatch decodes `updatedAtMs` specifically —
-        // an `updatedAt` key would be delivered and then ignored.
-        try { getBroadcast?.()?.('plugin.pipeclaw.run.updated', { flowId, status: 'running', updatedAtMs: Date.now() }); } catch {}
+        // No gate.closed emission: zero consumers outside tests, no wire
+        // kind. No bespoke run.updated either: resuming goes through
+        // store.setRunning → notifyChange, and the WS run listener already
+        // emits the rich per-revision patch for that write — a second shape
+        // here only forks the contract iOS decodes.
         // Human-gate apply hook: fires per item, immediately after THAT
         // item's decision lands — the "write the moment this one decides,
         // don't wait for siblings" semantics, for both a root-level gate
@@ -561,7 +564,9 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     logger.info(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: ${itemId} → ${decision} (source=${source})`);
 
     await maybeResolveFlow(flowId, awaitCompletion);
-    try { getBroadcast?.()?.('plugin.gate.resolved', { flowId, itemId, decision, resolvedAt: Date.now() }); } catch {}
+    // Canonical gate.resolved: identical legacy wire string
+    // (`plugin.gate.resolved`); the envelope adds kind/v/emittedAtMs.
+    try { await emit("gate.resolved", { flowId, itemId, decision, resolvedAt: Date.now() }); } catch {}
     return { ok: true, status: "applied" };
   }
 

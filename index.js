@@ -49,6 +49,7 @@ import { createPipeclawParrotChannelEntry } from "./channels/pipeclaw-parrot-cha
 // Route modules extracted from this file.
 import { createEmitSseEvent } from "./utils/sse.js";
 import { flowStateEmitter } from "./events.js";
+import { createEmitter } from "./events/emit.js";
 import { buildRunPatch as _buildRunPatch } from "./utils/run-patch.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
 import { registerRunRoutes } from "./routes/runs.js";
@@ -509,6 +510,10 @@ export default definePluginEntry({
     // ── emitSseEvent (factory, closes over _gatewayBroadcast lazily) ────────
 
     const emitSseEvent = createEmitSseEvent(() => _gatewayBroadcast);
+    // Canonical-kind emitter for the WS run-event listener below — same
+    // never-throw contract as the inline broadcasts it replaces; the
+    // `plugin.` prefix + legacy names are applied inside emit().
+    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
 
     // ── Discuss handlers ─────────────────────────────────────────────────────
 
@@ -757,7 +762,10 @@ export default definePluginEntry({
                 }
               } else if (isWaiting) {
                 if (flow.waitJson?.kind === "human-gate") {
-                  broadcast("gate.opened", { flowId, updatedAt: now });
+                  // Canonical gate.opened: identical wire string
+                  // (`plugin.gate.opened`); envelope adds kind/v/emittedAtMs.
+                  // Fire-and-forget — a dead broadcast must not fail the listener.
+                  emitCanonical("gate.opened", { flowId, updatedAt: now }).catch(() => {});
                 }
               } else if (isTerminal) {
                 // Was a bespoke {flowId, status, updatedAt} shape — same
