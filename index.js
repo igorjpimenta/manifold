@@ -56,6 +56,7 @@ import { registerDiscussHandlers } from "./routes/discuss.js";
 import { createComponentEmitter } from "./routes/discuss-component.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
+import { resumeFlowFromGate } from "./routes/operator-resume.js";
 import { registerFailureRoutes } from "./routes/failures.js";
 import { registerPipelineRoutes } from "./routes/pipelines.js";
 import { registerBudgetRoutes } from "./budget/index.js";
@@ -567,7 +568,14 @@ export default definePluginEntry({
       ensurePipelinesLoaded,
     });
 
-    registerBudgetRoutes(api, { getBroadcast: () => _gatewayBroadcast });
+    registerBudgetRoutes(api, {
+      getBroadcast: () => _gatewayBroadcast,
+      // In-process resume for flow-bound budget approvals (no HTTP loopback).
+      onFlowResume: ({ flowId, nodeId, decision }) => resumeFlowFromGate({
+        store, readStore, admissionQueueStore, runStore, executor,
+        logger: api.logger, api, flowId, nodeId, decision,
+      }),
+    });
     registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
 
     // ── Boot-time task orphan cleanup (absorbed from taskflow-revive) ─────────
