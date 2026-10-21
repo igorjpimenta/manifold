@@ -7,8 +7,8 @@ import {
 import { createEmitter } from "../events/emit.js";
 
 export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroadcast }) {
-  // Canonical-kind fan-out for the two cap emissions below (events roadmap
-  // slice 6): canonical wire name, envelope adds kind.
+  // Canonical-kind fan-out for the two cap emissions below: canonical
+  // wire name, envelope adds kind.
   const { emit } = createEmitter({ getBroadcast, logger });
   // ─── /budget/cap — read / update the operator-set daily cap ───────────────
   api.registerHttpRoute({

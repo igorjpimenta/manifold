@@ -165,7 +165,7 @@ function postReq(body) {
   };
 }
 
-// ─── canonical budget emissions (events roadmap slice 6) ─────────────────────
+// ─── canonical budget emissions ─────────────────────────────────────────────
 // decide/lock/unlock go through the shared emitter: identical legacy wire
 // strings, envelope adds kind. Real sqlite at a tmp dbPath, same as above.
 

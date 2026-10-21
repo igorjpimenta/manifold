@@ -284,9 +284,9 @@ describe("dispatchAgentWithRetry — retry config is inert (single dispatch, no 
 });
 
 // ── dispatchAgentWithRetry — session transcript event ─────────────────────────
-// Events roadmap slice 2: the dispatch reply is otherwise visible only inside
-// apply(). Nullable like sessionIndex — dispatch without an emitter emits
-// nothing and is otherwise identical.
+// The dispatch reply is otherwise visible only inside apply(). Nullable like
+// sessionIndex — dispatch without an emitter emits nothing and is otherwise
+// identical.
 
 describe("dispatchAgentWithRetry — session.transcript.completed", () => {
   function makeEmit() {
