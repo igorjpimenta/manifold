@@ -1,4 +1,4 @@
-# pipeclaw — subflow nodes (childFlows)
+# manifold — subflow nodes (childFlows)
 
 Split out of `README.md` to keep that file focused on quick orientation.
 Read this when authoring or modifying a `kind:"subflow"` node. For general
@@ -238,10 +238,10 @@ Because a subflow item is a genuine, independent flow, every mechanism that
 applies to a normal flow applies to it directly — there is no separate
 "subflow retry" API:
 
-- **Resolve its gate**: `openclaw pipeclaw approve <childFlowId> <itemId> approve`
+- **Resolve its gate**: `openclaw manifold approve <childFlowId> <itemId> approve`
   — same command as any flow, just pointed at the child's own flowId.
 - **Retry it after a failure**: the child's own flowId through the normal
-  failures/retry flow (`POST /pipeclaw/failures/<id>/retry`) — the same
+  failures/retry flow (`POST /manifold/failures/<id>/retry`) — the same
   code path as a flow-level retry, walking the child's own topology back
   to the failing node. There is no itemId-based subflow retry anymore;
   the old `flow_branches`-era mechanism was removed once every subflow
