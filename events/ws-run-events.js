@@ -91,7 +91,7 @@ export function createWsRunEventsListener({ store, readStore, nodeExecutionsStor
         } else if (isWaiting) {
           if (flow.waitJson?.kind === "human-gate") {
             // Canonical gate.opened: identical wire string
-            // (`plugin.gate.opened`); envelope adds kind/v/emittedAtMs.
+            // (`plugin.gate.opened`); envelope adds kind/emittedAtMs.
             // Fire-and-forget — a dead broadcast must not fail the listener.
             emit("gate.opened", { flowId, updatedAt: now }).catch(() => {});
           }
