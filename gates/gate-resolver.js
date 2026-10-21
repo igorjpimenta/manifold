@@ -300,11 +300,8 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       });
       if (result.applied) {
         logger.info(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: resolved ${newResultsThisPass.length} (${approvedIds.length} approve, ${rejectedIds.length} reject total)${undecidedCount > 0 ? `; ${undecidedCount} still awaiting` : ""}${result.queued ? "; queued — waiting for a shared admission slot to resume" : "; resuming"}`);
-        // No gate.closed emission: zero consumers outside tests, no wire
-        // kind. No bespoke run.updated either: resuming goes through
-        // store.setRunning → notifyChange, and the WS run listener already
-        // emits the rich per-revision patch for that write — a second shape
-        // here only forks the contract iOS decodes.
+        // Resume patches for this write come from the WS run listener's
+        // per-revision patch — emit no second shape here; iOS decodes one.
         // Human-gate apply hook: fires per item, immediately after THAT
         // item's decision lands — the "write the moment this one decides,
         // don't wait for siblings" semantics, for both a root-level gate
