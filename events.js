@@ -15,8 +15,8 @@ failureEmitter.setMaxListeners(10);
 // Structured state-boundary emitters — carry full payloads so subscribers
 // can project live_activity.* messages without a DB scan.
 
-// gate.opened  { flowId, nodeId, items, waitJson, stateJson, lastStep, _suppressApns? }
-// gate.closed  { flowId, nodeId }
+// gate.opened  { flowId, nodeId, ... } — local trigger only (test
+// wait-for-event; the wire kind is produced thin at the WS boundary).
 export const gateEmitter = new EventEmitter();
 gateEmitter.setMaxListeners(10);
 
