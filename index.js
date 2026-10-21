@@ -52,6 +52,7 @@ import { flowStateEmitter } from "./events.js";
 import { createEmitter } from "./events/emit.js";
 import { buildRunPatch as _buildRunPatch } from "./utils/run-patch.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
+import { createComponentEmitter } from "./routes/discuss-component.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
 import { registerFailureRoutes } from "./routes/failures.js";
@@ -456,48 +457,12 @@ export default definePluginEntry({
 
     // ── componentEmitter + gateway ping ──────────────────────────────────────
 
-    const _componentEmitRef = {};
     let _gatewayBroadcast = null;
 
-    function componentEmitter({ flowId, itemId, component }) {
-      return Promise.resolve().then(async () => {
-        try { await discussStore.setComponent(flowId, itemId, component); } catch {}
-        if (_componentEmitRef.emit) {
-          try {
-            await _componentEmitRef.emit({
-              type: "discuss.component",
-              flowId,
-              itemId,
-              component,
-              emittedAtMs: Date.now(),
-            });
-          } catch {}
-          if (component.kind === "proposed_draft") {
-            try {
-              await _componentEmitRef.emit({
-                type: "discuss.pending",
-                flowId,
-                itemId,
-                text: component.text ?? null,
-                fields: null,
-                updatedAt: component.updatedAt ?? Date.now(),
-              });
-            } catch {}
-          } else if (component.kind === "proposed_meta") {
-            try {
-              await _componentEmitRef.emit({
-                type: "discuss.pending",
-                flowId,
-                itemId,
-                text: null,
-                fields: component.fields ?? null,
-                updatedAt: component.updatedAt ?? Date.now(),
-              });
-            } catch {}
-          }
-        }
-      });
-    }
+    // Proposal-artifact fan-out (routes/discuss-component.js): persists the
+    // component, then emits canonical proposed + derived pending through
+    // the shared emitter. Egress byte-identical via the legacy wire map.
+    const componentEmitter = createComponentEmitter({ discussStore, emit: emitCanonical });
 
     api.registerGatewayMethod("plugin.pipeclaw.ping", (opts) => {
       if (!_gatewayBroadcast) {
@@ -622,9 +587,7 @@ export default definePluginEntry({
       },
     });
 
-    // ── Wire emitSseEvent into component emitter ref + parrot channel ────────
-
-    _componentEmitRef.emit = emitSseEvent;
+    // ── Parrot channel (takes the shared emitter directly) ────────────────────
 
     createPipeclawParrotChannelEntry({
       readStore,
