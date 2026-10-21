@@ -5,7 +5,7 @@
  *   - Registry shape: 17 wire kinds (frozen, unique), 1 reserved.
  *   - Unknown/reserved kinds rejected everywhere.
  *   - Payload contracts enforced (required fields, session scope + ids).
- *   - Egress maps: gateway legacy names, dashboard legacy types, SSE set.
+ *   - Routing: dashboard-only kinds, SSE set.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -15,8 +15,7 @@ import {
   isWireKind,
   isReservedKind,
   assertPayload,
-  gatewayWireName,
-  dashboardLegacyType,
+  isDashboardOnly,
   isSseKind,
 } from "../../../events/kinds.js";
 
@@ -102,33 +101,17 @@ describe("kinds — assertPayload", () => {
   });
 });
 
-// ── egress maps ──────────────────────────────────────────────────────────────
+// ── routing ────────────────────────────────────────────────────────────────────
 
-describe("kinds — egress maps", () => {
-  test("gateway keeps exact legacy wire strings", () => {
-    assert.equal(gatewayWireName("session.transcript.completed"), "discuss.turn");
-    assert.equal(gatewayWireName("session.transcript.updated"), "discuss.transcript");
-    assert.equal(gatewayWireName("budget.lock.changed"), "gate.lock.changed");
-    assert.equal(gatewayWireName("pipeline.catalog.updated"), "pipeclaw.pipeline.catalog.changed");
-    assert.equal(gatewayWireName("gate.opened"), "gate.opened");
+describe("kinds — routing", () => {
+  test("run.created is dashboard-only", () => {
+    assert.equal(isDashboardOnly("run.created"), true);
+    assert.equal(isDashboardOnly("run.updated"), false);
   });
 
-  test("run.created has no gateway wire string (dashboard-only)", () => {
-    assert.equal(gatewayWireName("run.created"), null);
-  });
-
-  test("unknown kind throws in maps", () => {
-    assert.throws(() => gatewayWireName("nope"), /unknown/);
-    assert.throws(() => dashboardLegacyType("nope"), /unknown/);
+  test("unknown kind throws in routing", () => {
+    assert.throws(() => isDashboardOnly("nope"), /unknown/);
     assert.throws(() => isSseKind("nope"), /unknown/);
-  });
-
-  test("dashboard legacy types for bus kinds only", () => {
-    assert.equal(dashboardLegacyType("run.created"), "flow_created");
-    assert.equal(dashboardLegacyType("run.updated"), "flow_changed");
-    assert.equal(dashboardLegacyType("run.ended"), "flow_terminated");
-    assert.equal(dashboardLegacyType("pipeline.catalog.updated"), "pipelines_changed");
-    assert.equal(dashboardLegacyType("gate.opened"), null);
   });
 
   test("SSE set is session + discuss families", () => {

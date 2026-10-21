@@ -54,7 +54,7 @@ export function RunDetail({ flowId }: { flowId: string }) {
   useSse((evt) => {
     if (!("flowId" in evt) || evt.flowId !== flowId) return;
     setEvents((prev) => [evt, ...prev]);
-    if (evt.type !== "flow_created") loadAll();
+    if (evt.kind !== "run.created") loadAll();
   });
 
   if (error) {
@@ -206,7 +206,7 @@ export function RunDetail({ flowId }: { flowId: string }) {
                   {events.map((evt, i) => (
                     <div key={i} className="grid grid-cols-[56px_90px_1fr] sm:grid-cols-[80px_110px_1fr] gap-2 py-1 border-b border-dashed border-border last:border-b-0">
                       <span className="text-fg-dim">{formatTime((evt as any).at).split(" ")[1] ?? ""}</span>
-                      <span className={evt.type === "flow_terminated" ? "text-status-green" : evt.type === "flow_created" ? "text-status-amber" : "text-accent"}>{evt.type}</span>
+                      <span className={evt.kind === "run.ended" ? "text-status-green" : evt.kind === "run.created" ? "text-status-amber" : "text-accent"}>{evt.kind}</span>
                       <span>{formatEventBody(evt)}</span>
                     </div>
                   ))}
@@ -231,10 +231,10 @@ export function RunDetail({ flowId }: { flowId: string }) {
 }
 
 function formatEventBody(evt: SseEvent): string {
-  switch (evt.type) {
-    case "flow_created":   return `created at ${evt.currentStep ?? "?"} (${evt.status})`;
-    case "flow_terminated": return `terminated (${evt.status})`;
-    case "flow_changed": {
+  switch (evt.kind) {
+    case "run.created":   return `created at ${evt.currentStep ?? "?"} (${evt.status})`;
+    case "run.ended": return `terminated (${evt.status})`;
+    case "run.updated": {
       const step = evt.prevStep !== evt.currStep ? `step ${evt.prevStep ?? "?"} → ${evt.currStep ?? "?"}` : `rev ${evt.revision}`;
       const status = evt.prevStatus !== evt.currStatus ? ` · ${evt.prevStatus} → ${evt.currStatus}` : "";
       const keys = (evt.stateKeysAdded?.length || evt.stateKeysRemoved?.length)
@@ -243,6 +243,6 @@ function formatEventBody(evt: SseEvent): string {
       const wait = evt.waitKind ? ` · ${evt.waitKind}` : "";
       return `${step}${status}${keys}${wait}`;
     }
-    case "pipelines_changed": return `pipelines: ${evt.ids.join(", ")}`;
+    case "pipeline.catalog.updated": return `pipelines: ${evt.ids.join(", ")}`;
   }
 }

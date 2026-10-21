@@ -15,7 +15,6 @@ export function createCatalogPublisher({ emit, getDashboardBroadcast }) {
       const broadcastDashboard = getDashboardBroadcast?.();
       if (broadcastDashboard) {
         await broadcastDashboard({
-          type: "pipelines_changed",
           kind: "pipeline.catalog.updated",
           at: now,
           size: payload.count,

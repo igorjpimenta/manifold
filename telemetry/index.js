@@ -41,8 +41,8 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
 
   const logger = api.logger;
 
-  // Canonical-kind fan-out for cost.record.added below (events roadmap
-  // slice 6): identical legacy wire string, envelope adds kind.
+  // Canonical-kind fan-out for cost.record.added below: canonical wire
+  // name, envelope adds kind.
   const { emit } = createEmitter({ getBroadcast, logger });
 
   // ── Budget-cap store service ────────────────────────────────────────────────

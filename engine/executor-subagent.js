@@ -101,7 +101,7 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit
       skill: node.skill,
       agentId: node.agent,
     });
-    // Transcript event (events roadmap slice 2): without it the reply is
+    // Transcript event: without it the reply is visible only inside apply().
     // visible only inside apply(). Tool-fired path carries no reply text — skipped,
     // since the contract requires text and an empty event helps nobody.
     // Nullable like sessionIndex: callers without an emitter (CLI, tests)

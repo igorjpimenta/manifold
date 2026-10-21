@@ -2,9 +2,9 @@
  * Unit tests for events/emit.js
  *
  * Verifies (mirroring test/unit/telemetry/broadcast.test.js conventions):
- *   - WS delivery uses the plugin. prefix + legacy wire name.
- *   - SSE delivery only for session/discuss kinds, with legacy type.
- *   - Envelope stamped (kind, emittedAtMs); legacy `type` dropped.
+ *   - WS delivery uses the plugin. prefix + kind as the wire name.
+ *   - SSE delivery only for session/discuss kinds, envelope untouched.
+ *   - Envelope stamped (kind, emittedAtMs); stray `type` dropped.
  *   - Negative guards: getter undefined/null/throws → never rejects.
  *   - Validation faults reject (unknown kind, missing fields).
  */
@@ -32,7 +32,7 @@ function makeSse(result = { ok: true }) {
 // ── WS delivery ──────────────────────────────────────────────────────────────
 
 describe("emit — gateway WS", () => {
-  test("broadcasts plugin. + legacy name with stamped envelope", async () => {
+  test("broadcasts plugin. + kind with stamped envelope", async () => {
     const broadcast = makeBroadcast();
     const { emit } = createEmitter({ getBroadcast: () => broadcast });
     const res = await emit("gate.resolved", { flowId: "f", itemId: "i", decision: "approve" });
@@ -47,11 +47,13 @@ describe("emit — gateway WS", () => {
     assert.equal(payload.flowId, "f");
   });
 
-  test("session kind uses legacy discuss.turn wire name", async () => {
+  test("wire name is the kind itself — no legacy mapping", async () => {
     const broadcast = makeBroadcast();
     const { emit } = createEmitter({ getBroadcast: () => broadcast });
     await emit("session.transcript.completed", { scope: "node", nodeId: "n", text: "t" });
-    assert.equal(broadcast.calls[0].name, "plugin.discuss.turn");
+    assert.equal(broadcast.calls[0].name, "plugin.session.transcript.completed");
+    await emit("budget.queue.updated", { decision: "approve", count: 1 });
+    assert.equal(broadcast.calls[1].name, "plugin.budget.queue.updated");
   });
 
   test("dashboard-only kind skips WS without error", async () => {
@@ -67,7 +69,7 @@ describe("emit — gateway WS", () => {
 // ── SSE delivery ─────────────────────────────────────────────────────────────
 
 describe("emit — SSE", () => {
-  test("session/discuss kinds reach emitSseEvent with legacy type", async () => {
+  test("session/discuss kinds reach emitSseEvent untouched", async () => {
     const sse = makeSse();
     const { emit } = createEmitter({ getBroadcast: () => null, emitSseEvent: sse });
     const res = await emit("discuss.pending.updated", { flowId: "f", itemId: "i" });
@@ -75,8 +77,8 @@ describe("emit — SSE", () => {
     assert.equal(res.ok, true);
     assert.deepEqual(res.deliveries, { ws: "skipped", sse: "sent" });
     assert.equal(sse.calls.length, 1);
-    assert.equal(sse.calls[0].type, "discuss.pending");
     assert.equal(sse.calls[0].kind, "discuss.pending.updated");
+    assert.equal(sse.calls[0].type, undefined);
   });
 
   test("non-session/discuss kinds skip SSE", async () => {
@@ -86,7 +88,7 @@ describe("emit — SSE", () => {
     assert.equal(sse.calls.length, 0);
   });
 
-  test("legacy incoming type is dropped in favor of kind", async () => {
+  test("stray incoming type is dropped in favor of kind", async () => {
     const broadcast = makeBroadcast();
     const { emit } = createEmitter({ getBroadcast: () => broadcast });
     await emit("gate.opened", { flowId: "f", type: "gate.opened" });

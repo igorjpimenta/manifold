@@ -3,7 +3,7 @@
  *
  * Verifies:
  *   - One reload fans out to gateway WS (canonical kind) and dashboard bus
- *     (legacy type + stamped kind) with identical content.
+ *     with identical content.
  *   - Missing dashboard sink degrades to WS-only without throwing.
  *   - Missing emitter degrades to dashboard-only without throwing.
  */
@@ -24,7 +24,7 @@ function makeEmit() {
 // ── fan-out ──────────────────────────────────────────────────────────────────
 
 describe("publishCatalogChanged — fan-out", () => {
-  test("gateway WS gets canonical kind, dashboard gets legacy type + kind", async () => {
+  test("gateway WS gets canonical kind, dashboard gets kind + content", async () => {
     const emit = makeEmit();
     const dashboardCalls = [];
     const publish = createCatalogPublisher({
@@ -41,7 +41,6 @@ describe("publishCatalogChanged — fan-out", () => {
     assert.equal(typeof emit.calls[0].payload.updatedAt, "number");
 
     assert.equal(dashboardCalls.length, 1);
-    assert.equal(dashboardCalls[0].type, "pipelines_changed");
     assert.equal(dashboardCalls[0].kind, "pipeline.catalog.updated");
     assert.equal(dashboardCalls[0].size, 3);
     assert.deepEqual(dashboardCalls[0].ids, ["a", "b", "c"]);
@@ -63,6 +62,6 @@ describe("publishCatalogChanged — fan-out", () => {
     });
     await publish({ size: 1, ids: ["a"] });
     assert.equal(dashboardCalls.length, 1);
-    assert.equal(dashboardCalls[0].type, "pipelines_changed");
+    assert.equal(dashboardCalls[0].kind, "pipeline.catalog.updated");
   });
 });

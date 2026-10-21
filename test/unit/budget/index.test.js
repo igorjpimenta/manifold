@@ -165,7 +165,7 @@ function postReq(body) {
   };
 }
 
-// ─── canonical budget emissions (events roadmap slice 6) ─────────────────────
+// ─── canonical budget emissions ─────────────────────────────────────────────
 // decide/lock/unlock go through the shared emitter: identical legacy wire
 // strings, envelope adds kind. Real sqlite at a tmp dbPath, same as above.
 
@@ -192,7 +192,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     const route = api._routes.find((r) => r.path === "/pipeclaw/budget/decide");
     await route.handler(postReq({ ids: [itemId], decision: "approve" }), fakeRes());
 
-    const call = calls.find((c) => c.name === "plugin.budget.queue.changed");
+    const call = calls.find((c) => c.name === "plugin.budget.queue.updated");
     assert.ok(call, "queue.changed must fire");
     assert.equal(call.payload.decision, "approve");
     assert.equal(call.payload.count, 1);
@@ -218,7 +218,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
 
     assert.equal(resumes.length, 1);
     assert.deepEqual(resumes[0], { flowId: "flow-9", nodeId: "SUBMIT", decision: "reject" });
-    assert.ok(calls.find((c) => c.name === "plugin.budget.queue.changed"), "decision still broadcasts");
+    assert.ok(calls.find((c) => c.name === "plugin.budget.queue.updated"), "decision still broadcasts");
   });
 
   it("queue items carry kind tags: node by default, run-start when passed", async () => {
@@ -253,7 +253,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     const unlockRoute = api._routes.find((r) => r.path === "/pipeclaw/budget/gate/unlock");
     await unlockRoute.handler({ method: "POST" }, fakeRes());
 
-    const locked = calls.filter((c) => c.name === "plugin.gate.lock.changed");
+    const locked = calls.filter((c) => c.name === "plugin.budget.lock.changed");
     assert.equal(locked.length, 2);
     assert.equal(locked[0].payload.locked, true);
     assert.equal(locked[1].payload.locked, false);

@@ -10,8 +10,8 @@
 //   components_json  — tool-seeded components keyed by kind; one entry
 //                      per kind, last-write-wins. Cleared on gate resolve.
 //
-// SSE events (discuss.component / discuss.turn) update iOS in real-time.
-// This store makes correctness independent of SSE delivery: iOS reloads
+// Session/component events update clients in real-time.
+// This store makes correctness independent of event delivery: clients reload
 // full state on open/reconnect/foreground.
 
 import { randomUUID } from "node:crypto";
