@@ -131,9 +131,9 @@ export async function openStore({ dbPath = DEFAULT_DB_PATH, legacyDbPath = LEGAC
   return makeStore(client, dbPath);
 }
 
-/** Cross-DB JOIN target: pipeclaw's flow_runs lives in a sibling sqlite.
+/** Cross-DB JOIN target: manifold's flow_runs lives in a sibling sqlite.
  *  Attached read-only so ROI queries (status × cost) work in a single hop.
- *  Silent if absent — installations without pipeclaw keep working. */
+ *  Silent if absent — installations without manifold keep working. */
 async function attachFlowsDb(client) {
   const flowsPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
   if (!fs.existsSync(flowsPath)) return;

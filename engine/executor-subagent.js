@@ -33,7 +33,7 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger }) {
     // early instead of waiting out the model's redundant post-tool-call
     // wrap-up reply.
     //
-    // There is deliberately no pipeclaw-side deadline, idle or absolute: a
+    // There is deliberately no manifold-side deadline, idle or absolute: a
     // dispatched run can sit silently in the gateway's own lane queue
     // (agents.defaults.maxConcurrent) for arbitrarily long, and neither
     // silence nor wall-clock time there means the run is hung.

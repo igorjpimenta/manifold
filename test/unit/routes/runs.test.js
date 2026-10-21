@@ -54,7 +54,7 @@ function authReq(method, path) {
 }
 
 function prefixHandler(routes) {
-  return routes.find((r) => r.path === "/pipeclaw/runs/" && r.match === "prefix").handler;
+  return routes.find((r) => r.path === "/manifold/runs/" && r.match === "prefix").handler;
 }
 
 function makeDeps(api, overrides = {}) {
@@ -90,8 +90,8 @@ describe("registerRunRoutes — registration", () => {
   test("cost route: path, auth, match", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const r = routes.find((r) => r.path === "/pipeclaw/cost");
-    assert.ok(r, "/pipeclaw/cost route present");
+    const r = routes.find((r) => r.path === "/manifold/cost");
+    assert.ok(r, "/manifold/cost route present");
     assert.equal(r.auth, "plugin");
     assert.equal(r.match, "exact");
   });
@@ -99,24 +99,24 @@ describe("registerRunRoutes — registration", () => {
   test("runs list route: path, auth, match", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const r = routes.find((r) => r.path === "/pipeclaw/runs" && r.match === "exact");
-    assert.ok(r, "/pipeclaw/runs exact route present");
+    const r = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
+    assert.ok(r, "/manifold/runs exact route present");
     assert.equal(r.auth, "plugin");
   });
 
   test("runs prefix route: path, auth, match", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const r = routes.find((r) => r.path === "/pipeclaw/runs/" && r.match === "prefix");
-    assert.ok(r, "/pipeclaw/runs/ prefix route present");
+    const r = routes.find((r) => r.path === "/manifold/runs/" && r.match === "prefix");
+    assert.ok(r, "/manifold/runs/ prefix route present");
     assert.equal(r.auth, "plugin");
   });
 
   test("queue route: path, auth, match", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const r = routes.find((r) => r.path === "/pipeclaw/queue");
-    assert.ok(r, "/pipeclaw/queue route present");
+    const r = routes.find((r) => r.path === "/manifold/queue");
+    assert.ok(r, "/manifold/queue route present");
     assert.equal(r.auth, "plugin");
     assert.equal(r.match, "exact");
   });
@@ -124,8 +124,8 @@ describe("registerRunRoutes — registration", () => {
   test("errors route: path, auth, match", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const r = routes.find((r) => r.path === "/pipeclaw/errors");
-    assert.ok(r, "/pipeclaw/errors route present");
+    const r = routes.find((r) => r.path === "/manifold/errors");
+    assert.ok(r, "/manifold/errors route present");
     assert.equal(r.auth, "plugin");
     assert.equal(r.match, "exact");
   });
@@ -133,8 +133,8 @@ describe("registerRunRoutes — registration", () => {
   test("tree-summary route: path, auth, match", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const r = routes.find((r) => r.path === "/pipeclaw/tree-summary");
-    assert.ok(r, "/pipeclaw/tree-summary route present");
+    const r = routes.find((r) => r.path === "/manifold/tree-summary");
+    assert.ok(r, "/manifold/tree-summary route present");
     assert.equal(r.auth, "plugin");
     assert.equal(r.match, "exact");
   });
@@ -152,27 +152,27 @@ describe("registerRunRoutes — method guards", () => {
   test("cost route: POST → 405", async () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/cost");
+    const { handler } = routes.find((r) => r.path === "/manifold/cost");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/pipeclaw/cost"), res);
+    await handler(createMockReq("POST", "/manifold/cost"), res);
     assert.equal(res.statusCode, 405);
   });
 
   test("runs list route: POST → 405", async () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/runs" && r.match === "exact");
+    const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/pipeclaw/runs"), res);
+    await handler(createMockReq("POST", "/manifold/runs"), res);
     assert.equal(res.statusCode, 405);
   });
 
   test("queue route: POST → 405", async () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/queue");
+    const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/pipeclaw/queue"), res);
+    await handler(createMockReq("POST", "/manifold/queue"), res);
     assert.equal(res.statusCode, 405);
   });
 });
@@ -185,9 +185,9 @@ describe("registerRunRoutes — cost handler", () => {
     registerRunRoutes(makeDeps(api, {
       costForAllPipelines: async () => ({ pipelines: [{ id: "team_pipe", total: 1.23 }], sinceMs: null }),
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/cost");
+    const { handler } = routes.find((r) => r.path === "/manifold/cost");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/cost"), res);
+    await handler(createMockReq("GET", "/manifold/cost"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.pipelines), "pipelines is array");
@@ -200,9 +200,9 @@ describe("registerRunRoutes — queue handler", () => {
   test("empty store returns {items: []}", async () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/queue");
+    const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/queue"), res);
+    await handler(createMockReq("GET", "/manifold/queue"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.items, []);
@@ -220,9 +220,9 @@ describe("registerRunRoutes — queue handler", () => {
     registerRunRoutes(makeDeps(api, {
       readStore: { list: () => [], get: () => null, listQueued: () => [fakeQueuedRow] },
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/queue");
+    const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/queue"), res);
+    await handler(createMockReq("GET", "/manifold/queue"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.items.length, 1);
@@ -247,9 +247,9 @@ describe("registerRunRoutes — queue handler", () => {
     registerRunRoutes(makeDeps(api, {
       readStore: { list: () => [], get: () => null, listQueued: () => [fakeQueuedRow] },
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/queue");
+    const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/queue"), res);
+    await handler(createMockReq("GET", "/manifold/queue"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].parentFlowId, null);
     assert.equal(body.items[0].nodeId, null);
@@ -261,9 +261,9 @@ describe("registerRunRoutes — errors handler", () => {
   test("no flowIds param → 400", async () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/errors");
+    const { handler } = routes.find((r) => r.path === "/manifold/errors");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/errors"), res);
+    await handler(createMockReq("GET", "/manifold/errors"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -273,9 +273,9 @@ describe("registerRunRoutes — errors handler", () => {
     ]);
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/errors");
+    const { handler } = routes.find((r) => r.path === "/manifold/errors");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/errors?flowIds=flow-a"), res);
+    await handler(createMockReq("GET", "/manifold/errors?flowIds=flow-a"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(body.errors["flow-a"], "flow-a key present");
@@ -286,9 +286,9 @@ describe("registerRunRoutes — errors handler", () => {
     queryErrorsByFlowIdsImpl = () => new Map();
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/errors");
+    const { handler } = routes.find((r) => r.path === "/manifold/errors");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/errors?flowIds=flow-z"), res);
+    await handler(createMockReq("GET", "/manifold/errors?flowIds=flow-z"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.errors, {});
@@ -299,9 +299,9 @@ describe("registerRunRoutes — runs list handler", () => {
   test("empty store returns {runs: []}", async () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/runs" && r.match === "exact");
+    const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/runs"), res);
+    await handler(createMockReq("GET", "/manifold/runs"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.runs), "runs is an array");
@@ -316,9 +316,9 @@ describe("registerRunRoutes — runs list handler", () => {
       createdAtMs: 1000, updatedAtMs: 2000,
     };
     registerRunRoutes(makeDeps(api, { readStore: { listStatusCounts: () => ({}), listRunsPage: () => [fakeRun], get: () => null } }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/runs" && r.match === "exact");
+    const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/runs"), res);
+    await handler(createMockReq("GET", "/manifold/runs"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.runs.length, 1);
     assert.equal(body.runs[0].flowId, "abc123");
@@ -336,16 +336,16 @@ describe("registerRunRoutes — runs list handler", () => {
       createdAtMs: 1000, updatedAtMs: 2000,
     };
     registerRunRoutes(makeDeps(api, { readStore: { listStatusCounts: () => ({}), listRunsPage: () => [fakeRun], get: () => null } }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/runs" && r.match === "exact");
+    const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/runs"), res);
+    await handler(createMockReq("GET", "/manifold/runs"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.runs[0].currentStep, "FETCH");
     assert.equal(body.runs[0].lastStep, "INIT");
   });
 });
 
-// ── sendFullRun (GET /pipeclaw/runs/:flowId) — errorEntries (Phase 1.5) ───────
+// ── sendFullRun (GET /manifold/runs/:flowId) — errorEntries (Phase 1.5) ───────
 
 describe("registerRunRoutes — sendFullRun errorEntries", () => {
   test("includes a top-level errorEntries array sourced from failureStore.queryErrorsByFlow", async () => {
@@ -362,7 +362,7 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     };
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-full" ? fakeRun : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-full"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-full"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.errorEntries, [{ nodeId: "SUBMIT", subflowKey: null, message: "boom", at: 1 }]);
@@ -384,7 +384,7 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     };
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-clean" ? fakeRun : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-clean"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-clean"), res);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.errorEntries, []);
   });
@@ -402,7 +402,7 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     };
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-legacy" ? fakeRun : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-legacy"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-legacy"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.stateJson.errors, undefined);
     assert.equal(body.stateJson.pipelineId, "team_pipe", "other stateJson fields survive the strip");
@@ -426,7 +426,7 @@ describe("registerRunRoutes — sendFullRun parent-link resolution", () => {
     };
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-top" ? fakeRun : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-top"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-top"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.pipelineId, "team_pipe");
     assert.equal(body.parentFlowId, null);
@@ -460,7 +460,7 @@ describe("registerRunRoutes — sendFullRun parent-link resolution", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-child"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-child"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.pipelineId, "nyxen_linkedin-prospect", "resolved via the parent's own row, not the synthetic pipeline_id");
     assert.equal(body.parentFlowId, "flow-parent");
@@ -481,7 +481,7 @@ describe("registerRunRoutes — sendFullRun parent-link resolution", () => {
     };
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-orphan-child" ? fakeChild : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-orphan-child"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-orphan-child"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.pipelineId, "team_pipe::LOOP");
     assert.equal(body.parentFlowId, null);
@@ -515,7 +515,7 @@ describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () =>
     };
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-gated" ? fakeRun : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-gated"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-gated"), res);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.stateJson.gates, { GATE_A: { decision: "approved", at: 5 } });
   });
@@ -540,7 +540,7 @@ describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () =>
       readStore: { list: () => [], get: (id) => id === "flow-resultjson" ? fakeRun : null },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-resultjson"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-resultjson"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.stateJson.pipelineId, "team_pipe", "baseState fields survive");
     assert.deepEqual(body.stateJson.SCAN, { listings: ["a", "b"] }, "resultJson replay merges the node's own output in");

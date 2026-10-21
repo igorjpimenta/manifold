@@ -147,9 +147,9 @@ describe("runSubagentTurn — tool-fired race", () => {
   });
 });
 
-// ── runSubagentTurn — no pipeclaw-side deadline ──────────────────────────────
+// ── runSubagentTurn — no manifold-side deadline ──────────────────────────────
 
-describe("runSubagentTurn — no pipeclaw-side deadline", () => {
+describe("runSubagentTurn — no manifold-side deadline", () => {
   it("waits for the run's own end: a silent run is awaited even if the node still sets timeoutMs/idleTimeoutMs, and agent.wait gets the maximum timer delay, never a node value or the gateway's 30s default", async () => {
     let waitParams = null;
     const sub = makeSubagent({

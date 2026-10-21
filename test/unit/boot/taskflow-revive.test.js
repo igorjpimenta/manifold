@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { queryRunningOrphans, cancelOrphan, reviveSession, reviveViaFlowRevival, scanAndCleanup, isPipeclawOwnedSession, REVIVAL_MSG } from "../../../boot/taskflow-revive.js";
+import { queryRunningOrphans, cancelOrphan, reviveSession, reviveViaFlowRevival, scanAndCleanup, isManifoldOwnedSession, REVIVAL_MSG } from "../../../boot/taskflow-revive.js";
 import { createGatewaySubagentGate } from "../../../engine/gateway-subagent.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -193,44 +193,44 @@ describe("reviveSession", () => {
   });
 });
 
-// ── isPipeclawOwnedSession ──────────────────────────────────────────────────────
+// ── isManifoldOwnedSession ──────────────────────────────────────────────────────
 
-describe("isPipeclawOwnedSession", () => {
-  it("returns true when the session store's pluginOwnerId is 'pipeclaw'", () => {
+describe("isManifoldOwnedSession", () => {
+  it("returns true when the session store's pluginOwnerId is 'manifold'", () => {
     const sessionKey = "agent:scorer:subagent:custom-key-not-gf-shaped";
-    const agentsRoot = makeAgentsRoot("scorer", { [sessionKey]: { pluginOwnerId: "pipeclaw" } });
-    assert.equal(isPipeclawOwnedSession({ agentId: "scorer", sessionKey }, { agentsRoot }), true);
+    const agentsRoot = makeAgentsRoot("scorer", { [sessionKey]: { pluginOwnerId: "manifold" } });
+    assert.equal(isManifoldOwnedSession({ agentId: "scorer", sessionKey }, { agentsRoot }), true);
   });
 
   it("returns true for the legacy 'graph-flow' pluginOwnerId", () => {
     const sessionKey = "agent:scorer:subagent:another-custom-key";
     const agentsRoot = makeAgentsRoot("scorer", { [sessionKey]: { pluginOwnerId: "graph-flow" } });
-    assert.equal(isPipeclawOwnedSession({ agentId: "scorer", sessionKey }, { agentsRoot }), true);
+    assert.equal(isManifoldOwnedSession({ agentId: "scorer", sessionKey }, { agentsRoot }), true);
   });
 
-  it("returns false when the store says a different plugin owns it, even if the key looks pipeclaw-shaped", () => {
+  it("returns false when the store says a different plugin owns it, even if the key looks manifold-shaped", () => {
     // The authoritative store record wins over the naming-convention heuristic.
     const sessionKey = "agent:scorer:subagent:gf-99d6948f-score_llm";
     const agentsRoot = makeAgentsRoot("scorer", { [sessionKey]: { pluginOwnerId: "some-other-plugin" } });
-    assert.equal(isPipeclawOwnedSession({ agentId: "scorer", sessionKey }, { agentsRoot }), false);
+    assert.equal(isManifoldOwnedSession({ agentId: "scorer", sessionKey }, { agentsRoot }), false);
   });
 
   it("falls back to the sessionKey heuristic when the agent has no session store on disk", () => {
     const agentsRoot = join(tmpdir(), `taskflow-agents-missing-${randomUUID()}`);
     assert.equal(
-      isPipeclawOwnedSession({ agentId: "nonexistent-agent", sessionKey: "agent:scorer:subagent:gf-99d6948f-score_llm" }, { agentsRoot }),
+      isManifoldOwnedSession({ agentId: "nonexistent-agent", sessionKey: "agent:scorer:subagent:gf-99d6948f-score_llm" }, { agentsRoot }),
       true,
     );
     assert.equal(
-      isPipeclawOwnedSession({ agentId: "nonexistent-agent", sessionKey: "agent:main:cron:some-job" }, { agentsRoot }),
+      isManifoldOwnedSession({ agentId: "nonexistent-agent", sessionKey: "agent:main:cron:some-job" }, { agentsRoot }),
       false,
     );
   });
 
   it("falls back to the sessionKey heuristic when the session isn't in the store", () => {
-    const agentsRoot = makeAgentsRoot("scorer", { "agent:scorer:subagent:unrelated": { pluginOwnerId: "pipeclaw" } });
+    const agentsRoot = makeAgentsRoot("scorer", { "agent:scorer:subagent:unrelated": { pluginOwnerId: "manifold" } });
     assert.equal(
-      isPipeclawOwnedSession({ agentId: "scorer", sessionKey: "agent:scorer:subagent:gf-99d6948f-score_llm" }, { agentsRoot }),
+      isManifoldOwnedSession({ agentId: "scorer", sessionKey: "agent:scorer:subagent:gf-99d6948f-score_llm" }, { agentsRoot }),
       true,
     );
   });
@@ -239,12 +239,12 @@ describe("isPipeclawOwnedSession", () => {
     const sessionKeyA = "agent:scorer:subagent:key-a";
     const sessionKeyB = "agent:scorer:subagent:key-b";
     const agentsRoot = makeAgentsRoot("scorer", {
-      [sessionKeyA]: { pluginOwnerId: "pipeclaw" },
-      [sessionKeyB]: { pluginOwnerId: "not-pipeclaw" },
+      [sessionKeyA]: { pluginOwnerId: "manifold" },
+      [sessionKeyB]: { pluginOwnerId: "not-manifold" },
     });
     const cache = new Map();
-    assert.equal(isPipeclawOwnedSession({ agentId: "scorer", sessionKey: sessionKeyA }, { agentsRoot, cache }), true);
-    assert.equal(isPipeclawOwnedSession({ agentId: "scorer", sessionKey: sessionKeyB }, { agentsRoot, cache }), false);
+    assert.equal(isManifoldOwnedSession({ agentId: "scorer", sessionKey: sessionKeyA }, { agentsRoot, cache }), true);
+    assert.equal(isManifoldOwnedSession({ agentId: "scorer", sessionKey: sessionKeyB }, { agentsRoot, cache }), false);
     assert.equal(cache.size, 1, "one parsed store cached per agentId, reused for both lookups");
   });
 });
@@ -331,15 +331,15 @@ describe("scanAndCleanup", () => {
     assert.ok(logger._lines.info.some((m) => m.includes("revived=0")));
   });
 
-  // Both pipeclaw-flow-revival and pipeclaw-taskflow-revive start at boot
+  // Both manifold-flow-revival and manifold-taskflow-revive start at boot
   // with no ordering between them (startupDelayMs defaults to 0). A cancel
   // issued here by session key can tear down a fresh reviveAgentKindOrphan
   // dispatch already in flight under that exact deterministic key — the
   // dispatch then hangs with nothing left to observe or log it. A
-  // pipeclaw-owned session must not be touched at all, not even to cancel it.
-  it("skips a pipeclaw-owned session entirely — no cancel call, no revival dispatch", async () => {
+  // manifold-owned session must not be touched at all, not even to cancel it.
+  it("skips a manifold-owned session entirely — no cancel call, no revival dispatch", async () => {
     const dbPath = makeTempDb([
-      { task_id: "task-pipeclaw-01", status: "running", child_session_key: "agent:scorer:subagent:gf-99d6948f-score_llm", last_event_at: 1000 },
+      { task_id: "task-manifold-01", status: "running", child_session_key: "agent:scorer:subagent:gf-99d6948f-score_llm", last_event_at: 1000 },
     ]);
     let cancelCalled = false;
     let runCalled = false;
@@ -353,20 +353,20 @@ describe("scanAndCleanup", () => {
     };
     const logger = makeLogger();
     await scanAndCleanup(api, dbPath, 0, logger);
-    assert.equal(cancelCalled, false, "must not cancel a pipeclaw-owned session's task_run — it may be bound to a fresh dispatch already in flight");
-    assert.equal(runCalled, false, "must not dispatch a competing turn on a pipeclaw-owned session");
-    assert.ok(logger._lines.info.some((m) => m.includes("skipping") && m.includes("entirely") && m.includes("owned by pipeclaw")));
+    assert.equal(cancelCalled, false, "must not cancel a manifold-owned session's task_run — it may be bound to a fresh dispatch already in flight");
+    assert.equal(runCalled, false, "must not dispatch a competing turn on a manifold-owned session");
+    assert.ok(logger._lines.info.some((m) => m.includes("skipping") && m.includes("entirely") && m.includes("owned by manifold")));
     assert.ok(logger._lines.info.some((m) => m.includes("scanned=1 cancelled=0 revived=0")));
   });
 
   // The actual point of the delegation: when sessionIndex/runStore/executor
-  // are wired in, a pipeclaw-owned orphan is routed to the flow's own
+  // are wired in, a manifold-owned orphan is routed to the flow's own
   // revival function — the one that actually knows how to resolve the
   // pipeline/node and feed a reply back into flow state — instead of
   // either the generic cancel+reviveSession path or a silent skip.
-  it("delegates a pipeclaw-owned orphan to the flow's own revival function", async () => {
+  it("delegates a manifold-owned orphan to the flow's own revival function", async () => {
     const dbPath = makeTempDb([
-      { task_id: "task-pipeclaw-02", status: "running", child_session_key: "agent:scorer:subagent:gf-99d6948f-score_llm", last_event_at: 1000 },
+      { task_id: "task-manifold-02", status: "running", child_session_key: "agent:scorer:subagent:gf-99d6948f-score_llm", last_event_at: 1000 },
     ]);
     let cancelCalled = false;
     let genericRunCalled = false;
@@ -397,10 +397,10 @@ describe("scanAndCleanup", () => {
   // A failed delegation (flow already terminal, not found, or deps not
   // wired) must still skip the row entirely — never fall back to the
   // generic cancel+reviveSession path, which is exactly the race this
-  // delegation exists to avoid for a pipeclaw-owned session.
+  // delegation exists to avoid for a manifold-owned session.
   it("skips (does not fall back to generic cancel) when the delegated flow is already terminal", async () => {
     const dbPath = makeTempDb([
-      { task_id: "task-pipeclaw-03", status: "running", child_session_key: "agent:scorer:subagent:gf-deadbeef-score_llm", last_event_at: 1000 },
+      { task_id: "task-manifold-03", status: "running", child_session_key: "agent:scorer:subagent:gf-deadbeef-score_llm", last_event_at: 1000 },
     ]);
     let cancelCalled = false;
     const api = {

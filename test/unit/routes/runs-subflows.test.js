@@ -1,7 +1,7 @@
 /**
- * Unit tests for the /pipeclaw/runs/:flowId/subflows endpoint.
+ * Unit tests for the /manifold/runs/:flowId/subflows endpoint.
  *
- * sendSubflowsList serves GET /pipeclaw/runs/:flowId/subflows and resolves
+ * sendSubflowsList serves GET /manifold/runs/:flowId/subflows and resolves
  * a subflow node's real flow_runs children via getAllSubflowGroups
  * (nodeExecutionsStore/runStore). The old branchService path is gone.
  */
@@ -81,15 +81,15 @@ function resetNodeExecutionsMock() {
 }
 
 function prefixHandler(routes) {
-  return routes.find((r) => r.path === "/pipeclaw/runs/" && r.match === "prefix").handler;
+  return routes.find((r) => r.path === "/manifold/runs/" && r.match === "prefix").handler;
 }
 
 
 function subflowReq(flowId) {
-  return authReq("GET", `/pipeclaw/runs/${flowId}/subflows`);
+  return authReq("GET", `/manifold/runs/${flowId}/subflows`);
 }
 
-// ── GET /pipeclaw/runs/:flowId/subflows ───────────────────────────────────────
+// ── GET /manifold/runs/:flowId/subflows ───────────────────────────────────────
 
 describe("sendSubflowsList — 200 + subflow data", () => {
   test("returns { subflows: [] } when no subflows for the flow", async () => {
@@ -227,7 +227,7 @@ describe("sendSubflowsList — error cases", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -236,7 +236,7 @@ describe("sendSubflowsList — error cases", () => {
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
     // 405 is checked before auth, so no token needed
-    await prefixHandler(routes)(createMockReq("DELETE", "/pipeclaw/runs/some-flow/subflows"), res);
+    await prefixHandler(routes)(createMockReq("DELETE", "/manifold/runs/some-flow/subflows"), res);
     assert.equal(res.statusCode, 405);
   });
 });

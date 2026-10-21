@@ -49,7 +49,7 @@ describe("registerFailureRoutes — registration", () => {
     registerFailureRoutes(makeDeps(api));
     const r = routes.find((r) => r.match === "exact");
     assert.ok(r, "exact-match route exists");
-    assert.equal(r.path, "/pipeclaw/failures");
+    assert.equal(r.path, "/manifold/failures");
     assert.equal(r.auth, "plugin");
   });
 
@@ -58,7 +58,7 @@ describe("registerFailureRoutes — registration", () => {
     registerFailureRoutes(makeDeps(api));
     const r = routes.find((r) => r.match === "prefix");
     assert.ok(r, "prefix-match route exists");
-    assert.equal(r.path, "/pipeclaw/failures/");
+    assert.equal(r.path, "/manifold/failures/");
     assert.equal(r.auth, "plugin");
   });
 
@@ -79,7 +79,7 @@ describe("registerFailureRoutes — method guards", () => {
     registerFailureRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/pipeclaw/failures"), res);
+    await handler(createMockReq("POST", "/manifold/failures"), res);
     assert.equal(res.statusCode, 405);
   });
 
@@ -88,7 +88,7 @@ describe("registerFailureRoutes — method guards", () => {
     registerFailureRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("DELETE", "/pipeclaw/failures"), res);
+    await handler(createMockReq("DELETE", "/manifold/failures"), res);
     assert.equal(res.statusCode, 405);
   });
 });
@@ -101,7 +101,7 @@ describe("registerFailureRoutes — list handler", () => {
     registerFailureRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/failures"), res);
+    await handler(createMockReq("GET", "/manifold/failures"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.rows), "body.rows is an array");
@@ -122,7 +122,7 @@ describe("registerFailureRoutes — list handler", () => {
     }));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/failures"), res);
+    await handler(createMockReq("GET", "/manifold/failures"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.rows.length, 1);

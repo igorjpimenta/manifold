@@ -1,11 +1,11 @@
-// telemetry/index.js — lineage + cost attribution wired into pipeclaw.
+// telemetry/index.js — lineage + cost attribution wired into manifold.
 // Absorbed from extensions/lineage/; exposes registerTelemetry(api) instead of
-// definePluginEntry so pipeclaw's own plugin entry calls it inline.
+// definePluginEntry so manifold's own plugin entry calls it inline.
 //
 // Responsibilities (unchanged from lineage):
 //   - session_lineage + cost_by_call writes via before_agent_start /
 //     subagent_spawned / session_start / before_message_write hooks
-//   - /pipeclaw/telemetry/* HTTP read-only endpoints (cost, tree, budget cap)
+//   - /manifold/telemetry/* HTTP read-only endpoints (cost, tree, budget cap)
 //   - api.runtime.lineage.recordTrigger / recordSpawn cross-plugin API
 //   - `openclaw lineage` CLI subcommands
 
@@ -23,7 +23,7 @@ import { registerHttpRoutes } from "./http.js";
 let SHARED_STORE = null;
 let SHARED_RESOLVER = null;
 
-// Live accessor for pipeclaw modules that need to resolve a session's
+// Live accessor for manifold modules that need to resolve a session's
 // flow/item lineage (e.g. propose_draft's gate-context auto-resolve)
 // without opening their own resolver instance. Returns null until the
 // lineage-service's start() hook has run.
@@ -226,7 +226,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
 
   registerHttpRoutes({ api, getStore: () => SHARED_STORE, logger, getBroadcast });
 
-  // Redirect shim: /lineage/* → /pipeclaw/telemetry/* until iOS build deploys.
+  // Redirect shim: /lineage/* → /manifold/telemetry/* until iOS build deploys.
   const SHIM_PATHS = [
     ["GET",  "/lineage/cost/home"],
     ["GET",  "/lineage/cost/breakdown"],
@@ -253,7 +253,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     ["GET",  "/lineage/sessions/parts"],
   ];
   for (const [method, oldPath] of SHIM_PATHS) {
-    const newPath = oldPath.replace("/lineage/", "/pipeclaw/telemetry/");
+    const newPath = oldPath.replace("/lineage/", "/manifold/telemetry/");
     api.registerHttpRoute({
       method,
       path: oldPath,

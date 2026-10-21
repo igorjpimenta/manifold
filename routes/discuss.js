@@ -96,7 +96,7 @@ export function registerDiscussHandlers({
         ok: false,
         status: 400,
         code: "discuss_not_supported",
-        error: "this gate's pipeline hasn't opted into discussion (set `discuss: { agent, promptBuilder }` on the gate node, or set `pipeclawParrot.defaultAgent` in the pipeclaw plugin config in openclaw.json)",
+        error: "this gate's pipeline hasn't opted into discussion (set `discuss: { agent, promptBuilder }` on the gate node, or set `manifoldParrot.defaultAgent` in the manifold plugin config in openclaw.json)",
       };
     }
     const stamp = readDiscussSession(sourceFlow.flowId, gateNodeId, normalizedItemId);
@@ -167,7 +167,7 @@ export function registerDiscussHandlers({
         };
         systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
       } catch (err) {
-        api.logger.warn(`pipeclaw discuss promptBuilder threw for ${sourceFlow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
+        api.logger.warn(`manifold discuss promptBuilder threw for ${sourceFlow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
       }
     }
     const turnId = randomUUID();
@@ -202,7 +202,7 @@ export function registerDiscussHandlers({
 
     setImmediate(async () => {
       try {
-        const elev = await invokeElevated("/pipeclaw/_elev/discuss", {
+        const elev = await invokeElevated("/manifold/_elev/discuss", {
           flowId: sourceFlow.flowId,
           sessionKey: target.sessionKey,
           sessionId: target.sessionId,
@@ -258,15 +258,15 @@ export function registerDiscussHandlers({
             };
         const pushRes = await emitSseEvent(event);
         if (!pushRes.ok) {
-          api.logger.warn(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
+          api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
         } else {
-          api.logger.info(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${event.status} → SSE pushed`);
+          api.logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${event.status} → SSE pushed`);
         }
         import("node:fs/promises").then(({ unlink }) =>
           unlink(path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId, `${target.itemId}.pending.json`))
         ).catch(() => { /* non-fatal */ });
       } catch (err) {
-        api.logger.warn(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
         try {
           await discussStore.stampMessageError(sourceFlow.flowId, target.itemId, turnId, err?.message ?? String(err));
           await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
@@ -337,7 +337,7 @@ export function registerDiscussHandlers({
     if (transcriptStatus !== "completed") return;
 
     try {
-      const elev = await invokeElevated("/pipeclaw/_elev/discuss", {
+      const elev = await invokeElevated("/manifold/_elev/discuss", {
         flowId: sourceFlow.flowId,
         sessionKey: target.sessionKey,
         sessionId: target.sessionId,
@@ -438,13 +438,13 @@ export function registerDiscussHandlers({
       await mkdir(audioDir, { recursive: true });
       await writeFile(audioPath, Buffer.from(audioB64, "base64"));
     } catch (err) {
-      api.logger.warn(`pipeclaw discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: persist failed: ${err?.message ?? err}`);
+      api.logger.warn(`manifold discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: persist failed: ${err?.message ?? err}`);
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: false, code: "audio_persist_failed", error: err?.message ?? String(err) }));
       return true;
     }
-    const audioUrl = `/pipeclaw/runs/${sourceFlow.flowId}/discuss/audio/${turnId}.${ext}`;
+    const audioUrl = `/manifold/runs/${sourceFlow.flowId}/discuss/audio/${turnId}.${ext}`;
     const metaPath = path.join(audioDir, `${turnId}.meta.json`);
     const createdAtMs = Date.now();
     try {
@@ -453,7 +453,7 @@ export function registerDiscussHandlers({
         turnId, itemId: target.itemId, audioUrl, transcript: null, status: "pending", createdAtMs,
       }, null, 2));
     } catch (err) {
-      api.logger.warn(`pipeclaw discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: pending meta sidecar failed: ${err?.message ?? err}`);
+      api.logger.warn(`manifold discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: pending meta sidecar failed: ${err?.message ?? err}`);
     }
 
     res.statusCode = 202;
@@ -477,14 +477,14 @@ export function registerDiscussHandlers({
         };
         systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
       } catch (err) {
-        api.logger.warn(`pipeclaw discuss/audio promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
+        api.logger.warn(`manifold discuss/audio promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
       }
     }
 
     setImmediate(() => transcribeAndDispatch({
       sourceFlow, target, turnId, audioPath, audioUrl, metaPath,
       mime: contentType, language, systemPrompt, createdAtMs,
-      logPrefix: `pipeclaw discuss/audio async [${flowIdShort}/${turnId.slice(0, 8)}]`,
+      logPrefix: `manifold discuss/audio async [${flowIdShort}/${turnId.slice(0, 8)}]`,
     }));
     return true;
   }
@@ -558,7 +558,7 @@ export function registerDiscussHandlers({
         };
         systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
       } catch (err) {
-        api.logger.warn(`pipeclaw discuss/audio/retry promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
+        api.logger.warn(`manifold discuss/audio/retry promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
       }
     }
 
@@ -570,7 +570,7 @@ export function registerDiscussHandlers({
       sourceFlow, target, turnId, audioPath, audioUrl, metaPath,
       mime: EXT_TO_MIME[ext] ?? "audio/m4a", language: undefined, systemPrompt,
       createdAtMs: typeof meta.createdAtMs === "number" ? meta.createdAtMs : Date.now(),
-      logPrefix: `pipeclaw discuss/audio/retry async [${flowIdShort}/${turnId.slice(0, 8)}]`,
+      logPrefix: `manifold discuss/audio/retry async [${flowIdShort}/${turnId.slice(0, 8)}]`,
     }));
     return true;
   }
@@ -664,7 +664,7 @@ export function registerDiscussHandlers({
           updatedAt: typeof fsPending.updatedAt === "number" ? fsPending.updatedAt : null,
         };
       } else {
-        const elev = await invokeElevated("/pipeclaw/_elev/discuss_history", {
+        const elev = await invokeElevated("/manifold/_elev/discuss_history", {
           flowId: sourceFlow.flowId,
           sessionKey: target.sessionKey,
           sessionId: target.sessionId,
@@ -772,12 +772,12 @@ export function registerDiscussHandlers({
         } catch { /* sidecar absent or unreadable → no-op */ }
       }
     } catch (err) {
-      api.logger.warn(`pipeclaw discuss history enrichment error: ${err?.message ?? err}`);
+      api.logger.warn(`manifold discuss history enrichment error: ${err?.message ?? err}`);
       if (!parsed) parsed = { ok: false, code: "internal", error: err?.message ?? String(err) };
     }
     if (parsed?.ok) {
-      parsed.channelId = "pipeclaw-parrot";
-      parsed.channelInboundUrl = "/channels/pipeclaw-parrot/message";
+      parsed.channelId = "manifold-parrot";
+      parsed.channelInboundUrl = "/channels/manifold-parrot/message";
     }
     res.statusCode = (parsed?.ok) ? 200 : 500;
     res.setHeader("Content-Type", "application/json");
@@ -835,7 +835,7 @@ export function registerDiscussHandlers({
         logger: api.logger,
       });
       if (!r.applied) {
-        api.logger.warn(`pipeclaw discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: body persist failed: ${r.code}`);
+        api.logger.warn(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: body persist failed: ${r.code}`);
         res.statusCode = r.code === "rejected_meta_narration" ? 400 : 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: r.code }));
@@ -852,7 +852,7 @@ export function registerDiscussHandlers({
         logger: api.logger,
       });
       if (!r.applied) {
-        api.logger.warn(`pipeclaw discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: meta persist failed: ${r.code}`);
+        api.logger.warn(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: meta persist failed: ${r.code}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: r.code }));
@@ -863,7 +863,7 @@ export function registerDiscussHandlers({
     // INTENTIONAL: no gateResolver.recordItemDecision here.
     // Apply revises; Approve commits. They are separate operator intents.
     try { clearPending(sourceFlow.flowId, target.itemId); } catch {}
-    api.logger.info(`pipeclaw discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: applied (${summary.join(", ")})`);
+    api.logger.info(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: applied (${summary.join(", ")})`);
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ ok: true }));

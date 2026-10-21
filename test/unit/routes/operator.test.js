@@ -107,9 +107,9 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
 
   // plugin-auth routes (mobile can hit these directly)
   for (const { path, auth } of [
-    { path: "/pipeclaw/gate/resolve", auth: "plugin" },
-    { path: "/pipeclaw/cancel",        auth: "plugin" },
-    { path: "/pipeclaw/start",         auth: "plugin" },
+    { path: "/manifold/gate/resolve", auth: "plugin" },
+    { path: "/manifold/cancel",        auth: "plugin" },
+    { path: "/manifold/start",         auth: "plugin" },
   ]) {
     test(`${path}: auth=${auth}, match=exact`, () => {
       const { api, routes } = createMockApi();
@@ -123,13 +123,13 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
 
   // gateway-auth elevation routes (internal cross-route hops)
   for (const path of [
-    "/pipeclaw/_elev/start",
-    "/pipeclaw/_elev/gate-resolve",
-    "/pipeclaw/resume-from-gate",
-    "/pipeclaw/_elev/rerun",
-    "/pipeclaw/_elev/retry-failure",
-    "/pipeclaw/_elev/discuss",
-    "/pipeclaw/_elev/discuss_history",
+    "/manifold/_elev/start",
+    "/manifold/_elev/gate-resolve",
+    "/manifold/resume-from-gate",
+    "/manifold/_elev/rerun",
+    "/manifold/_elev/retry-failure",
+    "/manifold/_elev/discuss",
+    "/manifold/_elev/discuss_history",
   ]) {
     test(`${path}: auth=gateway, match=exact`, () => {
       const { api, routes } = createMockApi();
@@ -151,7 +151,7 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
 // ── method guards ─────────────────────────────────────────────────────────────
 
 describe("registerOperatorRoutes — method guards", { skip: SKIP_MSG }, () => {
-  for (const path of ["/pipeclaw/gate/resolve", "/pipeclaw/cancel", "/pipeclaw/start"]) {
+  for (const path of ["/manifold/gate/resolve", "/manifold/cancel", "/manifold/start"]) {
     test(`${path}: GET → 405`, async () => {
       const { api, routes } = createMockApi();
       registerOperatorRoutes(makeDeps(api));
@@ -165,11 +165,11 @@ describe("registerOperatorRoutes — method guards", { skip: SKIP_MSG }, () => {
 
 // ── gate/resolve handler behaviour ────────────────────────────────────────────
 //
-// /pipeclaw/gate/resolve is auth:"plugin" — it must never call
+// /manifold/gate/resolve is auth:"plugin" — it must never call
 // gateResolver.recordItemDecision() directly (that path can trigger
 // executor.resume(), which may dispatch a kind:"agent" node needing
 // operator.write scope this route doesn't have ambient). It must loop back
-// through invokeElevated to /pipeclaw/_elev/gate-resolve instead.
+// through invokeElevated to /manifold/_elev/gate-resolve instead.
 
 describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, () => {
   test("loops back via invokeElevated instead of calling recordItemDecision directly", async () => {
@@ -182,8 +182,8 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
       gateResolver: { recordItemDecision },
       invokeElevated,
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/gate/resolve");
-    const req = createMockReqWithBody("POST", "/pipeclaw/gate/resolve", {
+    const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
+    const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
       flowId: "f1", itemId: "i1", decision: "approve", source: "ios",
     });
     const res = createMockRes();
@@ -191,12 +191,12 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     assert.equal(recordItemDecision.mock.calls.length, 0);
     assert.equal(invokeElevated.mock.calls.length, 1);
     const [path, body] = invokeElevated.mock.calls[0].arguments;
-    assert.equal(path, "/pipeclaw/_elev/gate-resolve");
+    assert.equal(path, "/manifold/_elev/gate-resolve");
     assert.equal(body.flowId, "f1");
     assert.equal(body.itemId, "i1");
     assert.equal(body.decision, "approve");
     assert.equal(res.statusCode, 200);
-    assert.deepEqual(JSON.parse(res.body).echo.path, "/pipeclaw/_elev/gate-resolve");
+    assert.deepEqual(JSON.parse(res.body).echo.path, "/manifold/_elev/gate-resolve");
   });
 
   test("propagates the elevated route's status/body verbatim", async () => {
@@ -205,8 +205,8 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
       ok: false, status: 409, body: JSON.stringify({ ok: false, code: "already-decided" }),
     }));
     registerOperatorRoutes(makeDeps(api, { invokeElevated }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/gate/resolve");
-    const req = createMockReqWithBody("POST", "/pipeclaw/gate/resolve", {
+    const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
+    const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
       flowId: "f1", itemId: "i1", decision: "approve", source: "ios",
     });
     const res = createMockRes();
@@ -223,8 +223,8 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     const { api, routes } = createMockApi();
     const recordItemDecision = mock.fn(async () => ({ ok: true, status: "applied" }));
     registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/_elev/gate-resolve");
-    const req = createMockReqWithBody("POST", "/pipeclaw/_elev/gate-resolve", {
+    const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
+    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", {
       flowId: "f1", itemId: "i1", decision: "approve", source: "ios", editedText: "revised",
     });
     const res = createMockRes();
@@ -244,8 +244,8 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     registerOperatorRoutes(makeDeps(api, {
       gateResolver: { recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }) },
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/_elev/gate-resolve");
-    const req = createMockReqWithBody("POST", "/pipeclaw/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "ios" });
+    const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
+    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "ios" });
     const res = createMockRes();
     await handler(req, res);
     assert.equal(res.statusCode, 404);
@@ -254,9 +254,9 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
   test("GET → 405", async () => {
     const { api, routes } = createMockApi();
     registerOperatorRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/_elev/gate-resolve");
+    const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/pipeclaw/_elev/gate-resolve"), res);
+    await handler(createMockReq("GET", "/manifold/_elev/gate-resolve"), res);
     assert.equal(res.statusCode, 405);
   });
 });
@@ -267,8 +267,8 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
   test("missing flowId → 400", async () => {
     const { api, routes } = createMockApi();
     registerOperatorRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/cancel");
-    const req = { ...createMockReq("POST", "/pipeclaw/cancel"), body: "{}" };
+    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
+    const req = { ...createMockReq("POST", "/manifold/cancel"), body: "{}" };
     const res = createMockRes();
     // Simulate the gateway providing a parsed body (empty object)
     req.json = async () => ({});
@@ -285,8 +285,8 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
         cancel: async (flowId, reason) => { cancelArgs = [flowId, reason]; return { cancelled: true }; },
       },
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/cancel");
-    const req = createMockReqWithBody("POST", "/pipeclaw/cancel", { flowId: "flow-1", reason: "cancelled by operator" });
+    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
+    const req = createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-1", reason: "cancelled by operator" });
     const res = createMockRes();
     await handler(req, res);
     assert.deepEqual(cancelArgs, ["flow-1", "cancelled by operator"]);
@@ -301,8 +301,8 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
         cancel: async (flowId, reason) => { cancelArgs = [flowId, reason]; return { cancelled: true }; },
       },
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/cancel");
-    const req = createMockReqWithBody("POST", "/pipeclaw/cancel", { flowId: "flow-1" });
+    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
+    const req = createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-1" });
     const res = createMockRes();
     await handler(req, res);
     assert.deepEqual(cancelArgs, ["flow-1", null]);
@@ -340,15 +340,15 @@ describe("registerOperatorRoutes — cancel handler ownerKey mismatch fallback",
           lastStep: "SOME_NODE", stateJson: {}, ownerKey: "graph-flow-owner",
         }),
       },
-      ownerSessionKey: "pipeclaw-owner",
+      ownerSessionKey: "manifold-owner",
       runStore: sentinelRunStore,
       admissionQueueStore: sentinelAdmissionQueueStore,
       resumeParentRef: sentinelResumeParentRef,
       pipelinesRef: sentinelPipelinesRef,
       failureStore: sentinelFailureStore,
     }));
-    const { handler } = routes.find((r) => r.path === "/pipeclaw/cancel");
-    const req = createMockReqWithBody("POST", "/pipeclaw/cancel", { flowId: "flow-legacy-1" });
+    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
+    const req = createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-legacy-1" });
     const res = createMockRes();
     await handler(req, res);
 

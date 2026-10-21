@@ -140,7 +140,7 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
     await gen1Api.runtime.approvalQueue.isGateLocked(); // attaches gen1's client
 
     const today = todayLocal();
-    const gen1Route = gen1Api._routes.find((r) => r.path === "/pipeclaw/budget/gate/lock");
+    const gen1Route = gen1Api._routes.find((r) => r.path === "/manifold/budget/gate/lock");
     await gen1Route.handler({ method: "POST" }, fakeRes());
 
     const gen2Api = makeFakeApi();

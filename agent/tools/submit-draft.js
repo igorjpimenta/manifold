@@ -27,7 +27,7 @@
 // enforcement happens in execute(), which does see fresh per-call ctx: it
 // resolves pipelineId, looks up that pipeline's own declared
 // `proposalMeta.requiredDeliveryField` from the live pipeline registry
-// (pipelinesRef — same dependency-injection pattern pipeclaw-start.js
+// (pipelinesRef — same dependency-injection pattern manifold-start.js
 // already uses), and defaults to "timeframe" when a pipeline declares
 // nothing (Workana today) or resolution fails for any reason (unresolved
 // session, boot-time race) — a pipeline only ever gets a DIFFERENT
@@ -75,7 +75,7 @@ function formatFrontmatterValue(v) {
 export function registerSubmitDraftTool({ api, pipelinesRef }) {
   api.registerTool((ctx) => ({
     name: "submit_draft",
-    label: "Pipeclaw: write a structured draft to disk",
+    label: "Manifold: write a structured draft to disk",
     description:
       "Use to submit a finished draft instead of writing the file yourself with a heredoc. `outPath` must be copied verbatim from your brief. `jobId` is optional — it's auto-resolved from your session's own listing context; only pass it explicitly if you have a reason to override that (never derive it from a filename, URL, or listing content). This tool stamps the frontmatter deterministically (status is always set to 'pending' — you cannot mark a draft approved or sent) and will refuse to overwrite a draft already marked approved or sent. Exactly one of `timeframe`/`period` is required — which one depends on the pipeline you're running under (most platforms use `timeframe`; Freelancer.com uses `period`). If you're unsure, supply both.",
     parameters: {

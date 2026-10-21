@@ -1,5 +1,5 @@
 // Typed fetch wrappers for the dashboard's read-only HTTP API. The server
-// is dashboard/server.js (mounted by pipeclaw). All endpoints return JSON.
+// is dashboard/server.js (mounted by manifold). All endpoints return JSON.
 
 import type {
   AllPipelinesCost,

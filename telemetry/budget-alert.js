@@ -238,7 +238,7 @@ const _GW_PORT = Number(process.env.OPENCLAW_GATEWAY_PORT) || 18789;
 async function _lockGate(logger) {
   const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
   try {
-    await fetch(`http://127.0.0.1:${_GW_PORT}/pipeclaw/budget/gate/lock`, {
+    await fetch(`http://127.0.0.1:${_GW_PORT}/manifold/budget/gate/lock`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: "{}",
@@ -252,7 +252,7 @@ async function _lockGate(logger) {
 async function _unlockGate(logger) {
   const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
   try {
-    await fetch(`http://127.0.0.1:${_GW_PORT}/pipeclaw/budget/gate/unlock`, {
+    await fetch(`http://127.0.0.1:${_GW_PORT}/manifold/budget/gate/unlock`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: "{}",

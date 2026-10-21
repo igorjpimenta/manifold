@@ -13,7 +13,7 @@
 // (status, approval-token, drafted-at) and identity fields (job-id,
 // source-listing) are pipeline-owned and rejected here.
 //
-// Factory-form registration (like propose_draft / pipeclaw_start) —
+// Factory-form registration (like propose_draft / manifold_start) —
 // needs `ctx.sessionKey` / `ctx.agentId` to auto-resolve flowId/itemId
 // when the caller is a subagent that was never given them directly.
 // See resolveGateContext in shared.js.
@@ -24,7 +24,7 @@ import { toolErr, META_FIELD_WHITELIST, normalizePendingFields, resolveGateConte
 export function registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore }) {
   api.registerTool((ctx) => ({
     name: "propose_draft_meta",
-    label: "Pipeclaw: propose frontmatter metadata changes for the operator's gate",
+    label: "Manifold: propose frontmatter metadata changes for the operator's gate",
     description:
       "Use during a discuss-with-the-operator session to propose budget / timeframe / language changes on the pending gate's draft (without changing the prose body). The operator sees an 'Apply' button on your reply — they decide whether to commit. Pair with `propose_draft` when the operator wants both body AND metadata changed; either tool alone when only one dimension is in play. You do NOT need to pass `flowId`/`itemId` — the gateway resolves the active gate from your session context automatically. Pass them explicitly only if you already have them (e.g. from your discussion system prompt) or if auto-resolve fails.",
     parameters: {

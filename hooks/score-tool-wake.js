@@ -1,4 +1,4 @@
-// extensions/pipeclaw/hooks/score-tool-wake.js — after_tool_call hook that
+// extensions/manifold/hooks/score-tool-wake.js — after_tool_call hook that
 // wakes a waiting SCORE_LLM dispatch the instant submit_score fires.
 //
 // Without this, dispatchAgentWithRetry (via runSubagentTurn's

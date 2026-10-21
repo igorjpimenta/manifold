@@ -1,5 +1,5 @@
 // run-patch.js — pure RunSummary-shaped patch builders for the flow-state
-// WS events (pipeclaw.run.started/updated/ended payloads).
+// WS events (manifold.run.started/updated/ended payloads).
 //
 // Each function takes already-fetched data (no async DB calls inside) so the
 // caller can batch DB work and reuse results across multiple items in one

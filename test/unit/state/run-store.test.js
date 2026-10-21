@@ -27,7 +27,7 @@ async function makeStore(overrides = {}) {
 function fakeFlow(overrides = {}) {
   return {
     flowId:       randomUUID(),
-    ownerKey:     "pipeclaw-owner",
+    ownerKey:     "manifold-owner",
     pipelineId:   "team_pipe",
     revision:     0,
     status:       "running",
@@ -472,7 +472,7 @@ describe("createRunStore — updateStateJsonCAS", () => {
 // ── list / listFor ────────────────────────────────────────────────────────────
 
 describe("createRunStore — list / listFor", () => {
-  test("list returns every row (no per-tenant filter — sole pipeclaw store)", async () => {
+  test("list returns every row (no per-tenant filter — sole manifold store)", async () => {
     const store = await makeStore();
     await store.insert(fakeFlow({ pipelineId: "team_pipe" }));
     await store.insert(fakeFlow({ pipelineId: "other_pipe" }));
@@ -554,7 +554,7 @@ describe("createRunStore — v3 migration", () => {
     await seedLegacyDb(dbPath, [
       {
         sql: `INSERT INTO flow_runs (flow_id, controller_id, status, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        args: ["f-pipeclaw", "pipeclaw:foo", "succeeded", "{}", 0, 0],
+        args: ["f-manifold", "manifold:foo", "succeeded", "{}", 0, 0],
       },
       {
         sql: `INSERT INTO flow_runs (flow_id, controller_id, status, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
@@ -563,7 +563,7 @@ describe("createRunStore — v3 migration", () => {
     ]);
 
     const store = await createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
-    assert.equal((await store.get("f-pipeclaw")).pipelineId, "foo");
+    assert.equal((await store.get("f-manifold")).pipelineId, "foo");
     assert.equal((await store.get("f-legacy")).pipelineId, "bar");
     store.close();
   });
@@ -673,11 +673,11 @@ describe("createRunStore — v5 migration", () => {
     await seedLegacyDb(dbPath, [
       {
         sql: `INSERT INTO flow_runs (flow_id, controller_id, status, blocked_summary, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: ["f-with-reason", "pipeclaw:foo", "blocked", "waiting for gate", "{}", 0, 0],
+        args: ["f-with-reason", "manifold:foo", "blocked", "waiting for gate", "{}", 0, 0],
       },
       {
         sql: `INSERT INTO flow_runs (flow_id, controller_id, status, blocked_summary, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: ["f-no-reason", "pipeclaw:foo", "running", null, "{}", 0, 0],
+        args: ["f-no-reason", "manifold:foo", "running", null, "{}", 0, 0],
       },
     ]);
 
@@ -726,7 +726,7 @@ describe("createRunStore — v6 migration", () => {
     await seedLegacyDb(dbPath, [
       {
         sql: `INSERT INTO flow_runs (flow_id, controller_id, status, blocked_summary, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: ["f-survives", "pipeclaw:foo", "blocked", "waiting for gate", "{}", 0, 0],
+        args: ["f-survives", "manifold:foo", "blocked", "waiting for gate", "{}", 0, 0],
       },
     ]);
 

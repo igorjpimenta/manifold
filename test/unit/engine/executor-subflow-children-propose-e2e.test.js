@@ -58,7 +58,7 @@ function tmpPath(prefix) {
 // Real round-scoping logic (same shape as
 // workspace/.pipelines/freelance_workana-proposal/nodes/propose/gap-gate-id.js)
 // — deliberately reimplemented here rather than imported, since this test
-// lives in a different package (extensions/pipeclaw) than the pipeline
+// lives in a different package (extensions/manifold) than the pipeline
 // file. Kept byte-for-byte equivalent so the mechanics this test proves
 // actually match what the real pipeline does.
 function gapGateItemId(state) {

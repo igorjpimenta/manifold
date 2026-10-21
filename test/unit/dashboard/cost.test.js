@@ -161,7 +161,7 @@ function makeRunRaw({
 } = {}) {
   return {
     flowId,
-    controllerId: `pipeclaw:${pipelineId}`,
+    controllerId: `manifold:${pipelineId}`,
     status,
     createdAt,
     updatedAt,
@@ -382,7 +382,7 @@ describe("costForPipeline — empty / no match", () => {
 });
 
 describe("costForPipeline — pipeline filtering", () => {
-  test("matches runs via controllerId 'pipeclaw:<pipelineId>'", async () => {
+  test("matches runs via controllerId 'manifold:<pipelineId>'", async () => {
     const flowId = randomUUID();
     await insertRow({ flowId, costTotal: 0.5 });
     const r = await costForPipeline([makeRunRaw({ flowId, pipelineId: "pipe_ctrl" })], "pipe_ctrl", DB);
@@ -552,7 +552,7 @@ describe("costForAllPipelines — empty / null input", () => {
   });
 
   test("skips runs with no flowId", async () => {
-    const runs = [{ controllerId: "pipeclaw:x", stateJson: { pipelineId: "x" } }];
+    const runs = [{ controllerId: "manifold:x", stateJson: { pipelineId: "x" } }];
     const r = await costForAllPipelines(runs, DB);
     assert.deepEqual(r.pipelines, []);
   });

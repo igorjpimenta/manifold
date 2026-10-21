@@ -205,7 +205,7 @@ describe("recordItemDecision — telltale editedText rejection", () => {
   const telltales = [
     "Approve to send",
     "Reject to drop",
-    "openclaw pipeclaw respond",
+    "openclaw manifold respond",
     "─── Approve to send",
   ];
 
@@ -1823,7 +1823,7 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     const { resolver, broadcastFn } = makeResolverWithBroadcast(flow);
     const before = Date.now();
     await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "ios" });
-    // Both gate.resolved and pipeclaw.run.updated fire on the applied path; find by name.
+    // Both gate.resolved and manifold.run.updated fire on the applied path; find by name.
     const gateCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.gate.resolved");
     assert.ok(gateCall, "plugin.gate.resolved broadcast must fire");
     const [eventName, payload] = gateCall.arguments;
@@ -1834,14 +1834,14 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     assert.ok(typeof payload.resolvedAt === "number" && payload.resolvedAt >= before, "resolvedAt must be a timestamp");
   });
 
-  test("emits 'pipeclaw.run.updated' broadcast when resolution triggers setRunning", async () => {
+  test("emits 'manifold.run.updated' broadcast when resolution triggers setRunning", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const { resolver, broadcastFn } = makeResolverWithBroadcast(flow);
     await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "cli" });
-    const runUpdatedCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.pipeclaw.run.updated");
-    assert.ok(runUpdatedCall, "plugin.pipeclaw.run.updated broadcast must fire");
+    const runUpdatedCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.manifold.run.updated");
+    assert.ok(runUpdatedCall, "plugin.manifold.run.updated broadcast must fire");
     const [, payload] = runUpdatedCall.arguments;
     assert.equal(payload.flowId, flowId);
     assert.equal(payload.status, "running");

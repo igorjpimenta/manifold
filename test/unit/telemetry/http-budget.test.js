@@ -11,8 +11,8 @@ import { initCapStore } from "../../../telemetry/budget-alert.js";
 // isolated per-run temp file so this suite never touches the real
 // ~/.openclaw/ops.sqlite.
 await initCapStore({
-  dbPath: path.join(os.tmpdir(), `pipeclaw-http-budget-test-${randomUUID()}.sqlite`),
-  legacyCapFile: path.join(os.tmpdir(), `pipeclaw-http-budget-test-legacy-${randomUUID()}.json`), // doesn't exist — deterministic defaults
+  dbPath: path.join(os.tmpdir(), `manifold-http-budget-test-${randomUUID()}.sqlite`),
+  legacyCapFile: path.join(os.tmpdir(), `manifold-http-budget-test-legacy-${randomUUID()}.json`), // doesn't exist — deterministic defaults
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -70,10 +70,10 @@ describe("registerBudgetRoutes /budget/cap", () => {
     const store = { db: {} };
     registerBudgetRoutes({ api, getStore: () => store, logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap");
+    const def = api._routes.get("/manifold/telemetry/budget/cap");
     assert.ok(def, "route registered");
 
-    const req = makeReq("GET", "/pipeclaw/telemetry/budget/cap");
+    const req = makeReq("GET", "/manifold/telemetry/budget/cap");
     const res = makeRes();
     await def.handler(req, res);
     const body = JSON.parse(res._body);
@@ -86,8 +86,8 @@ describe("registerBudgetRoutes /budget/cap", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/cap", { capUSD: -5 });
+    const def = api._routes.get("/manifold/telemetry/budget/cap");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/cap", { capUSD: -5 });
     const res = makeRes();
     await def.handler(req, res);
     assert.equal(res.statusCode, 400);
@@ -100,8 +100,8 @@ describe("registerBudgetRoutes /budget/cap", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/cap", { capUSD: 5.0 });
+    const def = api._routes.get("/manifold/telemetry/budget/cap");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/cap", { capUSD: 5.0 });
     const res = makeRes();
     await def.handler(req, res);
     const body = JSON.parse(res._body);
@@ -115,8 +115,8 @@ describe("registerBudgetRoutes /budget/cap", () => {
     const { getBroadcast, calls } = makeBroadcast();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad, getBroadcast });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/cap", { capUSD: 7.5 });
+    const def = api._routes.get("/manifold/telemetry/budget/cap");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/cap", { capUSD: 7.5 });
     await def.handler(req, makeRes());
 
     assert.equal(calls.length, 1);
@@ -130,8 +130,8 @@ describe("registerBudgetRoutes /budget/cap", () => {
     const { getBroadcast, calls } = makeBroadcast();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad, getBroadcast });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/cap", { capUSD: -5 });
+    const def = api._routes.get("/manifold/telemetry/budget/cap");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/cap", { capUSD: -5 });
     await def.handler(req, makeRes());
 
     assert.equal(calls.length, 0);
@@ -142,8 +142,8 @@ describe("registerBudgetRoutes /budget/cap", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad }); // getBroadcast omitted
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/cap", { capUSD: 2.0 });
+    const def = api._routes.get("/manifold/telemetry/budget/cap");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/cap", { capUSD: 2.0 });
     const res = makeRes();
     await def.handler(req, res);
     assert.equal(JSON.parse(res._body).ok, true);
@@ -154,8 +154,8 @@ describe("registerBudgetRoutes /budget/cap", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap");
-    const req = makeReq("DELETE", "/pipeclaw/telemetry/budget/cap");
+    const def = api._routes.get("/manifold/telemetry/budget/cap");
+    const req = makeReq("DELETE", "/manifold/telemetry/budget/cap");
     const res = makeRes();
     await def.handler(req, res);
     assert.equal(res.statusCode, 405);
@@ -170,10 +170,10 @@ describe("registerBudgetRoutes /budget/gate-threshold", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/gate-threshold");
+    const def = api._routes.get("/manifold/telemetry/budget/gate-threshold");
     assert.ok(def, "route registered");
 
-    const req = makeReq("GET", "/pipeclaw/telemetry/budget/gate-threshold");
+    const req = makeReq("GET", "/manifold/telemetry/budget/gate-threshold");
     const res = makeRes();
     await def.handler(req, res);
     const body = JSON.parse(res._body);
@@ -186,8 +186,8 @@ describe("registerBudgetRoutes /budget/gate-threshold", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/gate-threshold");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/gate-threshold", { lockThreshold: 1.5 });
+    const def = api._routes.get("/manifold/telemetry/budget/gate-threshold");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/gate-threshold", { lockThreshold: 1.5 });
     const res = makeRes();
     await def.handler(req, res);
     assert.equal(res.statusCode, 400);
@@ -198,8 +198,8 @@ describe("registerBudgetRoutes /budget/gate-threshold", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/gate-threshold");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/gate-threshold", { lockThreshold: 0.8 });
+    const def = api._routes.get("/manifold/telemetry/budget/gate-threshold");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/gate-threshold", { lockThreshold: 0.8 });
     const res = makeRes();
     await def.handler(req, res);
     const body = JSON.parse(res._body);
@@ -213,8 +213,8 @@ describe("registerBudgetRoutes /budget/gate-threshold", () => {
     const { getBroadcast, calls } = makeBroadcast();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad, getBroadcast });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/gate-threshold");
-    const req = makeReq("PUT", "/pipeclaw/telemetry/budget/gate-threshold", { lockThreshold: 0.6 });
+    const def = api._routes.get("/manifold/telemetry/budget/gate-threshold");
+    const req = makeReq("PUT", "/manifold/telemetry/budget/gate-threshold", { lockThreshold: 0.6 });
     await def.handler(req, makeRes());
 
     assert.equal(calls.length, 1);
@@ -231,10 +231,10 @@ describe("registerBudgetRoutes /budget/cap-history", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/cap-history");
+    const def = api._routes.get("/manifold/telemetry/budget/cap-history");
     assert.ok(def, "route registered");
 
-    const req = makeReq("GET", "/pipeclaw/telemetry/budget/cap-history");
+    const req = makeReq("GET", "/manifold/telemetry/budget/cap-history");
     const res = makeRes();
     await def.handler(req, res);
     const body = JSON.parse(res._body);
@@ -252,15 +252,15 @@ describe("registerBudgetRoutes /budget/cap-history", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const capDef = api._routes.get("/pipeclaw/telemetry/budget/cap");
+    const capDef = api._routes.get("/manifold/telemetry/budget/cap");
     await capDef.handler(
-      makeReq("PUT", "/pipeclaw/telemetry/budget/cap", { capUSD: 9.5 }),
+      makeReq("PUT", "/manifold/telemetry/budget/cap", { capUSD: 9.5 }),
       makeRes(),
     );
 
-    const histDef = api._routes.get("/pipeclaw/telemetry/budget/cap-history");
+    const histDef = api._routes.get("/manifold/telemetry/budget/cap-history");
     const res = makeRes();
-    await histDef.handler(makeReq("GET", "/pipeclaw/telemetry/budget/cap-history"), res);
+    await histDef.handler(makeReq("GET", "/manifold/telemetry/budget/cap-history"), res);
     const body = JSON.parse(res._body);
     const last = body.versions.at(-1);
     assert.equal(last.capUSD, 9.5);
@@ -280,10 +280,10 @@ describe("registerBudgetRoutes /budget/alert-history", () => {
     const { json, bad } = makeJson();
     registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/budget/alert-history");
+    const def = api._routes.get("/manifold/telemetry/budget/alert-history");
     assert.ok(def, "route registered");
 
-    const req = makeReq("GET", "/pipeclaw/telemetry/budget/alert-history");
+    const req = makeReq("GET", "/manifold/telemetry/budget/alert-history");
     const res = makeRes();
     await def.handler(req, res);
     const body = JSON.parse(res._body);

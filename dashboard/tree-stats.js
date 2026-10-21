@@ -1,5 +1,5 @@
 // Small, dependency-free home for stats derived from the GET
-// /pipeclaw/runs/:flowId/tree response shape (routes/runs.js's
+// /manifold/runs/:flowId/tree response shape (routes/runs.js's
 // buildTreeNodeRows) — kept out of server.js so it stays importable by unit
 // tests without pulling in device.js's `openclaw` package dependency.
 

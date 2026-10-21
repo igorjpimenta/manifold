@@ -109,7 +109,7 @@ export function createDiscussHandler({
         mkdirSync(path.dirname(sessionFile), { recursive: true });
         writeFileSync(sessionFile, "", { flag: "w" });
       } catch (err) {
-        api.logger.warn(`pipeclaw discuss: session-file touch failed for ${sessionFile}: ${err?.message ?? err}`);
+        api.logger.warn(`manifold discuss: session-file touch failed for ${sessionFile}: ${err?.message ?? err}`);
       }
     }
     try {
@@ -144,7 +144,7 @@ export function createDiscussHandler({
         primarySpec, chain, isCooldown,
       });
       if (activeProvider !== primarySpec.split("/")[0] && activeProvider) {
-        api.logger.info(`pipeclaw discuss: billing cooldown on ${primarySpec.split("/")[0]}, routing to ${activeProvider}/${activeModel}`);
+        api.logger.info(`manifold discuss: billing cooldown on ${primarySpec.split("/")[0]}, routing to ${activeProvider}/${activeModel}`);
       }
       const _runParams = {
         sessionId, sessionKey, agentId, trigger: "manual", sessionFile, workspaceDir,
@@ -162,7 +162,7 @@ export function createDiscussHandler({
         if (_isBilling && chain.length > 1) {
           const retry = selectDiscussProvider({ primarySpec, chain, isCooldown: (p) => p === activeProvider });
           if (retry.provider && retry.provider !== activeProvider) {
-            api.logger.info(`pipeclaw discuss: billing error on ${activeProvider}, retrying with ${retry.provider}/${retry.model}`);
+            api.logger.info(`manifold discuss: billing error on ${activeProvider}, retrying with ${retry.provider}/${retry.model}`);
             result = await agentRuntime.runEmbeddedAgent({ ..._runParams, provider: retry.provider, model: retry.model || undefined });
           } else {
             throw firstErr;
@@ -180,12 +180,12 @@ export function createDiscussHandler({
           const _skipped = _activeIdx > 0 ? chain.slice(0, _activeIdx) : [];
           for (const ref of _skipped) {
             const [_p, ..._mPts] = ref.split("/");
-            api.logger.info(`pipeclaw discuss: all providers returned empty (context-filter likely) — retrying with skipped provider ${_p}`);
+            api.logger.info(`manifold discuss: all providers returned empty (context-filter likely) — retrying with skipped provider ${_p}`);
             try {
               const _l3 = await agentRuntime.runEmbeddedAgent({ ..._runParams, provider: _p, model: _mPts.join("/") || undefined });
               if (_hasText(_l3)) { result = _l3; break; }
             } catch (_l3Err) {
-              api.logger.warn(`pipeclaw discuss: layer-3 ${_p} retry failed: ${_l3Err?.message}`);
+              api.logger.warn(`manifold discuss: layer-3 ${_p} retry failed: ${_l3Err?.message}`);
             }
           }
         }
@@ -200,7 +200,7 @@ export function createDiscussHandler({
             ? result.payloads.map((p) => p?.text?.trim?.() ?? "").filter(Boolean).join("\n")
             : "");
       if (!replyText) {
-        api.logger.warn(`pipeclaw discuss (elev) [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
+        api.logger.warn(`manifold discuss (elev) [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
         return { status: 500, body: { ok: false, code: "no_reply_text", error: "agent ran but no assistant text found" } };
       }
       // Harvest child sessions spawned during this turn
@@ -234,7 +234,7 @@ export function createDiscussHandler({
               } catch {}
             }
             if (_ent?.status !== "done" && _ent?.status !== "error") {
-              api.logger.warn(`pipeclaw discuss: child session ${_ck} did not terminate within 60s`);
+              api.logger.warn(`manifold discuss: child session ${_ck} did not terminate within 60s`);
               continue;
             }
             const _jsonlPath = _ent?.sessionFile
@@ -286,17 +286,17 @@ export function createDiscussHandler({
             if (_eFields) {
               try {
                 mergePendingFields(flowId, itemIdForDraft, _eFields);
-                api.logger.info(`pipeclaw discuss: applied child-session meta [${_ck.slice(-8)}]: ${JSON.stringify(Object.keys(_eFields))}`);
+                api.logger.info(`manifold discuss: applied child-session meta [${_ck.slice(-8)}]: ${JSON.stringify(Object.keys(_eFields))}`);
               } catch (_err) {
-                api.logger.warn(`pipeclaw discuss: mergePendingFields error: ${_err?.message}`);
+                api.logger.warn(`manifold discuss: mergePendingFields error: ${_err?.message}`);
               }
             }
             if (_eDraft) {
               try {
                 setPendingText(flowId, itemIdForDraft, _eDraft);
-                api.logger.info(`pipeclaw discuss: applied child-session draft [${_ck.slice(-8)}] (${_eDraft.length} chars)`);
+                api.logger.info(`manifold discuss: applied child-session draft [${_ck.slice(-8)}] (${_eDraft.length} chars)`);
               } catch (_err) {
-                api.logger.warn(`pipeclaw discuss: setPendingText error: ${_err?.message}`);
+                api.logger.warn(`manifold discuss: setPendingText error: ${_err?.message}`);
               }
             }
             if ((_eFields || _eDraft) && componentEmitter) {
@@ -313,12 +313,12 @@ export function createDiscussHandler({
                   },
                 });
               } catch (_err) {
-                api.logger.warn(`pipeclaw discuss: componentEmitter error: ${_err?.message}`);
+                api.logger.warn(`manifold discuss: componentEmitter error: ${_err?.message}`);
               }
             }
           }
         } catch (_outerErr) {
-          api.logger.warn(`pipeclaw discuss: child-session wait/apply error: ${_outerErr?.message}`);
+          api.logger.warn(`manifold discuss: child-session wait/apply error: ${_outerErr?.message}`);
         }
       }
       let proposedDraft = null;
@@ -330,11 +330,11 @@ export function createDiscussHandler({
       }
       const durationMs = Date.now() - startedAt;
       api.logger.info(
-        `pipeclaw discuss (elev) [${flowId.slice(0, 8)}]: ok in ${durationMs}ms (reply=${replyText.length} chars, proposedDraft=${proposedDraft ? proposedDraft.length + " chars" : "none"}, proposedMeta=${proposedMeta ? JSON.stringify(Object.keys(proposedMeta)) : "none"})`
+        `manifold discuss (elev) [${flowId.slice(0, 8)}]: ok in ${durationMs}ms (reply=${replyText.length} chars, proposedDraft=${proposedDraft ? proposedDraft.length + " chars" : "none"}, proposedMeta=${proposedMeta ? JSON.stringify(Object.keys(proposedMeta)) : "none"})`
       );
       return { status: 200, body: { ok: true, reply: replyText, durationMs, editDraftUpdated: false, proposedDraft, proposedMeta } };
     } catch (err) {
-      api.logger.warn(`pipeclaw discuss (elev) handler error: ${err?.message ?? err}`);
+      api.logger.warn(`manifold discuss (elev) handler error: ${err?.message ?? err}`);
       return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
     }
   }
@@ -385,7 +385,7 @@ export function createDiscussHistoryHandler({ api }) {
         nextOffset = lines.length - start;
         const scanLines = lines.slice(start, end);
         if (hasMore) {
-          api.logger.info(`pipeclaw discuss_history (elev) [${sessionId.slice(0, 8)}]: page [${start},${end}) of ${lines.length} lines, more remain before it`);
+          api.logger.info(`manifold discuss_history (elev) [${sessionId.slice(0, 8)}]: page [${start},${end}) of ${lines.length} lines, more remain before it`);
         }
         for (const line of scanLines) {
           if (!line.trim()) continue;
@@ -400,7 +400,7 @@ export function createDiscussHistoryHandler({ api }) {
       }
       return { status: 200, body: { ok: true, messages: filterDiscussHistoryMessages(msgs), hasMore, nextOffset } };
     } catch (err) {
-      api.logger.warn(`pipeclaw discuss_history (elev) handler error: ${err?.message ?? err}`);
+      api.logger.warn(`manifold discuss_history (elev) handler error: ${err?.message ?? err}`);
       return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
     }
   }

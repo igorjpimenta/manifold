@@ -1,4 +1,4 @@
-// Unit tests for channels/pipeclaw-parrot-channel.js
+// Unit tests for channels/manifold-parrot-channel.js
 
 import { test, mock, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -11,7 +11,7 @@ import { createMockApi, createMockRes } from "../../helpers/mock-api.js";
 // all tests are skipped with a clear reason — matching the pattern used by
 // operator.test.js and runs.test.js.
 
-let createPipeclawParrotChannelEntry = null;
+let createManifoldParrotChannelEntry = null;
 let importError = null;
 
 // Capture the most recently registered sendText handler so tests can call it.
@@ -69,14 +69,14 @@ try {
     },
   });
 
-  ({ createPipeclawParrotChannelEntry } = await import("../../../channels/pipeclaw-parrot-channel.js"));
+  ({ createManifoldParrotChannelEntry } = await import("../../../channels/manifold-parrot-channel.js"));
 } catch (err) {
   importError = err?.message ?? String(err);
 }
 
-const SKIP = !createPipeclawParrotChannelEntry;
+const SKIP = !createManifoldParrotChannelEntry;
 const SKIP_MSG = importError
-  ? `pipeclaw-parrot-channel.js could not be imported: ${importError}`
+  ? `manifold-parrot-channel.js could not be imported: ${importError}`
   : undefined;
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ function buildEntry(overrides = {}) {
   const resolveDiscussTarget = overrides.resolveDiscussTarget ?? (() => target);
   const readPending = overrides.readPending ?? (() => null);
 
-  const entry = createPipeclawParrotChannelEntry({
+  const entry = createManifoldParrotChannelEntry({
     readStore,
     discussStore,
     resolveDiscussTarget,
@@ -157,7 +157,7 @@ function buildEntry(overrides = {}) {
   api.runtime = { lineage: { recordSpawn: () => {} } };
   entry.registerFull(api);
 
-  const route = routes.find((r) => r.path === "/channels/pipeclaw-parrot/message");
+  const route = routes.find((r) => r.path === "/channels/manifold-parrot/message");
 
   return {
     entry, route, api, routes,
@@ -191,7 +191,7 @@ function makePostReq(body, extraHeaders = {}) {
   const raw = typeof body === "string" ? body : JSON.stringify(body);
   return {
     method: "POST",
-    url: "/channels/pipeclaw-parrot/message",
+    url: "/channels/manifold-parrot/message",
     headers: { host: "localhost", ...extraHeaders },
     [Symbol.asyncIterator]: async function* () { yield raw; },
   };
@@ -199,9 +199,9 @@ function makePostReq(body, extraHeaders = {}) {
 
 // ─── defineChannelPluginEntry — shape ────────────────────────────────────────
 
-describe("createPipeclawParrotChannelEntry — entry shape", () => {
-  test("returns an object with id 'pipeclaw-parrot'", { skip: SKIP ? SKIP_MSG : false }, () => {
-    const entry = createPipeclawParrotChannelEntry({
+describe("createManifoldParrotChannelEntry — entry shape", () => {
+  test("returns an object with id 'manifold-parrot'", { skip: SKIP ? SKIP_MSG : false }, () => {
+    const entry = createManifoldParrotChannelEntry({
       readStore: makeReadStore(),
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
@@ -209,11 +209,11 @@ describe("createPipeclawParrotChannelEntry — entry shape", () => {
       emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
-    assert.equal(entry.id, "pipeclaw-parrot");
+    assert.equal(entry.id, "manifold-parrot");
   });
 
   test("exposes plugin.gateway.startAccount as a function", { skip: SKIP ? SKIP_MSG : false }, () => {
-    const entry = createPipeclawParrotChannelEntry({
+    const entry = createManifoldParrotChannelEntry({
       readStore: makeReadStore(),
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
@@ -226,7 +226,7 @@ describe("createPipeclawParrotChannelEntry — entry shape", () => {
 
   test("registerFull registers message route with auth 'plugin' and match 'exact'", { skip: SKIP ? SKIP_MSG : false }, () => {
     const { routes } = buildEntry();
-    const r = routes.find((r) => r.path === "/channels/pipeclaw-parrot/message");
+    const r = routes.find((r) => r.path === "/channels/manifold-parrot/message");
     assert.ok(r, "message route registered");
     assert.equal(r.auth, "plugin");
     assert.equal(r.match, "exact");
@@ -256,7 +256,7 @@ describe("outbound.sendText — loopback no-op", () => {
 
 describe("gateway.startAccount — lifecycle", () => {
   test("rejects with 'aborted' when abortSignal fires", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const entry = createPipeclawParrotChannelEntry({
+    const entry = createManifoldParrotChannelEntry({
       readStore: makeReadStore(),
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
@@ -276,7 +276,7 @@ describe("gateway.startAccount — lifecycle", () => {
   });
 
   test("rejects immediately when signal is already aborted", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const entry = createPipeclawParrotChannelEntry({
+    const entry = createManifoldParrotChannelEntry({
       readStore: makeReadStore(),
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
@@ -306,7 +306,7 @@ describe("HTTP handler — method guard", () => {
     for (const method of ["GET", "PUT", "DELETE", "PATCH"]) {
       const req = {
         method,
-        url: "/channels/pipeclaw-parrot/message",
+        url: "/channels/manifold-parrot/message",
         headers: { host: "localhost" },
         [Symbol.asyncIterator]: async function* () {},
       };
@@ -344,7 +344,7 @@ describe("HTTP handler — body validation", () => {
     const { route } = buildReadyEntry();
     const req = {
       method: "POST",
-      url: "/channels/pipeclaw-parrot/message",
+      url: "/channels/manifold-parrot/message",
       headers: { host: "localhost" },
       [Symbol.asyncIterator]: async function* () { yield "not-json{{{"; },
     };
@@ -386,7 +386,7 @@ describe("HTTP handler — body validation", () => {
     const { route } = buildReadyEntry();
     const req = {
       method: "POST",
-      url: "/channels/pipeclaw-parrot/message",
+      url: "/channels/manifold-parrot/message",
       headers: { host: "localhost" },
       [Symbol.asyncIterator]: async function* () {},
     };
@@ -956,7 +956,7 @@ describe("stampDiscussSession — needsStamp conditional", () => {
 // ─── dispatch args — routing contract ────────────────────────────────────────
 
 describe("dispatchInboundDirectDmWithRuntime — call contract", () => {
-  test("passes channel='pipeclaw-parrot', accountId='default', senderId='operator'", { skip: SKIP ? SKIP_MSG : false }, async () => {
+  test("passes channel='manifold-parrot', accountId='default', senderId='operator'", { skip: SKIP ? SKIP_MSG : false }, async () => {
     const flow = makeFlow();
 
     dispatchCalls = [];
@@ -968,7 +968,7 @@ describe("dispatchInboundDirectDmWithRuntime — call contract", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     assert.ok(capturedDispatchArgs, "dispatch was called");
-    assert.equal(capturedDispatchArgs.channel, "pipeclaw-parrot");
+    assert.equal(capturedDispatchArgs.channel, "manifold-parrot");
     assert.equal(capturedDispatchArgs.accountId, "default");
     assert.equal(capturedDispatchArgs.senderId, "operator");
     assert.equal(capturedDispatchArgs.senderAddress, "operator");
@@ -991,7 +991,7 @@ describe("dispatchInboundDirectDmWithRuntime — call contract", () => {
     assert.equal(resolved.agentId, "answer-agent");
     assert.equal(resolved.accountId, "default");
     assert.match(resolved.sessionKey, /answer-agent/);
-    assert.match(resolved.sessionKey, /pipeclaw-parrot/);
+    assert.match(resolved.sessionKey, /manifold-parrot/);
   });
 
   test("messageId in dispatch matches turnId returned in HTTP response", { skip: SKIP ? SKIP_MSG : false }, async () => {

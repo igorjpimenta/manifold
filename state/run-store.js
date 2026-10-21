@@ -1,6 +1,6 @@
-// run-store.js — pipeclaw-owned flow_runs in runtime.sqlite.
+// run-store.js — manifold-owned flow_runs in runtime.sqlite.
 //
-// This is the sole read/write store for pipeclaw flows. No dual-write;
+// This is the sole read/write store for manifold flows. No dual-write;
 // registry.sqlite is never touched. All executor transitions go through the
 // CAS methods here.
 //
@@ -9,7 +9,7 @@
 // If rowsAffected === 0 → disambiguate via SELECT revision, status to return the
 // right code: not_found | terminal | revision_conflict.
 //
-// Boot migration: copies pipeclaw-owned rows from registry.sqlite on first
+// Boot migration: copies manifold-owned rows from registry.sqlite on first
 // boot (idempotent — INSERT OR IGNORE; skipped when the table is non-empty).
 
 import path from "node:path";
@@ -25,7 +25,7 @@ import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 const LEGACY_DB_PATH  = path.join(os.homedir(), ".openclaw", "flows", "registry.sqlite");
 
-const CONTROLLER_PREFIX = "pipeclaw:";
+const CONTROLLER_PREFIX = "manifold:";
 const LEGACY_PREFIX = "graph-flow:";
 
 // Exported so callers deciding "is this flow cancellable / already done"
@@ -40,7 +40,7 @@ const TERMINAL_SET = TERMINAL_STATUS_SET;
 
 const MIGRATIONS = [
   // v1: initial schema. Omits shape + requester_origin_json (never
-  // read/written by pipeclaw). Column set has to cover the out-of-store
+  // read/written by manifold). Column set has to cover the out-of-store
   // raw-SQL readers that hit flow_runs directly, bypassing this store —
   // telemetry/resolver.js selects flow_id, owner_key, pipeline_id, status,
   // created_at via its own readonly handle.
@@ -82,7 +82,7 @@ const MIGRATIONS = [
      WHERE parent_flow_node_execution_id IS NOT NULL;
    ALTER TABLE flow_runs ADD COLUMN pipeline_id TEXT;
    UPDATE flow_runs SET pipeline_id = CASE
-     WHEN controller_id LIKE 'pipeclaw:%'   THEN SUBSTR(controller_id, 10)
+     WHEN controller_id LIKE 'manifold:%'   THEN SUBSTR(controller_id, 10)
      WHEN controller_id LIKE 'graph-flow:%' THEN SUBSTR(controller_id, 12)
      ELSE controller_id
    END;
@@ -133,7 +133,7 @@ export function createRunStore(opts = {}) {
 async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH, legacyDbPath = LEGACY_DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "pipeclaw_flow_runs", migrations: MIGRATIONS });
+  await createMigrator(client, { name: "manifold_flow_runs", migrations: MIGRATIONS });
   await _migrateFromRegistry(client, logger, legacyDbPath);
 
   // ── CAS failure classifier ───────────────────────────────────────────────
@@ -768,7 +768,7 @@ function mapRow(row) {
   };
 }
 
-// One-time boot copy of pipeclaw-owned rows from registry.sqlite.
+// One-time boot copy of manifold-owned rows from registry.sqlite.
 // Idempotent: INSERT OR IGNORE; skipped entirely when the table is non-empty
 // (i.e. after the first successful boot post-migration).
 // Uses raw client — Drizzle cannot express ATTACH DATABASE.

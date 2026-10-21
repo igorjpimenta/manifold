@@ -1,9 +1,9 @@
 /**
  * Unit tests for the run-detail node tree endpoints:
- *   GET /pipeclaw/runs/:flowId/tree
- *   GET /pipeclaw/runs/:flowId/tree/expand?type=node&invocationId=X
- *   GET /pipeclaw/runs/:flowId/tree/expand?type=flow&childFlowId=Y
- *   GET /pipeclaw/runs/:flowId/tree/invocation/:invocationId
+ *   GET /manifold/runs/:flowId/tree
+ *   GET /manifold/runs/:flowId/tree/expand?type=node&invocationId=X
+ *   GET /manifold/runs/:flowId/tree/expand?type=flow&childFlowId=Y
+ *   GET /manifold/runs/:flowId/tree/invocation/:invocationId
  */
 import { test, describe, mock } from "node:test";
 import assert from "node:assert/strict";
@@ -61,7 +61,7 @@ function authReq(method, path) {
 }
 
 function prefixHandler(routes) {
-  return routes.find((r) => r.path === "/pipeclaw/runs/" && r.match === "prefix").handler;
+  return routes.find((r) => r.path === "/manifold/runs/" && r.match === "prefix").handler;
 }
 
 function resetMocks() {
@@ -142,7 +142,7 @@ const CASCADE_PIPELINE = {
 
 // ── /tree root ──────────────────────────────────────────────────────────────
 
-describe("GET /pipeclaw/runs/:flowId/tree", () => {
+describe("GET /manifold/runs/:flowId/tree", () => {
   test("maps invocations onto node rows with kind/agent resolved from the pipeline definition", async () => {
     resetMocks();
     const flow = {
@@ -159,7 +159,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-a/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-a/tree"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.items.length, 2);
@@ -188,7 +188,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-b/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-b/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[1].status, "failed");
     assert.equal(body.items[1].executionCount, 2);
@@ -213,7 +213,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-c/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-c/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].status, "succeeded", "earlier, already-completed node stays succeeded");
     assert.equal(body.items[1].status, "blocked", "most-recently-invoked node mirrors the flow's own current status");
@@ -235,7 +235,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-terminal-fail/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-terminal-fail/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].status, "succeeded", "earlier, already-completed node stays succeeded");
     assert.equal(body.items[1].status, "failed", "last node mirrors the flow's own terminal status even though its own execution recorded no error");
@@ -253,7 +253,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-d/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-d/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].status, "skipped");
   });
@@ -283,7 +283,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-e/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-e/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].hasChildren, true);
     assert.deepEqual(body.items[0].rollup, { succeeded: 1, failed: 1, pending: 1, skipped: 0, cancelled: 0 });
@@ -309,7 +309,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-multi/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-multi/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items.length, 1, "one row for the node dispatch, not one per item");
     assert.equal(body.items[0].nodeId, "PROPOSE");
@@ -329,7 +329,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       runStore: { listForParentInvocations: () => [] },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-f/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-f/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].hasChildren, false);
     assert.deepEqual(body.items[0].rollup, { succeeded: 0, failed: 0, pending: 0, skipped: 0, cancelled: 0 });
@@ -351,7 +351,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-h/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-h/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].execKind, "recheck", "sanity: latest kind masks the real retry, as documented");
     assert.equal(body.items[0].everRetriedOrRevived, true, "the independent field still surfaces it");
@@ -370,7 +370,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map() },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-g/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-g/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].kind, null);
     assert.equal(body.items[0].agent, null);
@@ -412,7 +412,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-h/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-h/tree"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].kind, "subflow", "must render the historical kind, not fall back to null just because the live definition is gone");
     assert.equal(body.items[1].kind, "agent");
@@ -428,7 +428,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-h/tree"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-h/tree"), res);
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.body).items, []);
   });
@@ -436,7 +436,7 @@ describe("GET /pipeclaw/runs/:flowId/tree", () => {
 
 // ── /tree/expand ────────────────────────────────────────────────────────────
 
-describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
+describe("GET /manifold/runs/:flowId/tree/expand", () => {
   test("type=node returns the spawned child flows as type:flow rows", async () => {
     resetMocks();
     const flow = { flowId: "flow-i", status: "succeeded", currentStep: null, stateJson: { pipelineId: "team_pipe" } };
@@ -458,7 +458,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-i/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-i/tree/expand?type=node&invocationId=inv-propose"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.items.length, 1);
@@ -490,7 +490,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-cascade/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-cascade/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].cascadeAttempt, 2);
   });
@@ -514,7 +514,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-cascade-ok/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-cascade-ok/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].cascadeAttempt, null);
   });
@@ -542,7 +542,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-child-retry/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-child-retry/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].everRetriedOrRevived, true);
   });
@@ -567,7 +567,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-child-clean/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-child-clean/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].cascadeAttempt, 2, "sanity: this child DID need a 2nd root node");
     assert.equal(body.items[0].everRetriedOrRevived, false, "but no individual node within it ever retried — a different signal");
@@ -593,7 +593,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-plain/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-plain/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].cascadeAttempt, null);
   });
@@ -618,7 +618,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-gate/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-gate/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].reason, "Cyrano needs 2 things to draft blockchain listing");
   });
@@ -640,7 +640,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-queued/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-queued/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].reason, "queued: waiting for an agent-dispatch slot (node SCORE_LLM)");
   });
@@ -659,7 +659,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-bare/tree/expand?type=node&invocationId=inv-propose"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-bare/tree/expand?type=node&invocationId=inv-propose"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].reason, null);
   });
@@ -670,7 +670,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-j" ? flow : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-j/tree/expand?type=node"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-j/tree/expand?type=node"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -681,7 +681,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-k" ? flow : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-k/tree/expand?type=node&invocationId=inv-other"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-k/tree/expand?type=node&invocationId=inv-other"), res);
     assert.equal(res.statusCode, 404);
   });
 
@@ -698,7 +698,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-l/tree/expand?type=flow&childFlowId=child-9"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-l/tree/expand?type=flow&childFlowId=child-9"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.items.length, 1);
@@ -712,7 +712,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-m" ? flow : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-m/tree/expand?type=flow&childFlowId=nope"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-m/tree/expand?type=flow&childFlowId=nope"), res);
     assert.equal(res.statusCode, 404);
   });
 
@@ -722,14 +722,14 @@ describe("GET /pipeclaw/runs/:flowId/tree/expand", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-n" ? flow : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-n/tree/expand?type=bogus"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-n/tree/expand?type=bogus"), res);
     assert.equal(res.statusCode, 400);
   });
 });
 
 // ── /tree/invocation/:id ────────────────────────────────────────────────────
 
-describe("GET /pipeclaw/runs/:flowId/tree/invocation/:invocationId", () => {
+describe("GET /manifold/runs/:flowId/tree/invocation/:invocationId", () => {
   test("returns the full execution history for the invocation", async () => {
     resetMocks();
     const flow = { flowId: "flow-o", status: "succeeded", currentStep: null, stateJson: { pipelineId: "team_pipe" } };
@@ -747,7 +747,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/invocation/:invocationId", () => {
       pipelinesRef: { value: new Map([["team_pipe", FIXTURE_PIPELINE]]) },
     }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-o/tree/invocation/inv-retried"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-o/tree/invocation/inv-retried"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.nodeId, "SCORE_LLM");
@@ -764,7 +764,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/invocation/:invocationId", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-p" ? flow : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-p/tree/invocation/nope"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-p/tree/invocation/nope"), res);
     assert.equal(res.statusCode, 404);
   });
 
@@ -775,7 +775,7 @@ describe("GET /pipeclaw/runs/:flowId/tree/invocation/:invocationId", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, { readStore: { list: () => [], get: (id) => id === "flow-q" ? flow : null } }));
     const res = createMockRes();
-    await prefixHandler(routes)(authReq("GET", "/pipeclaw/runs/flow-q/tree/invocation/inv-elsewhere"), res);
+    await prefixHandler(routes)(authReq("GET", "/manifold/runs/flow-q/tree/invocation/inv-elsewhere"), res);
     assert.equal(res.statusCode, 404);
   });
 });

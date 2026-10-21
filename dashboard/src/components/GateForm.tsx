@@ -1,7 +1,7 @@
 // GateForm — operator actuation for blocked runs. When a flow is sitting
 // on a human-gate / gate with pending items, this renders an
 // approve / reject / edit form for each pending item and POSTs to
-// `/api/runs/:flowId/approve` (which mirrors the CLI's `pipeclaw
+// `/api/runs/:flowId/approve` (which mirrors the CLI's `manifold
 // approve` semantics). SSE refreshes the parent run state once the
 // executor reacts.
 //

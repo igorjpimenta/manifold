@@ -1,14 +1,14 @@
 {
-  "id": "pipeclaw",
+  "id": "manifold",
   "enabledByDefault": true,
   "activation": {
     "onStartup": true,
-    "onConfigPaths": ["plugins.entries.pipeclaw"]
+    "onConfigPaths": ["plugins.entries.manifold"]
   },
   "contracts": {
     "tools": [
-      "pipeclaw_start",
-      "pipeclaw_send_push",
+      "manifold_start",
+      "manifold_send_push",
       "propose_draft",
       "propose_draft_meta",
       "submit_draft",
@@ -26,14 +26,14 @@
       "dashboardEnabled": { "type": "boolean" },
       "dashboardPort": { "type": "integer", "minimum": 1024, "maximum": 65535 },
       "dashboardHost": { "type": "string" },
-      "pipeclawParrot": {
+      "manifoldParrot": {
         "type": "object",
-        "description": "pipeclaw-parrot channel config. pipeclaw-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
+        "description": "manifold-parrot channel config. manifold-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
         "additionalProperties": false,
         "properties": {
           "defaultAgent": {
             "type": "string",
-            "description": "Default agent for the pipeclaw-parrot channel. Used when the blocked gate node does not declare its own discuss.agent."
+            "description": "Default agent for the manifold-parrot channel. Used when the blocked gate node does not declare its own discuss.agent."
           }
         }
       },

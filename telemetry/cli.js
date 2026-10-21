@@ -64,7 +64,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       // Pull the parent_session_key-linked descendant subtree in one recursive
       // CTE. The recursion also follows the flow_id side-link: when a row in
       // the frontier is a synthetic `flow:<id>` trigger edge, every session
-      // sharing that flow_id (the actual subagent fan-out under pipeclaw-
+      // sharing that flow_id (the actual subagent fan-out under manifold-
       // owner) is pulled in as a virtual child. Without this the tree from
       // a cron only reaches the trigger edge and stops — the scorer/content-
       // writer subagents would be missing because their parent_session_key
@@ -343,7 +343,7 @@ async function resolveTreeTarget(target, client, kind) {
       return r?.child_session_key ?? null;
     },
     "run": async () => {
-      // pipeclaw runId (session_lineage.run_id column). Returns the flow
+      // manifold runId (session_lineage.run_id column). Returns the flow
       // trigger edge that owns this runId.
       const r = await execGet(client, `SELECT child_session_key FROM session_lineage WHERE run_id = ? AND child_session_key LIKE 'flow:%' LIMIT 1`, [t]);
       return r?.child_session_key ?? null;

@@ -2,7 +2,7 @@
 // `~/.openclaw/workspace/.pipelines/` directory.
 //
 // Why: without this, `loadPipelines` only runs once at gateway boot (via the
-// `pipeclaw-loader` service or `ensurePipelinesLoaded`'s "load once if
+// `manifold-loader` service or `ensurePipelinesLoaded`'s "load once if
 // empty" guard). New pipeline folders dropped after boot, or edits to existing
 // `index.js` files, are invisible until the next gateway restart.
 //
@@ -91,21 +91,21 @@ export function createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger, pol
         try {
           await stat(path.join(pipelinesDir, diskCheckId, "index.js"));
           merged.set(id, existing);
-          logger?.warn?.(`pipeclaw pipelines-watcher: kept stale entry for "${id}" (failed to reload)`);
+          logger?.warn?.(`manifold pipelines-watcher: kept stale entry for "${id}" (failed to reload)`);
         } catch {
           // parent's index.js gone — intentional removal, drop it
         }
       }
       pipelinesRef.value = merged;
       lastFingerprint = fp;
-      logger?.info?.(`pipeclaw pipelines-watcher: reloaded ${loaded.size} pipeline(s) after disk change`);
+      logger?.info?.(`manifold pipelines-watcher: reloaded ${loaded.size} pipeline(s) after disk change`);
       for (const cb of listeners) {
         try { cb({ size: loaded.size, ids: [...loaded.keys()] }); }
-        catch (err) { logger?.warn?.(`pipeclaw pipelines-watcher: listener error: ${err?.message ?? err}`); }
+        catch (err) { logger?.warn?.(`manifold pipelines-watcher: listener error: ${err?.message ?? err}`); }
       }
     } catch (err) {
       // Swallow — next tick retries.
-      logger?.warn?.(`pipeclaw pipelines-watcher: tick error: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold pipelines-watcher: tick error: ${err?.message ?? err}`);
     } finally {
       inFlight = false;
     }

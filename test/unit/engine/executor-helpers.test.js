@@ -8,7 +8,7 @@ import {
   mergeForConflict,
   withEditableTextDefault,
   defaultAgentSessionKey,
-  isPipeclawOwnedSessionKey,
+  isManifoldOwnedSessionKey,
   shortSummary,
   deepClone,
   detectBlockedSentinel,
@@ -222,22 +222,22 @@ describe("defaultAgentSessionKey", () => {
   });
 });
 
-// ── isPipeclawOwnedSessionKey ─────────────────────────────────────────────────
+// ── isManifoldOwnedSessionKey ─────────────────────────────────────────────────
 
-describe("isPipeclawOwnedSessionKey", () => {
+describe("isManifoldOwnedSessionKey", () => {
   it("returns true for a key built by defaultAgentSessionKey", () => {
     const key = defaultAgentSessionKey("cyrano", "12345678-aabb-ccdd-eeff-000000000000", "PROPOSE");
-    assert.equal(isPipeclawOwnedSessionKey(key), true);
+    assert.equal(isManifoldOwnedSessionKey(key), true);
   });
 
-  it("returns false for a non-pipeclaw session key", () => {
-    assert.equal(isPipeclawOwnedSessionKey("agent:main:cron:some-job"), false);
+  it("returns false for a non-manifold session key", () => {
+    assert.equal(isManifoldOwnedSessionKey("agent:main:cron:some-job"), false);
   });
 
   it("returns false for null/undefined/non-string input", () => {
-    assert.equal(isPipeclawOwnedSessionKey(null), false);
-    assert.equal(isPipeclawOwnedSessionKey(undefined), false);
-    assert.equal(isPipeclawOwnedSessionKey(42), false);
+    assert.equal(isManifoldOwnedSessionKey(null), false);
+    assert.equal(isManifoldOwnedSessionKey(undefined), false);
+    assert.equal(isManifoldOwnedSessionKey(42), false);
   });
 });
 

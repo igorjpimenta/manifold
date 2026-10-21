@@ -2,7 +2,7 @@
 // is temporarily disabled, letting the operator talk to the main agent
 // without the priming hook intercepting every message.
 //
-// State lives at ~/.openclaw/state/pipeclaw-paused.json so it survives
+// State lives at ~/.openclaw/state/manifold-paused.json so it survives
 // gateway restarts and is visible to both the hook (gateway process) and
 // the CLI (separate process).
 
@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const STATE_FILE = path.join(os.homedir(), ".openclaw", "state", "pipeclaw-paused.json");
+const STATE_FILE = path.join(os.homedir(), ".openclaw", "state", "manifold-paused.json");
 
 export function listPaused() {
   try {

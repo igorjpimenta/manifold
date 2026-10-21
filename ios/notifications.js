@@ -14,7 +14,7 @@
 // case to NotificationKind on iOS. Forgetting either side surfaces
 // as a notification that delivers but doesn't navigate.
 //
-// Notification kinds are NOT pipeclaw concepts (error_type / gate wait
+// Notification kinds are NOT manifold concepts (error_type / gate wait
 // kinds live one level up); they're delivery surfaces.
 
 const KIND_APPROVAL = "openclaw.approval";

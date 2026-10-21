@@ -1,12 +1,12 @@
 /**
- * Unit tests for agent/tools/pipeclaw-send-push.js — registerPipeclawSendPushTool
- * (pipeclaw_send_push): validation and APNs push delivery.
+ * Unit tests for agent/tools/manifold-send-push.js — registerManifoldSendPushTool
+ * (manifold_send_push): validation and APNs push delivery.
  */
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { registerPipeclawSendPushTool } from "../../../../agent/tools/pipeclaw-send-push.js";
+import { registerManifoldSendPushTool } from "../../../../agent/tools/manifold-send-push.js";
 import { configureApi } from "../../../../telemetry/digest-push.js";
 
 function createToolApi(apns) {
@@ -28,12 +28,12 @@ function findTool(tools, name) {
   return typeof def === "function" ? def({}) : def;
 }
 
-describe("registerPipeclawSendPushTool — pipeclaw_send_push", () => {
+describe("registerManifoldSendPushTool — manifold_send_push", () => {
   function makeSendDeps(apns) {
     const { api, tools } = createToolApi(apns);
     configureApi(api);
-    registerPipeclawSendPushTool({ api });
-    const toolDef = findTool(tools, "pipeclaw_send_push");
+    registerManifoldSendPushTool({ api });
+    const toolDef = findTool(tools, "manifold_send_push");
     return { toolDef };
   }
 

@@ -1,6 +1,6 @@
 /**
  * Unit tests for the batched tree-summary endpoint:
- *   GET /pipeclaw/tree-summary?flowIds=id1,id2,...
+ *   GET /manifold/tree-summary?flowIds=id1,id2,...
  */
 import { test, describe, mock } from "node:test";
 import assert from "node:assert/strict";
@@ -31,7 +31,7 @@ function authReq(method, path) {
 }
 
 function handler(routes) {
-  return routes.find((r) => r.path === "/pipeclaw/tree-summary" && r.match === "exact").handler;
+  return routes.find((r) => r.path === "/manifold/tree-summary" && r.match === "exact").handler;
 }
 
 function resetMocks() {
@@ -57,13 +57,13 @@ function makeDeps(api, overrides = {}) {
   };
 }
 
-describe("GET /pipeclaw/tree-summary", () => {
+describe("GET /manifold/tree-summary", () => {
   test("returns 405 for non-GET", async () => {
     resetMocks();
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    await handler(routes)(authReq("POST", "/pipeclaw/tree-summary?flowIds=a"), res);
+    await handler(routes)(authReq("POST", "/manifold/tree-summary?flowIds=a"), res);
     assert.equal(res.statusCode, 405);
   });
 
@@ -72,7 +72,7 @@ describe("GET /pipeclaw/tree-summary", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    await handler(routes)(authReq("GET", "/pipeclaw/tree-summary"), res);
+    await handler(routes)(authReq("GET", "/manifold/tree-summary"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -83,7 +83,7 @@ describe("GET /pipeclaw/tree-summary", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    await handler(routes)(authReq("GET", "/pipeclaw/tree-summary?flowIds=a,%20b%20,,c"), res);
+    await handler(routes)(authReq("GET", "/manifold/tree-summary?flowIds=a,%20b%20,,c"), res);
     assert.deepEqual(received, ["a", "b", "c"]);
   });
 
@@ -96,7 +96,7 @@ describe("GET /pipeclaw/tree-summary", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    await handler(routes)(authReq("GET", "/pipeclaw/tree-summary?flowIds=flow-a,flow-b"), res);
+    await handler(routes)(authReq("GET", "/manifold/tree-summary?flowIds=flow-a,flow-b"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.deepEqual(new Set(body.summaries["flow-a"].nodeIds), new Set(["PRIME", "DRAFT"]));
@@ -109,7 +109,7 @@ describe("GET /pipeclaw/tree-summary", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    await handler(routes)(authReq("GET", "/pipeclaw/tree-summary?flowIds=flow-a,flow-no-visits"), res);
+    await handler(routes)(authReq("GET", "/manifold/tree-summary?flowIds=flow-a,flow-no-visits"), res);
     const body = JSON.parse(res.body);
     assert.equal("flow-a" in body.summaries, true);
     assert.equal("flow-no-visits" in body.summaries, false);
@@ -121,7 +121,7 @@ describe("GET /pipeclaw/tree-summary", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    await handler(routes)(authReq("GET", "/pipeclaw/tree-summary?flowIds=a"), res);
+    await handler(routes)(authReq("GET", "/manifold/tree-summary?flowIds=a"), res);
     assert.equal(res.statusCode, 500);
     const body = JSON.parse(res.body);
     assert.equal(body.ok, false);

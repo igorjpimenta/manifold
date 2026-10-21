@@ -41,7 +41,7 @@ describe("registerPipelineRoutes — registration", () => {
     const { api, routes } = createMockApi();
     registerPipelineRoutes(makeDeps(api));
     const [r] = routes;
-    assert.equal(r.path, "/pipeclaw/pipelines");
+    assert.equal(r.path, "/manifold/pipelines");
     assert.equal(r.auth, "plugin");
     assert.equal(r.match, "exact");
     assert.equal(typeof r.handler, "function");
@@ -53,7 +53,7 @@ describe("registerPipelineRoutes — method guard", () => {
     const { api, routes } = createMockApi();
     registerPipelineRoutes(makeDeps(api));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("POST", "/pipeclaw/pipelines"), res);
+    await routes[0].handler(createMockReq("POST", "/manifold/pipelines"), res);
     assert.equal(res.statusCode, 405);
   });
 
@@ -61,7 +61,7 @@ describe("registerPipelineRoutes — method guard", () => {
     const { api, routes } = createMockApi();
     registerPipelineRoutes(makeDeps(api));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("DELETE", "/pipeclaw/pipelines"), res);
+    await routes[0].handler(createMockReq("DELETE", "/manifold/pipelines"), res);
     assert.equal(res.statusCode, 405);
   });
 });
@@ -71,7 +71,7 @@ describe("registerPipelineRoutes — handler", () => {
     const { api, routes } = createMockApi();
     registerPipelineRoutes(makeDeps(api));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/pipeclaw/pipelines"), res);
+    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.pipelines), "pipelines is an array");
@@ -90,7 +90,7 @@ describe("registerPipelineRoutes — handler", () => {
     const pipelines = new Map([["team_test", fakePipeline]]);
     registerPipelineRoutes(makeDeps(api, { pipelinesRef: { value: pipelines } }));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/pipeclaw/pipelines"), res);
+    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
     const body = JSON.parse(res.body);
     const [p] = body.pipelines;
     assert.equal(p.id, "team_test");
@@ -111,7 +111,7 @@ describe("registerPipelineRoutes — handler", () => {
       readStore: { listAllPipelineStats: () => new Map([["orphan_pipeline", orphanStats]]) },
     }));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/pipeclaw/pipelines"), res);
+    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
     const body = JSON.parse(res.body);
     const orphan = body.pipelines.find((p) => p.id === "orphan_pipeline");
     assert.ok(orphan, "orphan pipeline appears");
@@ -141,7 +141,7 @@ describe("registerPipelineRoutes — handler", () => {
     ]);
     registerPipelineRoutes(makeDeps(api, { pipelinesRef: { value: pipelines } }));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/pipeclaw/pipelines"), res);
+    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
     const body = JSON.parse(res.body);
     assert.ok(body.pipelines.some((p) => p.id === "team_test"), "the real pipeline must still appear");
     assert.ok(

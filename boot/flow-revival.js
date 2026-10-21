@@ -65,16 +65,16 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
       const result = await admissionQueueStore.release(row.id);
       await wakePromotedRelease(result, {
         runStore, resume: executor.resume, logger, api,
-        context: `pipeclaw revival: retired-kind reap [${row.id.slice(0, 8)}]`,
+        context: `manifold revival: retired-kind reap [${row.id.slice(0, 8)}]`,
       });
       retiredKindReaped++;
       logger.warn(
-        `pipeclaw revival: reaped retired-kind '${row.kind}' admission [${row.id.slice(0, 8)}] for flow ` +
+        `manifold revival: reaped retired-kind '${row.kind}' admission [${row.id.slice(0, 8)}] for flow ` +
         `[${row.flowId.slice(0, 8)}] (${flow ? `status=${flow.status}` : "flow_runs row gone"}) — ` +
         `no code path can drive this kind, slot reclaimed`,
       );
     } catch (err) {
-      logger.warn(`pipeclaw revival: retired-kind reap [${row.id.slice(0, 8)}] failed: ${err?.message ?? err}`);
+      logger.warn(`manifold revival: retired-kind reap [${row.id.slice(0, 8)}] failed: ${err?.message ?? err}`);
     }
   }
 
@@ -114,7 +114,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
   let stuckAdmissionsFailed = 0;
   await Promise.all(candidates.map(async (row) => {
     logger.warn(
-      `pipeclaw revival: admitted ${row.kind} slot [${row.id.slice(0, 8)}] for flow [${row.flowId.slice(0, 8)}] ` +
+      `manifold revival: admitted ${row.kind} slot [${row.id.slice(0, 8)}] for flow [${row.flowId.slice(0, 8)}] ` +
       `never resumed (status=queued, admitted ${Math.round((now - (row.admittedAt ?? now)) / 60000)}min ago) — force-driving flipToRunningAndResume`,
     );
     try {
@@ -128,11 +128,11 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
         stuckAdmissionsResumed++;
       } else {
         stuckAdmissionsFailed++;
-        logger.warn(`pipeclaw revival: stuck-admission force-resume for [${row.flowId.slice(0, 8)}] did not apply: ${result.reason ?? "unknown"}`);
+        logger.warn(`manifold revival: stuck-admission force-resume for [${row.flowId.slice(0, 8)}] did not apply: ${result.reason ?? "unknown"}`);
       }
     } catch (err) {
       stuckAdmissionsFailed++;
-      logger.warn(`pipeclaw revival: stuck-admission force-resume for [${row.flowId.slice(0, 8)}] threw: ${err?.message ?? err}`);
+      logger.warn(`manifold revival: stuck-admission force-resume for [${row.flowId.slice(0, 8)}] threw: ${err?.message ?? err}`);
     }
   }));
   return { stuckAdmissionsResumed, stuckAdmissionsFailed, retiredKindReaped };
@@ -142,7 +142,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
  * Boot-time orphan recovery for flow_runs left in status='running' (crashed
  * mid-flight) or status='queued' (waiting on a resource-lock, or on a
  * shared admission-pool slot — flow-start or child-dispatch — when the
- * process died) after a gateway crash. Called by the pipeclaw-flow-revival
+ * process died) after a gateway crash. Called by the manifold-flow-revival
  * service in index.js.
  *
  * Returns a summary object for observability and testing:
@@ -172,7 +172,7 @@ export async function reviveOrphanFlows({
   // createCancelStore(ownerKey) creates a store bound to the flow's actual ownerKey
   // so that cancelFlowByIdForOwner's equality check passes regardless of which
   // plugin originally created the flow (e.g. legacy graph-flow-owner flows are
-  // rejected by the default pipeclaw-owner store but succeed with their own key).
+  // rejected by the default manifold-owner store but succeed with their own key).
   const cancelledByRevival = new Set();
   const terminalStatuses = new Set(["cancelled", "failed", "succeeded"]);
   const cancelStores = new Map();
@@ -186,7 +186,7 @@ export async function reviveOrphanFlows({
     if (f.cancelRequestedAt == null) continue;
     if (terminalStatuses.has(f.status)) continue;
     logger.info(
-      `pipeclaw revival: completing interrupted cancel [${f.flowId.slice(0, 8)}] status=${f.status}`,
+      `manifold revival: completing interrupted cancel [${f.flowId.slice(0, 8)}] status=${f.status}`,
     );
     await completeCancellation({
       store: cancelStoreFor(f.ownerKey),
@@ -313,17 +313,17 @@ export async function reviveOrphanFlows({
   for (const o of orphans) {
     const kind = o.flow.waitJson?.kind;
     if (o.flow.status === "queued" && (kind === "flow-start" || kind === "child-dispatch")) {
-      logger.info(`pipeclaw revival: [${o.flow.flowId.slice(0, 8)}] left queued for admission (${kind}) — will resume via the normal release/promotion cycle`);
+      logger.info(`manifold revival: [${o.flow.flowId.slice(0, 8)}] left queued for admission (${kind}) — will resume via the normal release/promotion cycle`);
       queuedForAdmission++;
       continue;
     }
     if (o.flow.status === "queued" && kind === "agent-dispatch" && admissionQueueStore && runStore) {
       const result = await flipToRunningAndResume({
         parentFlowId: o.flow.flowId, runStore, admissionQueueStore, logger, api,
-        resume: (flowId) => { scheduleDetachedResume(executor.resume, flowId, { logger, api, context: "pipeclaw revival: re-admit" }); },
+        resume: (flowId) => { scheduleDetachedResume(executor.resume, flowId, { logger, api, context: "manifold revival: re-admit" }); },
       });
       logger.info(
-        `pipeclaw revival: [${o.flow.flowId.slice(0, 8)}] re-requested its ${admissionKindForFlow(o.flow)} slot — ` +
+        `manifold revival: [${o.flow.flowId.slice(0, 8)}] re-requested its ${admissionKindForFlow(o.flow)} slot — ` +
         `${result.resumed ? "admitted, resuming" : result.reason}`,
       );
       readmitted++;
@@ -335,13 +335,13 @@ export async function reviveOrphanFlows({
   // ── Revive survivors ────────────────────────────────────────────────────────
   let revivedAgent = 0;
   if (toRevive.length === 0) {
-    logger.info("pipeclaw revival: no revivable orphan flows at boot");
+    logger.info("manifold revival: no revivable orphan flows at boot");
   } else {
-    logger.info(`pipeclaw revival: reviving ${toRevive.length} orphan flow(s) from lastStep`);
+    logger.info(`manifold revival: reviving ${toRevive.length} orphan flow(s) from lastStep`);
     for (const o of toRevive) {
       const flow = o.flow;
       const pipelineId = flow.stateJson?.pipelineId ?? "?";
-      logger.info(`pipeclaw revival: [${flow.flowId.slice(0, 8)}] pipeline=${pipelineId} step=${o.targetNodeId}`);
+      logger.info(`manifold revival: [${flow.flowId.slice(0, 8)}] pipeline=${pipelineId} step=${o.targetNodeId}`);
       if (o.isAgent) {
         revivedAgent++;
         // Resumes the SAME session with a continuation prompt. No admission
@@ -351,11 +351,11 @@ export async function reviveOrphanFlows({
         // normal lifecycle once the run blocks or finishes.
         executor.reviveAgentKindOrphan(flow, o.targetNodeId)
           .catch((err) => {
-            logger.warn(`pipeclaw revival: reviveAgentKindOrphan [${flow.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+            logger.warn(`manifold revival: reviveAgentKindOrphan [${flow.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
           });
       } else {
         executor.runFlow(flow.flowId, "revival").catch((err) => {
-          logger.warn(`pipeclaw revival: runFlow [${flow.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+          logger.warn(`manifold revival: runFlow [${flow.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
         });
       }
     }
@@ -388,20 +388,20 @@ export async function reviveOrphanFlows({
       // crash hadn't happened.
       const mode = pipelines?.get?.(f.pipelineId)?.nodes?.[nodeId]?.mode;
       if (mode && !subflowOutcomeSatisfied(mode, children)) {
-        logger.info(`pipeclaw revival: failing [${f.flowId.slice(0, 8)}] — subflow "${nodeId}" (mode:"${mode}") not satisfied`);
+        logger.info(`manifold revival: failing [${f.flowId.slice(0, 8)}] — subflow "${nodeId}" (mode:"${mode}") not satisfied`);
         await store.fail({
           flowId: f.flowId, expectedRevision: f.revision, stateJson: f.stateJson,
           statusReason: `subflow "${nodeId}" (mode:"${mode}") not satisfied — ${mode === "any" ? "every child failed" : "at least one child did not succeed"}`,
         });
         continue;
       }
-      logger.info(`pipeclaw revival: resuming [${f.flowId.slice(0, 8)}] — all children of ${nodeId} terminal`);
+      logger.info(`manifold revival: resuming [${f.flowId.slice(0, 8)}] — all children of ${nodeId} terminal`);
       // Must flip status back to 'running' before calling resume() —
       // executor.resume() is just runFlow(), whose own first check returns
       // immediately for a flow still in status='blocked'. See
       // child-resume-trigger.js's flipToRunningAndResume for why.
       await flipToRunningAndResume({ parentFlowId: f.flowId, runStore, resume: executor.resume, logger, admissionQueueStore, api }).catch((err) => {
-        logger.warn(`pipeclaw revival: children-pending resume [${f.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+        logger.warn(`manifold revival: children-pending resume [${f.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
       });
     }
   }
@@ -430,10 +430,10 @@ export async function reviveOrphanFlows({
         return entry && (entry.decision || entry.sendFailed);
       });
       if (!hasUnappliedDecision) continue;
-      logger.info(`pipeclaw revival: [${f.flowId.slice(0, 8)}] has a recorded gate decision never applied — reconciling`);
+      logger.info(`manifold revival: [${f.flowId.slice(0, 8)}] has a recorded gate decision never applied — reconciling`);
       gatesReconciled++;
       maybeResolveFlow(f.flowId).catch((err) => {
-        logger.warn(`pipeclaw revival: gate reconciliation [${f.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+        logger.warn(`manifold revival: gate reconciliation [${f.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
       });
     }
   }
@@ -472,7 +472,7 @@ export async function reviveOrphanFlows({
       const owningStatus = cancelledByRevival.has(row.flowId) ? "cancelled" : statusByFlowId.get(row.flowId);
       if (!owningStatus || !admissionTerminalStatuses.has(owningStatus)) continue;
       logger.info(
-        `pipeclaw revival: releasing leaked ${row.kind} admission [${row.id.slice(0, 8)}] ` +
+        `manifold revival: releasing leaked ${row.kind} admission [${row.id.slice(0, 8)}] ` +
         `for already-terminal flow [${row.flowId.slice(0, 8)}] (status=${owningStatus})`,
       );
       try {
@@ -490,10 +490,10 @@ export async function reviveOrphanFlows({
         // shared pool by one slot per promotion this sweep caused.
         await wakePromotedRelease(result, {
           runStore, resume: executor.resume, logger, api,
-          context: `pipeclaw revival: leak-release promotion [${row.id.slice(0, 8)}]`,
+          context: `manifold revival: leak-release promotion [${row.id.slice(0, 8)}]`,
         });
       } catch (err) {
-        logger.warn(`pipeclaw revival: admission release [${row.id.slice(0, 8)}] failed: ${err?.message ?? err}`);
+        logger.warn(`manifold revival: admission release [${row.id.slice(0, 8)}] failed: ${err?.message ?? err}`);
       }
       admissionLeaksReleased++;
     }
@@ -513,13 +513,13 @@ export async function reviveOrphanFlows({
       for (const p of promoted) {
         await wakePromotedRelease({ released: false, promoted: p }, {
           runStore, resume: executor.resume, logger, api,
-          context: `pipeclaw revival: free-slot fill [${p.id.slice(0, 8)}]`,
+          context: `manifold revival: free-slot fill [${p.id.slice(0, 8)}]`,
         });
       }
       freeSlotsFilled = promoted.length;
-      if (freeSlotsFilled > 0) logger.info(`pipeclaw revival: filled ${freeSlotsFilled} free admission slot(s) from the queue`);
+      if (freeSlotsFilled > 0) logger.info(`manifold revival: filled ${freeSlotsFilled} free admission slot(s) from the queue`);
     } catch (err) {
-      logger.warn(`pipeclaw revival: free-slot fill failed: ${err?.message ?? err}`);
+      logger.warn(`manifold revival: free-slot fill failed: ${err?.message ?? err}`);
     }
   }
 
@@ -534,7 +534,7 @@ export async function reviveOrphanFlows({
     ...(stuckAdmissionMinAgeMs != null ? { minAgeMs: stuckAdmissionMinAgeMs } : {}),
   });
   if (retiredKindReaped > 0) {
-    logger.warn(`pipeclaw revival: reaped ${retiredKindReaped} retired-kind admission slot(s) no code path could drive`);
+    logger.warn(`manifold revival: reaped ${retiredKindReaped} retired-kind admission slot(s) no code path could drive`);
   }
 
   return {

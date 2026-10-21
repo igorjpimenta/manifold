@@ -63,7 +63,7 @@ async function openEventsDb(dbPath, legacyDbPath, logger) {
     if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["flow_events"], logger);
     return client;
   } catch (err) {
-    logger?.warn?.(`pipeclaw event-log: failed to open events DB: ${err?.message ?? err}`);
+    logger?.warn?.(`manifold event-log: failed to open events DB: ${err?.message ?? err}`);
     return null;
   }
 }
@@ -110,7 +110,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     }
     for (const cb of subscribers) {
       try { cb(event); } catch (err) {
-        logger?.warn?.(`pipeclaw dashboard event-bus subscriber error: ${err?.message ?? err}`);
+        logger?.warn?.(`manifold dashboard event-bus subscriber error: ${err?.message ?? err}`);
       }
     }
   }
@@ -211,7 +211,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
           });
         }
       } catch (err) {
-        logger?.warn?.(`pipeclaw dashboard event-bus prime failed: ${err?.message ?? err}`);
+        logger?.warn?.(`manifold dashboard event-bus prime failed: ${err?.message ?? err}`);
       }
       // Subscribe to trigger events from state-store — fires within a
       // process.nextTick after each write, replacing the 1 Hz poll.
@@ -272,7 +272,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     broadcast(event) {
       for (const cb of subscribers) {
         try { cb(event); } catch (err) {
-          logger?.warn?.(`pipeclaw dashboard event-bus broadcast error: ${err?.message ?? err}`);
+          logger?.warn?.(`manifold dashboard event-bus broadcast error: ${err?.message ?? err}`);
         }
       }
     },

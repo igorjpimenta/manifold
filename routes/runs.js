@@ -21,10 +21,10 @@ export function registerRunRoutes({
   handleDiscussAudioRetry,
 }) {
 
-  // ── GET /pipeclaw/cost ─────────────────────────────────────────────────
+  // ── GET /manifold/cost ─────────────────────────────────────────────────
 
   api.registerHttpRoute({
-    path: "/pipeclaw/cost",
+    path: "/manifold/cost",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -59,7 +59,7 @@ export function registerRunRoutes({
           pipelines: cost.pipelines,
         }));
       } catch (err) {
-        api.logger.warn(`pipeclaw cost handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold cost handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));
@@ -68,10 +68,10 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET /pipeclaw/runs ─────────────────────────────────────────────────
+  // ── GET /manifold/runs ─────────────────────────────────────────────────
 
   api.registerHttpRoute({
-    path: "/pipeclaw/runs",
+    path: "/manifold/runs",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -155,7 +155,7 @@ export function registerRunRoutes({
           nextBeforeId: last?.flowId ?? null,
         }));
       } catch (err) {
-        api.logger.warn(`pipeclaw runs handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold runs handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -164,13 +164,13 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET /pipeclaw/errors?flowIds=id1,id2,... ──────────────────────────
+  // ── GET /manifold/errors?flowIds=id1,id2,... ──────────────────────────
   // Returns error entries for the given flow IDs.
   // Used by the dashboard to enrich its run lists and stats without direct
   // DB access. flowIds is a comma-separated list; max 500 entries.
 
   api.registerHttpRoute({
-    path: "/pipeclaw/errors",
+    path: "/manifold/errors",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -200,7 +200,7 @@ export function registerRunRoutes({
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ errors }));
       } catch (err) {
-        api.logger.warn(`pipeclaw errors handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold errors handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -209,10 +209,10 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET /pipeclaw/queue ────────────────────────────────────────────────
+  // ── GET /manifold/queue ────────────────────────────────────────────────
 
   api.registerHttpRoute({
-    path: "/pipeclaw/queue",
+    path: "/manifold/queue",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -247,7 +247,7 @@ export function registerRunRoutes({
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ items }));
       } catch (err) {
-        api.logger.warn(`pipeclaw queue handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold queue handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -256,16 +256,16 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET /pipeclaw/tree-summary?flowIds=id1,id2,... ──────────────────────
+  // ── GET /manifold/tree-summary?flowIds=id1,id2,... ──────────────────────
   // Batched "which top-level nodes did each of these flows visit" —
   // backing the dashboard auto-funnel's per-node visit check without one
-  // round-trip per run. Same shape/convention as /pipeclaw/errors above
+  // round-trip per run. Same shape/convention as /manifold/errors above
   // (comma-separated flowIds, capped at 500, sibling top-level resource
-  // rather than nested under /pipeclaw/runs/ — that path is a
+  // rather than nested under /manifold/runs/ — that path is a
   // prefix-matched route below and this avoids any ambiguity with it).
 
   api.registerHttpRoute({
-    path: "/pipeclaw/tree-summary",
+    path: "/manifold/tree-summary",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -295,7 +295,7 @@ export function registerRunRoutes({
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ summaries }));
       } catch (err) {
-        api.logger.warn(`pipeclaw tree-summary handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold tree-summary handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -304,10 +304,10 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET+POST /pipeclaw/runs/<flowId>/... ────────────────────────────────
+  // ── GET+POST /manifold/runs/<flowId>/... ────────────────────────────────
 
   api.registerHttpRoute({
-    path: "/pipeclaw/runs/",
+    path: "/manifold/runs/",
     auth: "plugin",
     match: "prefix",
     handler: async (req, res) => {
@@ -321,7 +321,7 @@ export function registerRunRoutes({
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-      const tail = url.pathname.slice("/pipeclaw/runs/".length);
+      const tail = url.pathname.slice("/manifold/runs/".length);
       const segments = tail.split("/").filter(Boolean);
       const flowId = segments[0];
       if (!flowId) {
@@ -396,7 +396,7 @@ export function registerRunRoutes({
         res.end(JSON.stringify({ ok: false, error: "unknown subpath or method" }));
         return true;
       } catch (err) {
-        api.logger.warn(`pipeclaw run-detail handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold run-detail handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -427,7 +427,7 @@ export function registerRunRoutes({
     // reads when B2 landed.
     const gates = await nodeExecutionsStore.listGateRecordsForFlow(flow.flowId);
     // Strip `loop` from the stateJson payload — subflow data is served via
-    // GET /pipeclaw/runs/:flowId/subflows (childFlows, not old-model branchService).
+    // GET /manifold/runs/:flowId/subflows (childFlows, not old-model branchService).
     // Strip `errors` too: failure_events is now the sole store for error
     // history ("Eradicate soft errors" Phase 1.5) — errorEntries below is
     // the normalized replacement. Only historical rows persisted before
@@ -952,7 +952,7 @@ export function registerRunRoutes({
     const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
     const subagentKeyPattern = new RegExp(`^agent:([^:]+):subagent:gf-${flowShort}-(.+)$`);
-    const discussKeyPattern  = new RegExp(`^agent:([^:]+):(?:gf-discuss-|pipeclaw-parrot:direct:)${flowShort}-(.+)$`);
+    const discussKeyPattern  = new RegExp(`^agent:([^:]+):(?:gf-discuss-|manifold-parrot:direct:)${flowShort}-(.+)$`);
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;
 
@@ -1128,7 +1128,7 @@ export function registerRunRoutes({
       return true;
     }
     try {
-      const elev = await invokeElevated("/pipeclaw/_elev/rerun", {
+      const elev = await invokeElevated("/manifold/_elev/rerun", {
         sourceFlowId: sourceFlow.flowId,
         args: argsOverride,
       });
@@ -1136,7 +1136,7 @@ export function registerRunRoutes({
       res.setHeader("Content-Type", "application/json");
       res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
     } catch (err) {
-      api.logger.warn(`pipeclaw rerun handler error: ${err?.message ?? err}`);
+      api.logger.warn(`manifold rerun handler error: ${err?.message ?? err}`);
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
