@@ -1,7 +1,7 @@
 // Unit tests for the public export surface declared in package.json.
 //
 // Consumers (oc-config, later stories) install this repo as the
-// `@igorjpimenta/oc-pipeclaw` git dependency and import ONLY through the
+// `@igorjpimenta/manifold` git dependency and import ONLY through the
 // subpaths below — deep file paths are not a contract. This suite pins the
 // map itself: the exact subpath set, each target file's existence, and that
 // every subpath still imports through the package's own bare specifier
@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as openclawSdkHooks from "../../helpers/openclaw-plugin-sdk-hooks.js";
 
-const PKG_NAME = "@igorjpimenta/oc-pipeclaw";
+const PKG_NAME = "@igorjpimenta/manifold";
 const pkg = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
@@ -50,10 +50,6 @@ const PUBLIC_API = {
     exports: ["browserProfileForLock", "beginTabSession", "endTabSession"],
   },
   "./elevation": { file: "./elevation.js", exports: ["invokeElevated"] },
-  "./digest": {
-    file: "./telemetry/digest-push.js",
-    exports: ["sendDigestPush", "configureApi"],
-  },
   "./tool-handoff": {
     file: "./state/tool-handoff.js",
     exports: [
@@ -71,8 +67,8 @@ const PUBLIC_API = {
     file: "./hooks/profile-write-lock.js",
     exports: ["registerProfileWriteLock", "profileEditResultPathFor", "PROFILE_EDIT_RESULTS_DIR"],
   },
-  "./ios-auth": {
-    file: "./ios/auth.js",
+  "./bridge-auth": {
+    file: "./auth/bridge.js",
     exports: ["authorizeBridgeRequest", "sendUnauthorized"],
   },
   "./state/db": {

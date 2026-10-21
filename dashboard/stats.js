@@ -74,7 +74,7 @@ export function resolveDisplayStep(run, runErrors = []) {
 // so downstream aggregations see the corrected semantics without each
 // site having to call the resolver itself. errorsByFlow is the
 // Map<flowId, ErrorEntry[]> callers fetch once via the gateway's
-// GET /pipeclaw/errors (failureStore.queryErrorsByFlowIds, Phase 1.5) —
+// GET /manifold/errors (failureStore.queryErrorsByFlowIds, Phase 1.5) —
 // this function stays DB-free, just threading the lookup through.
 function withResolvedSteps(runs, errorsByFlow = null) {
   return runs.map((r) => {
@@ -426,7 +426,7 @@ function startOfDay(ms) {
  * declaration. One stage per top-level node in pipeline declaration order
  * (start/end skipped); per-run "size" is 1 when the node was ever visited,
  * per `visitedByFlow` — a Map<flowId, Set<nodeId>> the caller fetches in
- * one batched round-trip (GET /pipeclaw/tree-summary, backed by
+ * one batched round-trip (GET /manifold/tree-summary, backed by
  * flow_node_invocations) rather than this function reading
  * state._stepHistory or making one DB/HTTP call per (run, stage) itself.
  * `visitedByFlow` may be null/undefined (caller couldn't fetch it, e.g. no
@@ -607,7 +607,7 @@ function summariseForChart(r) {
  * click panel to show:
  *   - visits: how many runs visited this node at any point, per
  *     `visitedByFlow` — a Map<flowId, Set<nodeId>> the caller fetches in
- *     one batched round-trip (GET /pipeclaw/tree-summary), same as
+ *     one batched round-trip (GET /manifold/tree-summary), same as
  *     computePipelineStats' auto-funnel. May be null/undefined (caller
  *     couldn't fetch it) — visits then falls back to lastStep === nodeId
  *     only, same degrade-safe shape as everywhere else this map is

@@ -1,4 +1,4 @@
-// pipeclaw — LangGraph-style pipeline executor for openclaw.
+// manifold — LangGraph-style pipeline executor for openclaw.
 //
 // Loads pipeline definitions from `workspace/.pipelines/<team>_<name>.js`,
 // drives them against managed `flow_runs`, and dispatches each node:
@@ -28,7 +28,6 @@ import { createPipelineRegistryStore } from "./state/pipeline-registry.js";
 import { registerCliCommands } from "./agent/cli.js";
 import {
   registerGraphFlowTool,
-  registerPipeclawSendPushTool,
   registerProposeDraftTool,
   registerProposeDraftMetaTool,
   registerSubmitDraftTool,
@@ -44,11 +43,11 @@ import { costForAllPipelines } from "./dashboard/cost.js";
 import { createPipelinesWatcher } from "./engine/pipelines-watcher.js";
 import { flushAll as flushBatchWriter } from "./state/batch-writer.js";
 import { invokeElevated } from "./elevation.js";
-import { createPipeclawParrotChannelEntry } from "./channels/pipeclaw-parrot-channel.js";
+import { createManifoldParrotChannelEntry } from "./channels/manifold-parrot-channel.js";
 
 // Route modules extracted from this file.
 import { createEmitSseEvent } from "./utils/sse.js";
-import { flowStateEmitter } from "./events.js";
+import { flowStateEmitter, gateEmitter } from "./events.js";
 import { buildRunPatch as _buildRunPatch } from "./utils/run-patch.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
 import { registerRunRoutes } from "./routes/runs.js";
@@ -73,7 +72,7 @@ import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
 
 const DEFAULT_PIPELINES_DIR = path.join(os.homedir(), ".openclaw", "workspace", ".pipelines");
-const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:pipeclaw-owner";
+const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 const DEFAULT_DASHBOARD_PORT = 7430;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 
@@ -89,10 +88,10 @@ const moduleState = { workingSubagent: null };
 
 
 export default definePluginEntry({
-  id: "pipeclaw",
-  name: "Pipeclaw Pipeline Engine",
+  id: "manifold",
+  name: "Manifold Pipeline Engine",
   description:
-    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw pipeclaw list / start / status / approve / runs`. Agent tool: `pipeclaw_start`.",
+    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. Agent tool: `manifold_start`.",
   configSchema: () => ({
     type: "object",
     additionalProperties: false,
@@ -103,7 +102,7 @@ export default definePluginEntry({
       },
       ownerSessionKey: {
         type: "string",
-        description: "Session key used to scope flow_run ownership. Default: agent:main:explicit:pipeclaw-owner",
+        description: "Session key used to scope flow_run ownership. Default: agent:main:explicit:manifold-owner",
       },
       dashboardEnabled: {
         type: "boolean",
@@ -119,14 +118,14 @@ export default definePluginEntry({
         type: "string",
         description: "Host/interface to bind. Default: 127.0.0.1 (loopback only). Override at your own risk.",
       },
-      pipeclawParrot: {
+      manifoldParrot: {
         type: "object",
-        description: "pipeclaw-parrot channel config. pipeclaw-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
+        description: "manifold-parrot channel config. manifold-parrot is the built-in discuss channel a consumer opens when a human-gate is blocked.",
         additionalProperties: false,
         properties: {
           defaultAgent: {
             type: "string",
-            description: "Default agent for the pipeclaw-parrot channel. Used when the blocked gate node does not declare its own discuss.agent.",
+            description: "Default agent for the manifold-parrot channel. Used when the blocked gate node does not declare its own discuss.agent.",
           },
         },
       },
@@ -157,7 +156,7 @@ export default definePluginEntry({
     const userCfg = api.pluginConfig ?? {};
     const pipelinesDir = userCfg.pipelinesDir || DEFAULT_PIPELINES_DIR;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
-    const discussDefaultAgent = typeof userCfg.pipeclawParrot?.defaultAgent === "string" ? userCfg.pipeclawParrot.defaultAgent : null;
+    const discussDefaultAgent = typeof userCfg.manifoldParrot?.defaultAgent === "string" ? userCfg.manifoldParrot.defaultAgent : null;
     const dashboardEnabled = userCfg.dashboardEnabled !== false;
     const dashboardPort = Number.isInteger(userCfg.dashboardPort) ? userCfg.dashboardPort : DEFAULT_DASHBOARD_PORT;
     const dashboardHost = userCfg.dashboardHost || DEFAULT_DASHBOARD_HOST;
@@ -192,7 +191,7 @@ export default definePluginEntry({
     // The single durable admission pool for flow runs — child-dispatch and
     // flow-start share it; see state/admission-queue-store.js's own header
     // for why it's one combined pool, not one per kind. Reads
-    // the same runtimeDbPath every other pipeclaw-owned table lives in;
+    // the same runtimeDbPath every other manifold-owned table lives in;
     // getGlobalConcurrencyLimit is called fresh on every admit(), so a
     // reconfigured limit takes effect immediately, no restart needed.
     const admissionQueueStore = createAdmissionQueueStore({
@@ -253,7 +252,7 @@ export default definePluginEntry({
 
     // Process-wide gateway readiness (engine/gateway-readiness.js): settled
     // by gateway_start; resolves at once in a process that never starts
-    // pipeclaw's services (the CLI). Awaited only by the executor's subagent
+    // manifold's services (the CLI). Awaited only by the executor's subagent
     // gate (engine/gateway-subagent.js), which every agent dispatch passes.
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
 
@@ -286,18 +285,18 @@ export default definePluginEntry({
     // services, so this is what tells readiness this process is the gateway
     // (the CLI never gets here, and never waits).
     api.registerService({
-      id: "pipeclaw-gateway-readiness",
+      id: "manifold-gateway-readiness",
       start: () => gatewayReadiness.markGatewayProcess(),
     });
 
     api.registerService({
-      id: "pipeclaw-loader",
+      id: "manifold-loader",
       start: async (ctx) => {
         const logger = ctx?.logger ?? api.logger;
-        logger.info(`pipeclaw: loading pipelines from ${pipelinesDir}`);
+        logger.info(`manifold: loading pipelines from ${pipelinesDir}`);
         const pipelines = await ensurePipelinesLoaded();
         const ids = [...pipelines.keys()];
-        logger.info(`pipeclaw: ${pipelines.size} pipeline(s) loaded${ids.length ? `: ${ids.join(", ")}` : ""}`);
+        logger.info(`manifold: ${pipelines.size} pipeline(s) loaded${ids.length ? `: ${ids.join(", ")}` : ""}`);
         // First reconcile has to happen here, not from the watcher below —
         // the watcher's own first tick deliberately primes its fingerprint
         // without reloading (this boot-time load already happened).
@@ -307,13 +306,13 @@ export default definePluginEntry({
 
     const pipelinesWatcher = createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger: api.logger });
     pipelinesWatcher.onReload((info) => {
-      try { _gatewayBroadcast?.("plugin.pipeclaw.pipeline.catalog.changed", { count: info.size, ids: info.ids, updatedAt: Date.now() }); } catch {}
+      try { _gatewayBroadcast?.("plugin.manifold.pipeline.catalog.changed", { count: info.size, ids: info.ids, updatedAt: Date.now() }); } catch {}
     });
     pipelinesWatcher.onReload(() => {
       pipelineRegistryStore.reconcilePipelineVersions(pipelinesRef.value, { logger: api.logger });
     });
     api.registerService({
-      id: "pipeclaw-pipelines-watcher",
+      id: "manifold-pipelines-watcher",
       start: () => pipelinesWatcher.start(),
       stop:  () => pipelinesWatcher.stop(),
     });
@@ -324,21 +323,21 @@ export default definePluginEntry({
     // nothing to do at boot (it's lazy, created on first enqueue), but the
     // plugin loader calls every registered service's start() unconditionally,
     // so a service with stop-only work still needs a no-op start (same
-    // pattern as pipeclaw-read-store above) or the loader's call throws, the
+    // pattern as manifold-read-store above) or the loader's call throws, the
     // service never reaches its running list, and stop() never fires —
     // meaning the queue's not-yet-flushed buffered writes are silently lost
     // on every shutdown.
     api.registerService({
-      id: "pipeclaw-batch-writer",
+      id: "manifold-batch-writer",
       start: async () => {},
       stop: () => flushBatchWriter(),
     });
 
     api.registerService({
-      id: "pipeclaw-flow-revival",
+      id: "manifold-flow-revival",
       start: async (ctx) => {
         const logger = ctx?.logger ?? api.logger;
-        logger.info("pipeclaw revival: start");
+        logger.info("manifold revival: start");
         // Not awaited: revival dispatches agents once the gateway is ready,
         // and the gateway isn't ready until this start() returns.
         runBootRevival(logger);
@@ -352,7 +351,7 @@ export default definePluginEntry({
         // already fixed or genuinely couldn't.
         setInterval(() => {
           reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, api, logger })
-            .catch((err) => logger.warn(`pipeclaw revival: periodic stuck-admission reconcile failed: ${err?.message ?? err}`));
+            .catch((err) => logger.warn(`manifold revival: periodic stuck-admission reconcile failed: ${err?.message ?? err}`));
         }, STUCK_ADMISSION_RECONCILE_INTERVAL_MS);
       },
     });
@@ -360,7 +359,7 @@ export default definePluginEntry({
     async function runBootRevival(logger) {
       try {
         // Guarantee pipelines are in memory before reviving orphan flows.
-        // Without this, a race between pipeclaw-loader and pipeclaw-flow-revival
+        // Without this, a race between manifold-loader and manifold-flow-revival
         // causes pipelinesRef.value to be empty, the orphan filter passes every flow
         // (undefined pipeline → undefined nodeKind → not "single"), and executor.runFlow
         // immediately fails them with "pipeline not loaded: <id>" via persistFailRetrying.
@@ -381,7 +380,7 @@ export default definePluginEntry({
           executor,
           api,
           // Completing an interrupted cancellation needs to cancel flows by
-          // their actual ownerKey, not the default pipeclaw-owner key.
+          // their actual ownerKey, not the default manifold-owner key.
           // Legacy graph-flow-owner flows would fail the
           // cancelFlowByIdForOwner equality check otherwise.
           createCancelStore: (ownerKey) => createStateStore(api, ownerKey, {
@@ -399,7 +398,7 @@ export default definePluginEntry({
           maybeResolveFlow: gateResolver.maybeResolveFlow,
         });
       } catch (err) {
-        logger.warn(`pipeclaw revival: failed to enumerate orphans: ${err?.message ?? err}`);
+        logger.warn(`manifold revival: failed to enumerate orphans: ${err?.message ?? err}`);
       }
     }
 
@@ -421,9 +420,9 @@ export default definePluginEntry({
         admissionQueueStore,
       }),
       {
-        commands: ["pipeclaw"],
+        commands: ["manifold"],
         descriptors: [{
-          name: "pipeclaw",
+          name: "manifold",
           description: "Run state-graph pipelines from workspace/.pipelines/",
           hasSubcommands: true,
         }],
@@ -431,7 +430,6 @@ export default definePluginEntry({
     );
 
     registerGraphFlowTool({ api, executor, store, pipelinesRef, ensurePipelinesLoaded });
-    registerPipeclawSendPushTool({ api });
 
     const readStore = runStore;
     const gateResolver = createGateResolver({
@@ -441,7 +439,7 @@ export default definePluginEntry({
     });
 
     api.registerService({
-      id: "pipeclaw-read-store",
+      id: "manifold-read-store",
       start: async () => {},
       stop: async () => { sessionIndex?.close?.(); },
     });
@@ -491,10 +489,10 @@ export default definePluginEntry({
       });
     }
 
-    api.registerGatewayMethod("plugin.pipeclaw.ping", (opts) => {
+    api.registerGatewayMethod("plugin.manifold.ping", (opts) => {
       if (!_gatewayBroadcast) {
         _gatewayBroadcast = opts.context.broadcast;
-        api.logger.info("pipeclaw: WS broadcaster captured — discuss events will be dual-channel");
+        api.logger.info("manifold: WS broadcaster captured — discuss events will be dual-channel");
       }
       opts.respond(true, { ok: true });
     }, { scope: "operator.read" });
@@ -594,15 +592,15 @@ export default definePluginEntry({
       ? Number(userCfg.taskflowRevive?.startupDelayMs)
       : 0;
     api.registerService({
-      id: "pipeclaw-taskflow-revive",
+      id: "manifold-taskflow-revive",
       start: async (ctx) => {
         const logger = ctx?.logger ?? api.logger;
         logger.info(`taskflow-revive: service started (startupDelay=${taskflowStartupDelayMs}ms)`);
-        // Not awaited, same as pipeclaw-flow-revival: its dispatches go
+        // Not awaited, same as manifold-flow-revival: its dispatches go
         // through the executor's subagent and wait for gateway readiness,
         // which can't come until this start() returns.
         taskflowScanAndCleanup(api, TASKFLOW_RUNS_DB, taskflowStartupDelayMs, logger, {
-          // Lets a pipeclaw-owned orphan be delegated to the flow's own
+          // Lets a manifold-owned orphan be delegated to the flow's own
           // revival function (engine/executor.js's reviveAgentKindOrphan,
           // via reviveViaFlowRevival) instead of only being skipped —
           // see boot/taskflow-revive.js's own header for why.
@@ -617,7 +615,7 @@ export default definePluginEntry({
 
     _componentEmitRef.emit = emitSseEvent;
 
-    createPipeclawParrotChannelEntry({
+    createManifoldParrotChannelEntry({
       readStore,
       discussStore,
       resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
@@ -646,12 +644,12 @@ export default definePluginEntry({
         recordItemDecision: gateResolver.recordItemDecision,
       });
       api.registerService({
-        id: "pipeclaw-dashboard",
+        id: "manifold-dashboard",
         start: async () => {
           dashboardBus.start();
           try { await dashboardServer.start(); }
           catch (err) {
-            api.logger.warn(`pipeclaw dashboard: failed to start on ${dashboardHost}:${dashboardPort}: ${err?.message ?? err}`);
+            api.logger.warn(`manifold dashboard: failed to start on ${dashboardHost}:${dashboardPort}: ${err?.message ?? err}`);
             dashboardBus.stop();
           }
         },
@@ -668,8 +666,10 @@ export default definePluginEntry({
     // refresh once subscribed clients consume these events.
 
     let _wsRunEventsListener = null;
+    let _gateOpenedListener = null;
+    let _gateClosedListener = null;
     api.registerService({
-      id: "pipeclaw-ws-run-events",
+      id: "manifold-ws-run-events",
       start: async () => {
         const knownRevisions = new Map();
         const knownStatuses = new Map();
@@ -720,7 +720,7 @@ export default definePluginEntry({
             if (!rawBroadcast) return;
             // Every call below goes through here: the gateway's event-scope
             // allowlist silently drops any broadcast name that isn't
-            // recognized or "plugin."-prefixed. run.*/gate.opened/pipeline.*
+            // recognized or "plugin."-prefixed. run.*/gate.*/pipeline.*
             // were all unprefixed, so none of them ever reached a client,
             // always — not a timing/connection issue.
             const broadcast = (name, payload) => rawBroadcast(`plugin.${name}`, payload);
@@ -741,9 +741,8 @@ export default definePluginEntry({
               if (status === "running") {
                 // Full buildRunPatch payload so a run's start carries the
                 // same display metadata (pipelineDisplayName/pipelineEmoji/
-                // currentNodeId) as every other patch; this event also
-                // carries what live_activity.start/PipelineProgress carries.
-                broadcast("pipeclaw.run.started", buildRunPatch(flow, now));
+                // currentNodeId) as every other patch.
+                broadcast("manifold.run.started", buildRunPatch(flow, now));
                 const pipelineId = flow.stateJson?.pipelineId;
                 if (pipelineId) {
                   // setTimeout(100) instead of setImmediate — the executor
@@ -752,22 +751,15 @@ export default definePluginEntry({
                   // computePipelineStats (which reads readStore/SQLite)
                   // returns stale todayActive.
                   setTimeout(async () => {
-                    try { broadcast("pipeclaw.pipeline.stats.updated", await computePipelineStats(pipelineId)); } catch {}
+                    try { broadcast("manifold.pipeline.stats.updated", await computePipelineStats(pipelineId)); } catch {}
                   }, 100);
-                }
-              } else if (isWaiting) {
-                if (flow.waitJson?.kind === "human-gate") {
-                  broadcast("gate.opened", { flowId, updatedAt: now });
                 }
               } else if (isTerminal) {
                 // Was a bespoke {flowId, status, updatedAt} shape — same
                 // reasoning as run.started above: full buildRunPatch payload
-                // so OpsSummary's "just finished" row gets real display
-                // metadata (and the real terminal status) instead of
-                // nothing, now that live_activity.end/PipelineProgress no
-                // longer carries it (that path had its own dropped-status
-                // bug).
-                broadcast("pipeclaw.run.ended", buildRunPatch(flow, now));
+                // so a consumer's "just finished" row gets real display
+                // metadata (and the real terminal status).
+                broadcast("manifold.run.ended", buildRunPatch(flow, now));
                 knownStatuses.delete(flowId);
                 // A terminal flow won't get further revisions — drop it too
                 // so these maps don't grow unbounded across flow_ids.
@@ -777,7 +769,7 @@ export default definePluginEntry({
             // Rich patch — now truly per-revision, matching this line's own
             // comment: subscribed clients upsert without a re-fetch on every transition.
             const ownPatch = buildRunPatch(flow, now);
-            try { broadcast("pipeclaw.run.updated", ownPatch); } catch {}
+            try { broadcast("manifold.run.updated", ownPatch); } catch {}
             // If this is a child flow (spawned by a subflow node), also push a
             // subflow-aggregate patch to the parent so RunDetailView refreshes
             // the Branches section on every subflow state change, not just when
@@ -793,7 +785,7 @@ export default definePluginEntry({
                     const parentIsTerminal = ps === "succeeded" || ps === "failed"
                       || ps === "cancelled" || ps === "skipped";
                     if (!parentIsTerminal) {
-                      broadcast("pipeclaw.run.updated", buildRunPatch(parentFlow, now));
+                      broadcast("manifold.run.updated", buildRunPatch(parentFlow, now));
                     }
                   }
                 }
@@ -808,18 +800,39 @@ export default definePluginEntry({
               const pipelineId = flow.stateJson?.pipelineId;
               if (pipelineId) {
                 setImmediate(async () => {
-                  try { broadcast("pipeclaw.pipeline.stats.updated", await computePipelineStats(pipelineId)); } catch {}
+                  try { broadcast("manifold.pipeline.stats.updated", await computePipelineStats(pipelineId)); } catch {}
                 });
               }
             }
           } catch {}
         };
         flowStateEmitter.on("change", _wsRunEventsListener);
+
+        // Gate lifecycle goes out with its full payload (items, waitJson,
+        // stateJson) so a consumer can render the gate without a re-fetch;
+        // gate.closed tells it to drop the surface. Delivery is the
+        // consumer's business — manifold only states what happened.
+        _gateOpenedListener = (payload) => {
+          try { broadcast("manifold.gate.opened", payload); } catch {}
+        };
+        _gateClosedListener = (payload) => {
+          try { broadcast("manifold.gate.closed", payload); } catch {}
+        };
+        gateEmitter.on("gate.opened", _gateOpenedListener);
+        gateEmitter.on("gate.closed", _gateClosedListener);
       },
       stop: async () => {
         if (_wsRunEventsListener) {
           flowStateEmitter.off("change", _wsRunEventsListener);
           _wsRunEventsListener = null;
+        }
+        if (_gateOpenedListener) {
+          gateEmitter.off("gate.opened", _gateOpenedListener);
+          _gateOpenedListener = null;
+        }
+        if (_gateClosedListener) {
+          gateEmitter.off("gate.closed", _gateClosedListener);
+          _gateClosedListener = null;
         }
       },
     });
@@ -827,11 +840,11 @@ export default definePluginEntry({
     // ── Runtime-capture service ──────────────────────────────────────────────
 
     api.registerService({
-      id: "pipeclaw-runtime-capture",
+      id: "manifold-runtime-capture",
       start: async () => {
         if (!moduleState.workingSubagent && api.runtime?.subagent) {
           moduleState.workingSubagent = api.runtime.subagent;
-          api.logger.info("pipeclaw: captured working subagent runtime for executor use");
+          api.logger.info("manifold: captured working subagent runtime for executor use");
         }
       },
       stop: async () => {},

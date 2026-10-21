@@ -1,4 +1,4 @@
-// /pipeclaw/telemetry/sessions/parts — session transcript from lcm.db.
+// /manifold/telemetry/sessions/parts — session transcript from lcm.db.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -26,7 +26,7 @@ async function sharedLcmDb() {
 export function registerSessionRoutes({ api, logger, json, bad }) {
   api.registerHttpRoute({
     method: "GET",
-    path: "/pipeclaw/telemetry/sessions/parts",
+    path: "/manifold/telemetry/sessions/parts",
     auth: "plugin",
     handler: async (req, res) => {
       const u = new URL(req.url, "http://localhost");

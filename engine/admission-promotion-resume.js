@@ -32,10 +32,10 @@
 
 import { flipToRunningAndResume } from "./child-resume-trigger.js";
 
-// On globalThis, not module scope: extensions/pipeclaw/** can load through
+// On globalThis, not module scope: extensions/manifold/** can load through
 // both jiti and native ESM in one process, and a CLI command's
 // drainDetachedResumes() must see tasks scheduled by either instance.
-const PENDING_KEY = "__pipeclaw_detached_resumes__";
+const PENDING_KEY = "__manifold_detached_resumes__";
 function pendingResumes() {
   if (!globalThis[PENDING_KEY]) globalThis[PENDING_KEY] = new Set();
   return globalThis[PENDING_KEY];

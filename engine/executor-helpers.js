@@ -23,7 +23,7 @@ export function resolveEdge(edges, fromNode, state, ctx = null) {
     try {
       return edge.length >= 2 ? edge(state, ctx?.error ?? null) : edge(state);
     } catch (err) {
-      ctx?.logger?.warn?.(`pipeclaw [${(ctx?.flowId ?? "?").slice(0, 8)}] edge ${fromNode} threw: ${err?.message ?? err}`);
+      ctx?.logger?.warn?.(`manifold [${(ctx?.flowId ?? "?").slice(0, 8)}] edge ${fromNode} threw: ${err?.message ?? err}`);
       return null;
     }
   }
@@ -98,25 +98,25 @@ export function withEditableTextDefault(payload, branchData) {
   return { ...payload, editableText: candidate };
 }
 
-const PIPECLAW_SESSION_MARKER = ":subagent:gf-";
+const MANIFOLD_SESSION_MARKER = ":subagent:gf-";
 // Anchored: matches only the exact `:subagent:gf-<8-hex>-` shape
 // defaultAgentSessionKey produces, not any string that merely contains
 // "gf-" somewhere (a custom node.sessionKey/sessionKeyBuilder value could
 // otherwise coincidentally substring-match the old bare .includes() check).
-const PIPECLAW_SESSION_KEY_RE = /:subagent:gf-[0-9a-f]{8}-/;
+const MANIFOLD_SESSION_KEY_RE = /:subagent:gf-[0-9a-f]{8}-/;
 
 export function defaultAgentSessionKey(agent, flowId, nodeId, itemKey) {
   const seed = itemKey ? `${nodeId.toLowerCase()}-${itemKey}` : nodeId.toLowerCase();
-  return `agent:${agent}${PIPECLAW_SESSION_MARKER}${flowId.slice(0, 8)}-${seed}`;
+  return `agent:${agent}${MANIFOLD_SESSION_MARKER}${flowId.slice(0, 8)}-${seed}`;
 }
 
 // Convention-based check: true for a session key SHAPED like one
 // defaultAgentSessionKey would build. This is a fallback signal, not an
-// authoritative one — see boot/taskflow-revive.js's isPipeclawOwnedSession(),
+// authoritative one — see boot/taskflow-revive.js's isManifoldOwnedSession(),
 // which prefers the session store's own pluginOwnerId field and only falls
 // back to this when that lookup is unavailable.
-export function isPipeclawOwnedSessionKey(sessionKey) {
-  return typeof sessionKey === "string" && PIPECLAW_SESSION_KEY_RE.test(sessionKey);
+export function isManifoldOwnedSessionKey(sessionKey) {
+  return typeof sessionKey === "string" && MANIFOLD_SESSION_KEY_RE.test(sessionKey);
 }
 
 export function shortSummary(text) {

@@ -91,21 +91,21 @@ describe("registerCostRoutes registration", () => {
     registerCostRoutes({ api, getStore: () => makeStore(), logger: null, json, bad, parseRange });
 
     const expected = [
-      "/pipeclaw/telemetry/cost/today",
-      "/pipeclaw/telemetry/cost/by-root",
-      "/pipeclaw/telemetry/cost/by-trigger",
-      "/pipeclaw/telemetry/cost/by-pipeline",
-      "/pipeclaw/telemetry/cost/by-flow",
-      "/pipeclaw/telemetry/cost/by-node",
-      "/pipeclaw/telemetry/cost/by-model",
-      "/pipeclaw/telemetry/cost/by-cron-job",
-      "/pipeclaw/telemetry/cost/by-day",
-      "/pipeclaw/telemetry/cost/by-hour",
-      "/pipeclaw/telemetry/cost/by-session",
-      "/pipeclaw/telemetry/cost/runs",
-      "/pipeclaw/telemetry/cost/top-calls",
-      "/pipeclaw/telemetry/cost/breakdown",
-      "/pipeclaw/telemetry/cost/home",
+      "/manifold/telemetry/cost/today",
+      "/manifold/telemetry/cost/by-root",
+      "/manifold/telemetry/cost/by-trigger",
+      "/manifold/telemetry/cost/by-pipeline",
+      "/manifold/telemetry/cost/by-flow",
+      "/manifold/telemetry/cost/by-node",
+      "/manifold/telemetry/cost/by-model",
+      "/manifold/telemetry/cost/by-cron-job",
+      "/manifold/telemetry/cost/by-day",
+      "/manifold/telemetry/cost/by-hour",
+      "/manifold/telemetry/cost/by-session",
+      "/manifold/telemetry/cost/runs",
+      "/manifold/telemetry/cost/top-calls",
+      "/manifold/telemetry/cost/breakdown",
+      "/manifold/telemetry/cost/home",
     ];
     for (const path of expected) {
       assert.ok(api._routes.has(path), `missing route: ${path}`);
@@ -120,9 +120,9 @@ describe("/cost/today", () => {
     const api = makeApi();
     const { json, bad, parseRange } = makeHelpers();
     registerCostRoutes({ api, getStore: () => null, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/today");
+    const def = api._routes.get("/manifold/telemetry/cost/today");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/cost/today"), res);
+    await def.handler(makeReq("/manifold/telemetry/cost/today"), res);
     assert.equal(res.statusCode, 503);
   });
 
@@ -131,9 +131,9 @@ describe("/cost/today", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore([{ cost_total: 0.01, model: "claude-3-5-sonnet", root_label: "label-a", root_kind: "explicit" }]);
     registerCostRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/today");
+    const def = api._routes.get("/manifold/telemetry/cost/today");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/cost/today"), res);
+    await def.handler(makeReq("/manifold/telemetry/cost/today"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res._body);
     assert.ok("summary" in body);
@@ -151,9 +151,9 @@ describe("/cost/by-session", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerCostRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/by-session");
+    const def = api._routes.get("/manifold/telemetry/cost/by-session");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/cost/by-session?flow_id=abc"), res);
+    await def.handler(makeReq("/manifold/telemetry/cost/by-session?flow_id=abc"), res);
     assert.equal(res.statusCode, 503);
     const body = JSON.parse(res._body);
     assert.ok(body.error.includes("node_id"));
@@ -164,9 +164,9 @@ describe("/cost/by-session", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerCostRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/by-session");
+    const def = api._routes.get("/manifold/telemetry/cost/by-session");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/cost/by-session?flow_id=f1&node_id=n1"), res);
+    await def.handler(makeReq("/manifold/telemetry/cost/by-session?flow_id=f1&node_id=n1"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res._body);
     assert.ok(Array.isArray(body.rows));
@@ -181,9 +181,9 @@ describe("/cost/breakdown", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerCostRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/breakdown");
+    const def = api._routes.get("/manifold/telemetry/cost/breakdown");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/cost/breakdown?dim=bogus"), res);
+    await def.handler(makeReq("/manifold/telemetry/cost/breakdown?dim=bogus"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -192,9 +192,9 @@ describe("/cost/breakdown", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore([{ cost_total: 0.02, root_kind: "explicit", root_label: "op" }]);
     registerCostRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/breakdown");
+    const def = api._routes.get("/manifold/telemetry/cost/breakdown");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/cost/breakdown?dim=trigger"), res);
+    await def.handler(makeReq("/manifold/telemetry/cost/breakdown?dim=trigger"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res._body);
     assert.equal(body.dimension, "trigger");
@@ -215,9 +215,9 @@ describe("/cost/breakdown", () => {
       { cost_total: 0.04, pipeline_id: null, flow_id: null },
     ]);
     registerCostRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/breakdown");
+    const def = api._routes.get("/manifold/telemetry/cost/breakdown");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/cost/breakdown?dim=pipeline"), res);
+    await def.handler(makeReq("/manifold/telemetry/cost/breakdown?dim=pipeline"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res._body);
     assert.equal(body.dimension, "pipeline");
@@ -252,13 +252,13 @@ describe("/cost/breakdown", () => {
       { cost_total: 0.04, pipeline_id: null, flow_id: null },
     ]);
     registerCostRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/cost/breakdown");
+    const def = api._routes.get("/manifold/telemetry/cost/breakdown");
 
     const res = makeRes();
     // Exactly the filter the transform emits for the unattributed row. A
     // literal `pipeline_id = '(unattributed)'` would match zero rows, since
     // no row stores that string — the __null__ sentinel is what resolves.
-    await def.handler(makeReq(`/pipeclaw/telemetry/cost/breakdown?dim=pipeline&pipeline_id=${encodeURIComponent(UNATTRIBUTED_FILTER.pipeline_id)}`), res);
+    await def.handler(makeReq(`/manifold/telemetry/cost/breakdown?dim=pipeline&pipeline_id=${encodeURIComponent(UNATTRIBUTED_FILTER.pipeline_id)}`), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res._body);
     assert.equal(body.rows.length, 1);

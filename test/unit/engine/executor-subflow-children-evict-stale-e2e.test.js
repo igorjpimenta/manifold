@@ -4,7 +4,7 @@
  * EVICT_STALE (single kind:"code" sub-node, CANCEL → __end__), the
  * simplest topology of any migration so far: no gate, no fallback, one
  * sub-node. CANCEL is a trivial no-op stand-in — zero real HTTP calls to
- * /pipeclaw/gate/resolve anywhere in this fixture.
+ * /manifold/gate/resolve anywhere in this fixture.
  *
  * Isolated-sandbox discipline (per the incident writeup):
  * independent tmp-sqlite run-store/node-executions/state-store instances,

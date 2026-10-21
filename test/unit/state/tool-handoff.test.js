@@ -146,7 +146,7 @@ describe("writePendingResult / readPendingResult / clearPendingResult", () => {
 });
 
 describe("state survives being loaded as a distinct module instance (regression: jiti/CJS vs native-ESM split)", () => {
-  // extensions/pipeclaw/** loads through jiti's CJS transpilation while
+  // extensions/manifold/** loads through jiti's CJS transpilation while
   // pipeline files under workspace/.pipelines/** load via native ESM
   // `await import(url)`. Both import this file by the same file:// URL,
   // but jiti and native ESM do not share a module registry — each

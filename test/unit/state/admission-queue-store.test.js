@@ -391,7 +391,7 @@ describe("admission-queue-store — legacy agent-dispatch rows", () => {
       args: [],
     });
     await client.execute({
-      sql: `DELETE FROM _schema_version WHERE store = 'pipeclaw_flow_admission_queue' AND version > 1`,
+      sql: `DELETE FROM _schema_version WHERE store = 'manifold_flow_admission_queue' AND version > 1`,
       args: [],
     });
 

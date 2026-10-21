@@ -38,7 +38,7 @@
 //
 // Device identity: a real Ed25519 keypair (the server verifies a
 // signature, a hash alone isn't sufficient), persisted at
-// ~/.openclaw/identity/pipeclaw-dashboard-device.json — a DIFFERENT file
+// ~/.openclaw/identity/manifold-dashboard-device.json — a DIFFERENT file
 // from the CLI's own ~/.openclaw/identity/device.json, so pairing the
 // dashboard never disturbs the CLI's identity or cached token.
 
@@ -49,7 +49,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-const IDENTITY_PATH = path.join(os.homedir(), ".openclaw", "identity", "pipeclaw-dashboard-device.json");
+const IDENTITY_PATH = path.join(os.homedir(), ".openclaw", "identity", "manifold-dashboard-device.json");
 const OPERATOR_SCOPES = ["operator.read", "operator.write", "operator.approvals", "operator.admin"];
 
 // Ed25519 SPKI DER prefix — stripping it yields the raw 32-byte public key,
@@ -151,7 +151,7 @@ export async function pairDashboardDevice({ logger, gatewayUrl } = {}) {
         deviceIdentity: identity,
         token: gatewayToken,
         clientName: "gateway-client",
-        clientDisplayName: "Pipeclaw Dashboard",
+        clientDisplayName: "Manifold Dashboard",
         mode: "ui",
         role: "operator",
         scopes: OPERATOR_SCOPES,
@@ -161,12 +161,12 @@ export async function pairDashboardDevice({ logger, gatewayUrl } = {}) {
         },
         onConnectError: (err) => {
           const requestId = err?.details?.requestId ?? null;
-          if (!requestId) logger?.warn?.(`pipeclaw dashboard: device pairing connect error: ${err?.message ?? err}`);
+          if (!requestId) logger?.warn?.(`manifold dashboard: device pairing connect error: ${err?.message ?? err}`);
           settle({ alreadyPaired: false, requestId });
         },
       });
     } catch (err) {
-      logger?.warn?.(`pipeclaw dashboard: device pairing setup failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold dashboard: device pairing setup failed: ${err?.message ?? err}`);
       settle({ alreadyPaired: false, requestId: null });
       return;
     }
@@ -174,7 +174,7 @@ export async function pairDashboardDevice({ logger, gatewayUrl } = {}) {
     try {
       client.start();
     } catch (err) {
-      logger?.warn?.(`pipeclaw dashboard: device pairing connect failed to start: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold dashboard: device pairing connect failed to start: ${err?.message ?? err}`);
       settle({ alreadyPaired: false, requestId: null });
     }
     setTimeout(() => settle({ alreadyPaired: false, requestId: null }), 10_000);

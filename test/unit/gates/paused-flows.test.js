@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 // We intercept fs and os so no real disk I/O happens.
 
 const FAKE_HOME = "/fake-home";
-const FAKE_STATE_FILE = `${FAKE_HOME}/.openclaw/state/pipeclaw-paused.json`;
+const FAKE_STATE_FILE = `${FAKE_HOME}/.openclaw/state/manifold-paused.json`;
 
 // In-memory filesystem stub — keyed by absolute path.
 const _files = new Map();

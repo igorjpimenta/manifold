@@ -17,9 +17,9 @@
 // just vanishes with it instead of becoming an orphaned file.
 //
 // State lives on globalThis, NOT as plain module-scope `const` bindings:
-// extensions/pipeclaw/** loads through jiti's CJS transpilation
+// extensions/manifold/** loads through jiti's CJS transpilation
 // (engine/executor-subagent.js, agent/tools/submit-score.js — see
-// extensions/pipeclaw/node_modules/.cache/jiti/*.cjs), while pipeline files
+// extensions/manifold/node_modules/.cache/jiti/*.cjs), while pipeline files
 // under workspace/.pipelines/** load via native ESM `await import(url)`
 // (engine/loader.js). Both import this file by the same file:// URL, but
 // jiti and native ESM do not share a module registry — each produces its
@@ -62,7 +62,7 @@
 // already returned by subagent.run() before the wait even starts — no
 // extra registration/resolution step needed the way invocationId requires.
 
-const GLOBAL_KEY = "__pipeclaw_tool_handoff_state__";
+const GLOBAL_KEY = "__manifold_tool_handoff_state__";
 
 function state() {
   if (!globalThis[GLOBAL_KEY]) {

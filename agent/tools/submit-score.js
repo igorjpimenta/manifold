@@ -19,7 +19,7 @@ import { resolveInvocationId, writePendingResult } from "../../state/tool-handof
 export function registerSubmitScoreTool({ api }) {
   api.registerTool((ctx) => ({
     name: "submit_score",
-    label: "Pipeclaw: submit a listing's fit score",
+    label: "Manifold: submit a listing's fit score",
     description:
       "Use to submit your finished score instead of replying with a fenced JSON block. Call this exactly once per listing, as your final action — no prose reply before or after it. `score` must be an integer 0-100 respecting the rubric's hard-gate cap (≤30 if any hard gate failed). `fitFlags` and `reasons` follow the same schema SKILL.md's rubric describes.",
     parameters: {

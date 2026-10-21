@@ -5,7 +5,7 @@ is no CHANGELOG.md. The tag is the install contract: the live gateway and
 every consumer pin resolve to it, so the version is decided in the release PR
 before the tag is cut, never after.
 
-This repo is private and `@igorjpimenta/oc-pipeclaw` is UNLICENSED. It is
+This repo is private and `@igorjpimenta/manifold` is UNLICENSED. It is
 never npm-published; a git tag is the only distribution channel.
 
 ## Version
@@ -47,11 +47,11 @@ counts are omitted; a consumer cannot act on them.
 Live gateway (proven spec form — shorthand, pinned tag, unsafe flag for the
 scanner's `child_process` block):
 
-    openclaw plugins install git:igorjpimenta/oc-pipeclaw@<version> --force --dangerously-force-unsafe-install
+    openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install
 
 then reload the plugin. Managed installs land under `~/.openclaw/git/`
 (resolve the exact path from `~/.openclaw/plugins/installs.json`,
-`installPath` for id `pipeclaw`), never under `extensions/`. Build the
+`installPath` for id `manifold`), never under `extensions/`. Build the
 dashboard there explicitly — managed installs pass `--ignore-scripts`, so
 `prepare` never runs there (`prepare` only covers npm and git-dependency
 consumers):
@@ -62,7 +62,7 @@ oc-config consumers: bump the `#<version>` pins in the npm git-deps
 (`workspace/*`, `extensions/*`) and regen their lockfiles — one chore PR
 per release.
 
-Consumer npm deps pin `git+https://github.com/igorjpimenta/oc-pipeclaw.git#<version>`.
+Consumer npm deps pin `git+https://github.com/igorjpimenta/manifold.git#<version>`.
 
 Nothing follows `main` automatically — consumers bump the pin and re-install.
 

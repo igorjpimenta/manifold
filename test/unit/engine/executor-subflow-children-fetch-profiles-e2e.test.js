@@ -25,7 +25,7 @@
  * mock.module must be registered before engine/executor.js is imported
  * (it imports withLock at module-load time and caches the reference,
  * see executor.js's `import { withLock as withCrossProcessLock } from
- * "../locks/lock.js"`) — so every pipeclaw-internal module here is
+ * "../locks/lock.js"`) — so every manifold-internal module here is
  * loaded via a dynamic `await import()` AFTER the mock is in place,
  * not a static top-level import.
  *

@@ -102,7 +102,7 @@ export async function waitForFlowSettlement(rootFlowId, ctx, { pollMs = 300, log
     const now = Date.now();
     if (now - lastLogAt >= logEveryMs) {
       lastLogAt = now;
-      ctx.logger?.info?.(`pipeclaw: waiting on ${pending.length} still-active flow(s) beneath ${rootFlowId.slice(0, 8)}: ${pending.map((id) => id.slice(0, 8)).join(", ")}`);
+      ctx.logger?.info?.(`manifold: waiting on ${pending.length} still-active flow(s) beneath ${rootFlowId.slice(0, 8)}: ${pending.map((id) => id.slice(0, 8)).join(", ")}`);
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }

@@ -875,9 +875,8 @@ describe("recordEngineFailure()", () => {
       flowId, pipelineId: "test_pipe", failureNode: "NODE_X", message: "something broke", state: {},
     });
     assert.ok(emitted !== null, "failureEmitter fired");
-    // Same shape as get()/list() — this is what ios/index.js's
-    // apnsPushFailure and ios/projectors.js's startFailureEvent actually
-    // read.
+    // Same shape as get()/list() — this is what a consumer's failure-event
+    // projector actually reads.
     assert.equal(emitted.flow_id, flowId);
     assert.equal(emitted.error_type, null);
     assert.equal(emitted.failure_summary, "something broke");

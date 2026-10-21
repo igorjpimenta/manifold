@@ -1,9 +1,9 @@
 {
-  "name": "pipeclaw-dashboard",
+  "name": "manifold-dashboard",
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "React + TypeScript + Tailwind frontend for the pipeclaw plugin's read-only dashboard. Built sources land in dist/ and are served by server.js (no runtime build step required after `npm run build` ships the bundle into the repo).",
+  "description": "React + TypeScript + Tailwind frontend for the manifold plugin's read-only dashboard. Built sources land in dist/ and are served by server.js (no runtime build step required after `npm run build` ships the bundle into the repo).",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

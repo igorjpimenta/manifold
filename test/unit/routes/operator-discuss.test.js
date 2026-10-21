@@ -214,7 +214,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
     JSON.stringify({ timestamp: ts, message: { role, content: text } });
 
   it("returns all messages when the session is under the line cap", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "pipeclaw-discuss-hist-"));
+    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
     const prevHome = process.env.HOME;
     try {
       process.env.HOME = tmpHome;
@@ -239,7 +239,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
   });
 
   it("tails to the last MAX_HISTORY_LINES entries for an oversized session", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "pipeclaw-discuss-hist-"));
+    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
     const prevHome = process.env.HOME;
     try {
       process.env.HOME = tmpHome;
@@ -270,7 +270,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
   });
 
   it("pages further back when the caller passes the prior response's nextOffset", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "pipeclaw-discuss-hist-"));
+    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
     const prevHome = process.env.HOME;
     try {
       process.env.HOME = tmpHome;
@@ -305,7 +305,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
   });
 
   it("returns empty messages when the session file doesn't exist", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "pipeclaw-discuss-hist-"));
+    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
     const prevHome = process.env.HOME;
     try {
       process.env.HOME = tmpHome;

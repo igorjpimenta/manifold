@@ -1,4 +1,4 @@
-// server.js — read-only HTTP dashboard for pipeclaw.
+// server.js — read-only HTTP dashboard for manifold.
 //
 // Bound to 127.0.0.1 only (no LAN exposure, no auth surface). All routes are
 // read-only — actuation stays in the CLI and Telegram surfaces. Live updates
@@ -27,7 +27,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
 // Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/. The
-// pipeclaw executor uses the sessionKey pattern
+// manifold executor uses the sessionKey pattern
 // `agent:<agentId>:subagent:gf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`
 // (see executor.js `defaultAgentSessionKey`) so we can find every session a
 // flow spawned by scanning each agent's sessions.json for matching keys.
@@ -55,7 +55,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
   let unsubscribe = null;
 
   // ── Gateway API client ────────────────────────────────────────────────────
-  // All data reads go through the gateway's /pipeclaw/* API using a paired
+  // All data reads go through the gateway's /manifold/* API using a paired
   // device token from device.js (same auth mechanism as the iOS app).
 
   const GATEWAY_BASE = `http://127.0.0.1:${Number(process.env.OPENCLAW_GATEWAY_PORT) || 18789}`;
@@ -93,20 +93,20 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
     const p = new URLSearchParams({ limit: "9999" });
     if (pipelineId) p.set("pipelineId", pipelineId);
     if (status) p.set("status", status);
-    const { runs } = await gatewayFetch(`/pipeclaw/runs?${p}`);
+    const { runs } = await gatewayFetch(`/manifold/runs?${p}`);
     return runs.map(adaptRun);
   }
 
   // Fetch a single run by flowId; returns null if 404.
   async function fetchFlow(flowId) {
-    try { return await gatewayFetch(`/pipeclaw/runs/${flowId}`); }
+    try { return await gatewayFetch(`/manifold/runs/${flowId}`); }
     catch (err) { if (err.notFound) return null; throw err; }
   }
 
   // Fetch errors for a set of flowIds → Map<flowId, ErrorEntry[]>.
   async function fetchErrors(flowIds) {
     if (!flowIds.length) return new Map();
-    const { errors } = await gatewayFetch(`/pipeclaw/errors?flowIds=${flowIds.join(",")}`);
+    const { errors } = await gatewayFetch(`/manifold/errors?flowIds=${flowIds.join(",")}`);
     return new Map(Object.entries(errors ?? {}));
   }
 
@@ -118,14 +118,14 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
   async function fetchTreeSummary(flowIds) {
     if (!flowIds.length) return new Map();
     try {
-      const { summaries } = await gatewayFetch(`/pipeclaw/tree-summary?flowIds=${flowIds.join(",")}`);
+      const { summaries } = await gatewayFetch(`/manifold/tree-summary?flowIds=${flowIds.join(",")}`);
       return new Map(Object.entries(summaries ?? {}).map(([flowId, s]) => [flowId, new Set(s.nodeIds ?? [])]));
     } catch { return new Map(); }
   }
 
   // Fetch subflow groups for a flow → grouped object (or {} on error).
   async function fetchSubflows(flowId) {
-    try { return await gatewayFetch(`/pipeclaw/runs/${flowId}/subflows`); }
+    try { return await gatewayFetch(`/manifold/runs/${flowId}/subflows`); }
     catch { return {}; }
   }
 
@@ -135,7 +135,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
   // by invokedAt. Empty array on error rather than throwing — callers treat
   // "no tree data" the same as "flow has no history yet".
   async function fetchTree(flowId) {
-    try { const { items } = await gatewayFetch(`/pipeclaw/runs/${flowId}/tree`); return items ?? []; }
+    try { const { items } = await gatewayFetch(`/manifold/runs/${flowId}/tree`); return items ?? []; }
     catch { return []; }
   }
 
@@ -414,7 +414,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
 
       // ── Actuation: respond to a gate item ───────────────────────────────
       // Delegates to the shared recordItemDecision helper (same write site
-      // as TG callback, CLI, and the bridge's /pipeclaw/gate/resolve).
+      // as TG callback, CLI, and the bridge's /manifold/gate/resolve).
       // POST body: { itemId, decision: "approve"|"reject"|"edit", text? }.
       const approveMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/approve$/i);
       if (req.method === "POST" && approveMatch) {
@@ -466,7 +466,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
 
       return sendJson(res, 404, { error: "not found", path: pathname });
     } catch (err) {
-      logger?.warn?.(`pipeclaw dashboard handler error on ${pathname}: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold dashboard handler error on ${pathname}: ${err?.message ?? err}`);
       return sendJson(res, 500, { error: "internal", message: err?.message ?? String(err) });
     }
   }
@@ -497,7 +497,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
   }
 
   // Walk every agent's sessions.json, find entries whose sessionKey matches
-  // the pipeclaw naming scheme for this flow, and parse a compact turn
+  // the manifold naming scheme for this flow, and parse a compact turn
   // timeline from each session's JSONL. The dashboard renders this as a
   // chat-style transcript per (agent, nodeId, itemKey) trio.
   async function sendTranscripts(res, flowId) {
@@ -527,7 +527,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
         const m = keyPattern.exec(sessionKey);
         if (!m || m[1] !== agent) continue;
         const tail = m[2];
-        // tail is `<nodeId>` or `<nodeId>-<itemKey>`. pipeclaw's node ids
+        // tail is `<nodeId>` or `<nodeId>-<itemKey>`. manifold's node ids
         // are conventionally token-style (letters/digits/underscores/dots,
         // no hyphens) — e.g. SCORE, ENSURE_LOGIN_CODE, propose.draft — while
         // listing/item keys are kebab-case slugs full of hyphens. So we
@@ -629,8 +629,8 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
     }
 
     // Delegates to the shared recordItemDecision helper. Same write site as
-    // the CLI's `pipeclaw approve` and the /pipeclaw/gate/resolve route the
-    // pipeclaw ios module POSTs to (the Telegram delivery service that used
+    // the CLI's `manifold approve` and the /manifold/gate/resolve route the
+    // manifold ios module POSTs to (the Telegram delivery service that used
     // to also write here was never wired up and has since been removed).
     // Resolution -> state.approvalPending[itemId] = {decision, source: "dashboard"};
     // the existing consolidator advances the flow when all items decide.
@@ -667,7 +667,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
       // surface as 409 so the client can offer "cancel the active one first".
       if (msg.includes("active flow")) return sendJson(res, 409, { error: msg });
       if (msg.includes("not found")) return sendJson(res, 404, { error: msg });
-      logger?.warn?.(`pipeclaw dashboard rerun: ${sourceFlowId.slice(0, 8)} failed: ${msg}`);
+      logger?.warn?.(`manifold dashboard rerun: ${sourceFlowId.slice(0, 8)} failed: ${msg}`);
       return sendJson(res, 500, { error: "rerun failed", message: msg });
     }
     // Fire the executor loop in the background; the HTTP response returns
@@ -676,7 +676,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
       Promise.resolve()
         .then(() => ensurePipelinesLoaded?.())
         .then(() => executor.runFlow(record.flowId, "fresh"))
-        .catch((err) => logger?.warn?.(`pipeclaw dashboard rerun: runFlow(${record.flowId.slice(0, 8)}) failed: ${err?.message ?? err}`));
+        .catch((err) => logger?.warn?.(`manifold dashboard rerun: runFlow(${record.flowId.slice(0, 8)}) failed: ${err?.message ?? err}`));
     });
     return sendJson(res, 200, {
       flowId: record.flowId,
@@ -700,7 +700,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
     let result;
     try { result = await executor.cancel(flowId, reason); }
     catch (err) {
-      logger?.warn?.(`pipeclaw dashboard cancel: executor.cancel(${flowId.slice(0, 8)}) failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold dashboard cancel: executor.cancel(${flowId.slice(0, 8)}) failed: ${err?.message ?? err}`);
       return sendJson(res, 500, { error: "cancel failed", message: err?.message ?? String(err) });
     }
     if (!result?.cancelled) {
@@ -747,7 +747,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
     }
     setImmediate(() => {
       executor?.resume?.(flowId)?.catch?.((err) =>
-        logger?.warn?.(`pipeclaw dashboard resume: runFlow(${flowId.slice(0, 8)}) failed: ${err?.message ?? err}`)
+        logger?.warn?.(`manifold dashboard resume: runFlow(${flowId.slice(0, 8)}) failed: ${err?.message ?? err}`)
       );
     });
     return sendJson(res, 200, { resumed: true });
@@ -896,21 +896,21 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
       const pairing = await pairDashboardDevice({ logger });
       if (pairing.alreadyPaired) {
         _gwToken = pairing.token;
-        logger?.info?.("pipeclaw dashboard: authenticated to gateway via paired device token");
+        logger?.info?.("manifold dashboard: authenticated to gateway via paired device token");
       } else {
         _gwToken = process.env.OPENCLAW_GATEWAY_TOKEN || null;
         if (pairing.requestId) {
           logger?.warn?.(
-            `pipeclaw dashboard: not yet paired as a device — run: ` +
+            `manifold dashboard: not yet paired as a device — run: ` +
             `openclaw devices approve ${pairing.requestId} then restart the dashboard ` +
             `to switch from the shared OPENCLAW_GATEWAY_TOKEN to a real per-device token.` +
             (_gwToken ? "" : " Using OPENCLAW_GATEWAY_TOKEN in the meantime, but it isn't set — API routes will return 503.")
           );
         } else if (_gwToken) {
-          logger?.info?.("pipeclaw dashboard: authenticated to gateway via OPENCLAW_GATEWAY_TOKEN (device pairing attempt failed — see prior warning if any)");
+          logger?.info?.("manifold dashboard: authenticated to gateway via OPENCLAW_GATEWAY_TOKEN (device pairing attempt failed — see prior warning if any)");
         } else {
           logger?.warn?.(
-            "pipeclaw dashboard: not authenticated — device pairing attempt failed and " +
+            "manifold dashboard: not authenticated — device pairing attempt failed and " +
             "OPENCLAW_GATEWAY_TOKEN isn't set. API routes will return 503."
           );
         }
@@ -926,7 +926,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
         });
       });
       unsubscribe = eventBus.subscribe(dispatchSse);
-      logger?.info?.(`pipeclaw dashboard: listening on http://${host}:${port}`);
+      logger?.info?.(`manifold dashboard: listening on http://${host}:${port}`);
     },
     async stop() {
       if (unsubscribe) { unsubscribe(); unsubscribe = null; }

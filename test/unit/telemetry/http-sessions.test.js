@@ -50,7 +50,7 @@ describe("registerSessionRoutes", () => {
     const api = makeApi();
     const { json, bad } = makeJson();
     registerSessionRoutes({ api, logger: null, json, bad });
-    assert.ok(api._routes.has("/pipeclaw/telemetry/sessions/parts"));
+    assert.ok(api._routes.has("/manifold/telemetry/sessions/parts"));
   });
 
   it("returns 503 when session_key is missing", async () => {
@@ -58,8 +58,8 @@ describe("registerSessionRoutes", () => {
     const { json, bad } = makeJson();
     registerSessionRoutes({ api, logger: null, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/sessions/parts");
-    const req = makeReq("/pipeclaw/telemetry/sessions/parts");
+    const def = api._routes.get("/manifold/telemetry/sessions/parts");
+    const req = makeReq("/manifold/telemetry/sessions/parts");
     const res = makeRes();
     await def.handler(req, res);
     assert.equal(res.statusCode, 503);
@@ -72,8 +72,8 @@ describe("registerSessionRoutes", () => {
     const { json, bad } = makeJson();
     registerSessionRoutes({ api, logger: { warn: () => {} }, json, bad });
 
-    const def = api._routes.get("/pipeclaw/telemetry/sessions/parts");
-    const req = makeReq("/pipeclaw/telemetry/sessions/parts?session_key=agent%3Atest%3Anonexistent%3Asession");
+    const def = api._routes.get("/manifold/telemetry/sessions/parts");
+    const req = makeReq("/manifold/telemetry/sessions/parts?session_key=agent%3Atest%3Anonexistent%3Asession");
     const res = makeRes();
     await def.handler(req, res);
     assert.equal(res.statusCode, 503);

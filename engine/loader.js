@@ -63,10 +63,10 @@ function registerSubflowChildren(pipelineId, nodes, { result, indexPath, pipelin
         _parentPipelineId: pipelineId, _parentNodeId: nodeId,
         ...(proposalMeta ? { proposalMeta } : {}),
       });
-      logger?.info?.(`pipeclaw loader: registered child-flow pipeline "${syntheticId}"`);
+      logger?.info?.(`manifold loader: registered child-flow pipeline "${syntheticId}"`);
       registerSubflowChildren(syntheticId, node.flow.nodes, { result, indexPath, pipelineDir, entName, logger }, [nodes, ...ancestorNodeMaps], proposalMeta);
     } catch (err) {
-      logger?.warn?.(`pipeclaw loader: ${entName}/ node "${nodeId}" subflow branch failed to register: ${err.message}`);
+      logger?.warn?.(`manifold loader: ${entName}/ node "${nodeId}" subflow branch failed to register: ${err.message}`);
     }
   }
 }
@@ -90,10 +90,10 @@ export async function loadPipelines(dir, logger) {
     entries = await readdir(dir, { withFileTypes: true });
   } catch (err) {
     if (err.code === "ENOENT") {
-      logger?.info?.(`pipeclaw loader: pipelines dir not found at ${dir} (no pipelines loaded)`);
+      logger?.info?.(`manifold loader: pipelines dir not found at ${dir} (no pipelines loaded)`);
       return result;
     }
-    logger?.warn?.(`pipeclaw loader: cannot read ${dir}: ${err.message}`);
+    logger?.warn?.(`manifold loader: cannot read ${dir}: ${err.message}`);
     return result;
   }
 
@@ -101,14 +101,14 @@ export async function loadPipelines(dir, logger) {
     if (ent.name.startsWith(".")) continue;
     if (!ent.isDirectory()) {
       if (ent.name.endsWith(".js")) {
-        logger?.warn?.(`pipeclaw loader: skipping legacy flat-file pipeline ${ent.name}; convert to a folder with index.js`);
+        logger?.warn?.(`manifold loader: skipping legacy flat-file pipeline ${ent.name}; convert to a folder with index.js`);
       }
       continue;
     }
     const pipelineDir = path.join(dir, ent.name);
     const indexPath = path.join(pipelineDir, "index.js");
     try { await stat(indexPath); } catch {
-      logger?.warn?.(`pipeclaw loader: ${ent.name}/ has no index.js; skipping`);
+      logger?.warn?.(`manifold loader: ${ent.name}/ has no index.js; skipping`);
       continue;
     }
     try {
@@ -131,13 +131,13 @@ export async function loadPipelines(dir, logger) {
       const pipeline = mod.default ?? mod.pipeline ?? mod;
       validatePipeline(pipeline, `${ent.name}/index.js`);
       if (result.has(pipeline.id)) {
-        logger?.warn?.(`pipeclaw loader: duplicate pipeline id "${pipeline.id}" in ${ent.name}/; keeping first`);
+        logger?.warn?.(`manifold loader: duplicate pipeline id "${pipeline.id}" in ${ent.name}/; keeping first`);
         continue;
       }
       let _fleet = null;
       try { _fleet = await loadFleet(pipelineDir); } catch {}
       result.set(pipeline.id, { ...pipeline, _filepath: indexPath, _dir: pipelineDir, _fleet });
-      logger?.info?.(`pipeclaw loader: loaded pipeline "${pipeline.id}" from ${ent.name}/${_fleet ? " (fleet.yaml found)" : ""}`);
+      logger?.info?.(`manifold loader: loaded pipeline "${pipeline.id}" from ${ent.name}/${_fleet ? " (fleet.yaml found)" : ""}`);
 
       // Phase 2: for every subflow node, register its .flow as an
       // addressable pipeline (`${pipeline.id}::${nodeId}`) so a real child
@@ -152,7 +152,7 @@ export async function loadPipelines(dir, logger) {
       // subflow node in the same pipeline. Renamed from kind:"loop".
       registerSubflowChildren(pipeline.id, pipeline.nodes, { result, indexPath, pipelineDir, entName: ent.name, logger }, [], pipeline.proposalMeta);
     } catch (err) {
-      logger?.warn?.(`pipeclaw loader: ${ent.name}/ failed to load: ${err.message}`);
+      logger?.warn?.(`manifold loader: ${ent.name}/ failed to load: ${err.message}`);
     }
   }
   return result;

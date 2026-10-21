@@ -67,7 +67,7 @@ export function TranscriptPane({ flowId, transcripts: externalTranscripts }: Tra
       {transcripts && transcripts.length === 0 && (
         <div className="text-fg-dim italic text-sm">
           This flow didn't spawn any subagent sessions, or the session keys don't
-          match the pipeclaw default pattern.
+          match the manifold default pattern.
         </div>
       )}
 

@@ -52,7 +52,7 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPat
     await createMigrator(client, { name: "session-index", migrations: MIGRATIONS });
     if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["flow_sessions"], logger);
   } catch (err) {
-    logger?.warn?.(`pipeclaw session-index: failed to open DB: ${err?.message ?? err}`);
+    logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);
     // Return a no-op shim so callers don't need to null-check.
     return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, close() {} };
   }
@@ -68,7 +68,7 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPat
         }).onConflictDoNothing()
       );
     } catch (err) {
-      logger?.warn?.(`pipeclaw session-index: record failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold session-index: record failed: ${err?.message ?? err}`);
     }
   }
 
@@ -88,7 +88,7 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPat
         .limit(1);
       return rows.length > 0;
     } catch (err) {
-      logger?.warn?.(`pipeclaw session-index: hasSessionForNode failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold session-index: hasSessionForNode failed: ${err?.message ?? err}`);
       return false;
     }
   }
@@ -96,7 +96,7 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPat
   // Reverse of the above: given a session key alone (no flowId in hand —
   // e.g. a task_runs row from boot/taskflow-revive.js's orphan scan, which
   // only carries child_session_key), find which flow it belongs to. Used
-  // to delegate a pipeclaw-owned orphan to the flow's own revival path
+  // to delegate a manifold-owned orphan to the flow's own revival path
   // instead of touching the session directly.
   async function flowIdForSessionKey(sessionKey) {
     if (!sessionKey) return null;
@@ -106,7 +106,7 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPat
         .limit(1);
       return rows[0]?.x ?? null;
     } catch (err) {
-      logger?.warn?.(`pipeclaw session-index: flowIdForSessionKey failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold session-index: flowIdForSessionKey failed: ${err?.message ?? err}`);
       return null;
     }
   }

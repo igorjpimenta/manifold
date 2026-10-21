@@ -149,7 +149,7 @@ export interface SubflowStepResult {
   [key: string]: unknown;
 }
 
-/** One row from GET /pipeclaw/runs/:flowId/tree (routes/runs.js's buildTreeNodeRows)
+/** One row from GET /manifold/runs/:flowId/tree (routes/runs.js's buildTreeNodeRows)
  *  — one per top-level (subflow_key IS NULL) invocation, ordered by invokedAt.
  *  Backs PathTrail/GraphView's executed-path rendering (SUBFLOW_PARENT_STATE_
  *  ACCESS.design.md's Phase 3b), replacing stateJson._stepHistory as the source. */

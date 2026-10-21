@@ -125,7 +125,7 @@ export async function createNodeHealthStore({ logger, dbPath = DEFAULT_DB_PATH }
         .where(and(eq(nodeHealth.pipelineId, pipelineId), eq(nodeHealth.nodeId, nodeId), eq(nodeHealth.status, "blocked")))
     );
     if (r.rowsAffected > 0) {
-      logger?.info?.(`pipeclaw node-health: ${pipelineId}/${nodeId} reset (${via ?? "operator"})`);
+      logger?.info?.(`manifold node-health: ${pipelineId}/${nodeId} reset (${via ?? "operator"})`);
     }
     return { reset: r.rowsAffected };
   }

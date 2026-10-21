@@ -12,11 +12,12 @@ flowStateEmitter.setMaxListeners(20);
 export const failureEmitter = new EventEmitter();
 failureEmitter.setMaxListeners(10);
 
-// Structured state-boundary emitters — carry full payloads so subscribers
-// can project live_activity.* messages without a DB scan.
+// Structured state-boundary emitters — carry full payloads so a consumer can
+// render without a DB scan.
 
-// gate.opened  { flowId, nodeId, items, waitJson, stateJson, lastStep, _suppressApns? }
-// gate.closed  { flowId, nodeId }
+// gate.opened  { flowId, nodeId, items, waitJson, stateJson, lastStep, updatedAt }
+//   forwarded over WS as manifold.gate.opened
+// gate.closed  { flowId, nodeId } — forwarded as manifold.gate.closed
 export const gateEmitter = new EventEmitter();
 gateEmitter.setMaxListeners(10);
 

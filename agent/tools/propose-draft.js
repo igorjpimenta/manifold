@@ -14,7 +14,7 @@
 // restart AND is readable on cold-open of the iOS app via the discuss
 // history GET.
 //
-// Factory-form registration (like pipeclaw_start) — needs `ctx.sessionKey`
+// Factory-form registration (like manifold_start) — needs `ctx.sessionKey`
 // / `ctx.agentId` to auto-resolve flowId/itemId when the caller is a
 // subagent (e.g. Cyrano) that was never given them directly. See
 // resolveGateContext in shared.js.
@@ -25,7 +25,7 @@ import { toolErr, resolveGateContext } from "./shared.js";
 export function registerProposeDraftTool({ api, readStore, componentEmitter, discussStore }) {
   api.registerTool((ctx) => ({
     name: "propose_draft",
-    label: "Pipeclaw: propose a draft revision for the operator's gate",
+    label: "Manifold: propose a draft revision for the operator's gate",
     description:
       "Use during a discuss-with-the-operator session to propose a new draft for the pending gate. The operator sees an 'Apply as draft' button on your reply — they decide whether to commit. This is the PRIMARY mechanism; do not write <draft>...</draft> tags inline if you call this tool. Pass ONLY the literal reply body inside `text` (the message the operator would actually send — no headings, no Before/After commentary, no narration). You do NOT need to pass `flowId`/`itemId` — the gateway resolves the active gate from your session context automatically. Pass them explicitly only if you already have them (e.g. from your discussion system prompt) or if auto-resolve fails. Pass `id` only when the gate has multiple draft slots (rare — e.g. subject + body) and you want to target a specific one; defaults to the gate's first/sole draft.",
     parameters: {

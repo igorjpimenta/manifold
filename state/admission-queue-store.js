@@ -83,7 +83,7 @@ async function _createImpl({ dbPath = DEFAULT_DB_PATH, getLimit } = {}) {
   }
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "pipeclaw_flow_admission_queue", migrations: MIGRATIONS });
+  await createMigrator(client, { name: "manifold_flow_admission_queue", migrations: MIGRATIONS });
 
   // Runs `fn(tx)` inside one BEGIN IMMEDIATE transaction, committing on
   // success and always closing (which rolls back if not committed) — the

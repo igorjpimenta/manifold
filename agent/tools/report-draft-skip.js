@@ -22,7 +22,7 @@ import { toolErr, resolveGateContext } from "./shared.js";
 export function registerReportDraftSkipTool({ api }) {
   api.registerTool((ctx) => ({
     name: "report_draft_skip",
-    label: "Pipeclaw: report the operator declined this listing — skip it",
+    label: "Manifold: report the operator declined this listing — skip it",
     description:
       "Use ONLY after the operator's answer to a gap question you already asked was an explicit decline — \"dealbreaker\", \"skip\", \"skip it\", \"no\", or equivalent. Ends this listing immediately: no draft is written, no further gap rounds happen. Do NOT call report_draft_blocked with a different question instead (that buries the decline under an unrelated ask), and do NOT draft around the declined requirement (that silently overrides the operator's decision). `reason` should name what was declined, in your own words, from the operator's actual answer — not invented. `outPath` must be copied verbatim from your brief (same blockedReportPath report_draft_blocked uses). `jobId` is optional — auto-resolved from your session's own listing context.",
     parameters: {

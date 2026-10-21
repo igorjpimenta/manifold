@@ -160,17 +160,17 @@ export function createRetryFailure({
         }
         if (result.queued) {
           logger.info(
-            `pipeclaw retry-flow: flowId=${flowId.slice(0, 8)} failureNode=<none> rootNode=__start__ via=${via} queued for admission`
+            `manifold retry-flow: flowId=${flowId.slice(0, 8)} failureNode=<none> rootNode=__start__ via=${via} queued for admission`
           );
           return { code: "queued", flowId, failureNode: null, rootNode: "__start__", priorStep: null, cleared: [], mode: "flow-restart", via };
         }
         const runRetryFlow = () => executor.runFlow(flowId, "retry").catch((err) => {
-          logger.warn(`pipeclaw retry-flow [${flowId.slice(0, 8)}/__start__] runFlow err: ${err?.message ?? err}`);
+          logger.warn(`manifold retry-flow [${flowId.slice(0, 8)}/__start__] runFlow err: ${err?.message ?? err}`);
         });
         if (awaitCompletion) await runRetryFlow();
         else setImmediate(runRetryFlow);
         logger.info(
-          `pipeclaw retry-flow: flowId=${flowId.slice(0, 8)} failureNode=<none> rootNode=__start__ via=${via}`
+          `manifold retry-flow: flowId=${flowId.slice(0, 8)} failureNode=<none> rootNode=__start__ via=${via}`
         );
         return { code: "ok", flowId, failureNode: null, rootNode: "__start__", priorStep: null, cleared: [], mode: "flow-restart", via };
       }
@@ -275,12 +275,12 @@ export function createRetryFailure({
       }
       if (result.queued) {
         logger.info(
-          `pipeclaw retry-flow: flowId=${flowId.slice(0, 8)} failureNode=${failureNode} rootNode=${rootNode} priorStep=${priorStep} cleared=[${nodesToClear.join(",")}] via=${via} queued for admission`
+          `manifold retry-flow: flowId=${flowId.slice(0, 8)} failureNode=${failureNode} rootNode=${rootNode} priorStep=${priorStep} cleared=[${nodesToClear.join(",")}] via=${via} queued for admission`
         );
         return { code: "queued", flowId, failureNode, rootNode, priorStep, cleared: nodesToClear, mode: "flow-step", via };
       }
       const runRetryFlow = () => executor.runFlow(flowId, "retry").catch((err) => {
-        logger.warn(`pipeclaw retry-flow [${flowId.slice(0, 8)}/${rootNode}] runFlow err: ${err?.message ?? err}`);
+        logger.warn(`manifold retry-flow [${flowId.slice(0, 8)}/${rootNode}] runFlow err: ${err?.message ?? err}`);
       });
       // HTTP/Telegram callers pass neither, and need this call to return
       // fast — the flow keeps running in the background via setImmediate.
@@ -291,7 +291,7 @@ export function createRetryFailure({
       if (awaitCompletion) await runRetryFlow();
       else setImmediate(runRetryFlow);
       logger.info(
-        `pipeclaw retry-flow: flowId=${flowId.slice(0, 8)} failureNode=${failureNode} rootNode=${rootNode} priorStep=${priorStep} cleared=[${nodesToClear.join(",")}] via=${via}`
+        `manifold retry-flow: flowId=${flowId.slice(0, 8)} failureNode=${failureNode} rootNode=${rootNode} priorStep=${priorStep} cleared=[${nodesToClear.join(",")}] via=${via}`
       );
       return { code: "ok", flowId, failureNode, rootNode, priorStep, cleared: nodesToClear, mode: "flow-step", via };
     }
