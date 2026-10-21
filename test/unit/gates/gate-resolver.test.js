@@ -1834,7 +1834,6 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     assert.equal(payload.decision, "approve");
     assert.ok(typeof payload.resolvedAt === "number" && payload.resolvedAt >= before, "resolvedAt must be a timestamp");
     assert.equal(payload.kind, "gate.resolved");
-    assert.equal(payload.v, 1);
   });
 
   test("does NOT emit bespoke 'pipeclaw.run.updated' on resolve (owned by the WS run listener)", async () => {

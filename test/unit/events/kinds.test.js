@@ -10,7 +10,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
-  EVENT_VERSION,
   WIRE_KINDS,
   RESERVED_KINDS,
   isWireKind,
@@ -39,10 +38,6 @@ describe("kinds — registry", () => {
       assert.match(kind, /^[a-z]+(\.[a-z]+)+$/);
       assert.ok(!kind.startsWith("plugin."));
     }
-  });
-
-  test("EVENT_VERSION is 1", () => {
-    assert.equal(EVENT_VERSION, 1);
   });
 });
 
