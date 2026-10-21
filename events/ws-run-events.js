@@ -79,11 +79,9 @@ export function createWsRunEventsListener({ store, readStore, nodeExecutionsStor
           emit("run.started", { ...buildRunPatch(flow, now) }).catch(() => {});
           const pipelineId = flow.stateJson?.pipelineId;
           if (pipelineId) {
-            // setTimeout(100) instead of setImmediate — the executor
-            // writes the new run row to SQLite asynchronously;
-            // setImmediate fires before the write lands, so
-            // computePipelineStats (which reads readStore/SQLite)
-            // returns stale todayActive.
+            // setTimeout instead of setImmediate — the executor writes the
+            // new run row asynchronously; the delay lets it land before the
+            // stats read, so computePipelineStats returns fresh todayActive.
             setTimeout(async () => {
               try { await emit("pipeline.stats.updated", { ...(await computePipelineStats(pipelineId)) }); } catch {}
             }, 100);
