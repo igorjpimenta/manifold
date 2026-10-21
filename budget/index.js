@@ -112,9 +112,8 @@ const BUDGET_MIGRATIONS = [
     }
   },
   // v4: kind tag — "node" for per-node approvals (the only prod writer),
-  // "run-start" for pipeline start-gate approvals. The queue narrows to run
-  // starts over time; the tag is what a future enforcement reads. Legacy
-  // rows read back as "node" (see deserialize).
+  // "run-start" for pipeline start-gate approvals. Legacy rows read back
+  // as "node" (see deserialize).
   async (client) => {
     const { rows } = await client.execute("SELECT name FROM pragma_table_info('queue_items')");
     const cols = rows.map((r) => r.name);
@@ -276,9 +275,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         });
         for (const row of decided) {
           if (row.flow_id) {
-            // In-process resume (routes/operator-resume.js) — the HTTP
-            // loopback to /pipeclaw/resume-from-gate is gone. The start-gate
-            // branch below still loops back: elevation needs gateway scope.
+            // In-process resume (routes/operator-resume.js, injected). The
+            // start-gate branch below still loops back: elevation needs
+            // gateway scope.
             if (onFlowResume) {
               try { await onFlowResume({ flowId: row.flow_id, nodeId: row.node, decision }); } catch {}
             }

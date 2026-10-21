@@ -1,12 +1,11 @@
 // routes/operator-resume.js — in-process resume for budget-gate approvals.
 //
-// resumeFlowFromGate holds the logic POST /pipeclaw/resume-from-gate used
-// to serve over HTTP: re-request the flow's own admission (released the
-// moment it blocked, state-store.js's setWaiting hook) and resume, leaving
-// status:"queued" to the admission cycle when the pool is full. The budget
-// decide route calls it directly instead of loopback-fetching the gateway —
-// same inputs, same outcomes, no HTTP hop. The route itself stays as a thin
-// validating wrapper.
+// resumeFlowFromGate is the single implementation behind two callers: POST
+// /pipeclaw/resume-from-gate (thin validating wrapper) and the budget
+// decide route's in-process call. It re-requests the flow's own admission
+// (released the moment it blocked, state-store.js's setWaiting hook) and
+// resumes, leaving status:"queued" to the admission cycle when the pool is
+// full.
 import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
 export async function resumeFlowFromGate({
