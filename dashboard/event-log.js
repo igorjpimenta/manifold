@@ -132,8 +132,11 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     return { added, removed };
   }
 
+  // Terminal set matches the WS run listener exactly (succeeded, failed,
+  // cancelled, skipped) — the two streams must agree on what "ended" means
+  // or dashboard and iOS diverge on skipped runs.
   function isTerminal(status) {
-    return status === "succeeded" || status === "failed" || status === "cancelled";
+    return status === "succeeded" || status === "failed" || status === "cancelled" || status === "skipped";
   }
 
   // Process a single flow row — diff against last snapshot and emit if changed.
@@ -150,6 +153,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
       });
       emit({
         type: "flow_created",
+        kind: "run.created",
         flowId: row.flowId,
         at: row.createdAt ?? Date.now(),
         status: row.status,
@@ -162,6 +166,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     const { added, removed } = diffKeys(prev.stateKeys, currKeys);
     emit({
       type: "flow_changed",
+      kind: "run.updated",
       flowId: row.flowId,
       at: row.updatedAt ?? Date.now(),
       prevStatus: prev.status,
@@ -176,6 +181,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     if (!prev.terminal && isTerminal(row.status)) {
       emit({
         type: "flow_terminated",
+        kind: "run.ended",
         flowId: row.flowId,
         at: row.endedAt ?? row.updatedAt ?? Date.now(),
         status: row.status,
