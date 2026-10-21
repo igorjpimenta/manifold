@@ -4,9 +4,8 @@
 // canonical run/gate/stats kinds through the shared emitter. Revision is
 // the per-write granularity (status alone would drop every same-status
 // node transition); the narrow compat events additionally gate on real
-// status change. Settle order matters: setImmediate lets the terminal row
-// land before the stats scan; the 100ms start delay lets the new run row
-// land before its own stats read.
+// status change. Settle order matters: the terminal scan waits past the
+// terminal write; the start scan waits longer, past the new run row.
 import { buildRunPatch as _buildRunPatch } from "../utils/run-patch.js";
 
 export function createWsRunEventsListener({ store, readStore, nodeExecutionsStore, pipelineLookup, getBroadcast, emit }) {
@@ -79,11 +78,9 @@ export function createWsRunEventsListener({ store, readStore, nodeExecutionsStor
           emit("run.started", { ...buildRunPatch(flow, now) }).catch(() => {});
           const pipelineId = flow.stateJson?.pipelineId;
           if (pipelineId) {
-            // setTimeout(100) instead of setImmediate — the executor
-            // writes the new run row to SQLite asynchronously;
-            // setImmediate fires before the write lands, so
-            // computePipelineStats (which reads readStore/SQLite)
-            // returns stale todayActive.
+            // setTimeout instead of setImmediate — the executor writes the
+            // new run row asynchronously; the delay lets it land before the
+            // stats read, so computePipelineStats returns fresh todayActive.
             setTimeout(async () => {
               try { await emit("pipeline.stats.updated", { ...(await computePipelineStats(pipelineId)) }); } catch {}
             }, 100);
