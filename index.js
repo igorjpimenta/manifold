@@ -51,6 +51,7 @@ import { createEmitSseEvent } from "./utils/sse.js";
 import { flowStateEmitter } from "./events.js";
 import { createEmitter } from "./events/emit.js";
 import { createWsRunEventsListener } from "./events/ws-run-events.js";
+import { createCatalogPublisher } from "./events/catalog.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
 import { createComponentEmitter } from "./routes/discuss-component.js";
 import { registerRunRoutes } from "./routes/runs.js";
@@ -265,6 +266,14 @@ export default definePluginEntry({
     // stays lazy via the getter (captured at plugin.pipeclaw.ping).
     const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
 
+    // Assigned in the dashboard section below; the catalog publisher reads
+    // it lazily so watcher reloads before dashboard boot stay WS-only.
+    let dashboardBusRef = null;
+    const publishCatalogChanged = createCatalogPublisher({
+      emit: emitCanonical,
+      getDashboardBroadcast: () => (dashboardBusRef ? (e) => dashboardBusRef.broadcast(e) : null),
+    });
+
     const executor = createExecutor({
       api,
       store,
@@ -315,8 +324,10 @@ export default definePluginEntry({
     });
 
     const pipelinesWatcher = createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger: api.logger });
+    // Single catalog producer (events/catalog.js): identical content to
+    // the gateway WS stream and the dashboard bus.
     pipelinesWatcher.onReload((info) => {
-      try { _gatewayBroadcast?.("plugin.pipeclaw.pipeline.catalog.changed", { count: info.size, ids: info.ids, updatedAt: Date.now() }); } catch {}
+      publishCatalogChanged(info).catch(() => {});
     });
     pipelinesWatcher.onReload(() => {
       pipelineRegistryStore.reconcilePipelineVersions(pipelinesRef.value, { logger: api.logger });
@@ -603,8 +614,9 @@ export default definePluginEntry({
     if (dashboardEnabled) {
       const dashboardStore = readStore;
       const dashboardBus = createEventBus({ store: dashboardStore, nodeExecutionsStore, logger: api.logger });
+      dashboardBusRef = dashboardBus;
       pipelinesWatcher.onReload((info) => {
-        dashboardBus.broadcast({ type: "pipelines_changed", at: Date.now(), size: info.size, ids: info.ids });
+        publishCatalogChanged(info).catch(() => {});
       });
       const dashboardServer = createDashboardServer({
         writeStore: store,
