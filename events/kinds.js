@@ -6,14 +6,13 @@
 // mid-migration. Every payload contract here is the minimum a consumer
 // can rely on — producers may attach more fields, never fewer.
 
-// Envelope version, stamped as `v` on every emission. Bump only on a
-// breaking payload change (dropping or renaming a required field);
-// additive fields never bump. A missing `v` reads as 1, so history stays
-// interpretable without backfill.
-export const EVENT_VERSION = 1;
-
 // Every kind with a Phase-1 producer. Frozen: adding a kind is a
 // deliberate registry change, never an inline string at a call site.
+// Evolution rule (CloudEvents primer §versioning): additive payload
+// changes keep the kind; a breaking change mints a NEW kind and dual-
+// produces through KIND_TO_LEGACY_WIRE until consumers cut over. There
+// is deliberately no integer version field — an unread version versions
+// nothing; the kind name is the version.
 export const WIRE_KINDS = Object.freeze([
   "run.created",
   "run.started",
