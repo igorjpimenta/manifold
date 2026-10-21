@@ -6,6 +6,10 @@
 // mid-migration. Every payload contract here is the minimum a consumer
 // can rely on — producers may attach more fields, never fewer.
 
+// Envelope version, stamped as `v` on every emission. Bump only on a
+// breaking payload change (dropping or renaming a required field);
+// additive fields never bump. A missing `v` reads as 1, so history stays
+// interpretable without backfill.
 export const EVENT_VERSION = 1;
 
 // Every kind with a Phase-1 producer. Frozen: adding a kind is a
