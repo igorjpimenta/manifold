@@ -1824,8 +1824,7 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     const before = Date.now();
     await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "ios" });
     // gate.resolved fires on the applied path via the canonical emitter
-    // (the bespoke pipeclaw.run.updated dup is gone — resume patches come
-    // from the WS run listener). Find by name.
+    // (resume patches come from the WS run listener). Find by name.
     const gateCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.gate.resolved");
     assert.ok(gateCall, "plugin.gate.resolved broadcast must fire");
     const [eventName, payload] = gateCall.arguments;
@@ -1967,13 +1966,11 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
   });
 });
 
-// ─── gate.closed removed ────────────────────────────────────────────────────
-// gateEmitter.gate.closed had zero consumers outside tests and no wire kind,
-// so the emission is deleted (events roadmap slice 1). What stays pinned:
-// resolving resumes the flow through the store; a failed persist resumes
-// nothing.
+// ─── resume without emitter ─────────────────────────────────────────────────
+// Resolving resumes the flow through the store; a failed persist resumes
+// nothing. No emitter participates in either path.
 
-describe("applyResolutionsAndResume — resume without gate.closed", () => {
+describe("applyResolutionsAndResume — resume", () => {
   test("resolves and resumes the flow with no gateEmitter emission", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
