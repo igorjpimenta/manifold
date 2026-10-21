@@ -4,8 +4,12 @@ import {
   currentLockThreshold, setLockThresholdAndPersist,
   testFireAlert, getCapHistory, getAlertHistory,
 } from "./budget-alert.js";
+import { createEmitter } from "../events/emit.js";
 
 export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroadcast }) {
+  // Canonical-kind fan-out for the two cap emissions below (events roadmap
+  // slice 6): identical legacy wire string, envelope adds kind/v.
+  const { emit } = createEmitter({ getBroadcast, logger });
   // ─── /budget/cap — read / update the operator-set daily cap ───────────────
   api.registerHttpRoute({
     path: "/pipeclaw/telemetry/budget/cap", auth: "plugin", match: "exact",
@@ -26,7 +30,7 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
           // iOS's Budget screen fetches cap/threshold via two independent
           // requests (home tile + hourly chart) — without this broadcast the
           // chart's cap line goes stale until the next unrelated reload.
-          getBroadcast?.()?.("plugin.budget.cap.changed", { capUSD });
+          try { await emit("budget.cap.changed", { capUSD }); } catch {}
           return json(res, { ok: true, capUSD });
         } catch (err) {
           return json(res, { error: String(err?.message ?? err) }, 400);
@@ -53,7 +57,7 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
             return json(res, { error: "lockThreshold must be a number between 0 and 1" }, 400);
           }
           await setLockThresholdAndPersist(lockThreshold);
-          getBroadcast?.()?.("plugin.budget.cap.changed", { lockThreshold });
+          try { await emit("budget.cap.changed", { lockThreshold }); } catch {}
           return json(res, { ok: true, lockThreshold });
         } catch (err) {
           return json(res, { error: String(err?.message ?? err) }, 400);
