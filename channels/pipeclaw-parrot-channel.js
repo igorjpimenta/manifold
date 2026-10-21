@@ -13,6 +13,7 @@ import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
+import { gatewayWireName } from "../events/kinds.js";
 
 export function createPipeclawParrotChannelEntry({
   readStore,
@@ -20,7 +21,12 @@ export function createPipeclawParrotChannelEntry({
   resolveDiscussTarget,
   stampDiscussSession,
   emitSseEvent,
+  emit,
 }) {
+  // Canonical-kind fan-out (events roadmap slice 2) with the same
+  // emitSseEvent-backed fallback as routes/discuss.js — pre-existing
+  // turn tests pin the fallback path unchanged.
+  const emitKind = emit ?? (async (kind, payload) => emitSseEvent({ ...payload, type: gatewayWireName(kind) ?? kind }));
   // Captured once during startAccount; used by the HTTP handler.
   let channelRuntimeRef = null;
   let cfgRef = null;
@@ -241,8 +247,10 @@ export function createPipeclawParrotChannelEntry({
                     api.logger.warn(`pipeclaw-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
                   }
 
-                  const pushRes = await emitSseEvent({
-                    type: "discuss.turn",
+                  // Canonical text field alongside legacy `reply` (iOS shape).
+                  const pushRes = await emitKind("session.transcript.completed", {
+                    scope: "discuss",
+                    text: replyText,
                     turnId,
                     flowId: flow.flowId,
                     itemId: target.itemId,
@@ -255,7 +263,7 @@ export function createPipeclawParrotChannelEntry({
                     emittedAtMs: Date.now(),
                   });
                   if (!pushRes.ok) {
-                    api.logger.warn(`pipeclaw-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
+                    api.logger.warn(`pipeclaw-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed`);
                   } else {
                     api.logger.info(`pipeclaw-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: completed → SSE pushed`);
                   }
@@ -268,14 +276,13 @@ export function createPipeclawParrotChannelEntry({
                     await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                     await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
                   } catch {}
-                  await emitSseEvent({
-                    type: "discuss.turn",
+                  await emitKind("session.transcript.failed", {
+                    scope: "discuss",
                     turnId,
                     flowId: flow.flowId,
                     itemId: target.itemId,
                     status: "failed",
                     error: err?.message ?? String(err),
-                    emittedAtMs: Date.now(),
                   });
                 },
               });
@@ -302,14 +309,13 @@ export function createPipeclawParrotChannelEntry({
                 await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                 await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
               } catch {}
-              await emitSseEvent({
-                type: "discuss.turn",
+              await emitKind("session.transcript.failed", {
+                scope: "discuss",
                 turnId,
                 flowId: flow.flowId,
                 itemId: target.itemId,
                 status: "failed",
                 error: err?.message ?? String(err),
-                emittedAtMs: Date.now(),
               });
             }
 

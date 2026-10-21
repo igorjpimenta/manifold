@@ -7,6 +7,7 @@ import { stampDiscussSession, readDiscussSession } from "./discuss-session.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
 import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, loadAudioMetasForFlow } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
+import { gatewayWireName } from "../events/kinds.js";
 
 // ── Factory ─────────────────────────────────────────────────────────────────
 // All handlers close over the deps passed from index.js / runs.js / operator.js
@@ -17,6 +18,7 @@ export function registerDiscussHandlers({
   store,
   pipelinesRef,
   emitSseEvent,
+  emit,
   discussDefaultAgent,
   invokeElevated,
   readPending,
@@ -25,6 +27,12 @@ export function registerDiscussHandlers({
   runStore,
   nodeExecutionsStore,
 }) {
+
+  // Canonical-kind fan-out (events roadmap slice 2). Callers that pass
+  // `emit` get canonical session kinds; otherwise an adapter over
+  // emitSseEvent preserves byte-identical egress through the legacy wire
+  // map — pre-existing turn/transcript tests pin that path unchanged.
+  const emitKind = emit ?? (async (kind, payload) => emitSseEvent({ ...payload, type: gatewayWireName(kind) ?? kind }));
 
   // ── Resolve discuss target ────────────────────────────────────────────────
 
@@ -236,7 +244,6 @@ export function registerDiscussHandlers({
         }
         const event = succeeded
           ? {
-              type: "discuss.turn",
               turnId,
               flowId: sourceFlow.flowId,
               itemId: target.itemId,
@@ -248,7 +255,6 @@ export function registerDiscussHandlers({
               emittedAtMs: Date.now(),
             }
           : {
-              type: "discuss.turn",
               turnId,
               flowId: sourceFlow.flowId,
               itemId: target.itemId,
@@ -256,9 +262,14 @@ export function registerDiscussHandlers({
               error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
               emittedAtMs: Date.now(),
             };
-        const pushRes = await emitSseEvent(event);
+        // Canonical turn event: agent text rides both the canonical `text`
+        // field and legacy `reply` (iOS shape) until the wire cutover.
+        const pushRes = await emitKind(
+          succeeded ? "session.transcript.completed" : "session.transcript.failed",
+          { scope: "discuss", text: event.reply ?? null, ...event },
+        );
         if (!pushRes.ok) {
-          api.logger.warn(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
+          api.logger.warn(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed`);
         } else {
           api.logger.info(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${event.status} → SSE pushed`);
         }
@@ -271,14 +282,13 @@ export function registerDiscussHandlers({
           await discussStore.stampMessageError(sourceFlow.flowId, target.itemId, turnId, err?.message ?? String(err));
           await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
         } catch {}
-        await emitSseEvent({
-          type: "discuss.turn",
+        await emitKind("session.transcript.failed", {
+          scope: "discuss",
           turnId,
           flowId: sourceFlow.flowId,
           itemId: target.itemId,
           status: "failed",
           error: err?.message ?? String(err),
-          emittedAtMs: Date.now(),
         });
       }
     });
@@ -322,12 +332,14 @@ export function registerDiscussHandlers({
     }
 
     const transcriptStatus = transcribeError ? "failed" : transcript ? "completed" : "empty";
-    await emitSseEvent({
-      type: "discuss.transcript",
+    // Canonical text field alongside legacy `transcript` (iOS shape).
+    await emitKind("session.transcript.updated", {
+      scope: "discuss",
       turnId,
       flowId: sourceFlow.flowId,
       itemId: target.itemId,
       status: transcriptStatus,
+      text: transcript || null,
       transcript: transcript || null,
       audioUrl,
       error: transcribeError,
@@ -351,7 +363,6 @@ export function registerDiscussHandlers({
       try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
       const event = elev.ok && payload.ok
         ? {
-            type: "discuss.turn",
             turnId,
             flowId: sourceFlow.flowId,
             itemId: target.itemId,
@@ -364,7 +375,6 @@ export function registerDiscussHandlers({
             emittedAtMs: Date.now(),
           }
         : {
-            type: "discuss.turn",
             turnId,
             flowId: sourceFlow.flowId,
             itemId: target.itemId,
@@ -374,16 +384,20 @@ export function registerDiscussHandlers({
             operatorTranscript: transcript,
             emittedAtMs: Date.now(),
           };
-      const pushRes = await emitSseEvent(event);
+      // Same canonical mapping as the text path above (status chooses kind).
+      const pushRes = await emitKind(
+        event.status === "completed" ? "session.transcript.completed" : "session.transcript.failed",
+        { scope: "discuss", text: event.reply ?? null, ...event },
+      );
       if (!pushRes.ok) {
-        api.logger.warn(`${logPrefix}: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
+        api.logger.warn(`${logPrefix}: SSE push failed`);
       } else {
         api.logger.info(`${logPrefix}: ${event.status} → SSE pushed`);
       }
     } catch (err) {
       api.logger.warn(`${logPrefix}: runner error: ${err?.message ?? err}`);
-      await emitSseEvent({
-        type: "discuss.turn",
+      await emitKind("session.transcript.failed", {
+        scope: "discuss",
         turnId,
         flowId: sourceFlow.flowId,
         itemId: target.itemId,

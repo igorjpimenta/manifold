@@ -139,6 +139,7 @@ function buildEntry(overrides = {}) {
   const target = overrides.target ?? makeTarget();
   const discussStore = overrides.discussStore ?? makeDiscussStore();
   const emitSseEvent = overrides.emitSseEvent ?? makeEmitSseEvent();
+  const emit = overrides.emit ?? null;
   const stampDiscussSession = overrides.stampDiscussSession ?? makeStampDiscussSession();
   const readStore = overrides.readStore ?? makeReadStore(flow);
   const resolveDiscussTarget = overrides.resolveDiscussTarget ?? (() => target);
@@ -151,6 +152,7 @@ function buildEntry(overrides = {}) {
     stampDiscussSession,
     emitSseEvent,
     readPending,
+    ...(emit ? { emit } : {}),
   });
 
   const { api, routes } = createMockApi();
@@ -161,7 +163,7 @@ function buildEntry(overrides = {}) {
 
   return {
     entry, route, api, routes,
-    flow, target, discussStore, emitSseEvent, stampDiscussSession, readStore,
+    flow, target, discussStore, emitSseEvent, emit, stampDiscussSession, readStore,
   };
 }
 
@@ -827,6 +829,32 @@ describe("deliver callback — SSE emission", () => {
     const { emitSseEvent } = await runAndDeliver();
     const evt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "completed");
     assert.ok(Array.isArray(evt.components), "components must be an array");
+  });
+
+  test("canonical path: deliver emits session.transcript.completed scope=discuss", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const flow = makeFlow();
+    const emitted = [];
+    const emit = async (kind, payload) => {
+      emitted.push({ kind, payload });
+      return { ok: true, kind, deliveries: {} };
+    };
+
+    dispatchCalls = [];
+    capturedDispatchArgs = null;
+
+    const { route } = buildReadyEntry({ flow, emit });
+    await route.handler(makePostReq({ flowId: flow.flowId, text: "canonical test" }), createMockRes());
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setTimeout(r, 20));
+    await capturedDispatchArgs.deliver("the canonical reply");
+
+    const call = emitted.find((c) => c.kind === "session.transcript.completed");
+    assert.ok(call, "session.transcript.completed emitted");
+    assert.equal(call.payload.scope, "discuss");
+    assert.equal(call.payload.text, "the canonical reply");
+    assert.equal(call.payload.reply, "the canonical reply", "legacy reply field preserved for iOS");
+    assert.equal(call.payload.flowId, flow.flowId);
+    assert.ok(Array.isArray(call.payload.components), "components preserved");
   });
 });
 
