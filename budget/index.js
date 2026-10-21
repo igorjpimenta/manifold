@@ -9,6 +9,7 @@
 
 import { mkdirSync } from "node:fs";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
+import { createEmitter } from "../events/emit.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -186,6 +187,9 @@ async function _loopback(path, body, extraHeaders = {}) {
 }
 
 export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore } = {}) {
+  // Canonical-kind fan-out for the three WS emissions below (events roadmap
+  // slice 6): identical legacy wire strings, envelope adds kind/v.
+  const { emit } = createEmitter({ getBroadcast, logger: api.logger });
   let client;
   let clientPromise = null;
 
@@ -301,7 +305,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         }
       }
       api.logger.info(`[pipeclaw/budget] ${decision}: ${updated}/${ids.length}`);
-      if (updated > 0) getBroadcast?.()?.("plugin.budget.queue.changed", { decision, count: updated });
+      if (updated > 0) {
+        try { await emit("budget.queue.updated", { decision, count: updated }); } catch {}
+      }
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true, updated, decision }));
@@ -390,7 +396,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=1, day=? WHERE id='singleton'", args: [today] }));
       api.logger.info(`[pipeclaw/budget] gate locked day=${today}`);
-      getBroadcast?.()?.("plugin.gate.lock.changed", { locked: true, day: today });
+      try { await emit("budget.lock.changed", { locked: true, day: today }); } catch {}
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true, locked: true, day: today }));
@@ -408,7 +414,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=0, day=? WHERE id='singleton'", args: [today] }));
       api.logger.info(`[pipeclaw/budget] gate unlocked day=${today}`);
-      getBroadcast?.()?.("plugin.gate.lock.changed", { locked: false, day: today });
+      try { await emit("budget.lock.changed", { locked: false, day: today }); } catch {}
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true, locked: false, day: today }));
