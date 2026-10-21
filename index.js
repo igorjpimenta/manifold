@@ -258,6 +258,12 @@ export default definePluginEntry({
     // gate (engine/gateway-subagent.js), which every agent dispatch passes.
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
 
+    // Canonical-kind emitter, shared by the executor (session transcripts),
+    // discuss handlers, and the WS run-event listener below. Created here so
+    // every producer closes over the same instance; the broadcast ref itself
+    // stays lazy via the getter (captured at plugin.pipeclaw.ping).
+    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
+
     const executor = createExecutor({
       api,
       store,
@@ -272,6 +278,7 @@ export default definePluginEntry({
       admissionQueueStore,
       getWorkingSubagent: () => moduleState.workingSubagent,
       whenGatewayReady: () => gatewayReadiness.whenReady(),
+      emit: emitCanonical,
     });
     resumeParentRef.resume = executor.resume;
 
@@ -510,10 +517,6 @@ export default definePluginEntry({
     // ── emitSseEvent (factory, closes over _gatewayBroadcast lazily) ────────
 
     const emitSseEvent = createEmitSseEvent(() => _gatewayBroadcast);
-    // Canonical-kind emitter for the WS run-event listener below — same
-    // never-throw contract as the inline broadcasts it replaces; the
-    // `plugin.` prefix + legacy names are applied inside emit().
-    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
 
     // ── Discuss handlers ─────────────────────────────────────────────────────
 
@@ -522,6 +525,7 @@ export default definePluginEntry({
       store,
       pipelinesRef,
       emitSseEvent,
+      emit: emitCanonical,
       discussDefaultAgent,
       invokeElevated,
       readPending,
@@ -628,6 +632,7 @@ export default definePluginEntry({
       resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
       stampDiscussSession:  discussHandlers.stampDiscussSession,
       emitSseEvent,
+      emit: emitCanonical,
     }).register(api);
 
     // ── Dashboard ────────────────────────────────────────────────────────────
