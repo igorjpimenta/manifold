@@ -82,7 +82,7 @@ const GATEWAY_WIRE = {
   "cost.record.added": "cost.record.added",
 };
 
-// Dashboard-bus `type` values surviving from the pre-canonical shapes.
+// Dashboard-bus `type` values for the kinds the bus carries.
 // Only kinds the bus carries are listed; the bus migration (slice 4)
 // reads this, nothing else should.
 const DASHBOARD_TYPE = {
