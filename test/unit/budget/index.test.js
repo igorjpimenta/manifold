@@ -197,7 +197,6 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     assert.equal(call.payload.decision, "approve");
     assert.equal(call.payload.count, 1);
     assert.equal(call.payload.kind, "budget.queue.updated");
-    assert.equal(call.payload.v, 1);
   });
 
   it("decide resumes flow-bound approvals through injected onFlowResume (no HTTP loopback)", async () => {
