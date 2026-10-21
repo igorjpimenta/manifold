@@ -69,7 +69,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
       let body = {};
       try { body = raw ? JSON.parse(raw) : {}; }
       catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const via = typeof body?.via === "string" ? body.via : "ios";
+      const via = typeof body?.via === "string" ? body.via : "app";
 
       try {
         const retryMatch = tail.match(/^([^/]+)\/retry$/);

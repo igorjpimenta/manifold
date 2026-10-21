@@ -55,7 +55,7 @@ describe("persistRevisedDraft", () => {
     const store = { get: async () => null, setWaiting: async () => ({ applied: true }) };
     const r = await persistRevisedDraft({
       flowId: "nonexistent", itemId: "item-1", newDraft: "hello world from the test suite",
-      source: "ios", store, logger: null,
+      source: "app", store, logger: null,
     });
     assert.equal(r.applied, false);
     assert.equal(r.code, "flow_not_found");
@@ -66,7 +66,7 @@ describe("persistRevisedDraft", () => {
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "item-1", newDraft: "some real draft text here for testing",
-      source: "ios", store, logger: null,
+      source: "app", store, logger: null,
     });
     assert.equal(r.applied, false);
     assert.equal(r.code, "not_a_gate");
@@ -77,7 +77,7 @@ describe("persistRevisedDraft", () => {
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "no-such-item", newDraft: "A draft with enough text to pass the meta check",
-      source: "ios", store, logger: null,
+      source: "app", store, logger: null,
     });
     assert.equal(r.applied, false);
     assert.equal(r.code, "item_not_found");
@@ -88,7 +88,7 @@ describe("persistRevisedDraft", () => {
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "item-1", newDraft: "Updated draft text that is long enough to not look like meta",
-      source: "ios", store, logger: null,
+      source: "app", store, logger: null,
     });
     assert.equal(r.applied, true);
   });
@@ -110,7 +110,7 @@ describe("persistRevisedDraft", () => {
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "item-1", newDraft: "Short",
-      source: "ios", store, logger: null,
+      source: "app", store, logger: null,
     });
     assert.equal(r.applied, true);
   });

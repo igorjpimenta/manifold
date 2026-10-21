@@ -465,7 +465,7 @@ describe("reviveOrphanFlows", () => {
       };
       flow.stateJson = {
         ...flow.stateJson,
-        approvalPending: { "job-1": { decision: "reject", source: "ios", decidedAt: 123 } },
+        approvalPending: { "job-1": { decision: "reject", source: "app", decidedAt: 123 } },
       };
       const maybeResolveFlow = makeMaybeResolveFlow();
 

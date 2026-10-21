@@ -5,10 +5,11 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
 // gate-resolver.js — channel-agnostic resolution for gate items.
 //
-// One write site for every channel that records a decision on a gate
+// One write site for every consumer that records a decision on a gate
 // item: the dashboard's POST /approve (source="dashboard"), the CLI's
-// `manifold approve` (source="cli"), and the live-activity-bridge's iOS
-// intent route (source="ios"). All of them call `recordItemDecision`, which:
+// `manifold approve` (source="cli"), and a harness/app bridge over the
+// gateway REST surface (source="app"). All of them call
+// `recordItemDecision`, which:
 //
 //   1. validates the flow (status, kind, item membership)
 //   2. idempotently merges {decision, source, decidedAt, ...} into
@@ -18,12 +19,11 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 //      setRunning + executor.resume so the flow actually advances.
 //
 // "human-gate" appears in this module only as the wait-kind discriminator the
-// executor stamps; nothing here talks to a specific delivery channel.
-// Channel-specific delivery + cleanup (e.g. deleteMessage on cross-channel
-// decision) lives in each delivery service module, which imports this
-// factory (the dashboard and CLI each do). iOS Live Activities are the sole
-// interactive push channel: non-bundled plugins can't get Telegram buttons
-// through the platform's channel path.
+// executor stamps; nothing here talks to a specific delivery channel. The
+// gateway broadcasts manifold.gate.opened/closed over WS with the payload
+// below, and each consumer (app bridge, dashboard, CLI) decides how to
+// surface it. Channel-specific delivery + cleanup lives in that consumer,
+// which calls this factory the same way the dashboard and CLI do.
 //
 // Per-process design: the factory closes over a store + executor instance,
 // so the gateway and the CLI each spin up their own resolver (different
@@ -39,14 +39,14 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 // `ctx` (apply's first arg) is the flow-level assembled state, matching
 // PRIME_FILL's existing apply(state, item) signature.
 //
-// Channels allowed to resolve a gate. Mostly human-driven (iOS approval
-// intents, dashboard buttons, CLI), plus
+// Consumers allowed to resolve a gate. Mostly human-driven (app approval,
+// dashboard buttons, CLI), plus
 // `pipeline` for automated self-resolutions — used by audit / sweep
 // nodes inside other pipelines that need to cancel stale gates whose
 // underlying state changed out from under the operator (e.g. poll-
 // inbox's EVICT_GATES cancelling reply/touch gates after the listing
 // got a reply or was won).
-const VALID_SOURCES = ["ios", "dashboard", "cli", "pipeline"];
+const VALID_SOURCES = ["app", "dashboard", "cli", "pipeline"];
 
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;

@@ -48,7 +48,7 @@ import { createManifoldParrotChannelEntry } from "./channels/manifold-parrot-cha
 
 // Route modules extracted from this file.
 import { createEmitSseEvent } from "./utils/sse.js";
-import { flowStateEmitter } from "./events.js";
+import { flowStateEmitter, gateEmitter } from "./events.js";
 import { buildRunPatch as _buildRunPatch } from "./utils/run-patch.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
 import { registerRunRoutes } from "./routes/runs.js";
@@ -121,7 +121,7 @@ export default definePluginEntry({
       },
       manifoldParrot: {
         type: "object",
-        description: "manifold-parrot channel config. manifold-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
+        description: "manifold-parrot channel config. manifold-parrot is the built-in discuss channel a consumer opens when a human-gate is blocked.",
         additionalProperties: false,
         properties: {
           defaultAgent: {
@@ -668,6 +668,8 @@ export default definePluginEntry({
     // refresh once subscribed clients consume these events.
 
     let _wsRunEventsListener = null;
+    let _gateOpenedListener = null;
+    let _gateClosedListener = null;
     api.registerService({
       id: "manifold-ws-run-events",
       start: async () => {
@@ -720,7 +722,7 @@ export default definePluginEntry({
             if (!rawBroadcast) return;
             // Every call below goes through here: the gateway's event-scope
             // allowlist silently drops any broadcast name that isn't
-            // recognized or "plugin."-prefixed. run.*/gate.opened/pipeline.*
+            // recognized or "plugin."-prefixed. run.*/gate.*/pipeline.*
             // were all unprefixed, so none of them ever reached a client,
             // always — not a timing/connection issue.
             const broadcast = (name, payload) => rawBroadcast(`plugin.${name}`, payload);
@@ -741,8 +743,7 @@ export default definePluginEntry({
               if (status === "running") {
                 // Full buildRunPatch payload so a run's start carries the
                 // same display metadata (pipelineDisplayName/pipelineEmoji/
-                // currentNodeId) as every other patch; this event also
-                // carries what live_activity.start/PipelineProgress carries.
+                // currentNodeId) as every other patch.
                 broadcast("manifold.run.started", buildRunPatch(flow, now));
                 const pipelineId = flow.stateJson?.pipelineId;
                 if (pipelineId) {
@@ -755,18 +756,11 @@ export default definePluginEntry({
                     try { broadcast("manifold.pipeline.stats.updated", await computePipelineStats(pipelineId)); } catch {}
                   }, 100);
                 }
-              } else if (isWaiting) {
-                if (flow.waitJson?.kind === "human-gate") {
-                  broadcast("gate.opened", { flowId, updatedAt: now });
-                }
               } else if (isTerminal) {
                 // Was a bespoke {flowId, status, updatedAt} shape — same
                 // reasoning as run.started above: full buildRunPatch payload
-                // so OpsSummary's "just finished" row gets real display
-                // metadata (and the real terminal status) instead of
-                // nothing, now that live_activity.end/PipelineProgress no
-                // longer carries it (that path had its own dropped-status
-                // bug).
+                // so a consumer's "just finished" row gets real display
+                // metadata (and the real terminal status).
                 broadcast("manifold.run.ended", buildRunPatch(flow, now));
                 knownStatuses.delete(flowId);
                 // A terminal flow won't get further revisions — drop it too
@@ -815,11 +809,32 @@ export default definePluginEntry({
           } catch {}
         };
         flowStateEmitter.on("change", _wsRunEventsListener);
+
+        // Gate lifecycle goes out with its full payload (items, waitJson,
+        // stateJson) so a consumer can render the gate without a re-fetch;
+        // gate.closed tells it to drop the surface. Delivery is the
+        // consumer's business — manifold only states what happened.
+        _gateOpenedListener = (payload) => {
+          try { broadcast("manifold.gate.opened", payload); } catch {}
+        };
+        _gateClosedListener = (payload) => {
+          try { broadcast("manifold.gate.closed", payload); } catch {}
+        };
+        gateEmitter.on("gate.opened", _gateOpenedListener);
+        gateEmitter.on("gate.closed", _gateClosedListener);
       },
       stop: async () => {
         if (_wsRunEventsListener) {
           flowStateEmitter.off("change", _wsRunEventsListener);
           _wsRunEventsListener = null;
+        }
+        if (_gateOpenedListener) {
+          gateEmitter.off("gate.opened", _gateOpenedListener);
+          _gateOpenedListener = null;
+        }
+        if (_gateClosedListener) {
+          gateEmitter.off("gate.closed", _gateClosedListener);
+          _gateClosedListener = null;
         }
       },
     });

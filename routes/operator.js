@@ -307,7 +307,7 @@ export function registerOperatorRoutes({
           return true;
         }
         const triggeredBy = {
-          kind: via.includes("ios") ? "operator_http" : via.includes("cron") ? "cron" : via.includes("cli") ? "cli" : "operator_http",
+          kind: via.includes("app") ? "operator_http" : via.includes("cron") ? "cron" : via.includes("cli") ? "cli" : "operator_http",
           label: `via ${via}`,
           ts: Date.now(),
         };
@@ -321,7 +321,7 @@ export function registerOperatorRoutes({
               parentSessionKey,
             });
           } else {
-            const source = triggeredBy.kind === "cli" ? "cli" : triggeredBy.kind === "operator_http" ? "ios" : "operator";
+            const source = triggeredBy.kind === "cli" ? "cli" : triggeredBy.kind === "operator_http" ? "app" : "operator";
             const synthSession = `agent:operator:${source}:${record.flowId}`;
             await api.runtime?.lineage?.recordTrigger?.({
               flowId: record.flowId,

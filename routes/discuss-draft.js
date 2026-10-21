@@ -45,7 +45,7 @@ async function writeDraftMetaToFile(draftPath, fields, logger) {
 }
 
 export async function persistRevisedDraft({ flowId, itemId, newDraft, source, store, logger }) {
-  if (source !== "ios" && looksLikeMetaNarration(newDraft)) {
+  if (source !== "app" && looksLikeMetaNarration(newDraft)) {
     return { applied: false, code: "rejected_meta_narration" };
   }
   {

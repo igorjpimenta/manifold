@@ -252,7 +252,7 @@ describe("recordItemDecision — source validation", () => {
   });
 
   test("accepts all valid sources", async () => {
-    for (const source of ["ios", "dashboard", "cli", "pipeline"]) {
+    for (const source of ["app", "dashboard", "cli", "pipeline"]) {
       const { resolver } = makeResolver(null);
       const res = await resolver.recordItemDecision({ flowId: randomUUID(), itemId: "x", decision: "approve", source });
       assert.notEqual(res.code, "invalid_source", `source=${source} should be accepted`);
@@ -305,7 +305,7 @@ describe("recordItemDecision — idempotency", () => {
       items: [{ itemId }],
       stateJson: {
         approvalPending: {
-          [itemId]: { decision: "approve", source: "ios", decidedAt: Date.now() },
+          [itemId]: { decision: "approve", source: "app", decidedAt: Date.now() },
         },
       },
     });
@@ -444,7 +444,7 @@ describe("recordItemDecision — successful write path", () => {
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const { resolver, store } = makeResolver(flow);
-    await resolver.recordItemDecision({ flowId, itemId, decision: "edit", editedText: "my custom reply", source: "ios" });
+    await resolver.recordItemDecision({ flowId, itemId, decision: "edit", editedText: "my custom reply", source: "app" });
     const current = store._current();
     const entry = current.stateJson?.approvalPending?.[itemId];
     assert.equal(entry?.editedText, "my custom reply");
@@ -477,7 +477,7 @@ describe("recordItemDecision — successful write path", () => {
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const { resolver } = makeResolver(flow);
-    const res = await resolver.recordItemDecision({ flowId, itemId, decision: "reject", source: "ios" });
+    const res = await resolver.recordItemDecision({ flowId, itemId, decision: "reject", source: "app" });
     assert.deepEqual(res, { ok: true, status: "applied" });
   });
 });
@@ -774,7 +774,7 @@ describe("applyResolutionsAndResume — approve/reject accumulation", () => {
       flowId,
       items: [{ itemId }],
       stateJson: {
-        approvalPending: { [itemId]: { decision: "approve", source: "ios", decidedAt: Date.now() } },
+        approvalPending: { [itemId]: { decision: "approve", source: "app", decidedAt: Date.now() } },
       },
     });
     const { resolver, store } = makeResolver(flow);
@@ -790,7 +790,7 @@ describe("applyResolutionsAndResume — approve/reject accumulation", () => {
       flowId,
       items: [{ itemId }],
       stateJson: {
-        approvalPending: { [itemId]: { decision: "reject", source: "ios", decidedAt: Date.now() } },
+        approvalPending: { [itemId]: { decision: "reject", source: "app", decidedAt: Date.now() } },
       },
     });
     const { resolver, store } = makeResolver(flow);
@@ -810,7 +810,7 @@ describe("applyResolutionsAndResume — editedTexts storage", () => {
       flowId,
       items: [{ itemId }],
       stateJson: {
-        approvalPending: { [itemId]: { decision: "approve", editedText: "custom text", source: "ios", decidedAt: Date.now() } },
+        approvalPending: { [itemId]: { decision: "approve", editedText: "custom text", source: "app", decidedAt: Date.now() } },
       },
     });
     const { resolver, store } = makeResolver(flow);
@@ -1727,7 +1727,7 @@ describe("full integration: recordItemDecision triggers resolution and resume", 
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const { resolver, executor } = makeResolver(flow);
-    await resolver.recordItemDecision({ flowId, itemId, decision: "reject", source: "ios" });
+    await resolver.recordItemDecision({ flowId, itemId, decision: "reject", source: "app" });
     await drainImmediate();
     assert.equal(executor.resume.mock.calls.length >= 1, true);
   });
@@ -1792,7 +1792,7 @@ describe("full integration: recordItemDecision triggers resolution and resume", 
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const { resolver, store } = makeResolver(flow);
-    await resolver.recordItemDecision({ flowId, itemId, decision: "edit", editedText: "finalized reply", source: "ios" });
+    await resolver.recordItemDecision({ flowId, itemId, decision: "edit", editedText: "finalized reply", source: "app" });
     await drainImmediate();
     const current = store._current();
     // editedText lands in either approvalPending or editedTexts (after resolution)
@@ -1822,7 +1822,7 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const { resolver, broadcastFn } = makeResolverWithBroadcast(flow);
     const before = Date.now();
-    await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "ios" });
+    await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "app" });
     // Both gate.resolved and manifold.run.updated fire on the applied path; find by name.
     const gateCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.gate.resolved");
     assert.ok(gateCall, "plugin.gate.resolved broadcast must fire");
@@ -1859,7 +1859,7 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
       },
     });
     const { resolver, broadcastFn } = makeResolverWithBroadcast(flow);
-    const res = await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "ios" });
+    const res = await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "app" });
     assert.equal(res.status, "already-decided");
     assert.equal(broadcastFn.mock.calls.length, 0, "broadcast must NOT fire for already-decided");
   });
@@ -1953,7 +1953,7 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
       stateAtBroadcastTime = store._current()?.stateJson;
     });
     const resolver = createGateResolver({ api: { logger }, store, executor: makeExecutor(), getBroadcast: () => broadcastFn, admissionQueueStore });
-    await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "ios" });
+    await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "app" });
     assert.ok(stateAtBroadcastTime, "state must be readable at broadcast time");
     const decisionCommitted =
       stateAtBroadcastTime.approvalPending?.[itemId]?.decision === "approve" ||
