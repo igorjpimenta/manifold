@@ -7,7 +7,6 @@
 // The `plugin.` prefix and legacy wire names are applied here and only
 // here — producers never name the wire.
 import {
-  EVENT_VERSION,
   assertPayload,
   gatewayWireName,
   isSseKind,
@@ -20,7 +19,7 @@ export function createEmitter({ getBroadcast, emitSseEvent, logger } = {}) {
     // The incoming `type`, if any, is a legacy wire string — it stays at
     // the boundary. Inside core the kind is the only name.
     const { type: _legacyType, ...fields } = payload;
-    const envelope = { ...fields, kind, v: EVENT_VERSION };
+    const envelope = { ...fields, kind };
     if (envelope.emittedAtMs == null) envelope.emittedAtMs = Date.now();
 
     const deliveries = { ws: "skipped", sse: "skipped" };
