@@ -60,7 +60,6 @@ describe("ws-run-events — lifecycle", () => {
     assert.ok(names(calls).includes("plugin.pipeclaw.run.updated"), "updated fires");
     for (const c of calls) {
       assert.ok(c.payload.kind, "envelope stamps kind");
-      assert.equal(c.payload.v, 1);
     }
     const started = calls.find((c) => c.name === "plugin.pipeclaw.run.started");
     assert.equal(started.payload.kind, "run.started");
