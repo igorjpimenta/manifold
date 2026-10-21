@@ -14,7 +14,6 @@ import { makeResolver } from "./resolver.js";
 import { registerCliCommands } from "./cli.js";
 import { resolveCost } from "./pricer.js";
 import { checkBudget, initCapStore } from "./budget-alert.js";
-import { configureApi as configureDigestPushApi } from "./digest-push.js";
 import { registerHttpRoutes } from "./http.js";
 
 // Hoisted to module-level so every call's hook closures share the same
@@ -37,7 +36,6 @@ let PENDING_CALLS = [];
 
 export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
   const dbPath = _dbPath ?? DEFAULT_DB_PATH;
-  configureDigestPushApi(api); // digest-push needs api.runtime.apns for pipeline NOTIFY nodes
 
   const logger = api.logger;
 
@@ -216,7 +214,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         item_key: lineage?.item_key ?? null,
       });
       try { getBroadcast?.()?.('plugin.cost.record.added', { costTotal: cost.total, flowId: lineage?.flow_id ?? null }); } catch {}
-      checkBudget({ store, logger, justWroteUsd: cost.total });
+      checkBudget({ store, logger, justWroteUsd: cost.total, notify: (payload) => getBroadcast?.()?.("plugin.manifold.budget.alert", payload) });
     } catch (err) {
       logger.warn(`telemetry[before_message_write] ERROR: ${err?.message ?? err}`);
     }

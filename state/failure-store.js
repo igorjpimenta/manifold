@@ -1,5 +1,5 @@
 // failure-store.js — durable record of flow / branch failures, for
-// operator triage via iOS Failures section + APNs deep-links.
+// operator triage via a consumer's Failures surface + deep links.
 //
 // Storage:  ~/.openclaw/runtime.sqlite   (consolidated store; see DEFAULT_DB_PATH).
 // ~/.openclaw/flows/failures.sqlite is only consulted as a legacy migration

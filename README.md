@@ -29,7 +29,7 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | run/tool handoff helpers (`notifyToolFired`, `registerDispatch`, …) | oc-config |
 | `…/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` | oc-config |
-| `…/ios-auth` | `authorizeBridgeRequest`, `sendUnauthorized` | oc-config |
+| `…/bridge-auth` | `authorizeBridgeRequest`, `sendUnauthorized` | oc-config |
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
 | `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |
@@ -445,7 +445,7 @@ export default {
   id: "myteam_my-flow",
   goal: "one-line description shown in the dashboard",
   // Identity surfaces wherever the pipeline shows up in operator UIs.
-  //   emoji      — dashboard headers, push notifications, Live Activity widgets
+  //   emoji      — dashboard headers, consumer notifications, Live Activity widgets
   //   sfSymbol   — iOS Inbox pipeline-row icon (any valid SF Symbol name; see
   //                Apple's SF Symbols app). Falls back to "tray.fill" on the
   //                bridge when omitted, so this field is optional but recommended.
@@ -1094,7 +1094,6 @@ Declared in `openclaw.plugin.json`, one tool per file under `agent/tools/`
 | Tool                      | File                                    | Signature input fields        | Purpose                                             |
 | ------------------------- | ---------------------------------------- | ------------------------------ | ---------------------------------------------------- |
 | `manifold_start`          | `agent/tools/manifold-start.js`          | `pipelineId`, optional `args` | Start a flow. Returns `flowId`.                     |
-| `manifold_send_push`      | `agent/tools/manifold-send-push.js`      | `title` (optional), `text`    | Send a one-way APNs push notification to every registered device. |
 | `propose_draft`           | `agent/tools/propose-draft.js`           | `text` (required); `flowId`/`itemId` auto-resolved from session context | Propose a revised draft during a discuss session.   |
 | `propose_draft_meta`      | `agent/tools/propose-draft-meta.js`      | `fields` (required); `flowId`/`itemId` auto-resolved from session context | Propose budget/timeframe/language changes.          |
 | `submit_draft`            | `agent/tools/submit-draft.js`            | `outPath`, `body`, `language`, `budget`, `timeframe` (required); `jobId` auto-resolved | Write a structured draft to disk (stamps YAML frontmatter deterministically instead of a hand-typed heredoc). |

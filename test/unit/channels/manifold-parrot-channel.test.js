@@ -52,7 +52,7 @@ try {
 
   // live-activity-bridge/auth.js is dynamically imported inside the handler.
   // Resolve its URL relative to the test file — matching operator.test.js / runs.test.js.
-  const authUrl = new URL("../../../ios/auth.js", import.meta.url).href;
+  const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
   await mock.module(authUrl, {
     exports: {
       authorizeBridgeRequest: async (...a) => authMockImpl.authorizeBridgeRequest(...a),

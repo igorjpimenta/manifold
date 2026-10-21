@@ -43,7 +43,7 @@ try {
     exports: { resolveAgentEffectiveModelPrimary: async () => null },
   });
 
-  const authUrl = new URL("../../../ios/auth.js", import.meta.url).href;
+  const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
   await mock.module(authUrl, {
     exports: {
       authorizeBridgeRequest: async () => ({ ok: true }),

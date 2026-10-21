@@ -1,7 +1,6 @@
 // index.js — barrel re-export of all manifold agent tools.
 
 export { registerGraphFlowTool } from "./manifold-start.js";
-export { registerManifoldSendPushTool } from "./manifold-send-push.js";
 export { registerProposeDraftTool } from "./propose-draft.js";
 export { registerProposeDraftMetaTool } from "./propose-draft-meta.js";
 export { registerSubmitDraftTool } from "./submit-draft.js";

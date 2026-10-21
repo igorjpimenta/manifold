@@ -14,7 +14,6 @@ function makeMockApi() {
     _handlers: handlers,
     _services: services,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
-    runtime: { apns: null },
     on: (event, handler) => { handlers[event] = handler; },
     registerService: (svc) => services.push(svc),
     registerHttpRoute: () => {},

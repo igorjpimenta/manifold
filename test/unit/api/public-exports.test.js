@@ -50,10 +50,6 @@ const PUBLIC_API = {
     exports: ["browserProfileForLock", "beginTabSession", "endTabSession"],
   },
   "./elevation": { file: "./elevation.js", exports: ["invokeElevated"] },
-  "./digest": {
-    file: "./telemetry/digest-push.js",
-    exports: ["sendDigestPush", "configureApi"],
-  },
   "./tool-handoff": {
     file: "./state/tool-handoff.js",
     exports: [
@@ -71,8 +67,8 @@ const PUBLIC_API = {
     file: "./hooks/profile-write-lock.js",
     exports: ["registerProfileWriteLock", "profileEditResultPathFor", "PROFILE_EDIT_RESULTS_DIR"],
   },
-  "./ios-auth": {
-    file: "./ios/auth.js",
+  "./bridge-auth": {
+    file: "./auth/bridge.js",
     exports: ["authorizeBridgeRequest", "sendUnauthorized"],
   },
   "./state/db": {

@@ -3,12 +3,13 @@
   "enabledByDefault": true,
   "activation": {
     "onStartup": true,
-    "onConfigPaths": ["plugins.entries.manifold"]
+    "onConfigPaths": [
+      "plugins.entries.manifold"
+    ]
   },
   "contracts": {
     "tools": [
       "manifold_start",
-      "manifold_send_push",
       "propose_draft",
       "propose_draft_meta",
       "submit_draft",
@@ -21,11 +22,23 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "pipelinesDir": { "type": "string" },
-      "ownerSessionKey": { "type": "string" },
-      "dashboardEnabled": { "type": "boolean" },
-      "dashboardPort": { "type": "integer", "minimum": 1024, "maximum": 65535 },
-      "dashboardHost": { "type": "string" },
+      "pipelinesDir": {
+        "type": "string"
+      },
+      "ownerSessionKey": {
+        "type": "string"
+      },
+      "dashboardEnabled": {
+        "type": "boolean"
+      },
+      "dashboardPort": {
+        "type": "integer",
+        "minimum": 1024,
+        "maximum": 65535
+      },
+      "dashboardHost": {
+        "type": "string"
+      },
       "manifoldParrot": {
         "type": "object",
         "description": "manifold-parrot channel config. manifold-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
@@ -42,13 +55,16 @@
         "description": "Config for boot-time task orphan cleanup (absorbed from taskflow-revive plugin).",
         "additionalProperties": false,
         "properties": {
-          "startupDelayMs": { "type": "number", "minimum": 0 }
+          "startupDelayMs": {
+            "type": "number",
+            "minimum": 0
+          }
         }
       },
       "globalConcurrency": {
         "type": "integer",
         "minimum": 1,
-        "description": "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+        "description": "Shared ceiling for every flow-run concurrency mechanism \u2014 agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
       },
       "profilePath": {
         "type": "string",

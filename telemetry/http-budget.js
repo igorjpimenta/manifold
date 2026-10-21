@@ -117,7 +117,7 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
         if (!store) return bad(res, "lineage store not ready");
         const url = new URL(req.url, "http://x");
         const threshold = Number(url.searchParams.get("threshold") || 0.5);
-        await testFireAlert({ store, logger, threshold });
+        await testFireAlert({ store, logger, threshold, notify: (payload) => getBroadcast?.()?.("plugin.manifold.budget.alert", payload) });
         json(res, { ok: true, threshold });
       } catch (err) {
         logger?.warn?.(`lineage[http /budget/test-alert]: ${err?.message ?? err}`);

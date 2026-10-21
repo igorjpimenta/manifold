@@ -28,7 +28,6 @@ import { createPipelineRegistryStore } from "./state/pipeline-registry.js";
 import { registerCliCommands } from "./agent/cli.js";
 import {
   registerGraphFlowTool,
-  registerManifoldSendPushTool,
   registerProposeDraftTool,
   registerProposeDraftMetaTool,
   registerSubmitDraftTool,
@@ -431,7 +430,6 @@ export default definePluginEntry({
     );
 
     registerGraphFlowTool({ api, executor, store, pipelinesRef, ensurePipelinesLoaded });
-    registerManifoldSendPushTool({ api });
 
     const readStore = runStore;
     const gateResolver = createGateResolver({

@@ -1,7 +1,8 @@
 // Daily-budget guard. Called from the before_message_write hook after each
-// cost insert. When today's total exceeds CAP_USD, fires an APNs push
-// alert to the operator's device(s) (once per day — debounced via
-// lastAlertedLocalDay).
+// cost insert. When today's total exceeds CAP_USD, writes the
+// budget_alert_events row and emits a manifold.budget.alert event for a
+// consumer to deliver (once per day per threshold — debounced via
+// lastAlertedLocalDay). Delivery is not manifold's job.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -9,7 +10,6 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { displayRootLabel } from "./labels.js";
 import { execGet } from "./http-helpers.js";
-import { NotificationKinds } from "../ios/notifications.js";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
 import { createMigrator } from "../state/migrator.js";
 
@@ -298,7 +298,7 @@ async function todaysTotalUSD(store) {
  *   per local day. Crossing two thresholds in one cost insert (rare) fires
  *   both notifications.
  */
-export async function checkBudget({ store, logger, justWroteUsd = 0 }) {
+export async function checkBudget({ store, logger, justWroteUsd = 0, notify }) {
   try {
     const today = localDayKey();
 
@@ -333,7 +333,7 @@ export async function checkBudget({ store, logger, justWroteUsd = 0 }) {
       _recordAlertEvent({ threshold: t, total, cap: configuredCapUSD })
         .catch((err) => logger?.warn?.(`lineage[budget-alert] record(${t}) error: ${err?.message ?? err}`));
       // Fire-and-forget so the hook isn't blocked on push round-trip.
-      fireAlert({ threshold: t, total, cap: configuredCapUSD, store, logger })
+      fireAlert({ threshold: t, total, cap: configuredCapUSD, store, logger, notify })
         .catch((err) => logger?.warn?.(`lineage[budget-alert] fire(${t}) error: ${err?.message ?? err}`));
     }
   } catch (err) {
@@ -343,22 +343,27 @@ export async function checkBudget({ store, logger, justWroteUsd = 0 }) {
 
 // ─── alert composition + dispatch ──────────────────────────────────────────
 
-async function fireAlert({ threshold, total, cap, store, logger }) {
+async function fireAlert({ threshold, total, cap, store, logger, notify }) {
   const text = await composeText({ threshold, total, cap, store });
   const title = composeTitle({ threshold, total, cap });
   if (threshold >= configuredLockThreshold) {
     _lockGate(logger).catch(() => {});
     logger?.info?.(`lineage[budget-alert] approval gate locked (threshold=${threshold} >= lock=${configuredLockThreshold})`);
   }
-  // APNs is the only delivery surface (iOS Lock Screen). The
-  // budget_alert_events row above is written unconditionally, so the
-  // threshold crossing is never lost even if nothing gets pushed here.
-  const apnsResult = await fireAPNs({ title, body: text.body, threshold, total, cap, logger });
-  if (apnsResult.ok && apnsResult.sent > 0) {
-    logger?.info?.(`lineage[budget-alert] APNs fired threshold=${threshold} sent=${apnsResult.sent}/${apnsResult.total}`);
-    return;
+  // The budget_alert_events row is written unconditionally, so the threshold
+  // crossing is never lost even when no consumer is attached. Delivery
+  // belongs to whoever subscribes (app bridge, notifier); manifold only
+  // states the event.
+  if (typeof notify === "function") {
+    try {
+      notify({ title, body: text.body, threshold, total, cap });
+      logger?.info?.(`lineage[budget-alert] emitted manifold.budget.alert threshold=${threshold}`);
+      return;
+    } catch (err) {
+      logger?.warn?.(`lineage[budget-alert] budget.alert emit failed: ${err?.message ?? err}`);
+    }
   }
-  logger?.warn?.(`lineage[budget-alert] no delivery channel available (${apnsResult.reason ?? "?"}) — threshold=${threshold} alert NOT delivered`);
+  logger?.warn?.(`lineage[budget-alert] no consumer attached — threshold=${threshold} alert not delivered`);
 }
 
 function composeTitle({ threshold }) {
@@ -392,45 +397,11 @@ async function topDriverToday(store) {
   } catch { return null; }
 }
 
-// ─── APNs (primary) ────────────────────────────────────────────────────────
-
-async function fireAPNs({ title, body, threshold, total, cap, logger }) {
-  // Goes through the apns extension's own HTTP route instead of
-  // api.runtime.apns — that in-process handle is a Proxy over a
-  // PluginRuntime object created fresh on every loadOpenClawPlugins() pass
-  // (gateway boot, plugin install, status/CLI, reload). This file's
-  // module-level SHARED_API is set once at this plugin's own original
-  // register() call and never updated, so if the runtime registry is ever
-  // rebuilt after boot, apns's later api.runtime.apns write lands on a new,
-  // disconnected object this module can no longer see — apns_present=false
-  // with the extension itself fully healthy. /apns/push already works
-  // end-to-end (it's what Deploy pushes use) and doesn't depend on two
-  // plugins sharing an in-process object's identity.
-  const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
-  try {
-    const res = await fetch(`http://127.0.0.1:${_GW_PORT}/apns/push`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ title, body, category: NotificationKinds.BUDGET, threadId: "budget" }),
-      signal: AbortSignal.timeout(5000),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.ok) {
-      logger?.warn?.(`lineage[budget-alert] APNs push failed (status=${res.status}, error=${data.error ?? "?"}, delivered=${data.delivered ?? 0}/${data.total ?? 0})`);
-      return { ok: false, reason: data.error ?? `http_${res.status}`, total: data.total ?? 0 };
-    }
-    return { ok: true, sent: data.delivered, total: data.total };
-  } catch (err) {
-    logger?.warn?.(`lineage[budget-alert] APNs push request threw: ${err?.message ?? err}`);
-    return { ok: false, reason: "request_failed" };
-  }
-}
-
-/** Fire a one-off alert through the normal APNs path, ignoring
- *  the once-per-day debounce. For operator validation only — does not mutate
- *  the persistent threshold-fired state. */
-export async function testFireAlert({ store, logger, threshold = 0.5 }) {
+/** Fire a one-off alert through the normal event path, ignoring the
+ *  once-per-day debounce. For operator validation only — does not mutate the
+ *  persistent threshold-fired state. */
+export async function testFireAlert({ store, logger, threshold = 0.5, notify }) {
   const total = await todaysTotalUSD(store);
-  await fireAlert({ threshold, total, cap: configuredCapUSD, store, logger });
+  await fireAlert({ threshold, total, cap: configuredCapUSD, store, logger, notify });
 }
 
