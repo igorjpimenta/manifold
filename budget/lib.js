@@ -23,6 +23,7 @@ export function deserialize(row) {
     pipelineId:   row.pipeline_id ?? null,
     pipelineArgs: row.pipeline_args ? JSON.parse(row.pipeline_args) : null,
     flowId:       row.flow_id ?? null,
+    kind:         row.kind ?? "node",
   };
 }
 

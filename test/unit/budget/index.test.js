@@ -167,7 +167,7 @@ function postReq(body) {
 
 // ─── canonical budget emissions (events roadmap slice 6) ─────────────────────
 // decide/lock/unlock go through the shared emitter: identical legacy wire
-// strings, envelope adds kind/v. Real sqlite at a tmp dbPath, same as above.
+// strings, envelope adds kind. Real sqlite at a tmp dbPath, same as above.
 
 describe("registerBudgetRoutes — canonical emissions", () => {
   function tmpDbPath() {
@@ -197,6 +197,50 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     assert.equal(call.payload.decision, "approve");
     assert.equal(call.payload.count, 1);
     assert.equal(call.payload.kind, "budget.queue.updated");
+  });
+
+  it("decide resumes flow-bound approvals through injected onFlowResume (no HTTP loopback)", async () => {
+    const { api, calls, getBroadcast } = makeApiWithBroadcast();
+    const resumes = [];
+    const onFlowResume = async (args) => { resumes.push(args); return { ok: true }; };
+    registerBudgetRoutes(api, {
+      openStore: () => openStore({ dbPath: tmpDbPath(), legacyDbPath: null }),
+      getBroadcast,
+      onFlowResume,
+    });
+    await api.runtime.approvalQueue.isGateLocked();
+
+    const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
+      flowId: "flow-9", nodeId: "SUBMIT", pipelineId: "p", label: "SUBMIT",
+    });
+    const route = api._routes.find((r) => r.path === "/pipeclaw/budget/decide");
+    await route.handler(postReq({ ids: [itemId], decision: "reject" }), fakeRes());
+
+    assert.equal(resumes.length, 1);
+    assert.deepEqual(resumes[0], { flowId: "flow-9", nodeId: "SUBMIT", decision: "reject" });
+    assert.ok(calls.find((c) => c.name === "plugin.budget.queue.changed"), "decision still broadcasts");
+  });
+
+  it("queue items carry kind tags: node by default, run-start when passed", async () => {
+    const dbPath = tmpDbPath();
+    const { api } = makeApiWithBroadcast();
+    const client = await openStore({ dbPath, legacyDbPath: null });
+    registerBudgetRoutes(api, { openStore: async () => client });
+    // Attachment happens on first isGateLocked(), same as production call order.
+    await api.runtime.approvalQueue.isGateLocked();
+
+    const nodeItem = await api.runtime.approvalQueue.enqueueNodeApproval({
+      flowId: "flow-1", nodeId: "SCORE_LLM", pipelineId: "p", label: "SCORE_LLM",
+    });
+    const startItem = await api.runtime.approvalQueue.enqueueNodeApproval({
+      flowId: null, nodeId: null, pipelineId: "p", label: "START p",
+      kind: "run-start",
+    });
+
+    const { rows } = await client.execute({ sql: "SELECT id, kind FROM queue_items WHERE id IN (?, ?)", args: [nodeItem, startItem] });
+    const byId = new Map(rows.map((r) => [r.id, r.kind]));
+    assert.equal(byId.get(nodeItem), "node", "per-node approvals default to kind=node");
+    assert.equal(byId.get(startItem), "run-start", "start-gate approvals carry kind=run-start");
   });
 
   it("lock/unlock emit budget.lock.changed with locked + day", async () => {

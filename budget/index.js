@@ -61,32 +61,6 @@ const MOCK_ITEMS = [
     brief: "Submit approved draft for: sistema-de-automacao-rpa-python (score 87, budget R$2.400)",
     modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
   },
-  {
-    label: "Add agent (product-designer)",
-    agent: "agent-forger",
-    agentEmoji: "🔨",
-    trigger: "manual",
-    pipeline: null,
-    node: null,
-    tokenEstimate: 48000,
-    costLow: 0.098,
-    costHigh: 0.29,
-    brief: "Forge a new product-designer agent — create workspace, write persona files, register in team registry",
-    modelChain: ["zai/glm-5.1", "openrouter/deepseek/deepseek-v4-pro"],
-  },
-  {
-    label: "Scout Workana (python, typescript)",
-    agent: "marketplace-scout",
-    agentEmoji: "🔭",
-    trigger: "cron",
-    pipeline: null,
-    node: null,
-    tokenEstimate: 6400,
-    costLow: 0.0011,
-    costHigh: 0.0033,
-    brief: "Fetch and cache new listings from Workana search: python + typescript + api. Last run found 34 new listings.",
-    modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
-  },
 ];
 
 const BUDGET_MIGRATIONS = [
@@ -135,6 +109,16 @@ const BUDGET_MIGRATIONS = [
     const cols = rows.map((r) => r.name);
     if (!cols.includes("enqueuer_session_key")) {
       await client.execute("ALTER TABLE queue_items ADD COLUMN enqueuer_session_key TEXT");
+    }
+  },
+  // v4: kind tag — "node" for per-node approvals (the only prod writer),
+  // "run-start" for pipeline start-gate approvals. Legacy rows read back
+  // as "node" (see deserialize).
+  async (client) => {
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('queue_items')");
+    const cols = rows.map((r) => r.name);
+    if (!cols.includes("kind")) {
+      await client.execute("ALTER TABLE queue_items ADD COLUMN kind TEXT");
     }
   },
 ];
@@ -186,9 +170,13 @@ async function _loopback(path, body, extraHeaders = {}) {
   } catch { /* best-effort fire-and-forget */ }
 }
 
-export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore } = {}) {
+export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume } = {}) {
   // Canonical-kind fan-out for the three WS emissions below (events roadmap
-  // slice 6): identical legacy wire strings, envelope adds kind/v.
+  // slice 6): identical legacy wire strings, envelope adds kind.
+  // onFlowResume({flowId, nodeId, decision}) resumes a flow-bound approval
+  // in-process (routes/operator-resume.js, injected by index.js) — no HTTP
+  // loopback. Absent (tests), per-node resume is skipped but the decision
+  // still commits and broadcasts.
   const { emit } = createEmitter({ getBroadcast, logger: api.logger });
   let client;
   let clientPromise = null;
@@ -287,7 +275,12 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         });
         for (const row of decided) {
           if (row.flow_id) {
-            _loopback("/pipeclaw/resume-from-gate", { flowId: row.flow_id, nodeId: row.node, decision });
+            // In-process resume (routes/operator-resume.js, injected). The
+            // start-gate branch below still loops back: elevation needs
+            // gateway scope.
+            if (onFlowResume) {
+              try { await onFlowResume({ flowId: row.flow_id, nodeId: row.node, decision }); } catch {}
+            }
             api.logger.info(`[pipeclaw/budget] ${decision} per-node — resuming flow=${String(row.flow_id).slice(0,8)} node=${row.node}`);
           } else if (decision === "approve" && row.pipeline_id) {
             _loopback(
@@ -348,8 +341,8 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         const id = randomUUID();
         await withSharedWrite(DB_PATH, () => client.execute({
           sql: `INSERT OR REPLACE INTO queue_items
-                  (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain, pipeline, node, token_estimate, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                  (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain, pipeline, node, token_estimate, kind, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'node', 'pending', ?)`,
           args: [id, t.label, t.agent, t.agentEmoji, t.trigger,
                  t.costLow, t.costHigh, t.brief, JSON.stringify(t.modelChain),
                  t.pipeline ?? null, t.node ?? null, t.tokenEstimate ?? null,
@@ -508,17 +501,17 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
     async enqueueNodeApproval({ flowId, nodeId, pipeline, pipelineId, label, agent, agentEmoji,
                                 trigger = "cron", brief, costLow = 0, costHigh = 0,
-                                modelChain = [], tokenEstimate = null, enqueuerSessionKey = null }) {
+                                modelChain = [], tokenEstimate = null, enqueuerSessionKey = null, kind = "node" }) {
       const id = randomUUID();
       await withSharedWrite(DB_PATH, () => client.execute({
         sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
-                 pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, status, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                 pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         args: [id, label, agent ?? "pipeclaw", agentEmoji ?? "🔁", trigger,
                costLow, costHigh, brief ?? null, JSON.stringify(modelChain ?? []),
                pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
-               pipelineId ?? null, flowId, enqueuerSessionKey ?? null, Date.now()],
+               pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
       }));
       return id;
     },
