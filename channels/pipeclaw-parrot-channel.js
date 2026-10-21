@@ -1,32 +1,26 @@
 // pipeclaw-parrot-channel.js — Pipeclaw Discuss channel plugin.
 //
 // Full SDK channel: inbound via dispatchInboundDirectDmWithRuntime, outbound
-// via the deliver callback → SSE (emitSseEvent). The HTTP route is a thin
-// bridge — auth, flow/target resolution, system-prompt injection — then
+// via the deliver callback → session transcript events. The HTTP route is a
+// thin bridge — auth, flow/target resolution, system-prompt injection — then
 // hands off to the channel runtime for agent dispatch.
 //
 // Entry point: call createPipeclawParrotChannelEntry(deps).register(api) from
-// inside pipeclaw's registerFull, after emitSseEvent is wired up.
+// inside pipeclaw's registerFull.
 
 import { createChatChannelPlugin, defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
 import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-inbound";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
-import { gatewayWireName } from "../events/kinds.js";
 
 export function createPipeclawParrotChannelEntry({
   readStore,
   discussStore,
   resolveDiscussTarget,
   stampDiscussSession,
-  emitSseEvent,
   emit,
 }) {
-  // Canonical-kind fan-out (events roadmap slice 2) with the same
-  // emitSseEvent-backed fallback as routes/discuss.js — pre-existing
-  // turn tests pin the fallback path unchanged.
-  const emitKind = emit ?? (async (kind, payload) => emitSseEvent({ ...payload, type: gatewayWireName(kind) ?? kind }));
   // Captured once during startAccount; used by the HTTP handler.
   let channelRuntimeRef = null;
   let cfgRef = null;
@@ -218,20 +212,6 @@ export function createPipeclawParrotChannelEntry({
                 deliver: async (payload) => {
                   const replyText = typeof payload === "string" ? payload
                     : (payload?.text ?? payload?.body ?? payload?.content ?? "");
-                  // Components are seeded by tools during the turn via componentEmitter.
-                  // Read them here for: (a) backward-compat proposedDraft/proposedMeta on
-                  // the message, (b) including in the discuss.turn SSE for state sync.
-                  let proposedDraft = null;
-                  let proposedMeta = null;
-                  let components = [];
-                  try {
-                    components = (await discussStore?.getComponents?.(flow.flowId, target.itemId)) ?? [];
-                    const draftComp = components.find((c) => c.kind === "proposed_draft");
-                    const metaComp  = components.find((c) => c.kind === "proposed_meta");
-                    if (draftComp) proposedDraft = draftComp.text ?? null;
-                    if (metaComp)  proposedMeta  = metaComp.fields ?? null;
-                  } catch {}
-
                   const durationMs = Date.now() - startMs;
                   try {
                     await discussStore.appendMessage(flow.flowId, target.itemId, {
@@ -247,18 +227,14 @@ export function createPipeclawParrotChannelEntry({
                     api.logger.warn(`pipeclaw-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
                   }
 
-                  // Canonical text field alongside legacy `reply` (iOS shape).
-                  const pushRes = await emitKind("session.transcript.completed", {
+                  // Canonical text field only — proposal artifacts travel as
+                  // discuss.component.proposed events, not turn dupes.
+                  const pushRes = await emit("session.transcript.completed", {
                     scope: "discuss",
                     text: replyText,
                     turnId,
                     flowId: flow.flowId,
                     itemId: target.itemId,
-                    status: "completed",
-                    reply: replyText,
-                    proposedDraft,
-                    proposedMeta,
-                    components,
                     durationMs,
                     emittedAtMs: Date.now(),
                   });
@@ -276,12 +252,11 @@ export function createPipeclawParrotChannelEntry({
                     await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                     await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
                   } catch {}
-                  await emitKind("session.transcript.failed", {
+                  await emit("session.transcript.failed", {
                     scope: "discuss",
                     turnId,
                     flowId: flow.flowId,
                     itemId: target.itemId,
-                    status: "failed",
                     error: err?.message ?? String(err),
                   });
                 },
@@ -309,12 +284,11 @@ export function createPipeclawParrotChannelEntry({
                 await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                 await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
               } catch {}
-              await emitKind("session.transcript.failed", {
+              await emit("session.transcript.failed", {
                 scope: "discuss",
                 turnId,
                 flowId: flow.flowId,
                 itemId: target.itemId,
-                status: "failed",
                 error: err?.message ?? String(err),
               });
             }

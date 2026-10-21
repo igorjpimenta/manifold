@@ -7,7 +7,6 @@ import { stampDiscussSession, readDiscussSession } from "./discuss-session.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
 import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, loadAudioMetasForFlow } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
-import { gatewayWireName } from "../events/kinds.js";
 
 // ── Factory ─────────────────────────────────────────────────────────────────
 // All handlers close over the deps passed from index.js / runs.js / operator.js
@@ -17,7 +16,6 @@ export function registerDiscussHandlers({
   api,
   store,
   pipelinesRef,
-  emitSseEvent,
   emit,
   discussDefaultAgent,
   invokeElevated,
@@ -27,12 +25,6 @@ export function registerDiscussHandlers({
   runStore,
   nodeExecutionsStore,
 }) {
-
-  // Canonical-kind fan-out (events roadmap slice 2). Callers that pass
-  // `emit` get canonical session kinds; otherwise an adapter over
-  // emitSseEvent preserves byte-identical egress through the legacy wire
-  // map — pre-existing turn/transcript tests pin that path unchanged.
-  const emitKind = emit ?? (async (kind, payload) => emitSseEvent({ ...payload, type: gatewayWireName(kind) ?? kind }));
 
   // ── Resolve discuss target ────────────────────────────────────────────────
 
@@ -242,36 +234,29 @@ export function registerDiscussHandlers({
         } catch (err) {
           api.logger.warn(`discuss-store write (agent reply): ${err?.message ?? err}`);
         }
-        const event = succeeded
+        const turnKind = succeeded ? "session.transcript.completed" : "session.transcript.failed";
+        const pushRes = await emit(turnKind, succeeded
           ? {
+              scope: "discuss",
               turnId,
               flowId: sourceFlow.flowId,
               itemId: target.itemId,
-              status: "completed",
-              reply: payload.reply ?? "",
-              proposedDraft: payload.proposedDraft ?? null,
-              proposedMeta: payload.proposedMeta ?? null,
+              text: payload.reply ?? "",
               durationMs: payload.durationMs ?? null,
               emittedAtMs: Date.now(),
             }
           : {
+              scope: "discuss",
               turnId,
               flowId: sourceFlow.flowId,
               itemId: target.itemId,
-              status: "failed",
               error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
               emittedAtMs: Date.now(),
-            };
-        // Canonical turn event: agent text rides both the canonical `text`
-        // field and legacy `reply` (iOS shape) until the wire cutover.
-        const pushRes = await emitKind(
-          succeeded ? "session.transcript.completed" : "session.transcript.failed",
-          { scope: "discuss", text: event.reply ?? null, ...event },
-        );
+            });
         if (!pushRes.ok) {
           api.logger.warn(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed`);
         } else {
-          api.logger.info(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${event.status} → SSE pushed`);
+          api.logger.info(`pipeclaw discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${turnKind} → SSE pushed`);
         }
         import("node:fs/promises").then(({ unlink }) =>
           unlink(path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId, `${target.itemId}.pending.json`))
@@ -282,12 +267,11 @@ export function registerDiscussHandlers({
           await discussStore.stampMessageError(sourceFlow.flowId, target.itemId, turnId, err?.message ?? String(err));
           await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
         } catch {}
-        await emitKind("session.transcript.failed", {
+        await emit("session.transcript.failed", {
           scope: "discuss",
           turnId,
           flowId: sourceFlow.flowId,
           itemId: target.itemId,
-          status: "failed",
           error: err?.message ?? String(err),
         });
       }
@@ -299,9 +283,10 @@ export function registerDiscussHandlers({
   // Shared by handleDiscussAudio (fresh upload) and handleDiscussAudioRetry
   // (re-transcribe an already-persisted file, e.g. after the operator taps
   // Retry on a failed voice message) — transcribes, updates the meta
-  // sidecar, pushes discuss.transcript, and on success dispatches the
-  // agent turn + discuss.turn SSE. Callers wrap this in setImmediate since
-  // the HTTP response has already been sent by the time it runs.
+  // sidecar, pushes session.transcript.updated, and on success dispatches
+  // the agent turn + session.transcript.completed. Callers wrap this in
+  // setImmediate since the HTTP response has already been sent by the time
+  // it runs.
 
   async function transcribeAndDispatch({
     sourceFlow, target, turnId, audioPath, audioUrl, metaPath,
@@ -332,15 +317,13 @@ export function registerDiscussHandlers({
     }
 
     const transcriptStatus = transcribeError ? "failed" : transcript ? "completed" : "empty";
-    // Canonical text field alongside legacy `transcript` (iOS shape).
-    await emitKind("session.transcript.updated", {
+    await emit("session.transcript.updated", {
       scope: "discuss",
       turnId,
       flowId: sourceFlow.flowId,
       itemId: target.itemId,
       status: transcriptStatus,
       text: transcript || null,
-      transcript: transcript || null,
       audioUrl,
       error: transcribeError,
       emittedAtMs: Date.now(),
@@ -361,47 +344,43 @@ export function registerDiscussHandlers({
       }, { timeoutMs: 360_000 });
       let payload;
       try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
-      const event = elev.ok && payload.ok
+      const turnKind = elev.ok && payload.ok
+        ? "session.transcript.completed"
+        : "session.transcript.failed";
+      const pushRes = await emit(turnKind, elev.ok && payload.ok
         ? {
+            scope: "discuss",
             turnId,
             flowId: sourceFlow.flowId,
             itemId: target.itemId,
-            status: "completed",
-            reply: payload.reply ?? "",
-            proposedDraft: payload.proposedDraft ?? null,
+            text: payload.reply ?? "",
             durationMs: payload.durationMs ?? null,
             operatorAudioUrl: audioUrl,
             operatorTranscript: transcript,
             emittedAtMs: Date.now(),
           }
         : {
+            scope: "discuss",
             turnId,
             flowId: sourceFlow.flowId,
             itemId: target.itemId,
-            status: "failed",
             error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
             operatorAudioUrl: audioUrl,
             operatorTranscript: transcript,
             emittedAtMs: Date.now(),
-          };
-      // Same canonical mapping as the text path above (status chooses kind).
-      const pushRes = await emitKind(
-        event.status === "completed" ? "session.transcript.completed" : "session.transcript.failed",
-        { scope: "discuss", text: event.reply ?? null, ...event },
-      );
+          });
       if (!pushRes.ok) {
         api.logger.warn(`${logPrefix}: SSE push failed`);
       } else {
-        api.logger.info(`${logPrefix}: ${event.status} → SSE pushed`);
+        api.logger.info(`${logPrefix}: ${turnKind} → SSE pushed`);
       }
     } catch (err) {
       api.logger.warn(`${logPrefix}: runner error: ${err?.message ?? err}`);
-      await emitKind("session.transcript.failed", {
+      await emit("session.transcript.failed", {
         scope: "discuss",
         turnId,
         flowId: sourceFlow.flowId,
         itemId: target.itemId,
-        status: "failed",
         error: err?.message ?? String(err),
         operatorAudioUrl: audioUrl,
         operatorTranscript: transcript,
@@ -507,8 +486,8 @@ export function registerDiscussHandlers({
   // Re-runs transcription on an already-uploaded voice message (identified
   // by turnId) without re-uploading the audio bytes — the operator's Retry
   // tap on a failed/empty transcription bubble. Reuses the same turnId and
-  // audioUrl so the existing bubble updates in place via the discuss.transcript
-  // / discuss.turn SSE events rather than creating a new turn.
+  // audioUrl so the existing bubble updates in place via the session
+  // transcript events rather than creating a new turn.
 
   async function handleDiscussAudioRetry(req, res, sourceFlow) {
     let raw = "";

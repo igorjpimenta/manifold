@@ -265,7 +265,10 @@ export default definePluginEntry({
     // discuss handlers, and the WS run-event listener below. Created here so
     // every producer closes over the same instance; the broadcast ref itself
     // stays lazy via the getter (captured at plugin.pipeclaw.ping).
-    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
+    // emitSseEvent (iOS push) is wired in so session/discuss emissions push;
+    // WS delivery comes from getBroadcast above, not from the push path.
+    const emitSseEvent = createEmitSseEvent();
+    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, emitSseEvent, logger: api.logger }).emit;
 
     // Assigned in the dashboard section below; the catalog publisher reads
     // it lazily so watcher reloads before dashboard boot stay WS-only.
@@ -473,7 +476,7 @@ export default definePluginEntry({
 
     // Proposal-artifact fan-out (routes/discuss-component.js): persists the
     // component, then emits canonical proposed + derived pending through
-    // the shared emitter. Egress byte-identical via the legacy wire map.
+    // the shared emitter. Egress carries canonical kinds.
     const componentEmitter = createComponentEmitter({ discussStore, emit: emitCanonical });
 
     api.registerGatewayMethod("plugin.pipeclaw.ping", (opts) => {
@@ -491,17 +494,12 @@ export default definePluginEntry({
     registerProposeDraftTool({ api, readStore, componentEmitter, discussStore });
     registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore });
 
-    // ── emitSseEvent (factory, closes over _gatewayBroadcast lazily) ────────
-
-    const emitSseEvent = createEmitSseEvent(() => _gatewayBroadcast);
-
     // ── Discuss handlers ─────────────────────────────────────────────────────
 
     const discussHandlers = registerDiscussHandlers({
       api,
       store,
       pipelinesRef,
-      emitSseEvent,
       emit: emitCanonical,
       discussDefaultAgent,
       invokeElevated,
@@ -613,7 +611,6 @@ export default definePluginEntry({
       discussStore,
       resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
       stampDiscussSession:  discussHandlers.stampDiscussSession,
-      emitSseEvent,
       emit: emitCanonical,
     }).register(api);
 

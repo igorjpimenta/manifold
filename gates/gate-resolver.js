@@ -51,7 +51,7 @@ const VALID_SOURCES = ["ios", "dashboard", "cli", "pipeline"];
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;
   // Canonical-kind fan-out for this resolver's WS emission (events/emit.js):
-  // validated envelope + `plugin.`-prefixed legacy wire names, never throws
+  // validated envelope + `plugin.`-prefixed wire names, never throws
   // on transport faults — the same contract the inline broadcasts had.
   const { emit } = createEmitter({ getBroadcast, logger });
   // Injectable for tests (defaults to the real singleton in production) —
@@ -561,8 +561,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     logger.info(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: ${itemId} → ${decision} (source=${source})`);
 
     await maybeResolveFlow(flowId, awaitCompletion);
-    // Canonical gate.resolved: identical legacy wire string
-    // (`plugin.gate.resolved`); the envelope adds kind/emittedAtMs.
+    // Canonical gate.resolved: wire name is the kind (`plugin.gate.resolved`).
     try { await emit("gate.resolved", { flowId, itemId, decision, resolvedAt: Date.now() }); } catch {}
     return { ok: true, status: "applied" };
   }

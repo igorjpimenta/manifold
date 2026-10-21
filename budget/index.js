@@ -172,7 +172,7 @@ async function _loopback(path, body, extraHeaders = {}) {
 
 export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume } = {}) {
   // Canonical-kind fan-out for the three WS emissions below (events roadmap
-  // slice 6): identical legacy wire strings, envelope adds kind.
+  // slice 6): canonical wire names, envelope adds kind.
   // onFlowResume({flowId, nodeId, decision}) resumes a flow-bound approval
   // in-process (routes/operator-resume.js, injected by index.js) — no HTTP
   // loopback. Absent (tests), per-node resume is skipped but the decision

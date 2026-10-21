@@ -1836,13 +1836,13 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     assert.equal(payload.kind, "gate.resolved");
   });
 
-  test("does NOT emit bespoke 'pipeclaw.run.updated' on resolve (owned by the WS run listener)", async () => {
+  test("does NOT emit a resolver-owned run.updated on resolve (owned by the WS run listener)", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const { resolver, store, executor, broadcastFn } = makeResolverWithBroadcast(flow);
     await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "cli" });
-    const runUpdatedCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.pipeclaw.run.updated");
+    const runUpdatedCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.run.updated");
     assert.equal(runUpdatedCall, undefined, "resolver must not emit its own run.updated");
     // The resume itself still happened through the store.
     assert.equal(store._current().status, "running");
