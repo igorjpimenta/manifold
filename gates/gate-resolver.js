@@ -562,7 +562,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
 
     await maybeResolveFlow(flowId, awaitCompletion);
     // Canonical gate.resolved: identical legacy wire string
-    // (`plugin.gate.resolved`); the envelope adds kind/v/emittedAtMs.
+    // (`plugin.gate.resolved`); the envelope adds kind/emittedAtMs.
     try { await emit("gate.resolved", { flowId, itemId, decision, resolvedAt: Date.now() }); } catch {}
     return { ok: true, status: "applied" };
   }
