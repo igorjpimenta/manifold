@@ -393,8 +393,7 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeE
         logger?.info?.(`manifold failure-store: ${errorType ?? "engine-failed"} ${flowId.slice(0, 8)} (${pipelineId}) at ${failureNode || "<engine>"}`);
         const context = await get(insertedId);
         if (context) failureEmitter.emit("failure.created", context);
-        // Canonical broadcast for WS consumers (iOS toasts). Fire-and-
-        // forget: delivery must never fail the recording.
+        // Fire-and-forget: delivery must never fail the recording.
         try {
           await emit?.("failure.recorded", {
             failureId: insertedId,
