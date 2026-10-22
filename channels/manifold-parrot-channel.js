@@ -1,12 +1,12 @@
 // manifold-parrot-channel.js — Manifold Discuss channel plugin.
 //
 // Full SDK channel: inbound via dispatchInboundDirectDmWithRuntime, outbound
-// via the deliver callback → SSE (emitSseEvent). The HTTP route is a thin
+// via the deliver callback. The HTTP route is a thin
 // bridge — auth, flow/target resolution, system-prompt injection — then
 // hands off to the channel runtime for agent dispatch.
 //
 // Entry point: call createManifoldParrotChannelEntry(deps).register(api) from
-// inside manifold's registerFull, after emitSseEvent is wired up.
+// inside manifold's registerFull.
 
 import { createChatChannelPlugin, defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
 import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-inbound";
@@ -19,7 +19,6 @@ export function createManifoldParrotChannelEntry({
   discussStore,
   resolveDiscussTarget,
   stampDiscussSession,
-  emitSseEvent,
 }) {
   // Captured once during startAccount; used by the HTTP handler.
   let channelRuntimeRef = null;
@@ -240,25 +239,6 @@ export function createManifoldParrotChannelEntry({
                   } catch (err) {
                     api.logger.warn(`manifold-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
                   }
-
-                  const pushRes = await emitSseEvent({
-                    type: "discuss.turn",
-                    turnId,
-                    flowId: flow.flowId,
-                    itemId: target.itemId,
-                    status: "completed",
-                    reply: replyText,
-                    proposedDraft,
-                    proposedMeta,
-                    components,
-                    durationMs,
-                    emittedAtMs: Date.now(),
-                  });
-                  if (!pushRes.ok) {
-                    api.logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
-                  } else {
-                    api.logger.info(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: completed → SSE pushed`);
-                  }
                 },
                 onRecordError: (err) => {
                   api.logger.warn(`manifold-parrot [${flowIdShort}]: record error: ${err?.message ?? err}`);
@@ -268,15 +248,6 @@ export function createManifoldParrotChannelEntry({
                     await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                     await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
                   } catch {}
-                  await emitSseEvent({
-                    type: "discuss.turn",
-                    turnId,
-                    flowId: flow.flowId,
-                    itemId: target.itemId,
-                    status: "failed",
-                    error: err?.message ?? String(err),
-                    emittedAtMs: Date.now(),
-                  });
                 },
               });
 
@@ -302,15 +273,6 @@ export function createManifoldParrotChannelEntry({
                 await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                 await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
               } catch {}
-              await emitSseEvent({
-                type: "discuss.turn",
-                turnId,
-                flowId: flow.flowId,
-                itemId: target.itemId,
-                status: "failed",
-                error: err?.message ?? String(err),
-                emittedAtMs: Date.now(),
-              });
             }
 
             import("node:fs/promises").then(({ unlink }) =>

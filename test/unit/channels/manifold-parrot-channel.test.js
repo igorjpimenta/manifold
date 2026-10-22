@@ -117,13 +117,6 @@ function makeReadStore(flow = null) {
   return { get: (id) => (id === flow?.flowId ? flow : null) };
 }
 
-function makeEmitSseEvent(result = { ok: true }) {
-  const calls = [];
-  const fn = async (evt) => { calls.push(evt); return result; };
-  fn.calls = calls;
-  return fn;
-}
-
 function makeStampDiscussSession() {
   const calls = [];
   const fn = (...args) => { calls.push(args); };
@@ -138,7 +131,6 @@ function buildEntry(overrides = {}) {
   const flow = overrides.flow ?? makeFlow();
   const target = overrides.target ?? makeTarget();
   const discussStore = overrides.discussStore ?? makeDiscussStore();
-  const emitSseEvent = overrides.emitSseEvent ?? makeEmitSseEvent();
   const stampDiscussSession = overrides.stampDiscussSession ?? makeStampDiscussSession();
   const readStore = overrides.readStore ?? makeReadStore(flow);
   const resolveDiscussTarget = overrides.resolveDiscussTarget ?? (() => target);
@@ -149,7 +141,6 @@ function buildEntry(overrides = {}) {
     discussStore,
     resolveDiscussTarget,
     stampDiscussSession,
-    emitSseEvent,
     readPending,
   });
 
@@ -161,7 +152,7 @@ function buildEntry(overrides = {}) {
 
   return {
     entry, route, api, routes,
-    flow, target, discussStore, emitSseEvent, stampDiscussSession, readStore,
+    flow, target, discussStore, stampDiscussSession, readStore,
   };
 }
 
@@ -206,7 +197,6 @@ describe("createManifoldParrotChannelEntry — entry shape", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     assert.equal(entry.id, "manifold-parrot");
@@ -218,7 +208,6 @@ describe("createManifoldParrotChannelEntry — entry shape", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     assert.equal(typeof entry.plugin?.gateway?.startAccount, "function");
@@ -261,7 +250,6 @@ describe("gateway.startAccount — lifecycle", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     const abortCtrl = new AbortController();
@@ -281,7 +269,6 @@ describe("gateway.startAccount — lifecycle", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     const abortCtrl = new AbortController();
@@ -779,63 +766,12 @@ describe("deliver callback — proposed_draft and proposed_meta components", () 
   });
 });
 
-// ─── deliver callback — SSE emission ─────────────────────────────────────────
-
-describe("deliver callback — SSE emission", () => {
-  async function runAndDeliver() {
-    const flow = makeFlow();
-    const emitSseEvent = makeEmitSseEvent();
-
-    dispatchCalls = [];
-    capturedDispatchArgs = null;
-
-    const { route } = buildReadyEntry({ flow, emitSseEvent });
-    await route.handler(makePostReq({ flowId: flow.flowId, text: "sse test" }), createMockRes());
-    await new Promise((r) => setImmediate(r));
-    await new Promise((r) => setTimeout(r, 20));
-    await capturedDispatchArgs.deliver("the reply");
-    return { emitSseEvent, flow };
-  }
-
-  test("emits 'discuss.turn' SSE event with status 'completed'", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const { emitSseEvent } = await runAndDeliver();
-    const evt = emitSseEvent.calls.find((c) => c.type === "discuss.turn");
-    assert.ok(evt, "discuss.turn SSE emitted");
-    assert.equal(evt.status, "completed");
-  });
-
-  test("SSE event reply contains the reply text", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const { emitSseEvent } = await runAndDeliver();
-    const evt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "completed");
-    assert.equal(evt.reply, "the reply");
-  });
-
-  test("SSE event contains flowId and itemId", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const { emitSseEvent, flow } = await runAndDeliver();
-    const evt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "completed");
-    assert.equal(evt.flowId, flow.flowId);
-    assert.equal(typeof evt.itemId, "string");
-  });
-
-  test("SSE event contains numeric durationMs", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const { emitSseEvent } = await runAndDeliver();
-    const evt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "completed");
-    assert.equal(typeof evt.durationMs, "number");
-  });
-
-  test("SSE event contains components array", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const { emitSseEvent } = await runAndDeliver();
-    const evt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "completed");
-    assert.ok(Array.isArray(evt.components), "components must be an array");
-  });
-});
 
 // ─── onDispatchError ──────────────────────────────────────────────────────────
 
 describe("onDispatchError — error handling", () => {
   async function triggerDispatchError(err, discussStoreOverrides = {}) {
     const flow = makeFlow();
-    const emitSseEvent = makeEmitSseEvent();
     const errorStampCalls = [];
     const statusCalls = [];
     const discussStore = makeDiscussStore({
@@ -847,14 +783,14 @@ describe("onDispatchError — error handling", () => {
     dispatchCalls = [];
     capturedDispatchArgs = null;
 
-    const { route } = buildReadyEntry({ flow, emitSseEvent, discussStore });
+    const { route } = buildReadyEntry({ flow, discussStore });
     await route.handler(makePostReq({ flowId: flow.flowId, text: "dispatch error test" }), createMockRes());
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setTimeout(r, 20));
 
     assert.ok(capturedDispatchArgs?.onDispatchError, "onDispatchError present");
     await capturedDispatchArgs.onDispatchError(err);
-    return { emitSseEvent, errorStampCalls, statusCalls, flow };
+    return { errorStampCalls, statusCalls, flow };
   }
 
   test("stamps message error in discussStore with error message", { skip: SKIP ? SKIP_MSG : false }, async () => {
@@ -869,21 +805,13 @@ describe("onDispatchError — error handling", () => {
     assert.ok(errCall, "setTurnStatus('error') called");
     assert.equal(errCall[3], null);
   });
-
-  test("emits discuss.turn SSE with status 'failed' and error message", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const { emitSseEvent } = await triggerDispatchError(new Error("boom"));
-    const evt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "failed");
-    assert.ok(evt, "failed discuss.turn SSE emitted");
-    assert.match(evt.error, /boom/);
-  });
 });
 
 // ─── runner error (dispatchInbound throws) ───────────────────────────────────
 
 describe("runner error — dispatchInboundDirectDmWithRuntime throws", () => {
-  test("emits failed SSE and stamps error when dispatch throws", { skip: SKIP ? SKIP_MSG : false }, async () => {
+  test("stamps error when dispatch throws", { skip: SKIP ? SKIP_MSG : false }, async () => {
     const flow = makeFlow();
-    const emitSseEvent = makeEmitSseEvent();
     const errorStampCalls = [];
     const discussStore = makeDiscussStore({
       stampMessageError: (...a) => errorStampCalls.push(a),
@@ -893,16 +821,13 @@ describe("runner error — dispatchInboundDirectDmWithRuntime throws", () => {
     dispatchCalls = [];
     capturedDispatchArgs = null;
 
-    const { route } = buildReadyEntry({ flow, emitSseEvent, discussStore });
+    const { route } = buildReadyEntry({ flow, discussStore });
     await route.handler(makePostReq({ flowId: flow.flowId, text: "crash test" }), createMockRes());
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setTimeout(r, 30));
 
     dispatchShouldThrow = null;
 
-    const failedEvt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "failed");
-    assert.ok(failedEvt, "failed SSE emitted on runner error");
-    assert.match(failedEvt.error, /runner crash/);
     assert.ok(errorStampCalls.length > 0, "stampMessageError called on runner error");
   });
 });

@@ -17,7 +17,6 @@ import {
   assertPayload,
   gatewayWireName,
   dashboardLegacyType,
-  isSseKind,
 } from "../../../events/kinds.js";
 
 // ── registry shape ───────────────────────────────────────────────────────────
@@ -120,7 +119,6 @@ describe("kinds — egress maps", () => {
   test("unknown kind throws in maps", () => {
     assert.throws(() => gatewayWireName("nope"), /unknown/);
     assert.throws(() => dashboardLegacyType("nope"), /unknown/);
-    assert.throws(() => isSseKind("nope"), /unknown/);
   });
 
   test("dashboard legacy types for bus kinds only", () => {
@@ -129,12 +127,5 @@ describe("kinds — egress maps", () => {
     assert.equal(dashboardLegacyType("run.ended"), "flow_terminated");
     assert.equal(dashboardLegacyType("pipeline.catalog.updated"), "pipelines_changed");
     assert.equal(dashboardLegacyType("gate.opened"), null);
-  });
-
-  test("SSE set is session + discuss families", () => {
-    assert.equal(isSseKind("session.transcript.completed"), true);
-    assert.equal(isSseKind("discuss.pending.updated"), true);
-    assert.equal(isSseKind("gate.opened"), false);
-    assert.equal(isSseKind("run.updated"), false);
   });
 });

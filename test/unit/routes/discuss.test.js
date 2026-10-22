@@ -52,7 +52,6 @@ function makeDeps(api, overrides = {}) {
     api,
     store: { get: () => null, list: () => [] },
     pipelinesRef: { value: new Map() },
-    emitSseEvent: async () => ({ ok: true }),
     discussDefaultAgent: null,
     invokeElevated: async () => ({}),
     readPending: () => null,
@@ -257,20 +256,10 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
       error: "Command failed: whisper --model turbo ...", createdAtMs: 1000, transcribedAtMs: 2000,
     }));
 
-    const sseEvents = [];
-    let resolveTranscriptEvent;
-    const transcriptEventSeen = new Promise((r) => { resolveTranscriptEvent = r; });
-    const emitSseEvent = async (event) => {
-      sseEvents.push(event);
-      if (event.type === "discuss.transcript") resolveTranscriptEvent();
-      return { ok: true };
-    };
-
     const { api } = createMockApi();
     api.runtime = { mediaUnderstanding: { transcribeAudioFile: async () => ({ text: "hello from retry" }) } };
     const deps = makeDeps(api, {
       pipelinesRef,
-      emitSseEvent,
       invokeElevated: async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, reply: "agent reply" }) }),
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
@@ -285,26 +274,20 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.equal(body.turnId, turnId);
     assert.equal(body.audioUrl, audioUrl);
 
-    await transcriptEventSeen;
-    // Let the microtask queue settle for the subsequent invokeElevated call
-    // and its discuss.turn emit, which fire after the transcript event.
-    await new Promise((r) => setTimeout(r, 20));
-
-    const updatedMeta = JSON.parse(await readFile(path.join(audioDir, `${turnId}.meta.json`), "utf8"));
-    assert.equal(updatedMeta.status, "completed");
+    // The retry dispatches in the background (setImmediate after the 202);
+    // poll the meta sidecar until it flips, bounded and loud on timeout.
+    const metaPath = path.join(audioDir, `${turnId}.meta.json`);
+    const deadline = Date.now() + 5000;
+    let updatedMeta = null;
+    for (;;) {
+      updatedMeta = JSON.parse(await readFile(metaPath, "utf8"));
+      if (updatedMeta.status === "completed") break;
+      if (Date.now() > deadline) assert.fail(`meta sidecar never flipped to completed (stuck at ${updatedMeta.status})`);
+      await new Promise((r) => setTimeout(r, 25));
+    }
     assert.equal(updatedMeta.transcript, "hello from retry");
     assert.equal(updatedMeta.error, null);
     assert.equal(updatedMeta.createdAtMs, 1000, "original createdAtMs must survive a retry");
-
-    const transcriptEvent = sseEvents.find((e) => e.type === "discuss.transcript");
-    assert.ok(transcriptEvent, "must emit discuss.transcript");
-    assert.equal(transcriptEvent.status, "completed");
-    assert.equal(transcriptEvent.turnId, turnId);
-
-    const turnEvent = sseEvents.find((e) => e.type === "discuss.turn");
-    assert.ok(turnEvent, "a successful retry must dispatch an agent turn, same as a fresh upload would");
-    assert.equal(turnEvent.status, "completed");
-    assert.equal(turnEvent.reply, "agent reply");
   });
 
   test("returns 404 when there's no meta sidecar for the turnId", async () => {

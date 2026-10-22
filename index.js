@@ -46,7 +46,6 @@ import { invokeElevated } from "./elevation.js";
 import { createManifoldParrotChannelEntry } from "./channels/manifold-parrot-channel.js";
 
 // Route modules extracted from this file.
-import { createEmitSseEvent } from "./utils/sse.js";
 import { flowStateEmitter, gateEmitter } from "./events.js";
 import { buildRunPatch as _buildRunPatch } from "./utils/run-patch.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
@@ -446,53 +445,18 @@ export default definePluginEntry({
 
     // ── componentEmitter + gateway ping ──────────────────────────────────────
 
-    const _componentEmitRef = {};
     let _gatewayBroadcast = null;
 
     function componentEmitter({ flowId, itemId, component }) {
       return Promise.resolve().then(async () => {
         try { await discussStore.setComponent(flowId, itemId, component); } catch {}
-        if (_componentEmitRef.emit) {
-          try {
-            await _componentEmitRef.emit({
-              type: "discuss.component",
-              flowId,
-              itemId,
-              component,
-              emittedAtMs: Date.now(),
-            });
-          } catch {}
-          if (component.kind === "proposed_draft") {
-            try {
-              await _componentEmitRef.emit({
-                type: "discuss.pending",
-                flowId,
-                itemId,
-                text: component.text ?? null,
-                fields: null,
-                updatedAt: component.updatedAt ?? Date.now(),
-              });
-            } catch {}
-          } else if (component.kind === "proposed_meta") {
-            try {
-              await _componentEmitRef.emit({
-                type: "discuss.pending",
-                flowId,
-                itemId,
-                text: null,
-                fields: component.fields ?? null,
-                updatedAt: component.updatedAt ?? Date.now(),
-              });
-            } catch {}
-          }
-        }
       });
     }
 
     api.registerGatewayMethod("plugin.manifold.ping", (opts) => {
       if (!_gatewayBroadcast) {
         _gatewayBroadcast = opts.context.broadcast;
-        api.logger.info("manifold: WS broadcaster captured — discuss events will be dual-channel");
+        api.logger.info("manifold: WS broadcaster captured");
       }
       opts.respond(true, { ok: true });
     }, { scope: "operator.read" });
@@ -504,17 +468,12 @@ export default definePluginEntry({
     registerProposeDraftTool({ api, readStore, componentEmitter, discussStore });
     registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore });
 
-    // ── emitSseEvent (factory, closes over _gatewayBroadcast lazily) ────────
-
-    const emitSseEvent = createEmitSseEvent(() => _gatewayBroadcast);
-
     // ── Discuss handlers ─────────────────────────────────────────────────────
 
     const discussHandlers = registerDiscussHandlers({
       api,
       store,
       pipelinesRef,
-      emitSseEvent,
       discussDefaultAgent,
       invokeElevated,
       readPending,
@@ -611,16 +570,11 @@ export default definePluginEntry({
       },
     });
 
-    // ── Wire emitSseEvent into component emitter ref + parrot channel ────────
-
-    _componentEmitRef.emit = emitSseEvent;
-
     createManifoldParrotChannelEntry({
       readStore,
       discussStore,
       resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
       stampDiscussSession:  discussHandlers.stampDiscussSession,
-      emitSseEvent,
     }).register(api);
 
     // ── Dashboard ────────────────────────────────────────────────────────────

@@ -95,10 +95,6 @@ const DASHBOARD_TYPE = {
   "pipeline.catalog.updated": "pipelines_changed",
 };
 
-// Families eligible for the SSE/iOS-push sink (legacy rule keyed on
-// `type.startsWith("discuss.")`; canonical rule keys on family).
-const SSE_FAMILIES = Object.freeze(["session", "discuss"]);
-
 export function isWireKind(kind) {
   return WIRE_KINDS.includes(kind);
 }
@@ -149,9 +145,4 @@ export function gatewayWireName(kind) {
 export function dashboardLegacyType(kind) {
   if (!isWireKind(kind)) throw new Error(`unknown event kind: ${kind}`);
   return DASHBOARD_TYPE[kind] ?? null;
-}
-
-export function isSseKind(kind) {
-  if (!isWireKind(kind)) throw new Error(`unknown event kind: ${kind}`);
-  return SSE_FAMILIES.includes(kind.split(".")[0]);
 }

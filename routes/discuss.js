@@ -16,7 +16,6 @@ export function registerDiscussHandlers({
   api,
   store,
   pipelinesRef,
-  emitSseEvent,
   discussDefaultAgent,
   invokeElevated,
   readPending,
@@ -234,34 +233,6 @@ export function registerDiscussHandlers({
         } catch (err) {
           api.logger.warn(`discuss-store write (agent reply): ${err?.message ?? err}`);
         }
-        const event = succeeded
-          ? {
-              type: "discuss.turn",
-              turnId,
-              flowId: sourceFlow.flowId,
-              itemId: target.itemId,
-              status: "completed",
-              reply: payload.reply ?? "",
-              proposedDraft: payload.proposedDraft ?? null,
-              proposedMeta: payload.proposedMeta ?? null,
-              durationMs: payload.durationMs ?? null,
-              emittedAtMs: Date.now(),
-            }
-          : {
-              type: "discuss.turn",
-              turnId,
-              flowId: sourceFlow.flowId,
-              itemId: target.itemId,
-              status: "failed",
-              error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
-              emittedAtMs: Date.now(),
-            };
-        const pushRes = await emitSseEvent(event);
-        if (!pushRes.ok) {
-          api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
-        } else {
-          api.logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${event.status} → SSE pushed`);
-        }
         import("node:fs/promises").then(({ unlink }) =>
           unlink(path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId, `${target.itemId}.pending.json`))
         ).catch(() => { /* non-fatal */ });
@@ -271,15 +242,6 @@ export function registerDiscussHandlers({
           await discussStore.stampMessageError(sourceFlow.flowId, target.itemId, turnId, err?.message ?? String(err));
           await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
         } catch {}
-        await emitSseEvent({
-          type: "discuss.turn",
-          turnId,
-          flowId: sourceFlow.flowId,
-          itemId: target.itemId,
-          status: "failed",
-          error: err?.message ?? String(err),
-          emittedAtMs: Date.now(),
-        });
       }
     });
     return true;
@@ -322,17 +284,6 @@ export function registerDiscussHandlers({
     }
 
     const transcriptStatus = transcribeError ? "failed" : transcript ? "completed" : "empty";
-    await emitSseEvent({
-      type: "discuss.transcript",
-      turnId,
-      flowId: sourceFlow.flowId,
-      itemId: target.itemId,
-      status: transcriptStatus,
-      transcript: transcript || null,
-      audioUrl,
-      error: transcribeError,
-      emittedAtMs: Date.now(),
-    });
 
     if (transcriptStatus !== "completed") return;
 
@@ -349,50 +300,8 @@ export function registerDiscussHandlers({
       }, { timeoutMs: 360_000 });
       let payload;
       try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
-      const event = elev.ok && payload.ok
-        ? {
-            type: "discuss.turn",
-            turnId,
-            flowId: sourceFlow.flowId,
-            itemId: target.itemId,
-            status: "completed",
-            reply: payload.reply ?? "",
-            proposedDraft: payload.proposedDraft ?? null,
-            durationMs: payload.durationMs ?? null,
-            operatorAudioUrl: audioUrl,
-            operatorTranscript: transcript,
-            emittedAtMs: Date.now(),
-          }
-        : {
-            type: "discuss.turn",
-            turnId,
-            flowId: sourceFlow.flowId,
-            itemId: target.itemId,
-            status: "failed",
-            error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
-            operatorAudioUrl: audioUrl,
-            operatorTranscript: transcript,
-            emittedAtMs: Date.now(),
-          };
-      const pushRes = await emitSseEvent(event);
-      if (!pushRes.ok) {
-        api.logger.warn(`${logPrefix}: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
-      } else {
-        api.logger.info(`${logPrefix}: ${event.status} → SSE pushed`);
-      }
     } catch (err) {
       api.logger.warn(`${logPrefix}: runner error: ${err?.message ?? err}`);
-      await emitSseEvent({
-        type: "discuss.turn",
-        turnId,
-        flowId: sourceFlow.flowId,
-        itemId: target.itemId,
-        status: "failed",
-        error: err?.message ?? String(err),
-        operatorAudioUrl: audioUrl,
-        operatorTranscript: transcript,
-        emittedAtMs: Date.now(),
-      });
     }
   }
 
