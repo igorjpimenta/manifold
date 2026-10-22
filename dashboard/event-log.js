@@ -2,10 +2,10 @@
 //
 // Driven by flowStateEmitter (state-store.js fires after every write) so
 // each change lands within a single process.nextTick — no polling lag.
-// Emits:
-//   - flow_created    : first time we see a flowId
-//   - flow_changed    : revision advanced; carries {prevStep, currStep, prevStatus, currStatus, stateKeysAdded, stateKeysRemoved}
-//   - flow_terminated : status moved to a terminal state
+// Emits (canonical kinds):
+//   - run.created : first time we see a flowId
+//   - run.updated : revision advanced; carries {prevStep, currStep, prevStatus, currStatus, stateKeysAdded, stateKeysRemoved}
+//   - run.ended   : status moved to a terminal state
 //
 // stateKeysAdded/stateKeysRemoved: diffed off which node_ids have a
 // flow_node_invocations row for this flow (nodeExecutionsStore.
@@ -75,8 +75,8 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     // Persist to SQLite so history survives restarts (best-effort, fire-and-
     // forget — errors already swallowed, nothing re-reads the row in the
     // same call). Routed through batch-writer's enqueueRaw rather than a
-    // bare client.execute(): this fires on every flow_created/flow_changed/
-    // flow_terminated transition anywhere in the system — the single
+    // bare client.execute(): this fires on every run.created/run.updated/
+    // run.ended transition anywhere in the system — the single
     // highest-frequency write in the app — so an unretried write here both
     // risked silently dropping history rows under SQLITE_BUSY contention
     // and meant every one of those transitions issued its own individual
@@ -84,8 +84,8 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     // connection via dbPath independently of this bus's own `_client` (used
     // only for reads/close below), so this needs no dependency on `_client`
     // having resolved yet either.
-    if (dbPath && event.flowId && event.type) {
-      enqueueRaw(dbPath, INSERT_SQL, [randomUUID(), event.flowId, event.type, event.prevStep ?? null, event.currStep ?? null, event.prevStatus ?? null, event.currStatus ?? null, event.waitKind ?? null, event.at ?? Date.now()]);
+    if (dbPath && event.flowId && event.kind) {
+      enqueueRaw(dbPath, INSERT_SQL, [randomUUID(), event.flowId, event.kind, event.prevStep ?? null, event.currStep ?? null, event.prevStatus ?? null, event.currStatus ?? null, event.waitKind ?? null, event.at ?? Date.now()]);
     }
     for (const cb of subscribers) {
       try { cb(event); } catch (err) {
@@ -111,8 +111,11 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     return { added, removed };
   }
 
+  // Terminal set matches the WS run listener exactly (succeeded, failed,
+  // cancelled, skipped) — the two streams must agree on what "ended" means
+  // or dashboard and iOS diverge on skipped runs.
   function isTerminal(status) {
-    return status === "succeeded" || status === "failed" || status === "cancelled";
+    return status === "succeeded" || status === "failed" || status === "cancelled" || status === "skipped";
   }
 
   // Process a single flow row — diff against last snapshot and emit if changed.
@@ -128,8 +131,8 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
         terminal: isTerminal(row.status),
       });
       emit({
-        type: "flow_created",
         flowId: row.flowId,
+        kind: "run.created",
         at: row.createdAt ?? Date.now(),
         status: row.status,
         lastStep: row.lastStep,
@@ -140,7 +143,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     if (prev.revision === row.revision) return;
     const { added, removed } = diffKeys(prev.stateKeys, currKeys);
     emit({
-      type: "flow_changed",
+      kind: "run.updated",
       flowId: row.flowId,
       at: row.updatedAt ?? Date.now(),
       prevStatus: prev.status,
@@ -154,7 +157,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     });
     if (!prev.terminal && isTerminal(row.status)) {
       emit({
-        type: "flow_terminated",
+        kind: "run.ended",
         flowId: row.flowId,
         at: row.endedAt ?? row.updatedAt ?? Date.now(),
         status: row.status,
@@ -232,7 +235,9 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
           args: [flowId],
         });
         return rows.map((r) => ({
-          type: r.event_type,
+          // event_type stores the canonical kind outright; no read-time
+          // translation — pre-break rows are out of scope by design.
+          kind: r.event_type,
           flowId: r.flow_id,
           at: r.occurred_at,
           prevStep: r.prev_step ?? undefined,

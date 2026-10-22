@@ -117,6 +117,13 @@ function makeReadStore(flow = null) {
   return { get: (id) => (id === flow?.flowId ? flow : null) };
 }
 
+function makeEmit(result = { ok: true }) {
+  const calls = [];
+  const fn = async (kind, payload) => { calls.push({ kind, payload }); return { ...result, kind }; };
+  fn.calls = calls;
+  return fn;
+}
+
 function makeStampDiscussSession() {
   const calls = [];
   const fn = (...args) => { calls.push(args); };
@@ -131,6 +138,7 @@ function buildEntry(overrides = {}) {
   const flow = overrides.flow ?? makeFlow();
   const target = overrides.target ?? makeTarget();
   const discussStore = overrides.discussStore ?? makeDiscussStore();
+  const emit = overrides.emit ?? makeEmit();
   const stampDiscussSession = overrides.stampDiscussSession ?? makeStampDiscussSession();
   const readStore = overrides.readStore ?? makeReadStore(flow);
   const resolveDiscussTarget = overrides.resolveDiscussTarget ?? (() => target);
@@ -141,6 +149,7 @@ function buildEntry(overrides = {}) {
     discussStore,
     resolveDiscussTarget,
     stampDiscussSession,
+    emit,
     readPending,
   });
 
@@ -152,7 +161,7 @@ function buildEntry(overrides = {}) {
 
   return {
     entry, route, api, routes,
-    flow, target, discussStore, stampDiscussSession, readStore,
+    flow, target, discussStore, emit, stampDiscussSession, readStore,
   };
 }
 
@@ -766,12 +775,65 @@ describe("deliver callback — proposed_draft and proposed_meta components", () 
   });
 });
 
+// ─── deliver callback — SSE emission ─────────────────────────────────────────
+
+describe("deliver callback — SSE emission", () => {
+  async function runAndDeliver() {
+    const flow = makeFlow();
+    const emit = makeEmit();
+
+    dispatchCalls = [];
+    capturedDispatchArgs = null;
+
+    const { route } = buildReadyEntry({ flow, emit });
+    await route.handler(makePostReq({ flowId: flow.flowId, text: "sse test" }), createMockRes());
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setTimeout(r, 20));
+    await capturedDispatchArgs.deliver("the reply");
+    return { emit, flow };
+  }
+
+  function completed(emit) {
+    const call = emit.calls.find((c) => c.kind === "session.transcript.completed");
+    assert.ok(call, "session.transcript.completed emitted");
+    return call.payload;
+  }
+
+  test("emits session.transcript.completed scope=discuss", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const { emit } = await runAndDeliver();
+    const payload = completed(emit);
+    assert.equal(payload.scope, "discuss");
+    assert.equal(payload.text, "the reply");
+  });
+
+  test("event contains flowId and itemId", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const { emit, flow } = await runAndDeliver();
+    const payload = completed(emit);
+    assert.equal(payload.flowId, flow.flowId);
+    assert.equal(typeof payload.itemId, "string");
+  });
+
+  test("event contains numeric durationMs", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const { emit } = await runAndDeliver();
+    const payload = completed(emit);
+    assert.equal(typeof payload.durationMs, "number");
+  });
+
+  test("event carries no legacy dupes", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const { emit } = await runAndDeliver();
+    const payload = completed(emit);
+    assert.equal(payload.reply, undefined);
+    assert.equal(payload.status, undefined);
+    assert.equal(payload.type, undefined);
+  });
+});
 
 // ─── onDispatchError ──────────────────────────────────────────────────────────
 
 describe("onDispatchError — error handling", () => {
   async function triggerDispatchError(err, discussStoreOverrides = {}) {
     const flow = makeFlow();
+    const emit = makeEmit();
     const errorStampCalls = [];
     const statusCalls = [];
     const discussStore = makeDiscussStore({
@@ -783,14 +845,14 @@ describe("onDispatchError — error handling", () => {
     dispatchCalls = [];
     capturedDispatchArgs = null;
 
-    const { route } = buildReadyEntry({ flow, discussStore });
+    const { route } = buildReadyEntry({ flow, emit, discussStore });
     await route.handler(makePostReq({ flowId: flow.flowId, text: "dispatch error test" }), createMockRes());
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setTimeout(r, 20));
 
     assert.ok(capturedDispatchArgs?.onDispatchError, "onDispatchError present");
     await capturedDispatchArgs.onDispatchError(err);
-    return { errorStampCalls, statusCalls, flow };
+    return { emit, errorStampCalls, statusCalls, flow };
   }
 
   test("stamps message error in discussStore with error message", { skip: SKIP ? SKIP_MSG : false }, async () => {
@@ -804,6 +866,14 @@ describe("onDispatchError — error handling", () => {
     const errCall = statusCalls.find((c) => c[2] === "error");
     assert.ok(errCall, "setTurnStatus('error') called");
     assert.equal(errCall[3], null);
+  });
+
+  test("emits session.transcript.failed with error message", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const { emit } = await triggerDispatchError(new Error("boom"));
+    const call = emit.calls.find((c) => c.kind === "session.transcript.failed");
+    assert.ok(call, "failed session.transcript emitted");
+    assert.match(call.payload.error, /boom/);
+    assert.equal(call.payload.scope, "discuss");
   });
 });
 

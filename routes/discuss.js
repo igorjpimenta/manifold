@@ -16,6 +16,7 @@ export function registerDiscussHandlers({
   api,
   store,
   pipelinesRef,
+  emit,
   discussDefaultAgent,
   invokeElevated,
   readPending,
@@ -233,6 +234,30 @@ export function registerDiscussHandlers({
         } catch (err) {
           api.logger.warn(`discuss-store write (agent reply): ${err?.message ?? err}`);
         }
+        const turnKind = succeeded ? "session.transcript.completed" : "session.transcript.failed";
+        const emitRes = await emit(turnKind, succeeded
+          ? {
+              scope: "discuss",
+              turnId,
+              flowId: sourceFlow.flowId,
+              itemId: target.itemId,
+              text: payload.reply ?? "",
+              durationMs: payload.durationMs ?? null,
+              emittedAtMs: Date.now(),
+            }
+          : {
+              scope: "discuss",
+              turnId,
+              flowId: sourceFlow.flowId,
+              itemId: target.itemId,
+              error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
+              emittedAtMs: Date.now(),
+            });
+        if (!emitRes.ok) {
+          api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: canonical emit failed`);
+        } else {
+          api.logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${turnKind} emitted`);
+        }
         import("node:fs/promises").then(({ unlink }) =>
           unlink(path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId, `${target.itemId}.pending.json`))
         ).catch(() => { /* non-fatal */ });
@@ -242,6 +267,13 @@ export function registerDiscussHandlers({
           await discussStore.stampMessageError(sourceFlow.flowId, target.itemId, turnId, err?.message ?? String(err));
           await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
         } catch {}
+        await emit("session.transcript.failed", {
+          scope: "discuss",
+          turnId,
+          flowId: sourceFlow.flowId,
+          itemId: target.itemId,
+          error: err?.message ?? String(err),
+        });
       }
     });
     return true;
@@ -251,9 +283,10 @@ export function registerDiscussHandlers({
   // Shared by handleDiscussAudio (fresh upload) and handleDiscussAudioRetry
   // (re-transcribe an already-persisted file, e.g. after the operator taps
   // Retry on a failed voice message) — transcribes, updates the meta
-  // sidecar, pushes discuss.transcript, and on success dispatches the
-  // agent turn + discuss.turn SSE. Callers wrap this in setImmediate since
-  // the HTTP response has already been sent by the time it runs.
+  // sidecar, pushes session.transcript.updated, and on success dispatches
+  // the agent turn + session.transcript.completed. Callers wrap this in
+  // setImmediate since the HTTP response has already been sent by the time
+  // it runs.
 
   async function transcribeAndDispatch({
     sourceFlow, target, turnId, audioPath, audioUrl, metaPath,
@@ -284,6 +317,17 @@ export function registerDiscussHandlers({
     }
 
     const transcriptStatus = transcribeError ? "failed" : transcript ? "completed" : "empty";
+    await emit("session.transcript.updated", {
+      scope: "discuss",
+      turnId,
+      flowId: sourceFlow.flowId,
+      itemId: target.itemId,
+      status: transcriptStatus,
+      text: transcript || null,
+      audioUrl,
+      error: transcribeError,
+      emittedAtMs: Date.now(),
+    });
 
     if (transcriptStatus !== "completed") return;
 
@@ -300,8 +344,46 @@ export function registerDiscussHandlers({
       }, { timeoutMs: 360_000 });
       let payload;
       try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
+      const turnKind = elev.ok && payload.ok
+        ? "session.transcript.completed"
+        : "session.transcript.failed";
+      const emitRes = await emit(turnKind, elev.ok && payload.ok
+        ? {
+            scope: "discuss",
+            turnId,
+            flowId: sourceFlow.flowId,
+            itemId: target.itemId,
+            text: payload.reply ?? "",
+            durationMs: payload.durationMs ?? null,
+            operatorAudioUrl: audioUrl,
+            operatorTranscript: transcript,
+            emittedAtMs: Date.now(),
+          }
+        : {
+            scope: "discuss",
+            turnId,
+            flowId: sourceFlow.flowId,
+            itemId: target.itemId,
+            error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
+            operatorAudioUrl: audioUrl,
+            operatorTranscript: transcript,
+            emittedAtMs: Date.now(),
+          });
+      if (!emitRes.ok) {
+        api.logger.warn(`${logPrefix}: canonical emit failed`);
+      }
     } catch (err) {
       api.logger.warn(`${logPrefix}: runner error: ${err?.message ?? err}`);
+      await emit("session.transcript.failed", {
+        scope: "discuss",
+        turnId,
+        flowId: sourceFlow.flowId,
+        itemId: target.itemId,
+        error: err?.message ?? String(err),
+        operatorAudioUrl: audioUrl,
+        operatorTranscript: transcript,
+        emittedAtMs: Date.now(),
+      });
     }
   }
 
@@ -402,8 +484,8 @@ export function registerDiscussHandlers({
   // Re-runs transcription on an already-uploaded voice message (identified
   // by turnId) without re-uploading the audio bytes — the operator's Retry
   // tap on a failed/empty transcription bubble. Reuses the same turnId and
-  // audioUrl so the existing bubble updates in place via the discuss.transcript
-  // / discuss.turn SSE events rather than creating a new turn.
+  // audioUrl so the existing bubble updates in place via the session
+  // transcript events rather than creating a new turn.
 
   async function handleDiscussAudioRetry(req, res, sourceFlow) {
     let raw = "";

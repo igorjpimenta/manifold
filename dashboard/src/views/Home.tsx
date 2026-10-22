@@ -100,7 +100,7 @@ export function Home() {
   };
   const loadRecent    = () => { api.runs({ limit: 200 }).then(setAllRecent); };
   // Cost roll-up walks session JSONLs per run — slow at scale, so we
-  // refresh only on mount + on pipelines_changed (rare). Visiting the
+  // refresh only on mount + on pipeline.catalog.updated (rare). Visiting the
   // detail page hydrates the same data fresh.
   const loadPipelinesCost = () => { api.allPipelinesCost(30).then(setPipelinesCost).catch(() => setPipelinesCost(null)); };
 
@@ -112,11 +112,11 @@ export function Home() {
   }, [status, pipeline, range, query, pinnedDay]);
 
   useSse((evt) => {
-    if (evt.type === "flow_created" || evt.type === "flow_changed" || evt.type === "flow_terminated") {
+    if (evt.kind === "run.created" || evt.kind === "run.updated" || evt.kind === "run.ended") {
       loadRuns();
       loadRecent();
       loadStats();
-    } else if (evt.type === "pipelines_changed") {
+    } else if (evt.kind === "pipeline.catalog.updated") {
       loadPipelines();
       loadPipelinesCost();
     }

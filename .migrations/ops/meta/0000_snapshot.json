@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "02368f5b-123f-4385-81b3-72e811e84ed5",
+  "id": "c0104d99-7954-47d4-abbb-e7a8d3921257",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "budget_alert_events": {
@@ -541,6 +541,13 @@
         },
         "enqueuer_session_key": {
           "name": "enqueuer_session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
           "type": "text",
           "primaryKey": false,
           "notNull": false,

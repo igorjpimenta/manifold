@@ -282,3 +282,79 @@ describe("dispatchAgentWithRetry — retry config is inert (single dispatch, no 
     assert.equal(callCount, 1);
   });
 });
+
+// ── dispatchAgentWithRetry — session transcript event ─────────────────────────
+// The dispatch reply is otherwise visible only inside apply(). Nullable like
+// sessionIndex — dispatch without an emitter emits nothing and is otherwise
+// identical.
+
+describe("dispatchAgentWithRetry — session.transcript.completed", () => {
+  function makeEmit() {
+    const calls = [];
+    const emit = async (kind, payload) => {
+      calls.push({ kind, payload });
+      return { ok: true, kind, deliveries: {} };
+    };
+    emit.calls = calls;
+    return emit;
+  }
+
+  it("emits scope=node with nodeId, sessionKey and reply text on success", async () => {
+    const sub = makeSubagent();
+    const emit = makeEmit();
+    const { dispatchAgentWithRetry } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger, emit });
+    const node = {
+      agent: "cyrano",
+      apply: (state, output) => ({ text: output.text }),
+    };
+    const result = await dispatchAgentWithRetry({
+      node, nodeId: "DRAFT", sessionKey: "sk-emit-1", initialMessage: "go",
+      applyCtx: { pipelineId: "p" }, applyExtraArg: undefined, flowId: "flow-emit",
+    });
+    assert.equal(result.text, "reply text");
+    assert.equal(emit.calls.length, 1);
+    assert.equal(emit.calls[0].kind, "session.transcript.completed");
+    assert.deepEqual(emit.calls[0].payload, {
+      scope: "node",
+      nodeId: "DRAFT",
+      sessionKey: "sk-emit-1",
+      text: "reply text",
+    });
+  });
+
+  it("skips emission on the tool-fired path (no reply text)", async () => {
+    const sub = makeSubagent({
+      run: async () => ({ runId: "run-emit-skip-1" }),
+      waitForRun: () => new Promise(() => {}),
+    });
+    const emit = makeEmit();
+    const { dispatchAgentWithRetry } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger, emit });
+    const node = {
+      agent: "cyrano",
+      apply: (state, output) => ({ text: output.text }),
+    };
+    const pending = dispatchAgentWithRetry({
+      node, nodeId: "DRAFT", sessionKey: "sk-emit-skip", initialMessage: "go",
+      applyCtx: { pipelineId: "p" }, applyExtraArg: undefined, flowId: "flow-emit-skip",
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    notifyToolFired("run-emit-skip-1");
+    const result = await pending;
+    assert.deepEqual(result, { text: "" });
+    assert.equal(emit.calls.length, 0, "tool-fired path carries no transcript — nothing emitted");
+  });
+
+  it("dispatch without an emitter emits nothing and is otherwise identical", async () => {
+    const sub = makeSubagent();
+    const { dispatchAgentWithRetry } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger });
+    const node = {
+      agent: "cyrano",
+      apply: (state, output) => ({ text: output.text }),
+    };
+    const result = await dispatchAgentWithRetry({
+      node, nodeId: "DRAFT", sessionKey: "sk", initialMessage: "go",
+      applyCtx: { pipelineId: "p" }, applyExtraArg: undefined, flowId: "flow-x",
+    });
+    assert.deepEqual(result, { text: "reply text" });
+  });
+});

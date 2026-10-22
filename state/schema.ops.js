@@ -29,6 +29,7 @@ export const queueItems = sqliteTable('queue_items', {
   pipelineArgs:     text('pipeline_args'),
   flowId:           text('flow_id'),
   enqueuerSessionKey: text('enqueuer_session_key'),
+  kind:             text('kind'),
 }, (table) => [
   index('idx_status').on(table.status),
   index('idx_created_at').on(desc(table.createdAt)),

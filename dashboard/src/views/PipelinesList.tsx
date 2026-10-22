@@ -15,7 +15,7 @@ export function PipelinesList() {
 
   const load = () => { api.pipelines().then(setPipelines); };
   useEffect(load, []);
-  useSse((evt) => { if (evt.type === "pipelines_changed") load(); });
+  useSse((evt) => { if (evt.kind === "pipeline.catalog.updated") load(); });
 
   return (
     <>

@@ -1,12 +1,13 @@
 // budget — approval queue module absorbed into manifold.
 //
-// Owns the SQLite store at ~/.openclaw/ops.sqlite (DB_PATH). Registers
-// HTTP routes under /manifold/budget/*. Sets api.runtime.approvalQueue
-// with the async API that executor.js calls per-node (isGateLocked,
+// Owns the SQLite store at ~/.openclaw/ops.sqlite (DB_PATH). Registers HTTP
+// routes under /manifold/budget/*. Sets api.runtime.approvalQueue with the
+// async API that executor.js calls per-node (isGateLocked,
 // lookupNodeDecision, enqueueNodeApproval).
 
 import { mkdirSync } from "node:fs";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
+import { createEmitter } from "../events/emit.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -54,32 +55,6 @@ const MOCK_ITEMS = [
     costLow: 0.0005,
     costHigh: 0.0016,
     brief: "Submit approved draft for: sistema-de-automacao-rpa-python (score 87, budget R$2.400)",
-    modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
-  },
-  {
-    label: "Add agent (product-designer)",
-    agent: "agent-forger",
-    agentEmoji: "🔨",
-    trigger: "manual",
-    pipeline: null,
-    node: null,
-    tokenEstimate: 48000,
-    costLow: 0.098,
-    costHigh: 0.29,
-    brief: "Forge a new product-designer agent — create workspace, write persona files, register in team registry",
-    modelChain: ["zai/glm-5.1", "openrouter/deepseek/deepseek-v4-pro"],
-  },
-  {
-    label: "Scout Workana (python, typescript)",
-    agent: "marketplace-scout",
-    agentEmoji: "🔭",
-    trigger: "cron",
-    pipeline: null,
-    node: null,
-    tokenEstimate: 6400,
-    costLow: 0.0011,
-    costHigh: 0.0033,
-    brief: "Fetch and cache new listings from Workana search: python + typescript + api. Last run found 34 new listings.",
     modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
   },
 ];
@@ -132,7 +107,14 @@ async function _loopback(path, body, extraHeaders = {}) {
   } catch { /* best-effort fire-and-forget */ }
 }
 
-export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore } = {}) {
+export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume } = {}) {
+  // Canonical-kind fan-out for the three WS emissions below: canonical
+  // wire names, envelope adds kind.
+  // onFlowResume({flowId, nodeId, decision}) resumes a flow-bound approval
+  // in-process (routes/operator-resume.js, injected by index.js) — no HTTP
+  // loopback. Absent (tests), per-node resume is skipped but the decision
+  // still commits and broadcasts.
+  const { emit } = createEmitter({ getBroadcast, logger: api.logger });
   let client;
   let clientPromise = null;
 
@@ -230,7 +212,12 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         });
         for (const row of decided) {
           if (row.flow_id) {
-            _loopback("/manifold/resume-from-gate", { flowId: row.flow_id, nodeId: row.node, decision });
+            // In-process resume (routes/operator-resume.js, injected). The
+            // start-gate branch below still loops back: elevation needs
+            // gateway scope.
+            if (onFlowResume) {
+              try { await onFlowResume({ flowId: row.flow_id, nodeId: row.node, decision }); } catch {}
+            }
             api.logger.info(`[manifold/budget] ${decision} per-node — resuming flow=${String(row.flow_id).slice(0,8)} node=${row.node}`);
           } else if (decision === "approve" && row.pipeline_id) {
             _loopback(
@@ -248,7 +235,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         }
       }
       api.logger.info(`[manifold/budget] ${decision}: ${updated}/${ids.length}`);
-      if (updated > 0) getBroadcast?.()?.("plugin.budget.queue.changed", { decision, count: updated });
+      if (updated > 0) {
+        try { await emit("budget.queue.updated", { decision, count: updated }); } catch {}
+      }
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true, updated, decision }));
@@ -289,8 +278,8 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         const id = randomUUID();
         await withSharedWrite(DB_PATH, () => client.execute({
           sql: `INSERT OR REPLACE INTO queue_items
-                  (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain, pipeline, node, token_estimate, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                  (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain, pipeline, node, token_estimate, kind, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'node', 'pending', ?)`,
           args: [id, t.label, t.agent, t.agentEmoji, t.trigger,
                  t.costLow, t.costHigh, t.brief, JSON.stringify(t.modelChain),
                  t.pipeline ?? null, t.node ?? null, t.tokenEstimate ?? null,
@@ -337,7 +326,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=1, day=? WHERE id='singleton'", args: [today] }));
       api.logger.info(`[manifold/budget] gate locked day=${today}`);
-      getBroadcast?.()?.("plugin.gate.lock.changed", { locked: true, day: today });
+      try { await emit("budget.lock.changed", { locked: true, day: today }); } catch {}
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true, locked: true, day: today }));
@@ -355,7 +344,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=0, day=? WHERE id='singleton'", args: [today] }));
       api.logger.info(`[manifold/budget] gate unlocked day=${today}`);
-      getBroadcast?.()?.("plugin.gate.lock.changed", { locked: false, day: today });
+      try { await emit("budget.lock.changed", { locked: false, day: today }); } catch {}
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true, locked: false, day: today }));
@@ -449,17 +438,17 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
     async enqueueNodeApproval({ flowId, nodeId, pipeline, pipelineId, label, agent, agentEmoji,
                                 trigger = "cron", brief, costLow = 0, costHigh = 0,
-                                modelChain = [], tokenEstimate = null, enqueuerSessionKey = null }) {
+                                modelChain = [], tokenEstimate = null, enqueuerSessionKey = null, kind = "node" }) {
       const id = randomUUID();
       await withSharedWrite(DB_PATH, () => client.execute({
         sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
-                 pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, status, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                 pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         args: [id, label, agent ?? "manifold", agentEmoji ?? "🔁", trigger,
                costLow, costHigh, brief ?? null, JSON.stringify(modelChain ?? []),
                pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
-               pipelineId ?? null, flowId, enqueuerSessionKey ?? null, Date.now()],
+               pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
       }));
       return id;
     },

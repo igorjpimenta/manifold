@@ -3,7 +3,7 @@ import { createDiscussHandler, createDiscussHistoryHandler } from "./operator-di
 import { createStateStore } from "../state/state-store.js";
 import { completeCancellation } from "../engine/executor-cancel.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
-import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
+import { resumeFlowFromGate } from "./operator-resume.js";
 
 export function registerOperatorRoutes({
   api,
@@ -386,24 +386,20 @@ export function registerOperatorRoutes({
         res.statusCode = 400; res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: "flowId required" })); return true;
       }
-      const flow = (await store.get(flowId)) ?? (await readStore?.get(flowId)) ?? null;
-      if (!flow) {
+      // Core resume lives in routes/operator-resume.js (shared with the
+      // budget decide route, which calls it in-process); this stays a thin
+      // validating wrapper mapping outcomes to status codes.
+      const result = await resumeFlowFromGate({
+        store, readStore, admissionQueueStore, runStore, executor,
+        logger: api.logger, api, flowId, nodeId: body.nodeId, decision: body.decision,
+      });
+      if (!result.ok && result.code === "flow_not_found") {
         res.statusCode = 404; res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: "flow not found" })); return true;
       }
-      // Re-requests this flow's own admission before resuming — it was
-      // released the moment the flow blocked on this budget-gate
-      // (state-store.js's setWaiting hook). If the pool is full, the flow
-      // is left at status:"queued" instead of running; admission-queue-
-      // store's own release()/promotion cycle resumes it later.
-      const result = await admitAndSetRunning({
-        flowId, expectedRevision: flow.revision, lastStep: flow.lastStep, stateJson: flow.stateJson ?? {},
-        parentInvocationId: flow.parentInvocationId, store, admissionQueueStore,
-        runStore, resume: executor.resume, logger: api.logger, api,
-      });
-      if (!result.applied) {
+      if (!result.ok) {
         res.statusCode = 409; res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, error: `setRunning failed: ${result.code}` })); return true;
+        res.end(JSON.stringify({ ok: false, error: result.code })); return true;
       }
       if (!result.queued) {
         setImmediate(() => {

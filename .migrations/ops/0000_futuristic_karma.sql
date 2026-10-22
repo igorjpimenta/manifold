@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS `queue_items` (
 	`pipeline_id` text,
 	`pipeline_args` text,
 	`flow_id` text,
-	`enqueuer_session_key` text
+	`enqueuer_session_key` text,
+	`kind` text
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_status` ON `queue_items` (`status`);--> statement-breakpoint

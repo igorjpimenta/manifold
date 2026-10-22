@@ -10,7 +10,7 @@ import { waitForToolSignal } from "../state/tool-handoff.js";
 // still bounds the run itself.
 const WAIT_UNTIL_RUN_ENDS_MS = 2_147_483_647;
 
-export function createSubagentDispatch({ getSubagent, sessionIndex, logger }) {
+export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit }) {
   /**
    * Dispatch one subagent turn against an existing or fresh session key,
    * await its completion, fetch the last assistant message.
@@ -101,6 +101,14 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger }) {
       skill: node.skill,
       agentId: node.agent,
     });
+    // Transcript event: without it the reply is visible only inside apply().
+    // visible only inside apply(). Tool-fired path carries no reply text — skipped,
+    // since the contract requires text and an empty event helps nobody.
+    // Nullable like sessionIndex: callers without an emitter (CLI, tests)
+    // dispatch exactly as before.
+    if (emit && output?.text) {
+      try { await emit("session.transcript.completed", { scope: "node", nodeId, sessionKey, text: output.text }); } catch {}
+    }
     // Option B "needs:" — needsCtx threaded through both calling
     // conventions as a new field/5th positional arg. Additive: every
     // existing apply() function ignores an argument/key it doesn't

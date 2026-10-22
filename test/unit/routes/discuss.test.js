@@ -52,6 +52,7 @@ function makeDeps(api, overrides = {}) {
     api,
     store: { get: () => null, list: () => [] },
     pipelinesRef: { value: new Map() },
+    emit: async () => ({ ok: true }),
     discussDefaultAgent: null,
     invokeElevated: async () => ({}),
     readPending: () => null,
@@ -256,10 +257,20 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
       error: "Command failed: whisper --model turbo ...", createdAtMs: 1000, transcribedAtMs: 2000,
     }));
 
+    const emitted = [];
+    let resolveTranscriptEvent;
+    const transcriptEventSeen = new Promise((r) => { resolveTranscriptEvent = r; });
+    const emit = async (kind, payload) => {
+      emitted.push({ kind, payload });
+      if (kind === "session.transcript.updated") resolveTranscriptEvent();
+      return { ok: true, kind, deliveries: {} };
+    };
+
     const { api } = createMockApi();
     api.runtime = { mediaUnderstanding: { transcribeAudioFile: async () => ({ text: "hello from retry" }) } };
     const deps = makeDeps(api, {
       pipelinesRef,
+      emit,
       invokeElevated: async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, reply: "agent reply" }) }),
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
@@ -288,6 +299,70 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.equal(updatedMeta.transcript, "hello from retry");
     assert.equal(updatedMeta.error, null);
     assert.equal(updatedMeta.createdAtMs, 1000, "original createdAtMs must survive a retry");
+
+    const transcriptEvent = emitted.find((c) => c.kind === "session.transcript.updated");
+    assert.ok(transcriptEvent, "must emit session.transcript.updated");
+    assert.equal(transcriptEvent.payload.scope, "discuss");
+    assert.equal(transcriptEvent.payload.text, "hello from retry");
+    assert.equal(transcriptEvent.payload.turnId, turnId);
+
+    const turnEvent = emitted.find((c) => c.kind === "session.transcript.completed");
+    assert.ok(turnEvent, "a successful retry must dispatch an agent turn, same as a fresh upload would");
+    assert.equal(turnEvent.payload.scope, "discuss");
+    assert.equal(turnEvent.payload.text, "agent reply");
+  });
+
+  test("canonical path: retry emits session.transcript.* with scope=discuss", async () => {    const { audioDirForFlow } = await import("../../../routes/discuss-audio.js");
+    const audioDir = audioDirForFlow(testFlowId, itemId);
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(audioDir, { recursive: true });
+    const turnId = "22222222-2222-2222-2222-222222222222";
+    const audioUrl = `/pipeclaw/runs/${testFlowId}/discuss/audio/${turnId}.m4a`;
+    await writeFile(path.join(audioDir, `${turnId}.m4a`), Buffer.from("fake audio bytes"));
+    await writeFile(path.join(audioDir, `${turnId}.meta.json`), JSON.stringify({
+      turnId, itemId, audioUrl, transcript: null, status: "failed",
+      error: "boom", createdAtMs: 1000, transcribedAtMs: 2000,
+    }));
+
+    const emitted = [];
+    let resolveTurnEvent;
+    const turnEventSeen = new Promise((r) => { resolveTurnEvent = r; });
+    const emit = async (kind, payload) => {
+      emitted.push({ kind, payload });
+      if (kind === "session.transcript.completed") resolveTurnEvent();
+      return { ok: true, kind, deliveries: {} };
+    };
+
+    const { api } = createMockApi();
+    api.runtime = { mediaUnderstanding: { transcribeAudioFile: async () => ({ text: "hello canonical" }) } };
+    const deps = makeDeps(api, {
+      pipelinesRef,
+      emit,
+      invokeElevated: async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, reply: "agent reply" }) }),
+    });
+    const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
+
+    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId });
+    const res = createMockRes();
+    await handleDiscussAudioRetry(req, res, sourceFlow);
+    assert.equal(res.statusCode, 202);
+
+    await turnEventSeen;
+    await new Promise((r) => setTimeout(r, 20));
+
+    const transcriptCall = emitted.find((c) => c.kind === "session.transcript.updated");
+    assert.ok(transcriptCall, "must emit session.transcript.updated");
+    assert.equal(transcriptCall.payload.scope, "discuss");
+    assert.equal(transcriptCall.payload.text, "hello canonical");
+    assert.equal(transcriptCall.payload.transcript, undefined, "no legacy transcript dupe — text is canonical");
+
+    const turnCall = emitted.find((c) => c.kind === "session.transcript.completed");
+    assert.ok(turnCall, "must emit session.transcript.completed for the agent turn");
+    assert.equal(turnCall.payload.scope, "discuss");
+    assert.equal(turnCall.payload.turnId, turnId);
+    assert.equal(turnCall.payload.text, "agent reply");
+    assert.equal(turnCall.payload.reply, undefined, "no legacy reply dupe — text is canonical");
+    assert.equal(turnCall.payload.status, undefined, "no status dupe — the kind carries it");
   });
 
   test("returns 404 when there's no meta sidecar for the turnId", async () => {

@@ -56,7 +56,7 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     bus = null;
   });
 
-  test("flow_changed diffs added/removed node ids via listVisitedNodeIdsByFlow, not Object.keys(stateJson)", async () => {
+  test("run.updated diffs added/removed node ids via listVisitedNodeIdsByFlow, not Object.keys(stateJson)", async () => {
     const flowId = "diff-test-flow";
     const row = { flowId, revision: 1, status: "running", lastStep: "SCAN", stateJson: { pipelineId: "p", args: {} } };
     const store = makeStore([row]);
@@ -70,7 +70,7 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     // store's visited-set changes, same as it would post-B4.
     nodeExecutionsStore._addVisited(flowId, "DRAFT");
     store._set({ ...row, revision: 2, lastStep: "DRAFT" });
-    const evtPromise = waitForEvent(bus, (e) => e.type === "flow_changed" && e.flowId === flowId);
+    const evtPromise = waitForEvent(bus, (e) => e.kind === "run.updated" && e.flowId === flowId);
     flowStateEmitter.emit("change", flowId);
     const evt = await evtPromise;
 
@@ -103,7 +103,7 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     await bus.start();
 
     store._set({ ...row, revision: 2, lastStep: "B" });
-    const evtPromise = waitForEvent(bus, (e) => e.type === "flow_changed" && e.flowId === flowId);
+    const evtPromise = waitForEvent(bus, (e) => e.kind === "run.updated" && e.flowId === flowId);
     flowStateEmitter.emit("change", flowId);
     const evt = await evtPromise;
 

@@ -47,10 +47,14 @@ import { createManifoldParrotChannelEntry } from "./channels/manifold-parrot-cha
 
 // Route modules extracted from this file.
 import { flowStateEmitter, gateEmitter } from "./events.js";
-import { buildRunPatch as _buildRunPatch } from "./utils/run-patch.js";
+import { createEmitter } from "./events/emit.js";
+import { createWsRunEventsListener } from "./events/ws-run-events.js";
+import { createCatalogPublisher } from "./events/catalog.js";
 import { registerDiscussHandlers } from "./routes/discuss.js";
+import { createComponentEmitter } from "./routes/discuss-component.js";
 import { registerRunRoutes } from "./routes/runs.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
+import { resumeFlowFromGate } from "./routes/operator-resume.js";
 import { registerFailureRoutes } from "./routes/failures.js";
 import { registerPipelineRoutes } from "./routes/pipelines.js";
 import { registerBudgetRoutes } from "./budget/index.js";
@@ -255,6 +259,21 @@ export default definePluginEntry({
     // gate (engine/gateway-subagent.js), which every agent dispatch passes.
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
 
+    // Canonical-kind emitter, shared by the executor (session transcripts),
+    // discuss handlers, and the WS run-event listener below. Created here so
+    // every producer closes over the same instance; the broadcast ref itself
+    // stays lazy via the getter (captured at plugin.manifold.ping).
+    // WS delivery comes from getBroadcast above.
+    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
+
+    // Assigned in the dashboard section below; the catalog publisher reads
+    // it lazily so watcher reloads before dashboard boot stay WS-only.
+    let dashboardBusRef = null;
+    const publishCatalogChanged = createCatalogPublisher({
+      emit: emitCanonical,
+      getDashboardBroadcast: () => (dashboardBusRef ? (e) => dashboardBusRef.broadcast(e) : null),
+    });
+
     const executor = createExecutor({
       api,
       store,
@@ -269,6 +288,7 @@ export default definePluginEntry({
       admissionQueueStore,
       getWorkingSubagent: () => moduleState.workingSubagent,
       whenGatewayReady: () => gatewayReadiness.whenReady(),
+      emit: emitCanonical,
     });
     resumeParentRef.resume = executor.resume;
 
@@ -304,8 +324,10 @@ export default definePluginEntry({
     });
 
     const pipelinesWatcher = createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger: api.logger });
+    // Single catalog producer (events/catalog.js): identical content to
+    // the gateway WS stream and the dashboard bus.
     pipelinesWatcher.onReload((info) => {
-      try { _gatewayBroadcast?.("plugin.manifold.pipeline.catalog.changed", { count: info.size, ids: info.ids, updatedAt: Date.now() }); } catch {}
+      publishCatalogChanged(info).catch(() => {});
     });
     pipelinesWatcher.onReload(() => {
       pipelineRegistryStore.reconcilePipelineVersions(pipelinesRef.value, { logger: api.logger });
@@ -447,11 +469,10 @@ export default definePluginEntry({
 
     let _gatewayBroadcast = null;
 
-    function componentEmitter({ flowId, itemId, component }) {
-      return Promise.resolve().then(async () => {
-        try { await discussStore.setComponent(flowId, itemId, component); } catch {}
-      });
-    }
+    // Proposal-artifact fan-out (routes/discuss-component.js): persists the
+    // component, then emits canonical proposed + derived pending through
+    // the shared emitter. Egress carries canonical kinds.
+    const componentEmitter = createComponentEmitter({ discussStore, emit: emitCanonical });
 
     api.registerGatewayMethod("plugin.manifold.ping", (opts) => {
       if (!_gatewayBroadcast) {
@@ -474,6 +495,7 @@ export default definePluginEntry({
       api,
       store,
       pipelinesRef,
+      emit: emitCanonical,
       discussDefaultAgent,
       invokeElevated,
       readPending,
@@ -539,7 +561,14 @@ export default definePluginEntry({
       ensurePipelinesLoaded,
     });
 
-    registerBudgetRoutes(api, { getBroadcast: () => _gatewayBroadcast });
+    registerBudgetRoutes(api, {
+      getBroadcast: () => _gatewayBroadcast,
+      // In-process resume for flow-bound budget approvals (no HTTP loopback).
+      onFlowResume: ({ flowId, nodeId, decision }) => resumeFlowFromGate({
+        store, readStore, admissionQueueStore, runStore, executor,
+        logger: api.logger, api, flowId, nodeId, decision,
+      }),
+    });
     registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
 
     // ── Boot-time task orphan cleanup (absorbed from taskflow-revive) ─────────
@@ -570,11 +599,14 @@ export default definePluginEntry({
       },
     });
 
+    // ── Parrot channel (takes the shared emitter directly) ────────────────────
+
     createManifoldParrotChannelEntry({
       readStore,
       discussStore,
       resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
       stampDiscussSession:  discussHandlers.stampDiscussSession,
+      emit: emitCanonical,
     }).register(api);
 
     // ── Dashboard ────────────────────────────────────────────────────────────
@@ -582,8 +614,9 @@ export default definePluginEntry({
     if (dashboardEnabled) {
       const dashboardStore = readStore;
       const dashboardBus = createEventBus({ store: dashboardStore, nodeExecutionsStore, logger: api.logger });
+      dashboardBusRef = dashboardBus;
       pipelinesWatcher.onReload((info) => {
-        dashboardBus.broadcast({ type: "pipelines_changed", at: Date.now(), size: info.size, ids: info.ids });
+        publishCatalogChanged(info).catch(() => {});
       });
       const dashboardServer = createDashboardServer({
         writeStore: store,
@@ -625,141 +658,16 @@ export default definePluginEntry({
     api.registerService({
       id: "manifold-ws-run-events",
       start: async () => {
-        const knownRevisions = new Map();
-        const knownStatuses = new Map();
-
-        // Builds a RunSummary-shaped patch from the in-memory flow object.
-        // The wrapper binds the pipeline lookup; the pure builder lives in
-        // utils/run-patch.js.
-        const buildRunPatch = (flow, now) =>
-          _buildRunPatch(flow, now, { pipelineLookup: (id) => pipelinesRef.value.get(id) });
-
-        // Scans readStore for a single pipeline's aggregate stats. Called in a
-        // setImmediate after a terminal transition so the executor has finished
-        // writing the run row to the DB before the scan starts. Mirrors the
-        // bucketing logic in routes/pipelines.js (createdAt window, local TZ).
-        const computePipelineStats = async (pipelineId) => {
-          const now = Date.now();
-          const d = new Date(now);
-          const todayStartMs = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-          const sevenDaysMs = now - 7 * 86_400_000;
-          const s = await readStore.statsFor(pipelineId, { todayStartMs, sevenDaysMs });
-          return { id: pipelineId, ...s };
-        };
-
-        _wsRunEventsListener = async (flowId) => {
-          try {
-            const flow = await store.get(flowId);
-            if (!flow) return;
-            // Primary gate: has this write already been processed. Keyed on
-            // revision, not status — a flow's status stays "running" across
-            // many internal node transitions (the common case: current_step
-            // advances every node, status only changes at
-            // start/gate/terminal), so a status-keyed gate would drop every
-            // transition after the first and never reach the "rich patch"
-            // broadcast below. revision (state/run-store.js,
-            // CAS-incremented on every write) is the per-write granularity.
-            const revision = flow.revision;
-            const priorRevision = knownRevisions.get(flowId);
-            if (priorRevision !== undefined && revision <= priorRevision) return;
-            const status = flow.status;
-            // Secondary check, for the narrow backward-compat events only —
-            // those are meant to fire once per real status change (an
-            // operator doesn't want a fresh "run started" push for every
-            // node), not once per revision.
-            const statusChanged = status !== knownStatuses.get(flowId);
-            knownRevisions.set(flowId, revision);
-            knownStatuses.set(flowId, status);
-            const rawBroadcast = _gatewayBroadcast;
-            if (!rawBroadcast) return;
-            // Every call below goes through here: the gateway's event-scope
-            // allowlist silently drops any broadcast name that isn't
-            // recognized or "plugin."-prefixed. run.*/gate.*/pipeline.*
-            // were all unprefixed, so none of them ever reached a client,
-            // always — not a timing/connection issue.
-            const broadcast = (name, payload) => rawBroadcast(`plugin.${name}`, payload);
-            const now = Date.now();
-            // Gate pauses are always persisted as "blocked" — run-store.js's
-            // setWaiting always writes status='blocked' despite the name.
-            // "waiting" itself is never actually written anywhere (confirmed
-            // repo-wide), so it's not checked here at all.
-            const isWaiting = status === "blocked";
-            // Terminal set is exactly what state/run-store.js persists —
-            // succeeded, failed, cancelled, skipped. "finished" is written
-            // nowhere, so it is not part of it.
-            const isTerminal = status === "succeeded" || status === "failed"
-              || status === "cancelled" || status === "skipped";
-            // Backward-compat narrow events — kept so older iOS builds still
-            // work. Gated on statusChanged, not on revision.
-            if (statusChanged) {
-              if (status === "running") {
-                // Full buildRunPatch payload so a run's start carries the
-                // same display metadata (pipelineDisplayName/pipelineEmoji/
-                // currentNodeId) as every other patch.
-                broadcast("manifold.run.started", buildRunPatch(flow, now));
-                const pipelineId = flow.stateJson?.pipelineId;
-                if (pipelineId) {
-                  // setTimeout(100) instead of setImmediate — the executor
-                  // writes the new run row to SQLite asynchronously;
-                  // setImmediate fires before the write lands, so
-                  // computePipelineStats (which reads readStore/SQLite)
-                  // returns stale todayActive.
-                  setTimeout(async () => {
-                    try { broadcast("manifold.pipeline.stats.updated", await computePipelineStats(pipelineId)); } catch {}
-                  }, 100);
-                }
-              } else if (isTerminal) {
-                // Was a bespoke {flowId, status, updatedAt} shape — same
-                // reasoning as run.started above: full buildRunPatch payload
-                // so a consumer's "just finished" row gets real display
-                // metadata (and the real terminal status).
-                broadcast("manifold.run.ended", buildRunPatch(flow, now));
-                knownStatuses.delete(flowId);
-                // A terminal flow won't get further revisions — drop it too
-                // so these maps don't grow unbounded across flow_ids.
-                knownRevisions.delete(flowId);
-              }
-            }
-            // Rich patch — now truly per-revision, matching this line's own
-            // comment: subscribed clients upsert without a re-fetch on every transition.
-            const ownPatch = buildRunPatch(flow, now);
-            try { broadcast("manifold.run.updated", ownPatch); } catch {}
-            // If this is a child flow (spawned by a subflow node), also push a
-            // subflow-aggregate patch to the parent so RunDetailView refreshes
-            // the Branches section on every subflow state change, not just when
-            // all siblings go terminal and the parent resumes. Per-revision,
-            // like the rich patch above.
-            if (flow.parentInvocationId) {
-              try {
-                const inv = await nodeExecutionsStore.getInvocation(flow.parentInvocationId);
-                if (inv?.flowId) {
-                  const parentFlow = await store.get(inv.flowId);
-                  if (parentFlow) {
-                    const ps = parentFlow.status;
-                    const parentIsTerminal = ps === "succeeded" || ps === "failed"
-                      || ps === "cancelled" || ps === "skipped";
-                    if (!parentIsTerminal) {
-                      broadcast("manifold.run.updated", buildRunPatch(parentFlow, now));
-                    }
-                  }
-                }
-              } catch {}
-            }
-            // Pipeline aggregate on terminal. Stays tied to the status
-            // transition (not every revision) — a terminal flow's stats
-            // should recompute once. setImmediate lets the executor finish
-            // writing the terminal row to the DB before the readStore scan
-            // starts.
-            if (statusChanged && isTerminal) {
-              const pipelineId = flow.stateJson?.pipelineId;
-              if (pipelineId) {
-                setImmediate(async () => {
-                  try { broadcast("manifold.pipeline.stats.updated", await computePipelineStats(pipelineId)); } catch {}
-                });
-              }
-            }
-          } catch {}
-        };
+        // Listener body lives in events/ws-run-events.js (unit-covered);
+        // this only binds the live stores and subscribes.
+        _wsRunEventsListener = createWsRunEventsListener({
+          store,
+          readStore,
+          nodeExecutionsStore,
+          pipelineLookup: (id) => pipelinesRef.value.get(id),
+          getBroadcast: () => _gatewayBroadcast,
+          emit: emitCanonical,
+        });
         flowStateEmitter.on("change", _wsRunEventsListener);
 
         // Gate lifecycle goes out with its full payload (items, waitJson,

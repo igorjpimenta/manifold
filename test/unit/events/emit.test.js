@@ -2,8 +2,8 @@
  * Unit tests for events/emit.js
  *
  * Verifies (mirroring test/unit/telemetry/broadcast.test.js conventions):
- *   - WS delivery uses the plugin. prefix + legacy wire name.
- *   - Envelope stamped (kind, emittedAtMs); legacy `type` dropped.
+ *   - WS delivery uses the plugin. prefix + kind as the wire name.
+ *   - Envelope stamped (kind, emittedAtMs); stray `type` dropped.
  *   - Negative guards: getter undefined/null/throws → never rejects.
  *   - Validation faults reject (unknown kind, missing fields).
  */
@@ -21,7 +21,7 @@ function makeBroadcast() {
 // ── WS delivery ──────────────────────────────────────────────────────────────
 
 describe("emit — gateway WS", () => {
-  test("broadcasts plugin. + legacy name with stamped envelope", async () => {
+  test("broadcasts plugin. + kind with stamped envelope", async () => {
     const broadcast = makeBroadcast();
     const { emit } = createEmitter({ getBroadcast: () => broadcast });
     const res = await emit("gate.resolved", { flowId: "f", itemId: "i", decision: "approve" });
@@ -36,11 +36,13 @@ describe("emit — gateway WS", () => {
     assert.equal(payload.flowId, "f");
   });
 
-  test("session kind uses legacy discuss.turn wire name", async () => {
+  test("wire name is the kind itself — no legacy mapping", async () => {
     const broadcast = makeBroadcast();
     const { emit } = createEmitter({ getBroadcast: () => broadcast });
     await emit("session.transcript.completed", { scope: "node", nodeId: "n", text: "t" });
-    assert.equal(broadcast.calls[0].name, "plugin.discuss.turn");
+    assert.equal(broadcast.calls[0].name, "plugin.session.transcript.completed");
+    await emit("budget.queue.updated", { decision: "approve", count: 1 });
+    assert.equal(broadcast.calls[1].name, "plugin.budget.queue.updated");
   });
 
   test("dashboard-only kind skips WS without error", async () => {
@@ -52,7 +54,7 @@ describe("emit — gateway WS", () => {
     assert.equal(broadcast.calls.length, 0);
   });
 
-  test("legacy incoming type is dropped in favor of kind", async () => {
+  test("stray incoming type is dropped in favor of kind", async () => {
     const broadcast = makeBroadcast();
     const { emit } = createEmitter({ getBroadcast: () => broadcast });
     await emit("gate.opened", { flowId: "f", type: "gate.opened" });
@@ -60,6 +62,8 @@ describe("emit — gateway WS", () => {
     assert.equal(broadcast.calls[0].payload.kind, "gate.opened");
   });
 });
+
+// ── negative guards ──────────────────────────────────────────────────────────
 
 // ── negative guards ──────────────────────────────────────────────────────────
 
