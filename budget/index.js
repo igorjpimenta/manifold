@@ -108,7 +108,7 @@ export async function openStore({ dbPath = DB_PATH } = {}) {
   const { client } = await getSharedDb(dbPath);
   await client.execute("PRAGMA foreign_keys = ON");
   // The singleton row is runtime state, not schema: every gate_state reader
-  // assumes it exists. Seeded unconditionally (was v1's INSERT OR IGNORE).
+  // assumes it exists, so seed it unconditionally on every open.
   await client.execute(`INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`);
   return client;
 }
