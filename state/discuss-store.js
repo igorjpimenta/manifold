@@ -25,7 +25,6 @@ import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-
 function tryParse(s, fallback) {
   if (s == null) return fallback;
   try { return JSON.parse(s); } catch { return fallback; }
@@ -42,7 +41,6 @@ export function createDiscussStore(opts = {}) {
 
 async function _createDiscussStoreImpl({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
 

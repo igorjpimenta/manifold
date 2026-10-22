@@ -36,7 +36,6 @@ const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 // result-replay.js/needs-resolver.js stay in place read-only, for
 // pre-existing rows whose capped result cannot be recovered.
 
-
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
 
 // Normalizes flow_branches.errors' confirmed mixed shape (bare strings vs
@@ -81,7 +80,6 @@ export function createNodeExecutionsStore(dbPath) {
 async function _createStore(dbPath) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
-    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     const { db, client } = await getSharedDb(dbPath);
     // Tracking key deliberately kept as "step-timings" — pure version-history

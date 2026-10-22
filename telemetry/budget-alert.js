@@ -43,7 +43,6 @@ let _dbPath = DB_PATH;
 let _client = null;
 async function _getClient() {
   if (!_client) {
-    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath: _dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
     const { client } = await getSharedDb(_dbPath);
     _client = client;

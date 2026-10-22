@@ -35,11 +35,9 @@ import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js"
 
 const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-
 async function openEventsDb(dbPath, logger) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
-    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     const { client } = await openDb(dbPath);
     return client;

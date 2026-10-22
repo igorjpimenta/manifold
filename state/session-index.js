@@ -24,12 +24,10 @@ import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-
 export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   let db, client;
   try {
-    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     ({ db, client } = await getSharedDb(dbPath));
   } catch (err) {

@@ -31,7 +31,6 @@ export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "skipped"]
 export const TERMINAL_STATUS_SET = new Set(TERMINAL_STATUSES);
 const TERMINAL_SET = TERMINAL_STATUS_SET;
 
-
 // ── store factory ────────────────────────────────────────────────────────────
 
 export function createRunStore(opts = {}) {
@@ -45,7 +44,6 @@ export function createRunStore(opts = {}) {
 
 async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
 
@@ -293,7 +291,6 @@ async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
         return { cancelled: false };
       }
     },
-
 
     // Stamps state_json before the cancel status flip.
     async stampStateJson(flowId, stateJson) {

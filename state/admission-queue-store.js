@@ -40,7 +40,6 @@ import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-
 // Same Proxy-wrapped async-ready factory idiom as run-store.js/state-
 // store.js — every method call transparently awaits store construction
 // (migration included) before running.
@@ -63,7 +62,6 @@ async function _createImpl({ dbPath = DEFAULT_DB_PATH, getLimit } = {}) {
     throw new TypeError("admission-queue-store: getLimit() function is required (e.g. global-concurrency.js's getGlobalConcurrencyLimit)");
   }
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
 

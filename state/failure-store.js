@@ -49,7 +49,6 @@ import { getNodeExecutionsStore } from "./node-executions.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-
 // Maps a failure's (error_type, summary) to the operator action the iOS
 // Inbox should surface for this row:
 //   retry-step  — system-recoverable; one-tap retry the failed step
@@ -107,7 +106,6 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeE
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? await getNodeExecutionsStore();
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
 

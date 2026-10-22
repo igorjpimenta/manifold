@@ -84,7 +84,6 @@ const MOCK_ITEMS = [
   },
 ];
 
-
 // getSharedDb() instead of a fresh openDb() call: on the first call ever for
 // this dbPath, this does the real work (open + migrate). On every call
 // after — including a brand-new registerBudgetRoutes closure created by a
@@ -103,7 +102,6 @@ const MOCK_ITEMS = [
 // entirely.
 export async function openStore({ dbPath = DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
   await client.execute("PRAGMA foreign_keys = ON");
@@ -112,7 +110,6 @@ export async function openStore({ dbPath = DB_PATH } = {}) {
   await client.execute(`INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`);
   return client;
 }
-
 
 async function readBody(req) {
   let raw = "";
