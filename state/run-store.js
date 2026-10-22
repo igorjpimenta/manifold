@@ -14,7 +14,7 @@
 
 import path from "node:path";
 import os from "node:os";
-import { mkdirSync, existsSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { eq, and, notInArray, inArray, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { getSharedDb, withSharedWrite } from "./db.js";
@@ -23,7 +23,6 @@ import { createMigrator } from "./migrator.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const LEGACY_DB_PATH  = path.join(os.homedir(), ".openclaw", "flows", "registry.sqlite");
 
 const CONTROLLER_PREFIX = "pipeclaw:";
 const LEGACY_PREFIX = "graph-flow:";
@@ -130,11 +129,10 @@ export function createRunStore(opts = {}) {
   } });
 }
 
-async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH, legacyDbPath = LEGACY_DB_PATH } = {}) {
+async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
   await createMigrator(client, { name: "pipeclaw_flow_runs", migrations: MIGRATIONS });
-  await _migrateFromRegistry(client, logger, legacyDbPath);
 
   // ── CAS failure classifier ───────────────────────────────────────────────
 
@@ -766,64 +764,4 @@ function mapRow(row) {
     endedAt:            row.endedAt ?? null,
     parentInvocationId: row.parentInvocationId ?? null,
   };
-}
-
-// One-time boot copy of pipeclaw-owned rows from registry.sqlite.
-// Idempotent: INSERT OR IGNORE; skipped entirely when the table is non-empty
-// (i.e. after the first successful boot post-migration).
-// Uses raw client — Drizzle cannot express ATTACH DATABASE.
-async function _migrateFromRegistry(client, logger, legacyDbPath = LEGACY_DB_PATH) {
-  if (!legacyDbPath || !existsSync(legacyDbPath)) return;
-
-  try {
-    const { rows } = await client.execute("SELECT COUNT(*) AS n FROM flow_runs");
-    if ((rows[0]?.n ?? 0) > 0) return;
-  } catch { return; }
-
-  const safe = legacyDbPath.replace(/'/g, "''");
-  try {
-    await client.execute(`ATTACH DATABASE '${safe}' AS _legacy_reg`);
-  } catch (err) {
-    logger?.warn?.(`run-store: ATTACH ${legacyDbPath} failed: ${err?.message ?? err}`);
-    return;
-  }
-
-  try {
-    const { rows: srcRows } = await client.execute(
-      `SELECT name FROM _legacy_reg.sqlite_master WHERE type='table' AND name='flow_runs'`
-    );
-    if (srcRows.length > 0) {
-      // Legacy registry.sqlite still has controller_id (platform-owned
-      // schema, untouched by us) — derive pipeline_id from it the same way
-      // the v3 migration does for pre-existing rows. blocked_task_id/
-      // sync_mode/notify_policy/goal are dropped, not copied — dead in
-      // main.flow_runs since v3.
-      await client.execute(`
-        INSERT OR IGNORE INTO main.flow_runs
-          (flow_id, owner_key, pipeline_id, revision, status,
-           last_step, status_reason,
-           state_json, wait_json, cancel_requested_at, created_at, updated_at, ended_at)
-        SELECT
-          flow_id, owner_key,
-          CASE
-            WHEN controller_id LIKE '${CONTROLLER_PREFIX}%' THEN SUBSTR(controller_id, ${CONTROLLER_PREFIX.length + 1})
-            WHEN controller_id LIKE '${LEGACY_PREFIX}%'     THEN SUBSTR(controller_id, ${LEGACY_PREFIX.length + 1})
-            ELSE controller_id
-          END AS pipeline_id,
-          revision, status,
-          current_step, blocked_summary,
-          state_json, wait_json, cancel_requested_at, created_at, updated_at, ended_at
-        FROM _legacy_reg.flow_runs
-        WHERE controller_id LIKE '${CONTROLLER_PREFIX}%'
-           OR controller_id LIKE '${LEGACY_PREFIX}%'
-      `);
-      const { rows: countRows } = await client.execute("SELECT COUNT(*) AS n FROM flow_runs");
-      const copied = countRows[0]?.n ?? 0;
-      logger?.info?.(`run-store: migrated ${copied} rows from registry.sqlite → runtime.sqlite`);
-    }
-  } catch (err) {
-    logger?.warn?.(`run-store: copy from registry.sqlite failed: ${err?.message ?? err}`);
-  } finally {
-    try { await client.execute("DETACH DATABASE _legacy_reg"); } catch { /* ignore */ }
-  }
 }

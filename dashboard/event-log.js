@@ -32,10 +32,8 @@ import path from "node:path";
 import os from "node:os";
 import { flowStateEmitter } from "../events.js";
 import { createMigrator } from "../state/migrator.js";
-import { migrateFromLegacy } from "../state/consolidate.js";
 
 const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const LEGACY_EVENTS_DB_PATH  = path.join(os.homedir(), ".openclaw", "flows", "events.sqlite");
 
 const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS flow_events (
@@ -55,12 +53,11 @@ const MIGRATIONS = [
      ON flow_events(occurred_at)`,
 ];
 
-async function openEventsDb(dbPath, legacyDbPath, logger) {
+async function openEventsDb(dbPath, logger) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     const { client } = await openDb(dbPath);
     await createMigrator(client, { name: "event-log", migrations: MIGRATIONS });
-    if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["flow_events"], logger);
     return client;
   } catch (err) {
     logger?.warn?.(`pipeclaw event-log: failed to open events DB: ${err?.message ?? err}`);
@@ -72,9 +69,9 @@ const RING_CAP = 256;
 
 const INSERT_SQL = `INSERT OR IGNORE INTO flow_events (id, flow_id, event_type, prev_step, curr_step, prev_status, curr_status, wait_kind, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DEFAULT_EVENTS_DB_PATH, legacyDbPath = LEGACY_EVENTS_DB_PATH }) {
+export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DEFAULT_EVENTS_DB_PATH }) {
   let _client = null;
-  if (dbPath) openEventsDb(dbPath, legacyDbPath, logger).then(c => { _client = c; });
+  if (dbPath) openEventsDb(dbPath, logger).then(c => { _client = c; });
   // Map<flowId, { revision, status, lastStep, stateKeys: Set<string>, terminal: boolean }>
   const last = new Map();
 
@@ -138,15 +135,6 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
   function isTerminal(status) {
     return status === "succeeded" || status === "failed" || status === "cancelled" || status === "skipped";
   }
-
-  // event_type rows predating canonical kinds (flow_created/changed/
-  // terminated); upgrade on read so cold-fallback history stays matchable.
-  // Safe to delete once no such rows remain in any live database.
-  const READ_UPGRADE = {
-    flow_created: "run.created",
-    flow_changed: "run.updated",
-    flow_terminated: "run.ended",
-  };
 
   // Process a single flow row — diff against last snapshot and emit if changed.
   async function tickOne(row) {
@@ -265,9 +253,9 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
           args: [flowId],
         });
         return rows.map((r) => ({
-          // Rows written before the canonical cutover carry legacy type
-          // strings; upgrade on read so one restart window doesn't go blind.
-          kind: READ_UPGRADE[r.event_type] ?? r.event_type,
+          // event_type stores the canonical kind outright; no read-time
+          // translation — pre-break rows are out of scope by design.
+          kind: r.event_type,
           flowId: r.flow_id,
           at: r.occurred_at,
           prevStep: r.prev_step ?? undefined,
