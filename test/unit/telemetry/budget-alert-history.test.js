@@ -7,12 +7,11 @@ import { createClient } from "@libsql/client";
 import { initCapStore, getAlertHistory } from "../../../telemetry/budget-alert.js";
 
 // Each test gets its own fresh SQLite file — never touches the real
-// ~/.openclaw/ops.sqlite. initCapStore runs the module's migrations, which
-// is what actually creates the budget_alert_events table.
+// ~/.openclaw/ops.sqlite. initCapStore runs the module's snapshot migrate,
+// which is what actually creates the budget_alert_events table.
 async function freshDb() {
   const dbPath = path.join(os.tmpdir(), `manifold-alert-history-test-${randomUUID()}.sqlite`);
-  const legacyCapFile = path.join(os.tmpdir(), `manifold-alert-history-test-legacy-${randomUUID()}.json`);
-  await initCapStore({ dbPath, legacyCapFile });
+  await initCapStore({ dbPath });
   return dbPath;
 }
 

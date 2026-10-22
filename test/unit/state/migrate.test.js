@@ -123,11 +123,10 @@ describe("migrateDatabase — fresh databases", () => {
 
 // ── snapshot hygiene ─────────────────────────────────────────────────────────
 // Forward-safety invariants for every present and future snapshot file:
-// CREATEs must be IF NOT EXISTS (snapshots run after the legacy chain on
-// every open, against tables the chain may already have shaped). DROP
-// COLUMN and RENAME have no IF EXISTS form in SQLite and collide with the
-// frozen chain — they require manual review, so they fail here by design.
-// ADD COLUMN is allowed: the frozen chain never adds future columns.
+// snapshots are the sole schema path, applied to whatever shape a file is
+// in, so every CREATE must be IF NOT EXISTS. DROP COLUMN and RENAME have
+// no IF EXISTS form in SQLite — they require manual review, so they fail
+// here by design. ADD COLUMN is allowed for genuinely new columns.
 
 describe("snapshots — forward safety", () => {
   const folders = [RUNTIME_MIGRATIONS_FOLDER, OPS_MIGRATIONS_FOLDER];
@@ -162,42 +161,41 @@ describe("snapshots — forward safety", () => {
     for (const stmt of snapshotSql()) {
       assert.ok(
         !/DROP COLUMN|RENAME (COLUMN|TO)/i.test(stmt.replace(/^[^:]+: /, "")),
-        `DROP/RENAME needs manual review (collides with the frozen chain): ${stmt}`,
+        `DROP/RENAME needs manual review (no IF EXISTS form in SQLite): ${stmt}`,
       );
     }
   });
 });
 
-// ── ordering coexistence ─────────────────────────────────────────────────────
+// ── snapshots are the sole schema path ───────────────────────────────────────
 
-describe("migrateDatabase — after the legacy chain", () => {
-  test("succeeds on databases the legacy chain shaped (the production order)", async () => {
-    const { dbPath } = tmpDb("legacy-then-snapshot");
+describe("migrateDatabase — snapshots only, no chain", () => {
+  test("opening a store creates the full schema with no _schema_version table", async () => {
+    const { dbPath } = tmpDb("snapshots-only");
     const { createRunStore } = await import("../../../state/run-store.js");
     const store = await createRunStore({ dbPath, logger: silentLogger });
     await store.close?.().catch(() => {});
 
-    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger: silentLogger });
-    assert.ok(liveTables(dbPath).includes("flow_runs"));
+    const tables = liveTables(dbPath);
+    assert.ok(tables.includes("flow_runs"));
+    assert.ok(!tables.includes("_schema_version"), "no legacy journal on snapshot-built DBs");
   });
 });
 
 // ── schema parity guard ──────────────────────────────────────────────────────
 
 describe("schema parity — live boot vs drizzle defs", () => {
-  // Boots every store through its real open path (legacy chain included),
-  // then asserts the produced columns equal the def columns exactly.
-  // Add a column inline without updating schema.js (or vice versa) and
-  // this fails — that is the whole point.
+  // Boots every store through its real open path, then asserts the
+  // produced columns equal the def columns exactly. Add a column to a
+  // def without generating (or vice versa) and this fails — that is the
+  // whole point.
   //
   // One tmp file PER STORE (same precedent as the engine e2e tests):
   // Proxy-lazy factories resolve await instantly while construction races
-  // in the background, and overlapping createMigrator runs on ONE shared
-  // libsql client nest transactions and fail — verified against pristine
-  // main, so it is pre-existing and unrelated to snapshots (production
-  // boots services sequentially behind readiness gates and never trips
-  // it; a probe booting three factories back-to-back on one file does,
-  // deterministically).
+  // in the background, so each boot below polls for its store's tables
+  // before the assertions run. Bounded waits, fail loudly on timeout —
+  // never blind sleeps. One tmp file PER STORE (same precedent as the
+  // engine e2e tests).
   test("runtime tables match defs column-for-column", async () => {
     const { dbPath: runsDb } = tmpDb("parity-runs");
     const { dbPath: execDb } = tmpDb("parity-exec");
@@ -210,50 +208,44 @@ describe("schema parity — live boot vs drizzle defs", () => {
     const { dbPath: eventsDb } = tmpDb("parity-events");
     const W = "../../../";
 
-    async function journaledStores(dbPath) {
-      try {
-        const db = new Database(dbPath, { readonly: true });
-        try {
-          return new Set(
-            db.prepare("SELECT DISTINCT store FROM _schema_version").all().map((r) => r.store),
-          );
-        } finally {
-          db.close();
-        }
-      } catch {
-        return new Set();
-      }
-    }
-
-    async function bootAndWait(dbPath, journalName, fn) {
+    async function bootAndWait(dbPath, tables, fn) {
       await fn();
       const deadline = Date.now() + 15000;
       for (;;) {
-        if ((await journaledStores(dbPath)).has(journalName)) return;
-        if (Date.now() > deadline) assert.fail(`store ${journalName} never reached the journal`);
+        let seen = [];
+        try {
+          const db = new Database(dbPath, { readonly: true });
+          try {
+            seen = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+          } finally {
+            db.close();
+          }
+        } catch { seen = []; }
+        if (tables.every((t) => seen.includes(t))) return;
+        if (Date.now() > deadline) assert.fail(`tables [${tables}] never materialized in ${dbPath} (saw [${seen}])`);
         await new Promise((r) => setTimeout(r, 100));
       }
     }
 
     const { createRunStore } = await import(`${W}state/run-store.js`);
     const runStore = await createRunStore({ dbPath: runsDb, logger: silentLogger });
-    await bootAndWait(runsDb, "manifold_flow_runs", async () => {});
+    await bootAndWait(runsDb, ["flow_runs"], async () => {});
 
     const { createNodeExecutionsStore } = await import(`${W}state/node-executions.js`);
-    await bootAndWait(execDb, "step-timings", async () => { createNodeExecutionsStore(execDb); });
+    await bootAndWait(execDb, ["flow_node_invocations", "flow_node_executions", "gate_records"], async () => { createNodeExecutionsStore(execDb); });
 
     const { createNodeHealthStore } = await import(`${W}state/node-health-store.js`);
-    await bootAndWait(healthDb, "fallback_node_health", async () => {
+    await bootAndWait(healthDb, ["node_health"], async () => {
       await createNodeHealthStore({ dbPath: healthDb, logger: silentLogger });
     });
 
     const { createSessionIndex } = await import(`${W}state/session-index.js`);
-    await bootAndWait(sessionDb, "session-index", async () => {
+    await bootAndWait(sessionDb, ["flow_sessions"], async () => {
       await createSessionIndex({ dbPath: sessionDb, logger: silentLogger });
     });
 
     const { createFailureStore } = await import(`${W}state/failure-store.js`);
-    await bootAndWait(failureDb, "failure-store", async () => {
+    await bootAndWait(failureDb, ["failure_events"], async () => {
       createFailureStore({
         dbPath: failureDb,
         logger: silentLogger,
@@ -262,29 +254,29 @@ describe("schema parity — live boot vs drizzle defs", () => {
     });
 
     const { createDiscussStore } = await import(`${W}state/discuss-store.js`);
-    await bootAndWait(discussDb, "discuss-store", async () => {
+    await bootAndWait(discussDb, ["discuss_state"], async () => {
       createDiscussStore({ dbPath: discussDb, logger: silentLogger });
     });
 
     const { createPipelineRegistryStore } = await import(`${W}state/pipeline-registry.js`);
-    await bootAndWait(registryDb, "pipeline-registry", async () => {
+    await bootAndWait(registryDb, ["pipeline_versions", "pipeline_node_versions"], async () => {
       createPipelineRegistryStore(registryDb);
     });
 
     const { createAdmissionQueueStore } = await import(`${W}state/admission-queue-store.js`);
-    await bootAndWait(admissionDb, "manifold_flow_admission_queue", async () => {
+    await bootAndWait(admissionDb, ["flow_admission_queue"], async () => {
       createAdmissionQueueStore({ dbPath: admissionDb, logger: silentLogger, getLimit: () => 8 });
     });
 
     const { createEventBus } = await import(`${W}dashboard/event-log.js`);
     const bus = createEventBus({ store: { list: async () => [] }, logger: silentLogger, dbPath: eventsDb });
     await bus.start?.();
-    await bootAndWait(eventsDb, "event-log", async () => {});
+    await bootAndWait(eventsDb, ["flow_events"], async () => {});
 
     const files = [runsDb, execDb, healthDb, sessionDb, failureDb, discussDb, registryDb, admissionDb, eventsDb];
     const tablesByFile = new Map(files.map((f) => [f, liveTables(f)]));
     const allTables = [...new Set([...tablesByFile.values()].flat())].filter(
-      (t) => !["_schema_version", "__drizzle_migrations", "sqlite_sequence"].includes(t),
+      (t) => !["__drizzle_migrations", "sqlite_sequence"].includes(t),
     );
     const expected = new Set(
       defEntries(runtimeSchema).map(([, def]) => getTableConfig(def).name),

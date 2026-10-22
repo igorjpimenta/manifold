@@ -31,35 +31,16 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { flowStateEmitter } from "../events.js";
-import { createMigrator } from "../state/migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
 const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-const MIGRATIONS = [
-  `CREATE TABLE IF NOT EXISTS flow_events (
-     id           TEXT    PRIMARY KEY,
-     flow_id      TEXT    NOT NULL,
-     event_type   TEXT    NOT NULL,
-     prev_step    TEXT,
-     curr_step    TEXT,
-     prev_status  TEXT,
-     curr_status  TEXT,
-     wait_kind    TEXT,
-     occurred_at  INTEGER NOT NULL
-   );
-   CREATE INDEX IF NOT EXISTS idx_flow_events_flow_id
-     ON flow_events(flow_id);
-   CREATE INDEX IF NOT EXISTS idx_flow_events_occurred_at
-     ON flow_events(occurred_at)`,
-];
 
 async function openEventsDb(dbPath, logger) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     const { client } = await openDb(dbPath);
-    await createMigrator(client, { name: "event-log", migrations: MIGRATIONS });
-    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     return client;
   } catch (err) {

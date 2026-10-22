@@ -63,89 +63,10 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { getSharedDb, withSharedWrite } from "./db.js";
-import { createMigrator } from "./migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-const MIGRATIONS = [
-  async (client) => {
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS pipeline_versions (
-        id                  TEXT    PRIMARY KEY,
-        pipeline_id         TEXT    NOT NULL,
-        kind                TEXT,
-        allow_concurrent    TEXT,
-        is_synthetic        INTEGER NOT NULL,
-        parent_pipeline_id  TEXT,
-        source_path         TEXT,
-        content_hash        TEXT    NOT NULL,
-        registered_at       INTEGER NOT NULL,
-        retired_at          INTEGER
-      )
-    `);
-    await client.execute(`CREATE INDEX IF NOT EXISTS idx_pv_lookup ON pipeline_versions (pipeline_id, registered_at)`);
-    await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pv_active ON pipeline_versions (pipeline_id) WHERE retired_at IS NULL`);
-
-    // NOTE: no node_id-variant indexes here on purpose — v2 below drops
-    // whatever names match and recreates them against node_name, so
-    // creating them here would only ever produce same-open dead weight.
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS pipeline_node_versions (
-        id                    TEXT    PRIMARY KEY,
-        pipeline_version_id   TEXT    NOT NULL REFERENCES pipeline_versions(id),
-        pipeline_id           TEXT    NOT NULL,
-        node_id               TEXT    NOT NULL,
-        kind                  TEXT    NOT NULL,
-        agent                 TEXT,
-        mode                  TEXT,
-        content_hash          TEXT    NOT NULL,
-        registered_at         INTEGER NOT NULL,
-        retired_at            INTEGER
-      )
-    `);
-  },
-  // node_id (from migration 1) is renamed to node_name — it was always a
-  // point-in-time DISPLAY LABEL, not a stable identifier. A new node_id
-  // column takes over as the node's PERSISTENT identity: author-declared
-  // via `node.id` when present, otherwise minted the first time a given
-  // (pipeline_id, node_name) is ever reconciled (see _resolveNodeIdentity).
-  // Indexes are dropped and recreated against the new column names rather
-  // than relying on SQLite's automatic RENAME COLUMN propagation, to not
-  // depend on version-specific behavior. The new node_id column stays
-  // nullable in the schema (SQLite can't cheaply add a NOT NULL column to
-  // a populated table without a full rebuild) — every write path going
-  // forward always supplies a value explicitly. Backfill gives every
-  // pre-existing row its own freshly-minted node_id, one shared value per
-  // (pipeline_id, node_name) group across all of that node's own past
-  // rows — they're the same node's own history, not a rename.
-  // Guarded: the DDL runs only while node_name is still missing with
-  // node_id present (baseline-shaped tables already went through this).
-  // The backfill itself only touches rows with NULL node_id, so it stays
-  // unguarded — a no-op wherever there is nothing to mint.
-  async (client) => {
-    const { rows: colRows } = await client.execute("SELECT name FROM pragma_table_info('pipeline_node_versions')");
-    const cols = colRows.map((r) => r.name);
-    if (!cols.includes("node_name") && cols.includes("node_id")) {
-      await client.execute(`DROP INDEX IF EXISTS idx_pnv_lookup`);
-      await client.execute(`DROP INDEX IF EXISTS idx_pnv_active`);
-      await client.execute(`ALTER TABLE pipeline_node_versions RENAME COLUMN node_id TO node_name`);
-      await client.execute(`ALTER TABLE pipeline_node_versions ADD COLUMN node_id TEXT`);
-      await client.execute(`CREATE INDEX IF NOT EXISTS idx_pnv_lookup ON pipeline_node_versions (pipeline_id, node_name, registered_at)`);
-      await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pnv_active ON pipeline_node_versions (pipeline_id, node_name) WHERE retired_at IS NULL`);
-    }
-
-    const { rows } = await client.execute(
-      `SELECT DISTINCT pipeline_id, node_name FROM pipeline_node_versions WHERE node_id IS NULL`,
-    );
-    for (const { pipeline_id, node_name } of rows) {
-      await client.execute({
-        sql: `UPDATE pipeline_node_versions SET node_id = ? WHERE pipeline_id = ? AND node_name = ?`,
-        args: [randomUUID(), pipeline_id, node_name],
-      });
-    }
-  },
-];
 
 function hashOf(obj) {
   return createHash("sha256").update(JSON.stringify(obj)).digest("hex");
@@ -201,8 +122,7 @@ async function _createStore(dbPath) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     ({ client } = await getSharedDb(dbPath));
-    await createMigrator(client, { name: "pipeline-registry", migrations: MIGRATIONS });
-    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   } catch {
     // Purely additive/historical-rendering feature (see this file's own

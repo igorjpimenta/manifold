@@ -376,29 +376,3 @@ describe("admission-queue-store — fillFreeSlots()", () => {
   });
 });
 
-describe("admission-queue-store — legacy agent-dispatch rows", () => {
-  test("opening the store deletes kind:'agent-dispatch' rows left from a schema-v1 database", async () => {
-    const dbPath = tmpDb();
-    const first = createAdmissionQueueStore({ dbPath, getLimit: () => 4 });
-    const run = await first.admit({ kind: "child-dispatch", flowId: "run", nodeId: "N" });
-    await first._stats();
-
-    const { client } = await getSharedDb(dbPath);
-    await client.execute({
-      sql: `INSERT INTO flow_admission_queue (id, kind, flow_id, node_id, status, created_at, admitted_at)
-            VALUES ('legacy-1', 'agent-dispatch', 'run', 'SCORE_LLM', 'admitted', 1, 1),
-                   ('legacy-2', 'agent-dispatch', 'other', 'SCORE_LLM', 'queued', 2, NULL)`,
-      args: [],
-    });
-    await client.execute({
-      sql: `DELETE FROM _schema_version WHERE store = 'manifold_flow_admission_queue' AND version > 1`,
-      args: [],
-    });
-
-    const reopened = createAdmissionQueueStore({ dbPath, getLimit: () => 4 });
-    assert.deepEqual(await reopened._stats(), { admitted: 1, queued: 0 }, "only the run's own row survives");
-    assert.equal(await reopened.get("legacy-1"), null);
-    assert.equal(await reopened.get("legacy-2"), null);
-    assert.equal((await reopened.get(run.id)).status, "admitted");
-  });
-});

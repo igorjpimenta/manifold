@@ -11,7 +11,6 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "./lib.js";
-import { createMigrator } from "../state/migrator.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
 const STORE_DIR = path.join(os.homedir(), ".openclaw");
@@ -85,55 +84,6 @@ const MOCK_ITEMS = [
   },
 ];
 
-const BUDGET_MIGRATIONS = [
-  // v1: initial schema
-  `CREATE TABLE IF NOT EXISTS queue_items (
-     id              TEXT PRIMARY KEY,
-     label           TEXT NOT NULL,
-     agent           TEXT NOT NULL,
-     agent_emoji     TEXT NOT NULL DEFAULT '🤖',
-     trigger         TEXT NOT NULL DEFAULT 'manual',
-     cost_low        REAL NOT NULL DEFAULT 0,
-     cost_high       REAL NOT NULL DEFAULT 0,
-     brief           TEXT,
-     model_chain     TEXT,
-     pipeline        TEXT,
-     node            TEXT,
-     token_estimate  INTEGER,
-     status          TEXT NOT NULL DEFAULT 'pending',
-     created_at      INTEGER NOT NULL,
-     expires_at      INTEGER,
-     decided_at      INTEGER,
-     decision        TEXT,
-     pipeline_id     TEXT,
-     pipeline_args   TEXT
-   );
-   CREATE INDEX IF NOT EXISTS idx_status     ON queue_items(status);
-   CREATE INDEX IF NOT EXISTS idx_created_at ON queue_items(created_at DESC);
-   CREATE TABLE IF NOT EXISTS gate_state (
-     id     TEXT NOT NULL PRIMARY KEY DEFAULT 'singleton',
-     locked INTEGER NOT NULL DEFAULT 0,
-     day    TEXT
-   );
-   INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`,
-  // v2: flow_id + index
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('queue_items')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("flow_id")) {
-      await client.execute("ALTER TABLE queue_items ADD COLUMN flow_id TEXT");
-      await client.execute("CREATE INDEX IF NOT EXISTS idx_flow_node ON queue_items(flow_id, node)");
-    }
-  },
-  // v3: enqueuer_session_key
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('queue_items')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("enqueuer_session_key")) {
-      await client.execute("ALTER TABLE queue_items ADD COLUMN enqueuer_session_key TEXT");
-    }
-  },
-];
 
 // getSharedDb() instead of a fresh openDb() call: on the first call ever for
 // this dbPath, this does the real work (open + migrate). On every call
@@ -143,9 +93,9 @@ const BUDGET_MIGRATIONS = [
 // connection is what closes the "budget store not attached yet" race: a
 // fresh connection per reload opens a genuine "not ready" window each time
 // by construction (see ensureClient's own comment below for the hazard).
-// createMigrator is a cheap idempotent no-op once already
-// applied, so re-running it against an already-migrated cached connection
-// on a later reload costs one quick SELECT, not a meaningful delay.
+// Snapshots are idempotent no-ops once applied, so re-running openStore
+// against an already-migrated cached connection on a later reload costs
+// one quick journal SELECT, not a meaningful delay.
 // Exported so tests can exercise the real getSharedDb-backed path against a
 // tmp dbPath (see test/unit/budget/index.test.js's "real openStore()"
 // suite) instead of only ever testing through a fully-fake openStore DI
@@ -155,9 +105,11 @@ export async function openStore({ dbPath = DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { client } = await getSharedDb(dbPath);
   await client.execute("PRAGMA foreign_keys = ON");
-  await createMigrator(client, { name: "budget", migrations: BUDGET_MIGRATIONS });
-  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
+  // The singleton row is runtime state, not schema: every gate_state reader
+  // assumes it exists. Seeded unconditionally (was v1's INSERT OR IGNORE).
+  await client.execute(`INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`);
   return client;
 }
 

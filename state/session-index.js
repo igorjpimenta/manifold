@@ -20,25 +20,9 @@ import { flowSessions } from "./schema.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
-import { createMigrator } from "./migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-
-const MIGRATIONS = [
-  `CREATE TABLE IF NOT EXISTS flow_sessions (
-     id              TEXT    PRIMARY KEY,
-     flow_id         TEXT    NOT NULL,
-     session_key     TEXT    NOT NULL,
-     node_id         TEXT,
-     branch_item_id  TEXT,
-     spawned_at      INTEGER NOT NULL
-   );
-   CREATE INDEX IF NOT EXISTS idx_flow_sessions_flow_id
-     ON flow_sessions(flow_id);
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_flow_sessions_uniq
-     ON flow_sessions(flow_id, session_key)`,
-];
 
 
 export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
@@ -46,8 +30,7 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, logger } = 
   let db, client;
   try {
     ({ db, client } = await getSharedDb(dbPath));
-    await createMigrator(client, { name: "session-index", migrations: MIGRATIONS });
-    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   } catch (err) {
     logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);

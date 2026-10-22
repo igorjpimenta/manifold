@@ -16,7 +16,6 @@
     "./state/db": "./state/db.js",
     "./state/batch-writer": "./state/batch-writer.js",
     "./state/schema": "./state/schema.js",
-    "./state/migrator": "./state/migrator.js",
     "./bridge-auth": "./auth/bridge.js"
   },
   "scripts": {
@@ -24,8 +23,6 @@
     "test": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/**/*.test.js'",
     "test:unit": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/unit/**/*.test.js'",
     "test:integration": "./scripts/with-guard.sh node --test-timeout=60000 --test 'test/integration/*.test.js'",
-    "db:generate": "drizzle-kit generate --config=drizzle.config.js && drizzle-kit generate --config=drizzle.config.ops.js",
-    "db:migrate": "drizzle-kit migrate --config=drizzle.config.js && drizzle-kit migrate --config=drizzle.config.ops.js",
     "db:generate": "drizzle-kit generate --config=drizzle.config.js && drizzle-kit generate --config=drizzle.config.ops.js",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.js && drizzle-kit migrate --config=drizzle.config.ops.js"
   },

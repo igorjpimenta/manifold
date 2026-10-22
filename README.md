@@ -1572,12 +1572,13 @@ Table shapes live in `state/schema.js` (`runtime.sqlite`) and
 `state/schema.ops.js` (`ops.sqlite`) — drizzle definitions, the single
 source of truth. `npm run db:generate` snapshots them into
 `.migrations/<db>/`; `state/migrate.js` applies pending snapshots at
-store open, after each store's own `createMigrator` chain (same libsql
-driver throughout — never a second handle under live traffic). New schema
-changes go in the defs + a generated snapshot — frozen inline chains are
-never edited for shape. `test/unit/state/migrate.test.js` fails the build
-if live-booted columns drift from the defs either way, and if any snapshot
-file carries an unguarded CREATE or a DROP/RENAME.
+store open, through a short-lived libsql client (same driver family as
+every other access). Snapshots are the sole schema path — there are no
+inline migrations, and old databases predate the snapshot era and are not
+upgraded. New schema changes go in the defs + a generated snapshot.
+`test/unit/state/migrate.test.js` fails the build if live-booted columns
+drift from the defs either way, and if any snapshot file carries an
+unguarded CREATE or a DROP/RENAME.
 
 ## Database migrations
 

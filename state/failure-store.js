@@ -43,175 +43,12 @@ import { flowRuns } from "./schema.js";
 import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
-import { createMigrator } from "./migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { failureEmitter } from "../events.js";
 import { getNodeExecutionsStore } from "./node-executions.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-const MIGRATIONS = [
-  // v1: initial schema. The acked_at/created_at indexes are created only
-  // when their columns exist — baseline-shaped tables (which never had
-  // those columns) skip them; nothing reads them there.
-  async (client) => {
-    await client.execute(`CREATE TABLE IF NOT EXISTS failure_events (
-     id              TEXT    PRIMARY KEY,
-     flow_id         TEXT    NOT NULL,
-     pipeline_id     TEXT    NOT NULL,
-     branch_item_id  TEXT,
-     failed_at       INTEGER NOT NULL,
-     failure_node    TEXT,
-     failure_kind    TEXT    NOT NULL,
-     failure_summary TEXT    NOT NULL,
-     state_excerpt   TEXT,
-     acked_at        INTEGER,
-     acked_via       TEXT,
-     created_at      INTEGER NOT NULL,
-     UNIQUE(flow_id, branch_item_id, failure_node)
-   )`);
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
-    const cols = rows.map((r) => r.name);
-    if (cols.includes("acked_at")) {
-      await client.execute(`CREATE INDEX IF NOT EXISTS idx_failures_acked   ON failure_events(acked_at)`);
-    }
-    if (cols.includes("created_at")) {
-      await client.execute(`CREATE INDEX IF NOT EXISTS idx_failures_created ON failure_events(created_at)`);
-    }
-    await client.execute(`CREATE INDEX IF NOT EXISTS idx_failures_flow    ON failure_events(flow_id)`);
-  },
-  // v2–v10: additive columns. Each uses a function migration guarded by
-  // pragma_table_info so existing installs with columns already applied
-  // don't throw "duplicate column name" on first-time migrator adoption.
-  ...[
-    ["resolved_at",     "INTEGER"],
-    ["resolved_via",    "TEXT"],
-    ["recovery_hint",   "TEXT"],
-    ["ignored_at",      "INTEGER"],
-    ["ignored_by",      "TEXT"],
-    ["retry_count",     "INTEGER DEFAULT 0"],
-    ["last_retried_at", "INTEGER"],
-    ["invocation_id",   "TEXT"],
-    ["execution_id",    "TEXT"],
-  ].map(([col, type]) => async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes(col)) await client.execute(`ALTER TABLE failure_events ADD COLUMN ${col} ${type}`);
-  }),
-  // v11: index for invocation-keyed lookups. Self-healing (never just a
-  // bare CREATE INDEX); harmless no-op on any install that already has
-  // invocation_id and no child_flow_id.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("invocation_id")) await client.execute("ALTER TABLE failure_events ADD COLUMN invocation_id TEXT");
-    if (cols.includes("child_flow_id")) await client.execute("ALTER TABLE failure_events DROP COLUMN child_flow_id");
-    await client.execute("CREATE INDEX IF NOT EXISTS idx_failures_invocation ON failure_events(invocation_id)");
-  },
-  // v12 (schema redesign): drop the 14 columns that duplicated
-  // data reachable via invocation_id/execution_id, or that supported the
-  // now-removed Skip action / server-side ignore tracking, or that were
-  // already confirmed dead. Re-anchor identity on execution_id.
-  //
-  // Table-recreate-and-swap, not a sequence of ALTER TABLE DROP COLUMN —
-  // SQLite refuses to drop branch_item_id/failure_node via plain DROP
-  // COLUMN because they're part of the original inline UNIQUE(flow_id,
-  // branch_item_id, failure_node) table constraint (dropping a column a
-  // constraint references isn't just an index problem, it needs the whole
-  // table rebuilt). Same technique node-executions.js's v3 migration
-  // already used for exactly this reason — precedented, not novel.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("pipeline_id")) return; // already migrated (idempotent re-run)
-    await client.execute(`
-      CREATE TABLE failure_events_v12 (
-        id              TEXT    PRIMARY KEY,
-        flow_id         TEXT    NOT NULL,
-        failed_at       INTEGER NOT NULL,
-        failure_kind    TEXT    NOT NULL,
-        failure_summary TEXT    NOT NULL,
-        invocation_id   TEXT,
-        execution_id    TEXT
-      )
-    `);
-    // Copy every row with no execution_id unconditionally — the new
-    // partial UNIQUE index only covers non-null execution_id, so these
-    // can't collide with it regardless of how many share a null value.
-    await client.execute(`
-      INSERT INTO failure_events_v12 (id, flow_id, failed_at, failure_kind, failure_summary, invocation_id, execution_id)
-      SELECT id, flow_id, failed_at, failure_kind, failure_summary, invocation_id, execution_id
-      FROM failure_events WHERE execution_id IS NULL
-    `);
-    // Rows WITH an execution_id: dedupe before the new UNIQUE index can
-    // even be created. The old (flow_id, branch_item_id, failure_node)
-    // identity let genuine duplicates through whenever branch_item_id was
-    // recorded inconsistently for the same real event — exactly the
-    // identity mismatch this whole redesign exists to fix. Keep the row
-    // with the latest failed_at per execution_id (most current snapshot of
-    // that failure), drop the rest.
-    await client.execute(`
-      INSERT INTO failure_events_v12 (id, flow_id, failed_at, failure_kind, failure_summary, invocation_id, execution_id)
-      SELECT id, flow_id, failed_at, failure_kind, failure_summary, invocation_id, execution_id FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY execution_id ORDER BY failed_at DESC, id DESC) AS rn
-        FROM failure_events WHERE execution_id IS NOT NULL
-      ) WHERE rn = 1
-    `);
-    await client.execute("DROP TABLE failure_events");
-    await client.execute("ALTER TABLE failure_events_v12 RENAME TO failure_events");
-    await client.execute("CREATE INDEX IF NOT EXISTS idx_failures_flow ON failure_events(flow_id)");
-    await client.execute("CREATE INDEX IF NOT EXISTS idx_failures_invocation ON failure_events(invocation_id)");
-    await client.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_failures_execution ON failure_events(execution_id) WHERE execution_id IS NOT NULL");
-  },
-  // v13 (Phase 1.5, "Eradicate soft errors"): error_type moves here from
-  // flow_node_executions, which no longer stores error content at all —
-  // this table is now the sole source. Same vocabulary as before: never_attempted|confirmed_absent|
-  // inconclusive|infra_unavailable|blocked, or null.
-  // Guarded: skips when the column already exists (baseline-shaped).
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
-    if (rows.map((r) => r.name).includes("error_type")) return;
-    await client.execute("ALTER TABLE failure_events ADD COLUMN error_type TEXT");
-  },
-  // v14: drop failure_kind. Table-recreate-and-swap, not ALTER TABLE DROP
-  // COLUMN, same reason as v12 (SQLite can rebuild around a dropped column
-  // fine, but a plain DROP COLUMN on some SQLite builds still balks at the
-  // NOT NULL constraint failure_kind carried — recreating sidesteps the
-  // question entirely).
-  // Every existing "subflow-mode-not-satisfied" row had error_type NULL
-  // (nothing ever set both at once), so its one bit of real information is
-  // carried forward into error_type here; every other historical
-  // failure_kind value (node-error, submit-blocked, etc.) simply drops,
-  // since nothing has read failure_kind for any purpose other than
-  // that one comparison since the redesign.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("failure_kind")) return; // already migrated (idempotent re-run)
-    await client.execute(`
-      CREATE TABLE failure_events_v14 (
-        id              TEXT    PRIMARY KEY,
-        flow_id         TEXT    NOT NULL,
-        failed_at       INTEGER NOT NULL,
-        failure_summary TEXT    NOT NULL,
-        invocation_id   TEXT,
-        execution_id    TEXT,
-        error_type      TEXT
-      )
-    `);
-    await client.execute(`
-      INSERT INTO failure_events_v14 (id, flow_id, failed_at, failure_summary, invocation_id, execution_id, error_type)
-      SELECT id, flow_id, failed_at, failure_summary, invocation_id, execution_id,
-             COALESCE(error_type, CASE WHEN failure_kind = 'subflow-mode-not-satisfied' THEN failure_kind ELSE NULL END)
-      FROM failure_events
-    `);
-    await client.execute("DROP TABLE failure_events");
-    await client.execute("ALTER TABLE failure_events_v14 RENAME TO failure_events");
-    await client.execute("CREATE INDEX IF NOT EXISTS idx_failures_flow ON failure_events(flow_id)");
-    await client.execute("CREATE INDEX IF NOT EXISTS idx_failures_invocation ON failure_events(invocation_id)");
-    await client.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_failures_execution ON failure_events(execution_id) WHERE execution_id IS NOT NULL");
-  },
-];
 
 // Maps a failure's (error_type, summary) to the operator action the iOS
 // Inbox should surface for this row:
@@ -271,8 +108,7 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeE
   const nodeExecutions = nodeExecutionsStore ?? await getNodeExecutionsStore();
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "failure-store", migrations: MIGRATIONS });
-  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
 
   // ── Write-side identity ────────────────────────────────────────────

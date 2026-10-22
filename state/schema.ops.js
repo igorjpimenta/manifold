@@ -112,6 +112,10 @@ export const capVersions = sqliteTable('cap_versions', {
   uniqueIndex('idx_cv_active').on(sql`(1)`).where(sql`${table.retiredAt} IS NULL`),
 ]);
 
+// Durable log of threshold crossings — the .alerted-thresholds.json debounce
+// file only ever answers "did we already fire threshold X today" and is
+// overwritten every local day, so it can't answer "when did we last
+// cross 80%". This table is the queryable history that backs that question.
 export const budgetAlertEvents = sqliteTable('budget_alert_events', {
   id:        text('id').primaryKey(),
   threshold: real('threshold').notNull(),

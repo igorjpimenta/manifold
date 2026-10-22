@@ -36,30 +36,10 @@ import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { getSharedDb, withSharedWrite } from "./db.js";
-import { createMigrator } from "./migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-const MIGRATIONS = [
-  `CREATE TABLE IF NOT EXISTS flow_admission_queue (
-    id           TEXT    PRIMARY KEY,
-    kind         TEXT    NOT NULL,
-    flow_id      TEXT    NOT NULL,
-    node_id      TEXT,
-    status       TEXT    NOT NULL,
-    created_at   INTEGER NOT NULL,
-    admitted_at  INTEGER
-  );
-  CREATE INDEX IF NOT EXISTS idx_admission_status ON flow_admission_queue (status);
-  CREATE INDEX IF NOT EXISTS idx_admission_flow ON flow_admission_queue (flow_id);
-  CREATE INDEX IF NOT EXISTS idx_admission_status_created ON flow_admission_queue (status, created_at);`,
-  // kind:"agent-dispatch" is no longer an admission kind. Leftover rows
-  // would count against the pool with nothing ever releasing them; the
-  // flows that were queued on one are re-admitted on their own run kind by
-  // boot/flow-revival.js.
-  `DELETE FROM flow_admission_queue WHERE kind = 'agent-dispatch';`,
-];
 
 // Same Proxy-wrapped async-ready factory idiom as run-store.js/state-
 // store.js — every method call transparently awaits store construction
@@ -84,8 +64,7 @@ async function _createImpl({ dbPath = DEFAULT_DB_PATH, getLimit } = {}) {
   }
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "manifold_flow_admission_queue", migrations: MIGRATIONS });
-  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
 
   // Runs `fn(tx)` inside one BEGIN IMMEDIATE transaction, committing on

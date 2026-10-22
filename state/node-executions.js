@@ -25,7 +25,6 @@ import os from "node:os";
 import { eq, and, inArray, isNull, isNotNull, desc, asc } from "drizzle-orm";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { flowNodeInvocations, flowNodeExecutions } from "./schema.js";
-import { createMigrator } from "./migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
@@ -37,307 +36,6 @@ const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 // result-replay.js/needs-resolver.js stay in place read-only, for
 // pre-existing rows whose capped result cannot be recovered.
 
-const MIGRATIONS = [
-  // v1: original flow_step_timings shape.
-  `CREATE TABLE IF NOT EXISTS flow_step_timings (
-     id          INTEGER PRIMARY KEY AUTOINCREMENT,
-     flow_id     TEXT    NOT NULL,
-     pipeline_id TEXT,
-     node_id     TEXT    NOT NULL,
-     branch_item TEXT,
-     entered_at  INTEGER NOT NULL,
-     exited_at   INTEGER NOT NULL
-   );
-   CREATE INDEX IF NOT EXISTS idx_fst_pipe_node ON flow_step_timings(pipeline_id, node_id);
-   CREATE INDEX IF NOT EXISTS idx_fst_flow      ON flow_step_timings(flow_id);
-   CREATE INDEX IF NOT EXISTS idx_fst_exited    ON flow_step_timings(exited_at)`,
-
-  // v2: renamed flow_step_timings -> flow_node_executions. The data section
-  // runs only while the legacy timings table exists (fresh databases built
-  // from the baseline snapshot never had one); CREATEs are IF NOT EXISTS
-  // so either shape converges without error.
-  async (client) => {
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS flow_node_executions (
-        id          TEXT    PRIMARY KEY,
-        flow_id     TEXT    NOT NULL,
-        pipeline_id TEXT,
-        node_id     TEXT    NOT NULL,
-        branch_key  TEXT,
-        entered_at  INTEGER NOT NULL,
-        exited_at   INTEGER NOT NULL,
-        group_id    TEXT,
-        error       TEXT
-      )
-    `);
-    const { rows: timingTables } = await client.execute(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='flow_step_timings'`
-    );
-    if (timingTables.length === 0) return;
-    const { rows } = await client.execute(
-      `SELECT flow_id, pipeline_id, node_id, branch_item, entered_at, exited_at FROM flow_step_timings`
-    );
-    for (const r of rows) {
-      await client.execute({
-        sql: `INSERT INTO flow_node_executions (id, flow_id, pipeline_id, node_id, branch_key, entered_at, exited_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: [randomUUID(), r.flow_id, r.pipeline_id, r.node_id, r.branch_item, r.entered_at, r.exited_at],
-      });
-    }
-    // Branch-error backfill: flow_branches lives in this same runtime.sqlite
-    // file — legacy old-model storage, so guarded by an existence check: it
-    // may simply not exist on a database that never had a branch model.
-    const { rows: hasBranchTable } = await client.execute(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name='flow_branches'`
-    );
-    if (hasBranchTable.length > 0) {
-      const { rows: branchRows } = await client.execute(
-        `SELECT flow_id, group_id, branch_key, step, started_at, updated_at, done_at, errors
-           FROM flow_branches WHERE errors IS NOT NULL AND errors != '[]'`
-      );
-      for (const b of branchRows) {
-        const error = lastErrorMessage(b.errors);
-        if (error == null) continue;
-        await client.execute({
-          sql: `INSERT INTO flow_node_executions (id, flow_id, pipeline_id, node_id, branch_key, group_id, entered_at, exited_at, error) VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
-          args: [randomUUID(), b.flow_id, b.step, b.branch_key, b.group_id, b.started_at, b.done_at ?? b.updated_at, error],
-        });
-      }
-    }
-    await client.execute(`DROP TABLE flow_step_timings`);
-  },
-
-  // v3 (Phase 2): split flow_node_executions into flow_node_invocations
-  // (one row per logical dispatch, created once) + a narrowed
-  // flow_node_executions (one row per attempt, FK to its invocation).
-  // Guarded: runs only while executions still lacks invocation_id
-  // (baseline-shaped tables already went through this split).
-  async (client) => {
-    const { rows: execCols } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
-    if (execCols.map((r) => r.name).includes("invocation_id")) return;
-    await client.execute(`
-      CREATE TABLE flow_node_invocations (
-        id          TEXT    PRIMARY KEY,
-        flow_id     TEXT    NOT NULL,
-        pipeline_id TEXT,
-        node_id     TEXT    NOT NULL,
-        group_id    TEXT,
-        branch_key  TEXT,
-        invoked_at  INTEGER NOT NULL
-      )
-    `);
-    await client.execute(`
-      CREATE UNIQUE INDEX idx_invocations_identity
-        ON flow_node_invocations (flow_id, node_id, COALESCE(group_id, ''), COALESCE(branch_key, ''))
-    `);
-    await client.execute(`CREATE INDEX idx_invocations_flow ON flow_node_invocations (flow_id)`);
-    await client.execute(`CREATE INDEX idx_invocations_pipe_node ON flow_node_invocations (pipeline_id, node_id)`);
-
-    const { rows } = await client.execute(
-      `SELECT id, flow_id, pipeline_id, node_id, branch_key, group_id, entered_at, exited_at, error
-         FROM flow_node_executions ORDER BY entered_at ASC`
-    );
-
-    await client.execute(`
-      CREATE TABLE flow_node_executions_v3 (
-        id            TEXT    PRIMARY KEY,
-        invocation_id TEXT    NOT NULL,
-        entered_at    INTEGER NOT NULL,
-        exited_at     INTEGER NOT NULL,
-        error         TEXT
-      )
-    `);
-
-    const invocationIdByTuple = new Map();
-    for (const r of rows) {
-      const tupleKey = `${r.flow_id} ${r.node_id} ${r.group_id ?? ""} ${r.branch_key ?? ""}`;
-      let invocationId = invocationIdByTuple.get(tupleKey);
-      if (!invocationId) {
-        invocationId = randomUUID();
-        await client.execute({
-          sql: `INSERT INTO flow_node_invocations (id, flow_id, pipeline_id, node_id, group_id, branch_key, invoked_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          args: [invocationId, r.flow_id, r.pipeline_id, r.node_id, r.group_id, r.branch_key, r.entered_at],
-        });
-        invocationIdByTuple.set(tupleKey, invocationId);
-      }
-      await client.execute({
-        sql: `INSERT INTO flow_node_executions_v3 (id, invocation_id, entered_at, exited_at, error) VALUES (?, ?, ?, ?, ?)`,
-        args: [randomUUID(), invocationId, r.entered_at, r.exited_at, r.error],
-      });
-    }
-
-    await client.execute(`DROP TABLE flow_node_executions`);
-    await client.execute(`ALTER TABLE flow_node_executions_v3 RENAME TO flow_node_executions`);
-    await client.execute(`CREATE INDEX idx_fne_invocation ON flow_node_executions(invocation_id)`);
-    await client.execute(`CREATE INDEX idx_fne_exited ON flow_node_executions(exited_at)`);
-  },
-
-  // v4: drop group_id from flow_node_invocations (made redundant by
-  // childFlows being universal). Merges historical duplicates first —
-  // __end__ sub-node rows that share (flow_id, node_id, branch_key) but
-  // differ only in group_id would collide once group_id is gone.
-  // Guarded: runs only while group_id still exists.
-  async (client) => {
-    const { rows: invCols } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
-    if (!invCols.map((r) => r.name).includes("group_id")) return;
-    const { rows: dupes } = await client.execute(`
-      SELECT flow_id, node_id, COALESCE(branch_key, '') AS bk, MIN(id) AS winner_id
-        FROM flow_node_invocations
-       GROUP BY flow_id, node_id, bk
-      HAVING COUNT(*) > 1
-    `);
-    for (const d of dupes) {
-      const { rows: losers } = await client.execute({
-        sql: `SELECT id FROM flow_node_invocations WHERE flow_id = ? AND node_id = ? AND COALESCE(branch_key, '') = ? AND id != ?`,
-        args: [d.flow_id, d.node_id, d.bk, d.winner_id],
-      });
-      for (const loser of losers) {
-        await client.execute({ sql: `UPDATE flow_node_executions SET invocation_id = ? WHERE invocation_id = ?`, args: [d.winner_id, loser.id] });
-        await client.execute({ sql: `DELETE FROM flow_node_invocations WHERE id = ?`, args: [loser.id] });
-      }
-    }
-    await client.execute(`DROP INDEX idx_invocations_identity`);
-    await client.execute(`ALTER TABLE flow_node_invocations DROP COLUMN group_id`);
-    await client.execute(`
-      CREATE UNIQUE INDEX idx_invocations_identity
-        ON flow_node_invocations (flow_id, node_id, COALESCE(branch_key, ''))
-    `);
-  },
-
-  // v5: add visit_seq to distinguish fresh passes from
-  // continuations (retries, revivals, re-checks). Guarded: skips when
-  // the column already exists (baseline-shaped tables).
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
-    if (rows.map((r) => r.name).includes("visit_seq")) return;
-    await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN visit_seq INTEGER NOT NULL DEFAULT 1`);
-    await client.execute(`DROP INDEX idx_invocations_identity`);
-    await client.execute(`
-      CREATE UNIQUE INDEX idx_invocations_identity
-        ON flow_node_invocations (flow_id, node_id, COALESCE(branch_key, ''), visit_seq)
-    `);
-  },
-
-  // v6: kind on flow_node_executions — why this execution happened.
-  // Guarded: skips when the column already exists.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
-    if (rows.map((r) => r.name).includes("kind")) return;
-    await client.execute(`ALTER TABLE flow_node_executions ADD COLUMN kind TEXT NOT NULL DEFAULT 'legacy'`);
-  },
-
-  // v7: rename branch_key -> subflow_key. Drop and recreate the expression
-  // index since RENAME COLUMN doesn't rewrite index expressions.
-  // Guarded: the rename runs only while branch_key still exists without
-  // subflow_key. The index creations below run unconditionally (IF NOT
-  // EXISTS): baseline-shaped tables need them from the snapshot-independent
-  // path, legacy tables get them here exactly once.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
-    const cols = rows.map((r) => r.name);
-    if (cols.includes("branch_key") && !cols.includes("subflow_key")) {
-      await client.execute(`DROP INDEX IF EXISTS idx_invocations_identity`);
-      await client.execute(`ALTER TABLE flow_node_invocations RENAME COLUMN branch_key TO subflow_key`);
-    }
-    await client.execute(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_invocations_identity
-        ON flow_node_invocations (flow_id, node_id, COALESCE(subflow_key, ''), visit_seq)
-    `);
-  },
-
-  // v8 ("Eradicate soft errors"):
-  // error_type on flow_node_executions, set when a thrown error is a
-  // NodeFailure (engine/executor-errors.js) — reuses the existing
-  // never_attempted|confirmed_absent|inconclusive|infra_unavailable|blocked
-  // vocabulary, moved from a soft-returned field to a thrown error's
-  // property. Null for a plain Error or no error at all.
-  // Guarded: skips when the column already exists.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
-    if (rows.map((r) => r.name).includes("error_type")) return;
-    await client.execute(`ALTER TABLE flow_node_executions ADD COLUMN error_type TEXT`);
-  },
-
-  // v9 (Phase 1.5, "Eradicate soft errors"): error content moves entirely
-  // to failure_events, which now gets a permanent row on every single
-  // throw regardless of what a cascade edge decides next — v8's error_type
-  // lasted one phase. This table goes back to being a pure
-  // execution-window/identity ledger. Plain columns, no constraints
-  // reference either — safe to drop directly, no table-recreate-and-swap
-  // needed.
-  // Guarded: runs only while at least one dropped column still exists.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("error") && !cols.includes("error_type")) return;
-    if (cols.includes("error")) {
-      await client.execute(`ALTER TABLE flow_node_executions DROP COLUMN error`);
-    }
-    if (cols.includes("error_type")) {
-      await client.execute(`ALTER TABLE flow_node_executions DROP COLUMN error_type`);
-    }
-  },
-
-  // v10 ("Option B", Phase B0):
-  // resultJson on flow_node_invocations — this table's first payload
-  // column, written once per row on completion via writeResult() below.
-  // resultWrittenAt distinguishes "not dispatched" (no row)/"dispatched,
-  // not complete" (row exists, resultWrittenAt NULL)/"complete" (set) —
-  // a bare nullable resultJson alone can't tell those apart.
-  // resultTooLargeBytes is the write-time size-cap marker: above the cap,
-  // resultJson stays NULL and this carries the real byte count instead of
-  // silently inlining an oversized payload. Purely additive — nothing
-  // reads these columns yet; B0 only starts building history for the
-  // later assembly phase (B1+).
-  // Guarded: skips when result_json already exists (baseline-shaped).
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
-    if (rows.map((r) => r.name).includes("result_json")) return;
-    await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN result_json TEXT`);
-    await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN result_written_at INTEGER`);
-    await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN result_too_large_bytes INTEGER`);
-  },
-
-  // v11: gate_records — one row per (flow, human-gate node), holding
-  // exactly what executor-nodes.js's human-gate branch already tracks in
-  // state.gates[nodeId] (pending/items/openedAt/lastOpenedAt/
-  // consumedAt). state.gates itself is untouched by this — this is a
-  // parallel, additive write, same pattern the original resultJson columns
-  // used. The reason it needs its OWN identity-keyed table rather than
-  // riding along in resultJson: multiple different gate nodes in the same
-  // flow all write into the SAME top-level state.gates key via a full-
-  // snapshot embed (required by state_json's own shallow-merge accumulation
-  // model), which makes a later gate's own resultJson row contain an
-  // EARLIER gate's now-stale copy of that shared key — replaying it can
-  // silently erase a sibling gate's real record. A dedicated table keyed
-  // by (flow_id, node_id) has no shared key to go stale: each gate node
-  // only ever touches its own row, so a point lookup is always correct,
-  // no replay/merge involved.
-  `CREATE TABLE IF NOT EXISTS gate_records (
-     flow_id     TEXT    NOT NULL,
-     node_id     TEXT    NOT NULL,
-     record_json TEXT    NOT NULL,
-     updated_at  INTEGER NOT NULL,
-     PRIMARY KEY (flow_id, node_id)
-   )`,
-
-  // v13: index for freelance-filter-node.js's in-flight dedup query
-  // (workspace/.shared/common/lib/freelance-filter-node.js), which filters
-  // flow_node_invocations by node_id and correlates on subflow_key (both
-  // in its own WHERE clause and in a NOT EXISTS subquery added alongside
-  // it). Neither column was covered by an existing index — idx_invocations_
-  // pipe_node leads with pipeline_id, which that query never filters on —
-  // so SQLite falls back to a full scan of flow_runs (driving the join)
-  // plus a second per-row scan inside the correlated subquery; the query
-  // effectively never completes. This index turns both the outer filter
-  // and the subquery's exact (node_id, subflow_key) lookup into direct
-  // index searches instead. IF NOT EXISTS: the migrator tracks applied
-  // versions in _schema_version, not actual schema state, so a database
-  // that already carries this index (e.g. patched out-of-band ahead of the
-  // migration) would throw "index already exists" without it.
-  async (client) => {
-    await client.execute(`CREATE INDEX IF NOT EXISTS idx_invocations_node_subflow ON flow_node_invocations (node_id, subflow_key)`);
-  },
-];
 
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
 
@@ -386,8 +84,7 @@ async function _createStore(dbPath) {
     const { db, client } = await getSharedDb(dbPath);
     // Tracking key deliberately kept as "step-timings" — pure version-history
     // bookkeeping, unrelated to the table's current name/shape.
-    await createMigrator(client, { name: "step-timings", migrations: MIGRATIONS });
-    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
 
     // ── helpers ────────────────────────────────────────────────────────────
@@ -408,8 +105,8 @@ async function _createStore(dbPath) {
       return rows[0] ?? null;
     }
 
-    // Find-or-create the invocation for a logical node dispatch. See MIGRATIONS
-    // v5 comment: forceNew=true (kind="fresh") creates a new visit_seq row;
+    // Find-or-create the invocation for a logical node dispatch.
+    // forceNew=true (kind="fresh") creates a new visit_seq row;
     // forceNew=false reuses the latest. Race-safe via INSERT OR IGNORE +
     // re-select.
     //
@@ -941,8 +638,9 @@ async function _createStore(dbPath) {
         } catch { return null; }
       },
 
-      // gate_records — see MIGRATIONS v11's comment for why this needs its
-      // own identity-keyed table rather than riding along in resultJson.
+      // gate_records — see the gateRecords def in state/schema.js for why
+      // this needs its own identity-keyed table rather than riding along
+      // in resultJson.
       // Point upsert: a gate node only ever touches its own (flowId, nodeId)
       // row, so there's no merge/replay involved and no staleness possible.
       async writeGateRecord(flowId, nodeId, record) {

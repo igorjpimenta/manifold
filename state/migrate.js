@@ -7,8 +7,9 @@
 // Schema DDL lives in state/schema.js (runtime.sqlite) and
 // state/schema.ops.js (ops.sqlite); `npm run db:generate` snapshots them
 // into .migrations/*/<n>.sql from it. This applies pending snapshots at
-// open — AFTER each store's own createMigrator chain, never before: the
-// legacy chain owns all pre-existing databases outright.
+// every store open — the sole schema path. There are no inline migrations
+// left to run first: old databases predate the snapshot era and are not
+// upgraded (pre-release; delete and resync).
 //
 // Journal compatibility with drizzle-kit is exact, so `npm run db:migrate`
 // and this runner agree on what is applied: the same
@@ -18,10 +19,9 @@
 // recorded row (mirrors SQLiteSyncDialect.migrate line for line).
 //
 // The 0000 baseline files carry hand-added IF NOT EXISTS on every CREATE
-// (one-time anchor edit — drizzle-kit emits plain CREATE). That makes
-// this a strict no-op on databases the legacy chain just shaped, while
-// future snapshots (pure additive ALTERs the chain never mentions) apply
-// normally. Never hand-edit 0001+.
+// (one-time anchor edit — drizzle-kit emits plain CREATE). Future
+// snapshots must keep that property (pure additive ALTERs); the snapshot
+// hygiene tests fail the build otherwise. Never hand-edit 0001+.
 import path from "node:path";
 import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -83,9 +83,8 @@ export async function migrateDatabase({ dbPath, migrationsFolder, logger } = {})
       (s) => !last || Number(last.created_at) < s.when,
     );
     if (pending.length === 0) return { applied: [] };
-    // Serialized with every other in-process writer on this file: snapshot
-    // application must never interleave with live traffic on the shared
-    // connection the way overlapping createMigrator runs would.
+    // Serialized with every other in-process writer on this file — snapshot
+    // application must never interleave with live traffic.
     return await withSharedWrite(dbPath, async () => {
       await client.execute("BEGIN");
       try {

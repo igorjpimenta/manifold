@@ -1,37 +1,15 @@
 /**
  * Unit tests for state/failure-store.js
  *
- * 2026-08-11 schema redesign: failure_events went from 21 columns to 6
- * (id, flow_id, failed_at, failure_kind, failure_summary, invocation_id,
- * execution_id). pipeline_id/branch_item_id/failure_node/recovery_hint/
- * resolved_at are now computed at READ time (deriveFailureContext), not
- * stored — tests that need those fields go through store.get()/list(),
- * not raw SQL. resolveOpenForBranch/recordRetry/markIgnored/markUnignored
- * and the recovery_hint backfill are gone entirely.
- *
- * 2026-08-11 Phase 5 ("Eradicate soft errors"):
- * recordFromTerminalState/scanStateForSoftError/classifyKind are gone —
- * every soft `_error`/`blockedReason`/`mode` producer in the codebase was
- * finally converted to throw, leaving nothing for the soft-marker scan to
- * ever find. failure_events is now populated exclusively by
- * recordEngineFailure, called from the engine's own throw-catch paths.
- *
- * 2026-08-14: failure_kind dropped entirely (v14) — it had collapsed to
- * exactly two live values (engine-failed/subflow-mode-not-satisfied) once
- * classifyKind's producers were gone, so the one bit of information it
- * still carried folded into error_type instead. classifyRecoveryHint now
- * keys off (error_type, failure_summary), not (failure_kind, summary).
- *
- * Covers: createFailureStore — schema creation + column drops + idempotent
- * migration; summarize (still raw-stored, checked via SQL, now only
- * reachable via recordEngineFailure); classifyRecoveryHint (computed,
- * checked via get() against raw-seeded error_type/summary pairs);
- * upsertFailureRow's two identity paths (execution_id conflict,
- * null-execution_id fallback dedup); deriveFailureContext (pipeline_id via
- * flow_runs, branch_item_id/failure_node via invocation);
- * computeResolvedAt's two mechanisms (same-flow completion, cross-flow
- * supersession); list()/get(); recordEngineFailure();
- * queryErrorsByFlow()/queryErrorsByFlowIds().
+ * Covers: createFailureStore — schema creation + idempotent open;
+ * summarize (raw-stored, checked via SQL, reachable via
+ * recordEngineFailure); classifyRecoveryHint (computed, checked via get()
+ * against raw-seeded error_type/summary pairs); upsertFailureRow's two
+ * identity paths (execution_id conflict, null-execution_id fallback
+ * dedup); deriveFailureContext (pipeline_id via flow_runs,
+ * branch_item_id/failure_node via invocation); computeResolvedAt's two
+ * mechanisms (same-flow completion, cross-flow supersession); list()/get();
+ * recordEngineFailure(); queryErrorsByFlow()/queryErrorsByFlowIds().
  */
 
 import { test, describe, before, after, beforeEach, afterEach } from "node:test";
@@ -100,9 +78,8 @@ async function seedFlowRun(store, { flowId, pipelineId = "pipe", status = "runni
   });
 }
 
-// Raw insert matching the current 6-column (+id) stored shape (failure_kind
-// dropped by v14) — used where a test needs to seed a row directly rather
-// than go through recordFromTerminalState/recordEngineFailure.
+// Raw insert matching the stored shape — used where a test needs to seed
+// a row directly rather than go through recordEngineFailure.
 async function insertRawRow(store, { id = randomUUID(), flowId = "f1", failedAt = Date.now(), failureSummary = "err", invocationId = null, executionId = null, errorType = null } = {}) {
   await store._db.execute({
     sql: `INSERT INTO failure_events (id, flow_id, failed_at, failure_summary, invocation_id, execution_id, error_type)
@@ -130,201 +107,8 @@ describe("createFailureStore — DB setup", () => {
     const s2 = createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     await s2.close();
   });
-
-  test("current schema (post v1-v14) has exactly the 6 surviving columns, nothing from either dropped generation", async () => {
-    const store = await makeStore();
-    const { rows: info } = await store._db.execute("PRAGMA table_info(failure_events)");
-    const cols = info.map((r) => r.name);
-    for (const col of ["id", "flow_id", "failed_at", "failure_summary", "invocation_id", "execution_id", "error_type"]) {
-      assert.ok(cols.includes(col), `surviving column ${col} should exist`);
-    }
-    for (const col of [
-      "pipeline_id", "branch_item_id", "failure_node", "created_at", "recovery_hint",
-      "resolved_at", "resolved_via", "retry_count", "last_retried_at",
-      "ignored_at", "ignored_by", "acked_at", "acked_via", "state_excerpt",
-      "failure_kind",
-    ]) {
-      assert.ok(!cols.includes(col), `dropped column ${col} should no longer exist`);
-    }
-    store.close();
-  });
-
-  test("v12 dedupes pre-existing execution_id collisions before creating the UNIQUE index (real-data regression)", async () => {
-    // Found against production data during this migration's own rollout:
-    // the old (flow_id, branch_item_id, failure_node) identity let a
-    // genuine duplicate through when branch_item_id was recorded
-    // inconsistently ('' vs the real job slug) for what was actually the
-    // same underlying execution. Without a dedup pass, v12's CREATE
-    // UNIQUE INDEX on execution_id would throw SQLITE_CONSTRAINT and the
-    // whole migration would fail to apply.
-    const dbPath = tmpDb();
-    const raw = createClient({ url: `file:${dbPath}` });
-    await raw.execute(`CREATE TABLE failure_events (
-      id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, pipeline_id TEXT NOT NULL,
-      branch_item_id TEXT, failed_at INTEGER NOT NULL, failure_node TEXT,
-      failure_kind TEXT NOT NULL, failure_summary TEXT NOT NULL, state_excerpt TEXT,
-      acked_at INTEGER, acked_via TEXT, created_at INTEGER NOT NULL,
-      resolved_at INTEGER, resolved_via TEXT, recovery_hint TEXT,
-      ignored_at INTEGER, ignored_by TEXT, retry_count INTEGER DEFAULT 0,
-      last_retried_at INTEGER, invocation_id TEXT, execution_id TEXT,
-      UNIQUE(flow_id, branch_item_id, failure_node)
-    )`);
-    await raw.execute(`CREATE TABLE IF NOT EXISTS _schema_version (
-      store TEXT NOT NULL, version INTEGER NOT NULL, applied_at INTEGER NOT NULL,
-      PRIMARY KEY (store, version)
-    )`);
-    for (let v = 1; v <= 11; v++) {
-      await raw.execute({
-        sql: "INSERT INTO _schema_version(store, version, applied_at) VALUES (?, ?, ?)",
-        args: ["failure-store", v, Date.now()],
-      });
-    }
-    const sharedExecId = randomUUID();
-    const staleId = randomUUID();
-    const currentId = randomUUID();
-    await raw.execute({
-      sql: `INSERT INTO failure_events (id, flow_id, pipeline_id, branch_item_id, failed_at, failure_node, failure_kind, failure_summary, created_at, invocation_id, execution_id)
-            VALUES (?, 'flow-x', 'pipe', '', 1000, 'SUBMIT', 'node-error', 'stale copy', 1000, 'inv-x', ?)`,
-      args: [staleId, sharedExecId],
-    });
-    await raw.execute({
-      sql: `INSERT INTO failure_events (id, flow_id, pipeline_id, branch_item_id, failed_at, failure_node, failure_kind, failure_summary, created_at, invocation_id, execution_id)
-            VALUES (?, 'flow-x', 'pipe', 'job-real-slug', 2000, 'SUBMIT', 'node-error', 'current copy', 2000, 'inv-x', ?)`,
-      args: [currentId, sharedExecId],
-    });
-    raw.close();
-
-    const store = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
-    const { rows } = await store._db.execute({ sql: "SELECT * FROM failure_events WHERE execution_id = ?", args: [sharedExecId] });
-    assert.equal(rows.length, 1, "the migration must dedupe, not throw or leave both rows");
-    assert.equal(rows[0].id, currentId, "the row with the later failed_at should survive");
-    store.close();
-  });
-
-  test("v12 creates a partial UNIQUE index on execution_id", async () => {
-    const store = await makeStore();
-    const { rows } = await store._db.execute("PRAGMA index_list(failure_events)");
-    const idx = rows.find((r) => r.name === "idx_failures_execution");
-    assert.ok(idx, "idx_failures_execution should exist");
-    assert.equal(Number(idx.unique ?? idx["unique"]), 1, "index must be UNIQUE");
-    store.close();
-  });
-
-  test("v13 adds error_type (Phase 1.5 — moved here from flow_node_executions)", async () => {
-    const store = await makeStore();
-    const { rows: info } = await store._db.execute("PRAGMA table_info(failure_events)");
-    const cols = info.map((r) => r.name);
-    assert.ok(cols.includes("error_type"), "error_type column must exist after the v13 migration");
-    store.close();
-  });
-
-  test("v14 drops failure_kind, folding subflow-mode-not-satisfied into error_type and dropping every other historical kind with no replacement", async () => {
-    const dbPath = tmpDb();
-    const raw = createClient({ url: `file:${dbPath}` });
-    await raw.execute(`CREATE TABLE failure_events (
-      id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, failed_at INTEGER NOT NULL,
-      failure_kind TEXT NOT NULL, failure_summary TEXT NOT NULL,
-      invocation_id TEXT, execution_id TEXT, error_type TEXT
-    )`);
-    await raw.execute(`CREATE TABLE IF NOT EXISTS _schema_version (
-      store TEXT NOT NULL, version INTEGER NOT NULL, applied_at INTEGER NOT NULL,
-      PRIMARY KEY (store, version)
-    )`);
-    for (let v = 1; v <= 13; v++) {
-      await raw.execute({
-        sql: "INSERT INTO _schema_version(store, version, applied_at) VALUES (?, ?, ?)",
-        args: ["failure-store", v, Date.now()],
-      });
-    }
-    const propagatedId = randomUUID();
-    const alreadyTypedId = randomUUID();
-    const historicalId = randomUUID();
-    await raw.execute({
-      sql: `INSERT INTO failure_events (id, flow_id, failed_at, failure_kind, failure_summary, error_type)
-            VALUES (?, 'flow-a', 1000, 'subflow-mode-not-satisfied', 'propagated', NULL)`,
-      args: [propagatedId],
-    });
-    await raw.execute({
-      sql: `INSERT INTO failure_events (id, flow_id, failed_at, failure_kind, failure_summary, error_type)
-            VALUES (?, 'flow-b', 2000, 'engine-failed', 'a real node throw', 'blocked')`,
-      args: [alreadyTypedId],
-    });
-    await raw.execute({
-      sql: `INSERT INTO failure_events (id, flow_id, failed_at, failure_kind, failure_summary, error_type)
-            VALUES (?, 'flow-c', 3000, 'node-error', 'pre-redesign row', NULL)`,
-      args: [historicalId],
-    });
-    raw.close();
-
-    const store = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
-    const { rows: colRows } = await store._db.execute("PRAGMA table_info(failure_events)");
-    assert.ok(!colRows.map((r) => r.name).includes("failure_kind"), "failure_kind must be gone");
-
-    const propagated = (await store._db.execute({ sql: "SELECT error_type FROM failure_events WHERE id = ?", args: [propagatedId] })).rows[0];
-    assert.equal(propagated.error_type, "subflow-mode-not-satisfied", "propagated row's one bit of info survives into error_type");
-
-    const alreadyTyped = (await store._db.execute({ sql: "SELECT error_type FROM failure_events WHERE id = ?", args: [alreadyTypedId] })).rows[0];
-    assert.equal(alreadyTyped.error_type, "blocked", "an already-set error_type is never overwritten by the fold");
-
-    const historical = (await store._db.execute({ sql: "SELECT error_type FROM failure_events WHERE id = ?", args: [historicalId] })).rows[0];
-    assert.equal(historical.error_type, null, "a historical kind with no error_type drops with no replacement");
-    store.close();
-  });
-
-  test("v14 is idempotent — opening twice on an already-migrated DB does not throw or duplicate rows", async () => {
-    const dbPath = tmpDb();
-    const s1 = createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
-    await s1.close();
-    const s2 = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
-    const { rows } = await s2._db.execute("PRAGMA table_info(failure_events)");
-    assert.ok(!rows.map((r) => r.name).includes("failure_kind"));
-    s2.close();
-  });
-
-  test("v11 self-heals migrator drift left by the reverted child_flow_id migration, and v12 still runs after it", async () => {
-    // Reproduces exactly what happened in production: an earlier (later
-    // reverted) migration added child_flow_id and recorded a real
-    // _schema_version row before the code was reverted, shifting every
-    // migration after it down one slot. Hand-build a DB in that exact
-    // drifted state (v9 recorded, child_flow_id present, invocation_id
-    // absent) and confirm opening via createFailureStore repairs it AND
-    // still successfully runs v12's column drops afterward.
-    const dbPath = tmpDb();
-    const raw = createClient({ url: `file:${dbPath}` });
-    await raw.execute(`CREATE TABLE failure_events (
-      id TEXT PRIMARY KEY, flow_id TEXT NOT NULL, pipeline_id TEXT NOT NULL,
-      branch_item_id TEXT, failed_at INTEGER NOT NULL, failure_node TEXT,
-      failure_kind TEXT NOT NULL, failure_summary TEXT NOT NULL, state_excerpt TEXT,
-      acked_at INTEGER, acked_via TEXT, created_at INTEGER NOT NULL,
-      resolved_at INTEGER, resolved_via TEXT, recovery_hint TEXT,
-      ignored_at INTEGER, ignored_by TEXT, retry_count INTEGER DEFAULT 0,
-      last_retried_at INTEGER, child_flow_id TEXT,
-      UNIQUE(flow_id, branch_item_id, failure_node)
-    )`);
-    await raw.execute(`CREATE TABLE IF NOT EXISTS _schema_version (
-      store TEXT NOT NULL, version INTEGER NOT NULL, applied_at INTEGER NOT NULL,
-      PRIMARY KEY (store, version)
-    )`);
-    for (let v = 1; v <= 9; v++) {
-      await raw.execute({
-        sql: "INSERT INTO _schema_version(store, version, applied_at) VALUES (?, ?, ?)",
-        args: ["failure-store", v, Date.now()],
-      });
-    }
-    raw.close();
-
-    const store = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
-    const { rows: colRows } = await store._db.execute("PRAGMA table_info(failure_events)");
-    const cols = colRows.map((r) => r.name);
-    assert.ok(cols.includes("invocation_id"), "invocation_id must be added by the v11 repair");
-    assert.ok(cols.includes("execution_id"), "execution_id must also be present");
-    assert.ok(!cols.includes("child_flow_id"), "stray child_flow_id must be dropped");
-    assert.ok(!cols.includes("pipeline_id"), "v12 must still run and drop pipeline_id after v11 repairs");
-    assert.ok(!cols.includes("branch_item_id"), "v12 must still run and drop branch_item_id after v11 repairs");
-    await store._db.execute({ sql: "SELECT * FROM failure_events WHERE invocation_id = ?", args: ["x"] });
-    store.close();
-  });
 });
+
 
 // ─── summarize — still a raw-stored column ────────────────────────────────────
 //
