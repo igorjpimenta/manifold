@@ -199,6 +199,19 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     assert.equal(call.payload.kind, "budget.queue.updated");
   });
 
+  it("enqueue emits approval.requested with id", async () => {
+    const { api, calls, getBroadcast } = makeApiWithBroadcast();
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath() }), getBroadcast });
+    await api.runtime.approvalQueue.isGateLocked();
+
+    const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
+      flowId: "flow-1", nodeId: "SCORE_LLM", pipelineId: "p", label: "SCORE_LLM",
+    });
+    const call = calls.find((c) => c.name === "plugin.approval.requested");
+    assert.ok(call, "approval.requested must fire on enqueue");
+    assert.equal(call.payload.id, itemId);
+  });
+
   it("decide resumes flow-bound approvals through injected onFlowResume (no HTTP loopback)", async () => {
     const { api, calls, getBroadcast } = makeApiWithBroadcast();
     const resumes = [];

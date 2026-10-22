@@ -30,6 +30,8 @@ export const WIRE_KINDS = Object.freeze([
   "budget.lock.changed",
   "budget.cap.changed",
   "cost.record.added",
+  "failure.recorded",
+  "approval.requested",
 ]);
 
 // Named but producer-less: emitting one is a typo or a Phase-2 leak.
@@ -57,6 +59,8 @@ const REQUIRED_FIELDS = {
   "budget.lock.changed": ["locked", "day"],
   "budget.cap.changed": [],
   "cost.record.added": ["costTotal"],
+  "failure.recorded": ["failureId", "flowId"],
+  "approval.requested": ["id"],
 };
 
 export const SESSION_SCOPES = Object.freeze(["node", "discuss"]);

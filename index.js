@@ -211,7 +211,9 @@ export default definePluginEntry({
     // triggerParentResume hook needs failureStore to
     // record a real failure_events row when a subflow's mode isn't
     // satisfied, not just flip flow_runs.status.
-    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore });
+    // Lazy emit wiring: emitCanonical is declared below but only invoked
+    // at record time, long after evaluation.
+    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore, emit: (...a) => emitCanonical(...a) });
     // SCD2 history of node kind/agent/mode (see state/pipeline-registry.js's
     // own header) — separate from failureStore and unrelated to it;
     // constructed here only because runtimeDbPath is already in scope.
