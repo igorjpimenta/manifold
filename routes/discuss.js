@@ -235,7 +235,7 @@ export function registerDiscussHandlers({
           api.logger.warn(`discuss-store write (agent reply): ${err?.message ?? err}`);
         }
         const turnKind = succeeded ? "session.transcript.completed" : "session.transcript.failed";
-        const pushRes = await emit(turnKind, succeeded
+        const emitRes = await emit(turnKind, succeeded
           ? {
               scope: "discuss",
               turnId,
@@ -253,10 +253,10 @@ export function registerDiscussHandlers({
               error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
               emittedAtMs: Date.now(),
             });
-        if (!pushRes.ok) {
-          api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
+        if (!emitRes.ok) {
+          api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: canonical emit failed`);
         } else {
-          api.logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${turnKind} → SSE pushed`);
+          api.logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${turnKind} emitted`);
         }
         import("node:fs/promises").then(({ unlink }) =>
           unlink(path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId, `${target.itemId}.pending.json`))
@@ -347,7 +347,7 @@ export function registerDiscussHandlers({
       const turnKind = elev.ok && payload.ok
         ? "session.transcript.completed"
         : "session.transcript.failed";
-      const pushRes = await emit(turnKind, elev.ok && payload.ok
+      const emitRes = await emit(turnKind, elev.ok && payload.ok
         ? {
             scope: "discuss",
             turnId,
@@ -369,10 +369,8 @@ export function registerDiscussHandlers({
             operatorTranscript: transcript,
             emittedAtMs: Date.now(),
           });
-      if (!pushRes.ok) {
-        api.logger.warn(`${logPrefix}: SSE push failed`);
-      } else {
-        api.logger.info(`${logPrefix}: ${turnKind} → SSE pushed`);
+      if (!emitRes.ok) {
+        api.logger.warn(`${logPrefix}: canonical emit failed`);
       }
     } catch (err) {
       api.logger.warn(`${logPrefix}: runner error: ${err?.message ?? err}`);

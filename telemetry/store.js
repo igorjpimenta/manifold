@@ -6,7 +6,7 @@ import path from "node:path";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
 import os from "node:os";
 import fs from "node:fs";
-import { createMigrator } from "../state/migrator.js";
+import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
@@ -45,85 +45,10 @@ const INSERT_COST_SQL = `
   VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?,?, ?,?,?,?)
 `;
 
-const MIGRATIONS = [
-  // 1: initial schema
-  `
-  CREATE TABLE IF NOT EXISTS schema_version (
-    version INTEGER PRIMARY KEY,
-    applied_at INTEGER NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS session_lineage (
-    child_session_key   TEXT PRIMARY KEY,
-    parent_session_key  TEXT,
-    root_session_key    TEXT NOT NULL,
-    kind                TEXT NOT NULL,
-    root_kind           TEXT NOT NULL,
-    root_label          TEXT,
-    agent_id            TEXT,
-    pipeline_id         TEXT,
-    flow_id             TEXT,
-    node_id             TEXT,
-    item_key            TEXT,
-    first_seen_at       INTEGER NOT NULL,
-    source              TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_lineage_root      ON session_lineage(root_session_key);
-  CREATE INDEX IF NOT EXISTS idx_lineage_parent    ON session_lineage(parent_session_key);
-  CREATE INDEX IF NOT EXISTS idx_lineage_pipeline  ON session_lineage(pipeline_id);
-  CREATE INDEX IF NOT EXISTS idx_lineage_flow      ON session_lineage(flow_id);
-  CREATE INDEX IF NOT EXISTS idx_lineage_root_kind ON session_lineage(root_kind);
-
-  CREATE TABLE IF NOT EXISTS cost_by_call (
-    session_id          TEXT NOT NULL,
-    msg_id              TEXT NOT NULL,
-    ts                  INTEGER NOT NULL,
-    provider            TEXT,
-    model               TEXT,
-    input_tokens        INTEGER,
-    output_tokens       INTEGER,
-    cache_read_tokens   INTEGER,
-    cache_write_tokens  INTEGER,
-    total_tokens        INTEGER,
-    cost_input          REAL,
-    cost_output         REAL,
-    cost_cache_read     REAL,
-    cost_cache_write    REAL,
-    cost_total          REAL NOT NULL,
-    session_key         TEXT,
-    agent_id            TEXT,
-    root_session_key    TEXT,
-    root_kind           TEXT,
-    root_label          TEXT,
-    pipeline_id         TEXT,
-    flow_id             TEXT,
-    node_id             TEXT,
-    item_key            TEXT,
-    PRIMARY KEY (session_id, msg_id)
-  );
-  CREATE INDEX IF NOT EXISTS idx_cost_ts            ON cost_by_call(ts);
-  CREATE INDEX IF NOT EXISTS idx_cost_root_key      ON cost_by_call(root_session_key);
-  CREATE INDEX IF NOT EXISTS idx_cost_root_kind_ts  ON cost_by_call(root_kind, ts);
-  CREATE INDEX IF NOT EXISTS idx_cost_pipeline_ts   ON cost_by_call(pipeline_id, ts);
-  CREATE INDEX IF NOT EXISTS idx_cost_flow_node     ON cost_by_call(flow_id, node_id);
-  CREATE INDEX IF NOT EXISTS idx_cost_model_ts      ON cost_by_call(model, ts);
-  CREATE INDEX IF NOT EXISTS idx_cost_session       ON cost_by_call(session_id);
-  `,
-  // 2: add run_id to session_lineage
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('session_lineage')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("run_id")) {
-      await client.execute("ALTER TABLE session_lineage ADD COLUMN run_id TEXT");
-      await client.execute("CREATE INDEX IF NOT EXISTS idx_lineage_run ON session_lineage(run_id)");
-    }
-  },
-];
-
 export async function openStore({ dbPath = DEFAULT_DB_PATH } = {}) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "telemetry", migrations: MIGRATIONS });
   await attachFlowsDb(client);
   return makeStore(client, dbPath);
 }

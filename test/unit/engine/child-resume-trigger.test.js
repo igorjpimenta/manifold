@@ -23,7 +23,7 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("resume-trigger-runs"), legacyDbPath: tmpPath("resume-trigger-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("resume-trigger-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("resume-trigger-execs"));
   const store = createStateStore({}, "test-owner", { runStore });
   return { runStore, nodeExecutionsStore, store };

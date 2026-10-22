@@ -83,7 +83,7 @@ function makeScoreLikeNode(concurrency) {
 }
 
 async function makeHarness(concurrency) {
-  const runStore = await createRunStore({ dbPath: tmpPath("score-e2e-runs"), legacyDbPath: tmpPath("score-e2e-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("score-e2e-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("score-e2e-execs"));
   const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("score-e2e-admission"), getLimit: getGlobalConcurrencyLimit });
   const resumeParentRef = { resume: null };

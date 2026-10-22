@@ -33,7 +33,6 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
 | `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |
-| `…/state/migrator` | `createMigrator` | sibling extension |
 
 The map is pinned by `test/unit/api/public-exports.test.js`; adding or
 removing an entry is a breaking change for the consumers above.
@@ -1565,6 +1564,18 @@ with operator-supplied state* above.
 ```
 
 Schema enforced in `openclaw.plugin.json: configSchema`.
+
+## Database migrations
+
+Table shapes live in `state/schema.js` (`runtime.sqlite`) and
+`state/schema.ops.js` (`ops.sqlite`) — drizzle definitions, the single
+source of truth. `npm run db:generate` snapshots them into
+`.migrations/<db>/`; `state/migrate.js` applies pending snapshots at
+store open via better-sqlite3 + drizzle, before any libsql handle opens.
+Snapshots are the sole schema path. New schema changes go in the defs +
+a generated snapshot. `test/unit/state/migrate.test.js` fails the build
+if live-booted columns drift from the defs either way, and if any snapshot
+file carries an unguarded CREATE or a DROP/RENAME.
 
 ## SQLite shape (for direct queries / surgery)
 

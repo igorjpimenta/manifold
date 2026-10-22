@@ -206,7 +206,6 @@ describe("createManifoldParrotChannelEntry — entry shape", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     assert.equal(entry.id, "manifold-parrot");
@@ -218,7 +217,6 @@ describe("createManifoldParrotChannelEntry — entry shape", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     assert.equal(typeof entry.plugin?.gateway?.startAccount, "function");
@@ -261,7 +259,6 @@ describe("gateway.startAccount — lifecycle", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     const abortCtrl = new AbortController();
@@ -281,7 +278,6 @@ describe("gateway.startAccount — lifecycle", () => {
       discussStore: makeDiscussStore(),
       resolveDiscussTarget: () => makeTarget(),
       stampDiscussSession: () => {},
-      emitSseEvent: makeEmitSseEvent(),
       readPending: () => null,
     });
     const abortCtrl = new AbortController();
@@ -884,9 +880,8 @@ describe("onDispatchError — error handling", () => {
 // ─── runner error (dispatchInbound throws) ───────────────────────────────────
 
 describe("runner error — dispatchInboundDirectDmWithRuntime throws", () => {
-  test("emits failed SSE and stamps error when dispatch throws", { skip: SKIP ? SKIP_MSG : false }, async () => {
+  test("stamps error when dispatch throws", { skip: SKIP ? SKIP_MSG : false }, async () => {
     const flow = makeFlow();
-    const emitSseEvent = makeEmitSseEvent();
     const errorStampCalls = [];
     const discussStore = makeDiscussStore({
       stampMessageError: (...a) => errorStampCalls.push(a),
@@ -896,16 +891,13 @@ describe("runner error — dispatchInboundDirectDmWithRuntime throws", () => {
     dispatchCalls = [];
     capturedDispatchArgs = null;
 
-    const { route } = buildReadyEntry({ flow, emitSseEvent, discussStore });
+    const { route } = buildReadyEntry({ flow, discussStore });
     await route.handler(makePostReq({ flowId: flow.flowId, text: "crash test" }), createMockRes());
     await new Promise((r) => setImmediate(r));
     await new Promise((r) => setTimeout(r, 30));
 
     dispatchShouldThrow = null;
 
-    const failedEvt = emitSseEvent.calls.find((c) => c.type === "discuss.turn" && c.status === "failed");
-    assert.ok(failedEvt, "failed SSE emitted on runner error");
-    assert.match(failedEvt.error, /runner crash/);
     assert.ok(errorStampCalls.length > 0, "stampMessageError called on runner error");
   });
 });

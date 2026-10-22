@@ -32,7 +32,7 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("invoke-singleton-runs"), legacyDbPath: tmpPath("invoke-singleton-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("invoke-singleton-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("invoke-singleton-execs"));
   const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("invoke-singleton-admission"), getLimit: getGlobalConcurrencyLimit });
   const resumeParentRef = { resume: null };

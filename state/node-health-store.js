@@ -25,47 +25,9 @@ import { nodeHealth } from "./schema.js";
 import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
-import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-
-// The migrator's tracking name ("fallback_node_health") stays as originally
-// created — it's a historical key into _schema_version, unrelated to the
-// table's current name (same convention as node-executions.js's
-// "step-timings" migrator name, which has outlived several of that store's
-// own column renames). Renaming it would make the migrator think migration
-// 2 below has never run and try to re-apply it, which would fail the
-// second time since the table it renames FROM no longer exists.
-const MIGRATIONS = [
-  `CREATE TABLE IF NOT EXISTS fallback_node_health (
-     id                  TEXT    PRIMARY KEY,
-     pipeline_id         TEXT    NOT NULL,
-     node_id             TEXT    NOT NULL,
-     status              TEXT    NOT NULL,
-     reason              TEXT    NOT NULL,
-     blocked_by_flow_id  TEXT,
-     resolved_via        TEXT,
-     created_at          INTEGER NOT NULL,
-     updated_at          INTEGER NOT NULL,
-     ended_at            INTEGER
-   );
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_health_one_active
-     ON fallback_node_health (pipeline_id, node_id)
-     WHERE status = 'blocked';
-   CREATE INDEX IF NOT EXISTS idx_fallback_health_pipeline
-     ON fallback_node_health (pipeline_id, status)`,
-  // v2: table renamed to reflect that any node can opt in, not just
-  // fallback-shaped ones. SQLite doesn't rename indexes along with their
-  // table, so they're dropped and recreated under matching names.
-  `ALTER TABLE fallback_node_health RENAME TO node_health;
-   DROP INDEX IF EXISTS idx_fallback_health_one_active;
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_node_health_one_active
-     ON node_health (pipeline_id, node_id)
-     WHERE status = 'blocked';
-   DROP INDEX IF EXISTS idx_fallback_health_pipeline;
-   CREATE INDEX IF NOT EXISTS idx_node_health_pipeline
-     ON node_health (pipeline_id, status)`,
-];
 
 const INSERT_BLOCKED_SQL = `
   INSERT OR IGNORE INTO node_health
@@ -83,8 +45,8 @@ const IS_BLOCKED_SQL = `
 
 export async function createNodeHealthStore({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "fallback_node_health", migrations: MIGRATIONS });
 
   async function isBlocked(pipelineId, nodeId) {
     if (!pipelineId || !nodeId) return false;

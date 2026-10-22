@@ -99,7 +99,7 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("cancel-cascade-runs"), legacyDbPath: tmpPath("cancel-cascade-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("cancel-cascade-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("cancel-cascade-execs"));
   const store = createStateStore({}, "test-owner", { runStore });
   return { runStore, nodeExecutionsStore, store };

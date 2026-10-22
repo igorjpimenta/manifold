@@ -8,9 +8,6 @@
 //   UPDATE ... WHERE flow_id = ? AND revision = ? AND status NOT IN (terminals)
 // If rowsAffected === 0 → disambiguate via SELECT revision, status to return the
 // right code: not_found | terminal | revision_conflict.
-//
-// Boot migration: copies manifold-owned rows from registry.sqlite on first
-// boot (idempotent — INSERT OR IGNORE; skipped when the table is non-empty).
 
 import path from "node:path";
 import os from "node:os";
@@ -19,7 +16,7 @@ import { eq, and, notInArray, inArray, isNull, isNotNull, ne, desc, sql } from "
 import { alias } from "drizzle-orm/sqlite-core";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { flowRuns, flowNodeInvocations } from "./schema.js";
-import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
@@ -34,87 +31,6 @@ export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "skipped"]
 export const TERMINAL_STATUS_SET = new Set(TERMINAL_STATUSES);
 const TERMINAL_SET = TERMINAL_STATUS_SET;
 
-const MIGRATIONS = [
-  // v1: initial schema. Omits shape + requester_origin_json (never
-  // read/written by manifold). Column set has to cover the out-of-store
-  // raw-SQL readers that hit flow_runs directly, bypassing this store —
-  // telemetry/resolver.js selects flow_id, owner_key, pipeline_id, status,
-  // created_at via its own readonly handle.
-  `CREATE TABLE IF NOT EXISTS flow_runs (
-    flow_id              TEXT    PRIMARY KEY,
-    sync_mode            TEXT    NOT NULL DEFAULT 'managed',
-    owner_key            TEXT    NOT NULL DEFAULT '',
-    controller_id        TEXT,
-    revision             INTEGER NOT NULL DEFAULT 0,
-    status               TEXT    NOT NULL,
-    notify_policy        TEXT    NOT NULL DEFAULT 'default',
-    goal                 TEXT    NOT NULL DEFAULT '',
-    current_step         TEXT,
-    blocked_task_id      TEXT,
-    blocked_summary      TEXT,
-    state_json           TEXT    NOT NULL DEFAULT '{}',
-    wait_json            TEXT,
-    cancel_requested_at  INTEGER,
-    created_at           INTEGER NOT NULL,
-    updated_at           INTEGER NOT NULL,
-    ended_at             INTEGER
-  );
-  CREATE INDEX IF NOT EXISTS idx_pfr_controller ON flow_runs (controller_id);
-  CREATE INDEX IF NOT EXISTS idx_pfr_status     ON flow_runs (status) WHERE ended_at IS NULL;
-  CREATE INDEX IF NOT EXISTS idx_pfr_updated    ON flow_runs (updated_at DESC);`,
-
-  // v2: rename semantic. current_step was "last completed" (trailing write from
-  // the platform schema we couldn't change). Now:
-  //   last_step    = last completed node (written after execution)
-  //   current_step = node currently in flight (written before execution, NULL when idle/terminal)
-  `ALTER TABLE flow_runs ADD COLUMN last_step TEXT;
-   UPDATE flow_runs SET last_step = current_step WHERE last_step IS NULL;`,
-
-  // v3: branch/flow unification foundation + cleanup of 5 columns confirmed
-  // dead or superseded during that redesign.
-  `ALTER TABLE flow_runs ADD COLUMN parent_flow_node_execution_id TEXT;
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_pfr_parent_execution
-     ON flow_runs (parent_flow_node_execution_id)
-     WHERE parent_flow_node_execution_id IS NOT NULL;
-   ALTER TABLE flow_runs ADD COLUMN pipeline_id TEXT;
-   UPDATE flow_runs SET pipeline_id = CASE
-     WHEN controller_id LIKE 'manifold:%'   THEN SUBSTR(controller_id, 10)
-     WHEN controller_id LIKE 'graph-flow:%' THEN SUBSTR(controller_id, 12)
-     ELSE controller_id
-    END;
-    CREATE INDEX IF NOT EXISTS idx_flow_runs_pipeline_id ON flow_runs (pipeline_id);
-   DROP INDEX IF EXISTS idx_pfr_controller;
-   ALTER TABLE flow_runs DROP COLUMN controller_id;
-   ALTER TABLE flow_runs DROP COLUMN sync_mode;
-   ALTER TABLE flow_runs DROP COLUMN notify_policy;
-   ALTER TABLE flow_runs DROP COLUMN blocked_task_id;
-   ALTER TABLE flow_runs DROP COLUMN goal;`,
-
-  // v4: retarget the parent link from flow_node_executions (a
-  // per-attempt row, ambiguous across retries) to flow_node_invocations (a
-  // per-logical-dispatch row, created exactly once).
-  `ALTER TABLE flow_runs RENAME COLUMN parent_flow_node_execution_id TO parent_invocation_id;
-   DROP INDEX IF EXISTS idx_pfr_parent_execution;
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_pfr_parent_invocation
-     ON flow_runs (parent_invocation_id)
-     WHERE parent_invocation_id IS NOT NULL;`,
-
-  // v5: status_reason replaces blocked_summary as the single reason field
-  // for every status transition that carries one.
-  `ALTER TABLE flow_runs ADD COLUMN status_reason TEXT;
-   UPDATE flow_runs SET status_reason = blocked_summary WHERE blocked_summary IS NOT NULL;`,
-
-  // v6: drop blocked_summary — v5's backfill copied its values into
-  // status_reason and no read/write site references it anymore.
-  `ALTER TABLE flow_runs DROP COLUMN blocked_summary`,
-
-  // v7: drop current_step. Invocation pre-creation (enter()
-  // in node-executions.js, called from executor.js before executeNode) makes
-  // "last invocation node_id for this flow" the canonical current-step
-  // indicator. markExecuting() and all currentStep writes are removed.
-  `ALTER TABLE flow_runs DROP COLUMN current_step`,
-];
-
 // ── store factory ────────────────────────────────────────────────────────────
 
 export function createRunStore(opts = {}) {
@@ -128,8 +44,8 @@ export function createRunStore(opts = {}) {
 
 async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "manifold_flow_runs", migrations: MIGRATIONS });
 
   // ── CAS failure classifier ───────────────────────────────────────────────
 
@@ -375,7 +291,6 @@ async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
         return { cancelled: false };
       }
     },
-
 
     // Stamps state_json before the cancel status flip.
     async stampStateJson(flowId, stateJson) {

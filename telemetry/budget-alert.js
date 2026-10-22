@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { displayRootLabel } from "./labels.js";
 import { execGet } from "./http-helpers.js";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
-import { createMigrator } from "../state/migrator.js";
+import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
 const DEFAULT_CAP_USD = 3.0;
 const DEFAULT_LOCK_THRESHOLD = 0.8;  // fraction of cap; operator-configurable via iOS
@@ -26,47 +26,16 @@ const THRESHOLDS = [0.1, 0.5, 0.8, 1.0];
 // is the only silencing mechanism — no operator-facing snooze (removed:
 // redundant with the debounce, no clear product job).
 const STATE_FILE = path.join(os.homedir(), ".openclaw", "lineage", ".alerted-thresholds.json");
-// Legacy single-day flag from the v1 single-threshold alert; migrated on read.
-const LEGACY_DAY_FILE = path.join(os.homedir(), ".openclaw", "lineage", ".last-alerted-day");
-// v1 cap/threshold store — flat file, single current value, no history. Kept
-// only as a one-time seed source for cap_versions on first-ever init so
-// upgrading installs keep their operator-set cap instead of reverting to
-// DEFAULT_CAP_USD. No longer written to.
-const LEGACY_CAP_FILE = path.join(os.homedir(), ".openclaw", "lineage", ".cap.json");
 // Same physical file budget/index.js's gate_state lives in — each module
-// owns its own tables there via its own migrator `name`, same convention.
+// owns its own tables there.
 const DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
-
-const CAP_MIGRATIONS = [
-  `CREATE TABLE IF NOT EXISTS cap_versions (
-     id             TEXT    NOT NULL PRIMARY KEY,
-     cap_usd        REAL    NOT NULL,
-     lock_threshold REAL    NOT NULL,
-     registered_at  INTEGER NOT NULL,
-     retired_at     INTEGER
-   );
-   CREATE INDEX IF NOT EXISTS idx_cv_lookup ON cap_versions (registered_at);
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_cv_active ON cap_versions ((1)) WHERE retired_at IS NULL`,
-  // Durable log of threshold crossings — the .alerted-thresholds.json debounce
-  // file below only ever answers "did we already fire threshold X today" and
-  // is overwritten every local day, so it can't answer "when did we last
-  // cross 80%". This table is the queryable history that backs that question.
-  `CREATE TABLE IF NOT EXISTS budget_alert_events (
-     id         TEXT    NOT NULL PRIMARY KEY,
-     threshold  REAL    NOT NULL,
-     total_usd  REAL    NOT NULL,
-     cap_usd    REAL    NOT NULL,
-     fired_at   INTEGER NOT NULL
-   );
-   CREATE INDEX IF NOT EXISTS idx_bae_fired_at ON budget_alert_events (fired_at)`,
-];
 
 let state = readState();           // { day: "YYYY-MM-DD", fired: [0.5, 0.8, 1.0] }
 let lastObservedTotal = 0;
 
-// In-memory cache — read on the hot checkBudget path with zero I/O, same as
-// the old flat-file version. Populated by initCapStore() at service start;
-// updated optimistically (before the DB write lands) by the setters below.
+// In-memory cache — read on the hot checkBudget path with zero I/O.
+// Populated by initCapStore() at service start; updated optimistically
+// (before the DB write lands) by the setters below.
 let configuredCapUSD = DEFAULT_CAP_USD;
 let configuredLockThreshold = DEFAULT_LOCK_THRESHOLD;
 
@@ -74,29 +43,23 @@ let _dbPath = DB_PATH;
 let _client = null;
 async function _getClient() {
   if (!_client) {
+    await migrateDatabase({ dbPath: _dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
     const { client } = await getSharedDb(_dbPath);
-    await createMigrator(client, { name: "budget-cap", migrations: CAP_MIGRATIONS });
     _client = client;
   }
   return _client;
 }
 
-function _readLegacyCapFile(legacyCapFile) {
-  try { return JSON.parse(fs.readFileSync(legacyCapFile, "utf8")); } catch { return {}; }
-}
-
 /**
- * Loads the active cap_versions row into the in-memory cache. On a bare
- * table (first-ever run after this migration), seeds one row from the
- * legacy .cap.json — falling back to the hardcoded defaults if that file
- * never existed — so upgrading installs keep their operator-set cap.
- * Must complete before checkBudget()/the HTTP cap routes see traffic;
- * registered as its own api.registerService start hook.
+ * Loads the active cap_versions row into the in-memory cache, seeding one
+ * row from the hardcoded defaults on a bare table. Must complete before
+ * checkBudget()/the HTTP cap routes see traffic; registered as its own
+ * api.registerService start hook.
  *
- * dbPath/legacyCapFile overrides are test-only (isolated per-test files) —
- * production always uses the ~/.openclaw defaults.
+ * dbPath override is test-only (isolated per-test files) — production
+ * always uses the ~/.openclaw default.
  */
-export async function initCapStore({ dbPath = DB_PATH, legacyCapFile = LEGACY_CAP_FILE } = {}) {
+export async function initCapStore({ dbPath = DB_PATH } = {}) {
   _dbPath = dbPath;
   _client = null; // re-resolve against the (possibly new) path
   const client = await _getClient();
@@ -108,17 +71,12 @@ export async function initCapStore({ dbPath = DB_PATH, legacyCapFile = LEGACY_CA
     configuredLockThreshold = rows[0].lockThreshold;
     return;
   }
-  const legacy = _readLegacyCapFile(legacyCapFile);
-  const seedCap = (typeof legacy.capUSD === "number" && legacy.capUSD > 0 && Number.isFinite(legacy.capUSD))
-    ? legacy.capUSD : DEFAULT_CAP_USD;
-  const seedThreshold = (typeof legacy.lockThreshold === "number" && legacy.lockThreshold > 0 && legacy.lockThreshold <= 1 && Number.isFinite(legacy.lockThreshold))
-    ? legacy.lockThreshold : DEFAULT_LOCK_THRESHOLD;
   await client.execute({
     sql: `INSERT INTO cap_versions (id, cap_usd, lock_threshold, registered_at, retired_at) VALUES (?, ?, ?, ?, NULL)`,
-    args: [randomUUID(), seedCap, seedThreshold, Date.now()],
+    args: [randomUUID(), DEFAULT_CAP_USD, DEFAULT_LOCK_THRESHOLD, Date.now()],
   });
-  configuredCapUSD = seedCap;
-  configuredLockThreshold = seedThreshold;
+  configuredCapUSD = DEFAULT_CAP_USD;
+  configuredLockThreshold = DEFAULT_LOCK_THRESHOLD;
 }
 
 /**
@@ -209,27 +167,15 @@ function readState() {
     const raw = fs.readFileSync(STATE_FILE, "utf8");
     const j = JSON.parse(raw);
     if (j && typeof j === "object" && typeof j.day === "string" && Array.isArray(j.fired)) {
-      // We have a JSON state; the v1 legacy file is obsolete (cleanup any
-      // stragglers from an earlier in-progress migration).
-      try { fs.unlinkSync(LEGACY_DAY_FILE); } catch {}
       return { day: j.day, fired: j.fired.filter((x) => typeof x === "number") };
     }
   } catch { /* fall through */ }
-  // Migrate v1 legacy single-day flag — if it matches today, mark 100% fired
-  try {
-    const legacyDay = fs.readFileSync(LEGACY_DAY_FILE, "utf8").trim();
-    if (legacyDay) {
-      return { day: legacyDay, fired: [1.0] };
-    }
-  } catch {}
   return { day: null, fired: [] };
 }
 
 function writeState(next) {
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(next), "utf8");
-    // Migrated forward — clean up the v1 legacy single-day file
-    try { fs.unlinkSync(LEGACY_DAY_FILE); } catch {}
   } catch { /* best-effort */ }
 }
 

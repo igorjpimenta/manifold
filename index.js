@@ -46,7 +46,6 @@ import { invokeElevated } from "./elevation.js";
 import { createManifoldParrotChannelEntry } from "./channels/manifold-parrot-channel.js";
 
 // Route modules extracted from this file.
-import { createEmitSseEvent } from "./utils/sse.js";
 import { flowStateEmitter, gateEmitter } from "./events.js";
 import { createEmitter } from "./events/emit.js";
 import { createWsRunEventsListener } from "./events/ws-run-events.js";
@@ -264,10 +263,8 @@ export default definePluginEntry({
     // discuss handlers, and the WS run-event listener below. Created here so
     // every producer closes over the same instance; the broadcast ref itself
     // stays lazy via the getter (captured at plugin.manifold.ping).
-    // emitSseEvent (iOS push) is wired in so session/discuss emissions push;
-    // WS delivery comes from getBroadcast above, not from the push path.
-    const emitSseEvent = createEmitSseEvent();
-    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, emitSseEvent, logger: api.logger }).emit;
+    // WS delivery comes from getBroadcast above.
+    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
 
     // Assigned in the dashboard section below; the catalog publisher reads
     // it lazily so watcher reloads before dashboard boot stay WS-only.
@@ -480,7 +477,7 @@ export default definePluginEntry({
     api.registerGatewayMethod("plugin.manifold.ping", (opts) => {
       if (!_gatewayBroadcast) {
         _gatewayBroadcast = opts.context.broadcast;
-        api.logger.info("manifold: WS broadcaster captured — discuss events will be dual-channel");
+        api.logger.info("manifold: WS broadcaster captured");
       }
       opts.respond(true, { ok: true });
     }, { scope: "operator.read" });

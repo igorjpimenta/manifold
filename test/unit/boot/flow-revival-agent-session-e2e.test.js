@@ -72,7 +72,7 @@ function makeFixturePipeline() {
 }
 
 async function makeHarness({ fakeSubagent } = {}) {
-  const runStore = await createRunStore({ dbPath: tmpPath("fr-agent-e2e-runs"), legacyDbPath: tmpPath("fr-agent-e2e-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("fr-agent-e2e-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("fr-agent-e2e-execs"));
   const sessionIndex = await createSessionIndex({ dbPath: tmpPath("fr-agent-e2e-sessions") });
   const resumeParentRef = { resume: null };

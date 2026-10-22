@@ -14,14 +14,13 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createRunStore, TERMINAL_STATUSES, TERMINAL_STATUS_SET } from "../../../state/run-store.js";
 
-const NO_LEGACY = path.join(os.tmpdir(), `run-store-no-legacy-${randomUUID()}.sqlite`);
 
 function tmpDb() {
   return path.join(os.tmpdir(), `run-store-test-${randomUUID()}.sqlite`);
 }
 
 async function makeStore(overrides = {}) {
-  return createRunStore({ dbPath: tmpDb(), legacyDbPath: NO_LEGACY, ...overrides });
+  return createRunStore({ dbPath: tmpDb(), ...overrides });
 }
 
 function fakeFlow(overrides = {}) {
@@ -39,37 +38,7 @@ function fakeFlow(overrides = {}) {
   };
 }
 
-// Raw seed helper for tests that need a pre-migration DB state.
-async function seedLegacyDb(dbPath, rows = []) {
-  const client = createClient({ url: `file:${dbPath}` });
-  await client.execute(`
-    CREATE TABLE flow_runs (
-      flow_id              TEXT    PRIMARY KEY,
-      sync_mode            TEXT    NOT NULL DEFAULT 'managed',
-      owner_key            TEXT    NOT NULL DEFAULT '',
-      controller_id        TEXT,
-      revision             INTEGER NOT NULL DEFAULT 0,
-      status               TEXT    NOT NULL,
-      notify_policy        TEXT    NOT NULL DEFAULT 'default',
-      goal                 TEXT    NOT NULL DEFAULT '',
-      current_step         TEXT,
-      blocked_task_id      TEXT,
-      blocked_summary      TEXT,
-      state_json           TEXT    NOT NULL DEFAULT '{}',
-      wait_json            TEXT,
-      cancel_requested_at  INTEGER,
-      created_at           INTEGER NOT NULL,
-      updated_at           INTEGER NOT NULL,
-      ended_at             INTEGER
-    )
-  `);
-  for (const row of rows) {
-    await client.execute({ sql: row.sql, args: row.args });
-  }
-  client.close();
-}
-
-// ── schema + migration ────────────────────────────────────────────────────────
+// ── schema ────────────────────────────────────────────────────────────────────
 
 describe("createRunStore — schema", () => {
   test("opens DB and creates flow_runs table without throwing", async () => {
@@ -90,9 +59,9 @@ describe("createRunStore — schema", () => {
 
   test("idempotent: opening same dbPath twice does not throw", async () => {
     const dbPath = tmpDb();
-    const s1 = createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
+    const s1 = createRunStore({ dbPath });
     await s1.close();
-    const s2 = createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
+    const s2 = createRunStore({ dbPath });
     await s2.close();
   });
 });
@@ -535,208 +504,6 @@ describe("createRunStore — get", () => {
 });
 
 // ── v3 migration: pipeline_id, dropped columns ──────────────────────────────
-
-describe("createRunStore — v3 migration", () => {
-  test("dropped columns no longer appear in PRAGMA table_info", async () => {
-    const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const raw = createClient({ url: `file:${dbPath}` });
-    const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
-    const cols = rows.map((r) => r.name);
-    for (const dead of ["sync_mode", "notify_policy", "blocked_task_id", "goal", "controller_id"]) {
-      assert.ok(!cols.includes(dead), `${dead} should be dropped`);
-    }
-    raw.close();
-  });
-
-  test("pipeline_id backfilled from controller_id prefix on pre-existing rows", async () => {
-    const dbPath = tmpDb();
-    await seedLegacyDb(dbPath, [
-      {
-        sql: `INSERT INTO flow_runs (flow_id, controller_id, status, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        args: ["f-manifold", "manifold:foo", "succeeded", "{}", 0, 0],
-      },
-      {
-        sql: `INSERT INTO flow_runs (flow_id, controller_id, status, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        args: ["f-legacy", "graph-flow:bar", "succeeded", "{}", 0, 0],
-      },
-    ]);
-
-    const store = await createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
-    assert.equal((await store.get("f-manifold")).pipelineId, "foo");
-    assert.equal((await store.get("f-legacy")).pipelineId, "bar");
-    store.close();
-  });
-
-  test("new rows via insert() write pipeline_id directly and listFor finds them", async () => {
-    const store = await makeStore();
-    await store.insert(fakeFlow({ pipelineId: "fresh_pipe" }));
-    const rows = await store.listFor("fresh_pipe");
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].pipelineId, "fresh_pipe");
-    store.close();
-  });
-});
-
-// ── v4 migration: parent_invocation_id (renamed from parent_flow_node_execution_id) ──
-
-describe("createRunStore — v4 migration", () => {
-  test("parent_invocation_id column exists, old name gone", async () => {
-    const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const raw = createClient({ url: `file:${dbPath}` });
-    const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
-    const cols = rows.map((r) => r.name);
-    assert.ok(cols.includes("parent_invocation_id"));
-    assert.ok(!cols.includes("parent_flow_node_execution_id"));
-    raw.close();
-  });
-
-  test("idx_pfr_parent_invocation unique index exists, old-named index gone", async () => {
-    const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const raw = createClient({ url: `file:${dbPath}` });
-    const { rows: idx } = await raw.execute(`SELECT name, "unique" FROM pragma_index_list('flow_runs')`);
-    const found = idx.find((i) => i.name === "idx_pfr_parent_invocation");
-    assert.ok(found, "index should exist");
-    assert.equal(Number(found["unique"]), 1);
-    assert.ok(!idx.find((i) => i.name === "idx_pfr_parent_execution"));
-    raw.close();
-  });
-
-  test("existing rows read NULL for parentInvocationId", async () => {
-    const store = await makeStore();
-    const f = fakeFlow();
-    await store.insert(f);
-    const got = await store.get(f.flowId);
-    assert.equal(got.parentInvocationId, null);
-    store.close();
-  });
-
-  test("insert() writes parentInvocationId and get() returns it", async () => {
-    const store = await makeStore();
-    const invocationId = randomUUID();
-    const f = fakeFlow({ parentInvocationId: invocationId });
-    await store.insert(f);
-    const got = await store.get(f.flowId);
-    assert.equal(got.parentInvocationId, invocationId);
-  });
-
-  test("two different non-NULL parent_invocation_id values both succeed", async () => {
-    const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const raw = createClient({ url: `file:${dbPath}` });
-    const insertSql = `
-      INSERT INTO flow_runs (flow_id, owner_key, pipeline_id, revision, status, last_step, state_json, created_at, updated_at, parent_invocation_id)
-      VALUES (?, '', 'p', 0, 'blocked', NULL, '{}', 0, 0, ?)
-    `;
-    await raw.execute({ sql: insertSql, args: [randomUUID(), randomUUID()] });
-    await raw.execute({ sql: insertSql, args: [randomUUID(), randomUUID()] });
-    const { rows } = await raw.execute("SELECT flow_id FROM flow_runs WHERE parent_invocation_id IS NOT NULL");
-    assert.equal(rows.length, 2);
-    raw.close();
-  });
-
-  test("same parent_invocation_id twice throws SQLITE_CONSTRAINT", async () => {
-    const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const raw = createClient({ url: `file:${dbPath}` });
-    const dup = randomUUID();
-    const insertSql = `
-      INSERT INTO flow_runs (flow_id, owner_key, pipeline_id, revision, status, last_step, state_json, created_at, updated_at, parent_invocation_id)
-      VALUES (?, '', 'p', 0, 'blocked', NULL, '{}', 0, 0, ?)
-    `;
-    await raw.execute({ sql: insertSql, args: [randomUUID(), dup] });
-    await assert.rejects(
-      () => raw.execute({ sql: insertSql, args: [randomUUID(), dup] }),
-      /UNIQUE constraint failed/,
-    );
-    raw.close();
-  });
-});
-
-// ── v5 migration: status_reason (replaces blocked_summary) ─────────────────
-
-describe("createRunStore — v5 migration", () => {
-  test("status_reason column exists", async () => {
-    const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const raw = createClient({ url: `file:${dbPath}` });
-    const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
-    const cols = rows.map((r) => r.name);
-    assert.ok(cols.includes("status_reason"));
-    raw.close();
-  });
-
-  test("existing blocked_summary values are backfilled into status_reason", async () => {
-    const dbPath = tmpDb();
-    await seedLegacyDb(dbPath, [
-      {
-        sql: `INSERT INTO flow_runs (flow_id, controller_id, status, blocked_summary, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: ["f-with-reason", "manifold:foo", "blocked", "waiting for gate", "{}", 0, 0],
-      },
-      {
-        sql: `INSERT INTO flow_runs (flow_id, controller_id, status, blocked_summary, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: ["f-no-reason", "manifold:foo", "running", null, "{}", 0, 0],
-      },
-    ]);
-
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const check = createClient({ url: `file:${dbPath}` });
-    const { rows: r1 } = await check.execute("SELECT status_reason FROM flow_runs WHERE flow_id = 'f-with-reason'");
-    assert.equal(r1[0].status_reason, "waiting for gate");
-    const { rows: r2 } = await check.execute("SELECT status_reason FROM flow_runs WHERE flow_id = 'f-no-reason'");
-    assert.equal(r2[0].status_reason, null, "NULL blocked_summary must not backfill to a non-NULL status_reason");
-    check.close();
-  });
-
-  test("casSetRunning clears status_reason (not just blocked_summary)", async () => {
-    const store = await makeStore();
-    const f = fakeFlow({ status: "blocked", revision: 0 });
-    await store.insert(f);
-    await store.casSetWaiting(f.flowId, {
-      expectedRevision: 0, lastStep: "A", blockingNodeId: "GATE",
-      stateJson: {}, waitJson: {}, statusReason: "waiting for gate",
-    });
-    const blocked = await store.get(f.flowId);
-    assert.equal(blocked.statusReason, "waiting for gate");
-    await store.casSetRunning(blocked.flowId, { expectedRevision: blocked.revision, lastStep: "GATE", stateJson: {} });
-    const running = await store.get(f.flowId);
-    assert.equal(running.statusReason, null);
-    store.close();
-  });
-});
-
-// ── v6 migration: blocked_summary dropped ───────────────────────────────────
-
-describe("createRunStore — v6 migration", () => {
-  test("blocked_summary column no longer appears in PRAGMA table_info", async () => {
-    const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
-    const raw = createClient({ url: `file:${dbPath}` });
-    const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
-    const cols = rows.map((r) => r.name);
-    assert.ok(!cols.includes("blocked_summary"), "blocked_summary should be dropped");
-    assert.ok(cols.includes("status_reason"), "status_reason must survive the drop");
-    raw.close();
-  });
-
-  test("pre-existing blocked_summary data survives as status_reason after the drop", async () => {
-    const dbPath = tmpDb();
-    await seedLegacyDb(dbPath, [
-      {
-        sql: `INSERT INTO flow_runs (flow_id, controller_id, status, blocked_summary, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        args: ["f-survives", "manifold:foo", "blocked", "waiting for gate", "{}", 0, 0],
-      },
-    ]);
-
-    const store = await createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
-    assert.equal((await store.get("f-survives")).statusReason, "waiting for gate");
-    store.close();
-  });
-});
-
-// ── Phase 2: getByParentInvocationId / listForParentInvocations ────────────
 
 describe("createRunStore — getByParentInvocationId", () => {
   test("returns null when no child exists for the invocation", async () => {

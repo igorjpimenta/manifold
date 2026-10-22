@@ -6,7 +6,7 @@
 // hands off to the channel runtime for agent dispatch.
 //
 // Entry point: call createManifoldParrotChannelEntry(deps).register(api) from
-// inside manifold's registerFull, after emitSseEvent is wired up.
+// inside manifold's registerFull.
 
 import { createChatChannelPlugin, defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
 import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-inbound";
@@ -226,10 +226,9 @@ export function createManifoldParrotChannelEntry({
                   } catch (err) {
                     api.logger.warn(`manifold-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
                   }
-
                   // Canonical text field only — proposal artifacts travel as
                   // discuss.component.proposed events, not turn dupes.
-                  const pushRes = await emit("session.transcript.completed", {
+                  const emitRes = await emit("session.transcript.completed", {
                     scope: "discuss",
                     text: replyText,
                     turnId,
@@ -238,10 +237,8 @@ export function createManifoldParrotChannelEntry({
                     durationMs,
                     emittedAtMs: Date.now(),
                   });
-                  if (!pushRes.ok) {
-                    api.logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
-                  } else {
-                    api.logger.info(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: completed → SSE pushed`);
+                  if (!emitRes.ok) {
+                    api.logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: canonical emit failed`);
                   }
                 },
                 onRecordError: (err) => {

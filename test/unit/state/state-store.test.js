@@ -55,7 +55,7 @@ function makeFakeNodeExecutions() {
 }
 
 async function makeHarness({ withResumeHook = true } = {}) {
-  const runStore = await createRunStore({ dbPath: tmpPath("state-store-runs"), legacyDbPath: tmpPath("state-store-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("state-store-runs") });
   const nodeExecutionsStore = makeFakeNodeExecutions();
   const resumed = [];
   const resumeParentRef = { resume: withResumeHook ? async (flowId) => { resumed.push(flowId); } : null };
@@ -85,7 +85,7 @@ describe("createStateStore — create() pipelineId integrity", () => {
   // never shipped — but the underlying footgun in create() itself needed
   // fixing, not just the one caller that happened to trip it.
   test("the intended pipelineId always wins, even when initialState carries its own (different) pipelineId field", async () => {
-    runStore = await createRunStore({ dbPath: tmpPath("create-pid-runs"), legacyDbPath: tmpPath("create-pid-runs-legacy") });
+    runStore = await createRunStore({ dbPath: tmpPath("create-pid-runs") });
     const store = createStateStore({}, "test-owner", { runStore });
 
     const record = await store.create({
@@ -197,7 +197,7 @@ describe("createStateStore — Phase 2 resume-trigger wiring", () => {
 
   test("stays a safe no-op when nodeExecutionsStore/resumeParentRef aren't wired in", async () => {
     // harness NOT used here — we deliberately omit nodeExecutionsStore/resumeParentRef
-    const runStore = await createRunStore({ dbPath: tmpPath("state-store-bare-runs"), legacyDbPath: tmpPath("state-store-bare-legacy") });
+    const runStore = await createRunStore({ dbPath: tmpPath("state-store-bare-runs") });
     try {
       const store = createStateStore({}, "test-owner", { runStore });
       const flow = await store.create({ pipelineId: "some_pipe", initialState: {} });
@@ -234,7 +234,7 @@ describe("createStateStore — triggerAdmissionRelease promotion routing", () =>
   }
 
   async function makeRoutingHarness(promoted) {
-    const runStore = await createRunStore({ dbPath: tmpPath("state-store-routing-runs"), legacyDbPath: tmpPath("state-store-routing-runs-legacy") });
+    const runStore = await createRunStore({ dbPath: tmpPath("state-store-routing-runs") });
     const resumed = [];
     const warnings = [];
     const resumeParentRef = { resume: async (flowId) => { resumed.push(flowId); } };
@@ -259,7 +259,7 @@ describe("createStateStore — triggerAdmissionRelease promotion routing", () =>
   });
 
   test("a child-dispatch promotion pointing at a real blocked flow IS routed through and resumes it", async () => {
-    const runStore = await createRunStore({ dbPath: tmpPath("state-store-routing-runs"), legacyDbPath: tmpPath("state-store-routing-runs-legacy") });
+    const runStore = await createRunStore({ dbPath: tmpPath("state-store-routing-runs") });
     harness = { runStore };
     // Seed the promotion TARGET first, via its own admission-free store —
     // this flow must already exist and be blocked before the store-under-
@@ -310,7 +310,7 @@ describe("createStateStore — structured emitters", () => {
   after(() => { runStore?.close(); });
 
   async function makeSimpleHarness() {
-    runStore = await createRunStore({ dbPath: tmpPath("emitter-runs"), legacyDbPath: tmpPath("emitter-runs-legacy") });
+    runStore = await createRunStore({ dbPath: tmpPath("emitter-runs") });
     const store = createStateStore({}, "test-owner", { runStore, logger: { warn: () => {} } });
     const flow = await store.create({ pipelineId: "team_test-pipe", initialState: {} });
     return { store, flowId: flow.flowId };

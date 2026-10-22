@@ -22,7 +22,7 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("loop-children-runs"), legacyDbPath: tmpPath("loop-children-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("loop-children-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("loop-children-execs"));
   // Real admissionQueueStore, same shared getGlobalConcurrencyLimit()
   // singleton every test here already drives via resetChildFanoutCap(n) —

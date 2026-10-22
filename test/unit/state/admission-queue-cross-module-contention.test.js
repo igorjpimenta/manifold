@@ -11,11 +11,10 @@
 //
 // Known @libsql/client hazards this serialization works around:
 //   1. A plain client.execute()/db.update()/db.batch() issued on the SAME
-//      connection while a transaction() (or a raw BEGIN/COMMIT, e.g.
-//      state/migrator.js's own pattern) is open can fail INSTANTLY,
-//      bypassing the busy_timeout PRAGMA entirely, and can corrupt the
-//      transaction HOLDER's own commit ("cannot commit transaction - SQL
-//      statements in progress").
+//      connection while a transaction() (or a raw BEGIN/COMMIT) is open can
+//      fail INSTANTLY, bypassing the busy_timeout PRAGMA entirely, and can
+//      corrupt the transaction HOLDER's own commit ("cannot commit
+//      transaction - SQL statements in progress").
 //   2. Even across two SEPARATE connections to the same file (which does
 //      avoid #1's corruption), multiple concurrent calls queued on ONE
 //      client object each pay close to the FULL busy_timeout independently
@@ -51,29 +50,24 @@ function tmpDb(prefix) {
 describe("admission-queue-store.js vs. other state/*.js writers — real cross-module contention on the SAME shared connection", () => {
   test("concurrent admissionQueueStore admit()/release(), runStore CAS writes, nodeExecutionsStore batched writes, and failureStore writes against the same dbPath never throw a transaction-corruption error, and admission counts stay exact", async () => {
     const dbPath = tmpDb("cross-module-contention");
-    // Constructed and awaited-ready SEQUENTIALLY, not concurrently — each
-    // store's own createMigrator() call does a raw `client.execute("BEGIN")`
-    // (state/migrator.js), and SQLite hard-rejects a second BEGIN on the
-    // SAME connection while one is already open ("cannot start a
-    // transaction within a transaction"), regardless of which API opened
-    // it. Two stores' migrations racing on a genuinely fresh DB (nothing
-    // yet applied for either) is a real, separate, boot-time-only hazard
-    // pre-dating admission-queue-store.js — orthogonal to what THIS test
-    // checks, which is LIVE-OPERATION contention after both are already
-    // up and their schemas exist.
+    // Constructed and awaited-ready SEQUENTIALLY, not concurrently — boot
+    // opens share one connection, and overlapping transactions on it fail
+    // ("cannot start a transaction within a transaction") regardless of
+    // which API opened them. Keeping boot sequential isolates what THIS
+    // test checks, which is LIVE-OPERATION contention after all stores
+    // are already up and their schemas exist.
     const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 5 });
     await admissionQueueStore.ready();
-    const runStore = createRunStore({ dbPath, legacyDbPath: tmpDb("cross-module-contention-legacy") });
+    const runStore = createRunStore({ dbPath });
     await runStore.ready();
     const nodeExecutionsStore = createNodeExecutionsStore(dbPath);
     await nodeExecutionsStore.ready();
     // No explicit ready() on this store's Proxy — every method call already
-    // awaits its own async init internally on first use, but that init runs
-    // its own migrator BEGIN/COMMIT (state/migrator.js), same hazard as the
-    // other three stores' migrations above. A harmless read forces it to
-    // finish here, sequentially, before the concurrent round below.
+    // awaits its own async init internally on first use. A harmless read
+    // forces it to finish here, sequentially, before the concurrent round
+    // below.
     const failureStore = createFailureStore({
-      dbPath, legacyDbPath: null,
+      dbPath,
       nodeExecutionsStore: { getInvocation: () => null },
     });
     await failureStore.list({ limit: 1 });

@@ -62,8 +62,7 @@ const REQUIRED_FIELDS = {
 export const SESSION_SCOPES = Object.freeze(["node", "discuss"]);
 
 // Gateway WS carries every wire kind except run.created (dashboard-only;
-// the WS sink skips it). Families eligible for the SSE/iOS-push sink.
-const SSE_FAMILIES = Object.freeze(["session", "discuss"]);
+// the WS sink skips it).
 
 // Dashboard-only kinds (served over the dashboard bus/SSE, never gateway
 // WS) — read by the catalog publisher, nothing else should.
@@ -112,9 +111,4 @@ export function assertPayload(kind, payload) {
 export function isDashboardOnly(kind) {
   if (!isWireKind(kind)) throw new Error(`unknown event kind: ${kind}`);
   return DASHBOARD_ONLY.includes(kind);
-}
-
-export function isSseKind(kind) {
-  if (!isWireKind(kind)) throw new Error(`unknown event kind: ${kind}`);
-  return SSE_FAMILIES.includes(kind.split(".")[0]);
 }

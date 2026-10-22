@@ -92,7 +92,6 @@ const PUBLIC_API = {
       "modelHealth",
     ],
   },
-  "./state/migrator": { file: "./state/migrator.js", exports: ["createMigrator"] },
 };
 
 function specifierFor(subpath) {

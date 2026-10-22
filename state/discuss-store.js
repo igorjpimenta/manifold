@@ -21,36 +21,9 @@ import { discussState } from "./schema.js";
 import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
-import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-
-const MIGRATIONS = [
-  // v1: initial schema (components_json included from the start in new installs;
-  // the migrator's _schema_version table tells us if the column already exists
-  // via the version check, so no duplicate-column risk on upgrades).
-  `CREATE TABLE IF NOT EXISTS discuss_state (
-     flow_id         TEXT    NOT NULL,
-     item_id         TEXT    NOT NULL,
-     messages_json   TEXT    NOT NULL DEFAULT '[]',
-     turn_status     TEXT    NOT NULL DEFAULT 'idle',
-     active_turn_id  TEXT,
-     pending_json    TEXT,
-     updated_at      INTEGER NOT NULL,
-     PRIMARY KEY (flow_id, item_id)
-   );
-   CREATE INDEX IF NOT EXISTS idx_discuss_updated ON discuss_state(updated_at)`,
-  // v2: components_json column.
-  // Function migration guards against duplicate-column: existing installs
-  // may already carry the column from an older migration path.
-  async (client) => {
-    const { rows } = await client.execute("SELECT name FROM pragma_table_info('discuss_state')");
-    const cols = rows.map((r) => r.name);
-    if (!cols.includes("components_json")) {
-      await client.execute("ALTER TABLE discuss_state ADD COLUMN components_json TEXT NOT NULL DEFAULT '[]'");
-    }
-  },
-];
 
 function tryParse(s, fallback) {
   if (s == null) return fallback;
@@ -68,8 +41,8 @@ export function createDiscussStore(opts = {}) {
 
 async function _createDiscussStoreImpl({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "discuss-store", migrations: MIGRATIONS });
 
   const _where = (flowId, itemId) => and(eq(discussState.flowId, flowId), eq(discussState.itemId, itemId));
 

@@ -4,7 +4,7 @@ import * as schema from './schema.js';
 
 // Returns { db, client } where:
 //   db     — Drizzle ORM instance; use for typed queries
-//   client — raw @libsql/client handle; use for createMigrator() and ATTACH DATABASE
+//   client — raw @libsql/client handle; use for raw SQL the ORM can't express
 //
 // readonly opens skip WAL/autocheckpoint/busy_timeout — those are writer concerns.
 // WAL mode on the write connection already allows concurrent reads without extra config.

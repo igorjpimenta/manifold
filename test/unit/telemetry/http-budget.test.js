@@ -11,8 +11,7 @@ import { initCapStore } from "../../../telemetry/budget-alert.js";
 // isolated per-run temp file so this suite never touches the real
 // ~/.openclaw/ops.sqlite.
 await initCapStore({
-  dbPath: path.join(os.tmpdir(), `manifold-http-budget-test-${randomUUID()}.sqlite`),
-  legacyCapFile: path.join(os.tmpdir(), `manifold-http-budget-test-legacy-${randomUUID()}.json`), // doesn't exist — deterministic defaults
+  dbPath: path.join(os.tmpdir(), `manifold-http-budget-test-${randomUUID()}.sqlite`)
 });
 
 // ── helpers ───────────────────────────────────────────────────────────────────

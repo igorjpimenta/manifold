@@ -5,7 +5,7 @@
  *   - Registry shape: 17 wire kinds (frozen, unique), 1 reserved.
  *   - Unknown/reserved kinds rejected everywhere.
  *   - Payload contracts enforced (required fields, session scope + ids).
- *   - Routing: dashboard-only kinds, SSE set.
+ *   - Routing: dashboard-only kinds.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +16,6 @@ import {
   isReservedKind,
   assertPayload,
   isDashboardOnly,
-  isSseKind,
 } from "../../../events/kinds.js";
 
 // ── registry shape ───────────────────────────────────────────────────────────
@@ -111,13 +110,5 @@ describe("kinds — routing", () => {
 
   test("unknown kind throws in routing", () => {
     assert.throws(() => isDashboardOnly("nope"), /unknown/);
-    assert.throws(() => isSseKind("nope"), /unknown/);
-  });
-
-  test("SSE set is session + discuss families", () => {
-    assert.equal(isSseKind("session.transcript.completed"), true);
-    assert.equal(isSseKind("discuss.pending.updated"), true);
-    assert.equal(isSseKind("gate.opened"), false);
-    assert.equal(isSseKind("run.updated"), false);
   });
 });

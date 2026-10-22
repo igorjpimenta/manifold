@@ -114,7 +114,7 @@ function makeFetchProfilesLikeNode() {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("lock-queued-e2e-runs"), legacyDbPath: tmpPath("lock-queued-e2e-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("lock-queued-e2e-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("lock-queued-e2e-execs"));
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };

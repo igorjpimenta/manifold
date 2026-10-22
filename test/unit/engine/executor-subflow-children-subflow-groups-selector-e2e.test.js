@@ -104,7 +104,7 @@ function makeSelectNextLikeNode() {
 }
 
 async function makeHarness({ scoreNode = makeScoreLikeNode() } = {}) {
-  const runStore = await createRunStore({ dbPath: tmpPath("branch-groups-selector-e2e-runs"), legacyDbPath: tmpPath("branch-groups-selector-e2e-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("branch-groups-selector-e2e-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("branch-groups-selector-e2e-execs"));
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
