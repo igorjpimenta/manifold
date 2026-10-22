@@ -211,7 +211,8 @@ export default definePluginEntry({
     // triggerParentResume hook needs failureStore to
     // record a real failure_events row when a subflow's mode isn't
     // satisfied, not just flip flow_runs.status.
-    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore });
+    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
+    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore, emit: emitCanonical });
     // SCD2 history of node kind/agent/mode (see state/pipeline-registry.js's
     // own header) — separate from failureStore and unrelated to it;
     // constructed here only because runtimeDbPath is already in scope.
@@ -258,13 +259,6 @@ export default definePluginEntry({
     // manifold's services (the CLI). Awaited only by the executor's subagent
     // gate (engine/gateway-subagent.js), which every agent dispatch passes.
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
-
-    // Canonical-kind emitter, shared by the executor (session transcripts),
-    // discuss handlers, and the WS run-event listener below. Created here so
-    // every producer closes over the same instance; the broadcast ref itself
-    // stays lazy via the getter (captured at plugin.manifold.ping).
-    // WS delivery comes from getBroadcast above.
-    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
 
     // Assigned in the dashboard section below; the catalog publisher reads
     // it lazily so watcher reloads before dashboard boot stay WS-only.

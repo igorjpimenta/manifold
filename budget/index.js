@@ -376,13 +376,16 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       await withSharedWrite(DB_PATH, () => client.execute({
         sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
-                 pipeline, node, token_estimate, pipeline_id, pipeline_args, enqueuer_session_key, status, created_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+                 pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
         args: [id, label, agent, agentEmoji, trigger, costLow, costHigh, brief ?? null,
                JSON.stringify(modelChain), pipeline ?? pipelineId, node ?? null,
                tokenEstimate ?? null, pipelineId, JSON.stringify(pipelineArgs ?? {}),
                enqueuerSessionKey ?? null, now],
       }));
+      try {
+        await emit("approval.requested", { id });
+      } catch {}
       api.logger.info(`[manifold/budget] queued pipeline=${pipelineId} item=${id}`);
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
@@ -450,6 +453,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
                pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
                pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
       }));
+      try {
+        await emit("approval.requested", { id, flowId: flowId ?? null });
+      } catch {}
       return id;
     },
   };

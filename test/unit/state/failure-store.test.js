@@ -552,6 +552,19 @@ describe("get()", () => {
 // ─── recordEngineFailure() ────────────────────────────────────────────────────
 
 describe("recordEngineFailure()", () => {
+  test("emits failure.recorded with failureId + flowId when emit is injected", async () => {
+    const calls = [];
+    const store = await makeStore({ emit: async (kind, payload) => { calls.push({ kind, payload }); } });
+    const flowId = randomUUID();
+    await store.recordEngineFailure({
+      flowId, pipelineId: "pipe", failureNode: "NODE_X", message: "executor threw", state: {},
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].kind, "failure.recorded");
+    assert.equal(typeof calls[0].payload.failureId, "string");
+    assert.equal(calls[0].payload.flowId, flowId);
+  });
+
   test("inserts a row with error_type=null and (derived) recovery_hint='retry-step'", async () => {
     const store = await makeStore();
     const flowId = randomUUID();

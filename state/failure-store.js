@@ -101,7 +101,7 @@ export function createFailureStore(opts = {}) {
   } });
 }
 
-async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeExecutionsStore } = {}) {
+async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeExecutionsStore, emit } = {}) {
   // Injectable for tests (defaults to the real singleton in production) —
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? await getNodeExecutionsStore();
@@ -393,6 +393,17 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeE
         logger?.info?.(`manifold failure-store: ${errorType ?? "engine-failed"} ${flowId.slice(0, 8)} (${pipelineId}) at ${failureNode || "<engine>"}`);
         const context = await get(insertedId);
         if (context) failureEmitter.emit("failure.created", context);
+        // Fire-and-forget: delivery must never fail the recording.
+        try {
+          await emit?.("failure.recorded", {
+            failureId: insertedId,
+            flowId,
+            pipelineId: pipelineId ?? null,
+            failureNode: failureNode ?? null,
+            failureSummary: summary,
+            errorType: errorType ?? null,
+          });
+        } catch {}
         return { recorded: 1 };
       }
       return { recorded: 0 };
