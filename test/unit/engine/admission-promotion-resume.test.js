@@ -83,7 +83,7 @@ describe("wakePromotedRelease", () => {
   });
 
   test("accepts an ARRAY of release results and picks the first non-null promotion — the dual flow-start/child-dispatch release shape", async () => {
-    const runStore = await createRunStore({ dbPath: tmpPath("wake-array-runs"), legacyDbPath: tmpPath("wake-array-runs-legacy") });
+    const runStore = await createRunStore({ dbPath: tmpPath("wake-array-runs") });
     harness = { runStore };
     const resumed = [];
     const target = randomUUID();
@@ -106,7 +106,7 @@ describe("wakePromotedRelease", () => {
   // the promoted flow's run. Here that run never finishes — if
   // wakePromotedRelease awaited it, this test would hang.
   test("returns once the promoted flow is flipped to running, without waiting for its run to finish", async () => {
-    const runStore = await createRunStore({ dbPath: tmpPath("wake-detach-runs"), legacyDbPath: tmpPath("wake-detach-runs-legacy") });
+    const runStore = await createRunStore({ dbPath: tmpPath("wake-detach-runs") });
     harness = { runStore };
     const target = randomUUID();
     await runStore.insert({ flowId: target, ownerKey: "test", pipelineId: "p", revision: 0, status: "queued", lastStep: "__start__", stateJson: {} });
@@ -134,7 +134,7 @@ describe("wakePromotedRelease", () => {
   test("a resumable kind that genuinely fails to resume (target flow missing) logs a warning tagged with the caller's context", async () => {
     const { warnings, logger } = makeWarningLogger();
     const missingFlowId = randomUUID();
-    const runStore = await createRunStore({ dbPath: tmpPath("wake-fail-runs"), legacyDbPath: tmpPath("wake-fail-runs-legacy") });
+    const runStore = await createRunStore({ dbPath: tmpPath("wake-fail-runs") });
     harness = { runStore };
 
     const result = await wakePromotedRelease(
@@ -150,7 +150,7 @@ describe("wakePromotedRelease", () => {
 
   test("the promoted flow's run throwing is caught and logged by the detached task, tagged with the caller's context", async () => {
     const { warnings, logger } = makeWarningLogger();
-    const runStore = await createRunStore({ dbPath: tmpPath("wake-throw-runs"), legacyDbPath: tmpPath("wake-throw-runs-legacy") });
+    const runStore = await createRunStore({ dbPath: tmpPath("wake-throw-runs") });
     harness = { runStore };
     const target = randomUUID();
     await runStore.insert({ flowId: target, ownerKey: "test", pipelineId: "p", revision: 0, status: "queued", lastStep: "__start__", stateJson: {} });

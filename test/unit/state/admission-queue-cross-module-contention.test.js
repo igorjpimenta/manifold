@@ -63,7 +63,7 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
     // up and their schemas exist.
     const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 5 });
     await admissionQueueStore.ready();
-    const runStore = createRunStore({ dbPath, legacyDbPath: tmpDb("cross-module-contention-legacy") });
+    const runStore = createRunStore({ dbPath });
     await runStore.ready();
     const nodeExecutionsStore = createNodeExecutionsStore(dbPath);
     await nodeExecutionsStore.ready();
@@ -73,7 +73,7 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
     // other three stores' migrations above. A harmless read forces it to
     // finish here, sequentially, before the concurrent round below.
     const failureStore = createFailureStore({
-      dbPath, legacyDbPath: null,
+      dbPath,
       nodeExecutionsStore: { getInvocation: () => null },
     });
     await failureStore.list({ limit: 1 });

@@ -8,9 +8,7 @@
 // on disk directly. This index is written but currently has no reader
 // in production code.
 //
-// Storage: ~/.openclaw/runtime.sqlite (consolidated store; see
-// DEFAULT_DB_PATH). ~/.openclaw/flows/sessions.sqlite is only consulted
-// as a legacy migration source.
+// Storage: ~/.openclaw/runtime.sqlite (see DEFAULT_DB_PATH).
 //
 // INSERT OR IGNORE via UNIQUE(flow_id, session_key) — recording the same
 // session key twice (e.g. on error-retry with the same key) is a no-op.
@@ -24,10 +22,8 @@ import path from "node:path";
 import os from "node:os";
 import { createMigrator } from "./migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
-import { migrateFromLegacy } from "./consolidate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const LEGACY_DB_PATH  = path.join(os.homedir(), ".openclaw", "flows", "sessions.sqlite");
 
 const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS flow_sessions (
@@ -45,7 +41,7 @@ const MIGRATIONS = [
 ];
 
 
-export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPath = LEGACY_DB_PATH, logger } = {}) {
+export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   let db, client;
   try {
@@ -53,7 +49,6 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPat
     await createMigrator(client, { name: "session-index", migrations: MIGRATIONS });
     // Generated snapshots apply after the legacy chain (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
-    if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["flow_sessions"], logger);
   } catch (err) {
     logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);
     // Return a no-op shim so callers don't need to null-check.

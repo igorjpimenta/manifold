@@ -1,11 +1,9 @@
 // budget — approval queue module absorbed into manifold.
 //
-// Owns the SQLite store, now at ~/.openclaw/ops.sqlite (DB_PATH). The old
-// ~/.openclaw/approval-queue/store.sqlite location is kept as LEGACY_DB_PATH
-// and read exactly once, via migrateFromLegacy(), to carry forward any
-// in-flight decisions from before the rename. Registers HTTP routes under
-// /manifold/budget/*. Sets api.runtime.approvalQueue with the async API that
-// executor.js calls per-node (isGateLocked, lookupNodeDecision, enqueueNodeApproval).
+// Owns the SQLite store at ~/.openclaw/ops.sqlite (DB_PATH). Registers
+// HTTP routes under /manifold/budget/*. Sets api.runtime.approvalQueue
+// with the async API that executor.js calls per-node (isGateLocked,
+// lookupNodeDecision, enqueueNodeApproval).
 
 import { mkdirSync } from "node:fs";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
@@ -15,11 +13,9 @@ import os from "node:os";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "./lib.js";
 import { createMigrator } from "../state/migrator.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
-import { migrateFromLegacy } from "../state/consolidate.js";
 
 const STORE_DIR = path.join(os.homedir(), ".openclaw");
 const DB_PATH = path.join(STORE_DIR, "ops.sqlite");
-const LEGACY_DB_PATH = path.join(os.homedir(), ".openclaw", "approval-queue", "store.sqlite");
 
 const MOCK_ITEMS = [
   {
@@ -147,22 +143,21 @@ const BUDGET_MIGRATIONS = [
 // connection is what closes the "budget store not attached yet" race: a
 // fresh connection per reload opens a genuine "not ready" window each time
 // by construction (see ensureClient's own comment below for the hazard).
-// createMigrator/migrateFromLegacy are cheap idempotent no-ops once already
-// applied, so re-running them against an already-migrated cached connection
+// createMigrator is a cheap idempotent no-op once already
+// applied, so re-running it against an already-migrated cached connection
 // on a later reload costs one quick SELECT, not a meaningful delay.
 // Exported so tests can exercise the real getSharedDb-backed path against a
 // tmp dbPath (see test/unit/budget/index.test.js's "real openStore()"
 // suite) instead of only ever testing through a fully-fake openStore DI
 // override that bypasses this function — and by extension getSharedDb —
 // entirely.
-export async function openStore({ dbPath = DB_PATH, legacyDbPath = LEGACY_DB_PATH } = {}) {
+export async function openStore({ dbPath = DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { client } = await getSharedDb(dbPath);
   await client.execute("PRAGMA foreign_keys = ON");
   await createMigrator(client, { name: "budget", migrations: BUDGET_MIGRATIONS });
   // Generated snapshots apply after the legacy chain (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
-  if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["queue_items", "gate_state"]);
   return client;
 }
 

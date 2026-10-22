@@ -20,7 +20,7 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("spawn-child-runs"), legacyDbPath: tmpPath("spawn-child-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("spawn-child-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("spawn-child-execs"));
   const store = createStateStore({}, "test-owner", { runStore });
   return { runStore, nodeExecutionsStore, store };

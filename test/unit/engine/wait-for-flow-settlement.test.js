@@ -37,7 +37,7 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("wfs-runs"), legacyDbPath: tmpPath("wfs-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("wfs-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("wfs-execs"));
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };

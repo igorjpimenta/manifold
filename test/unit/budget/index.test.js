@@ -105,7 +105,7 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
   // still exercises the actual getSharedDb(dbPath) call inside openStore()
   // itself, just without touching the real ~/.openclaw/ops.sqlite.
   function realOpenStoreAt(dbPath) {
-    return () => openStore({ dbPath, legacyDbPath: null });
+    return () => openStore({ dbPath });
   }
 
   it("a second generation against the same dbPath sees data written by the first, with no separate migration failure", async () => {

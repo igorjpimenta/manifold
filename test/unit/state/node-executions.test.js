@@ -1725,7 +1725,7 @@ describe("getLatestExecutionForNode()", () => {
 describe("summarizeChildrenByFlowIds()", () => {
   async function makeDualStore() {
     const dbPath = tmpDb();
-    const runStore = createRunStore({ dbPath, legacyDbPath: path.join(os.tmpdir(), `gf-ne-legacy-${randomUUID()}.sqlite`) });
+    const runStore = createRunStore({ dbPath });
     await runStore.ready();
     const nodeExecutionsStore = createNodeExecutionsStore(dbPath);
     return { runStore, nodeExecutionsStore, dbPath };

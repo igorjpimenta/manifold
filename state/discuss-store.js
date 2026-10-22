@@ -23,10 +23,8 @@ import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { createMigrator } from "./migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
-import { migrateFromLegacy } from "./consolidate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const LEGACY_DB_PATH  = path.join(os.homedir(), ".openclaw", "discuss", "discuss.sqlite");
 
 const MIGRATIONS = [
   // v1: initial schema (components_json included from the start in new installs;
@@ -69,13 +67,12 @@ export function createDiscussStore(opts = {}) {
   } });
 }
 
-async function _createDiscussStoreImpl({ dbPath = DEFAULT_DB_PATH, legacyDbPath = LEGACY_DB_PATH, logger } = {}) {
+async function _createDiscussStoreImpl({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
   await createMigrator(client, { name: "discuss-store", migrations: MIGRATIONS });
   // Generated snapshots apply after the legacy chain (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
-  if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["discuss_state"], logger);
 
   const _where = (flowId, itemId) => and(eq(discussState.flowId, flowId), eq(discussState.itemId, itemId));
 

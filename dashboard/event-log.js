@@ -33,10 +33,8 @@ import os from "node:os";
 import { flowStateEmitter } from "../events.js";
 import { createMigrator } from "../state/migrator.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
-import { migrateFromLegacy } from "../state/consolidate.js";
 
 const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const LEGACY_EVENTS_DB_PATH  = path.join(os.homedir(), ".openclaw", "flows", "events.sqlite");
 
 const MIGRATIONS = [
   `CREATE TABLE IF NOT EXISTS flow_events (
@@ -56,14 +54,13 @@ const MIGRATIONS = [
      ON flow_events(occurred_at)`,
 ];
 
-async function openEventsDb(dbPath, legacyDbPath, logger) {
+async function openEventsDb(dbPath, logger) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     const { client } = await openDb(dbPath);
     await createMigrator(client, { name: "event-log", migrations: MIGRATIONS });
     // Generated snapshots apply after the legacy chain (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
-    if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["flow_events"], logger);
     return client;
   } catch (err) {
     logger?.warn?.(`manifold event-log: failed to open events DB: ${err?.message ?? err}`);
@@ -75,9 +72,9 @@ const RING_CAP = 256;
 
 const INSERT_SQL = `INSERT OR IGNORE INTO flow_events (id, flow_id, event_type, prev_step, curr_step, prev_status, curr_status, wait_kind, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DEFAULT_EVENTS_DB_PATH, legacyDbPath = LEGACY_EVENTS_DB_PATH }) {
+export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DEFAULT_EVENTS_DB_PATH }) {
   let _client = null;
-  if (dbPath) openEventsDb(dbPath, legacyDbPath, logger).then(c => { _client = c; });
+  if (dbPath) openEventsDb(dbPath, logger).then(c => { _client = c; });
   // Map<flowId, { revision, status, lastStep, stateKeys: Set<string>, terminal: boolean }>
   const last = new Map();
 

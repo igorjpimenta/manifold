@@ -14,14 +14,13 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createRunStore, TERMINAL_STATUSES, TERMINAL_STATUS_SET } from "../../../state/run-store.js";
 
-const NO_LEGACY = path.join(os.tmpdir(), `run-store-no-legacy-${randomUUID()}.sqlite`);
 
 function tmpDb() {
   return path.join(os.tmpdir(), `run-store-test-${randomUUID()}.sqlite`);
 }
 
 async function makeStore(overrides = {}) {
-  return createRunStore({ dbPath: tmpDb(), legacyDbPath: NO_LEGACY, ...overrides });
+  return createRunStore({ dbPath: tmpDb(), ...overrides });
 }
 
 function fakeFlow(overrides = {}) {
@@ -90,9 +89,9 @@ describe("createRunStore — schema", () => {
 
   test("idempotent: opening same dbPath twice does not throw", async () => {
     const dbPath = tmpDb();
-    const s1 = createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
+    const s1 = createRunStore({ dbPath });
     await s1.close();
-    const s2 = createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
+    const s2 = createRunStore({ dbPath });
     await s2.close();
   });
 });
@@ -539,7 +538,7 @@ describe("createRunStore — get", () => {
 describe("createRunStore — v3 migration", () => {
   test("dropped columns no longer appear in PRAGMA table_info", async () => {
     const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const raw = createClient({ url: `file:${dbPath}` });
     const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
     const cols = rows.map((r) => r.name);
@@ -562,7 +561,7 @@ describe("createRunStore — v3 migration", () => {
       },
     ]);
 
-    const store = await createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
+    const store = await createRunStore({ dbPath });
     assert.equal((await store.get("f-manifold")).pipelineId, "foo");
     assert.equal((await store.get("f-legacy")).pipelineId, "bar");
     store.close();
@@ -583,7 +582,7 @@ describe("createRunStore — v3 migration", () => {
 describe("createRunStore — v4 migration", () => {
   test("parent_invocation_id column exists, old name gone", async () => {
     const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const raw = createClient({ url: `file:${dbPath}` });
     const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
     const cols = rows.map((r) => r.name);
@@ -594,7 +593,7 @@ describe("createRunStore — v4 migration", () => {
 
   test("idx_pfr_parent_invocation unique index exists, old-named index gone", async () => {
     const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const raw = createClient({ url: `file:${dbPath}` });
     const { rows: idx } = await raw.execute(`SELECT name, "unique" FROM pragma_index_list('flow_runs')`);
     const found = idx.find((i) => i.name === "idx_pfr_parent_invocation");
@@ -624,7 +623,7 @@ describe("createRunStore — v4 migration", () => {
 
   test("two different non-NULL parent_invocation_id values both succeed", async () => {
     const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const raw = createClient({ url: `file:${dbPath}` });
     const insertSql = `
       INSERT INTO flow_runs (flow_id, owner_key, pipeline_id, revision, status, last_step, state_json, created_at, updated_at, parent_invocation_id)
@@ -639,7 +638,7 @@ describe("createRunStore — v4 migration", () => {
 
   test("same parent_invocation_id twice throws SQLITE_CONSTRAINT", async () => {
     const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const raw = createClient({ url: `file:${dbPath}` });
     const dup = randomUUID();
     const insertSql = `
@@ -660,7 +659,7 @@ describe("createRunStore — v4 migration", () => {
 describe("createRunStore — v5 migration", () => {
   test("status_reason column exists", async () => {
     const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const raw = createClient({ url: `file:${dbPath}` });
     const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
     const cols = rows.map((r) => r.name);
@@ -681,7 +680,7 @@ describe("createRunStore — v5 migration", () => {
       },
     ]);
 
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const check = createClient({ url: `file:${dbPath}` });
     const { rows: r1 } = await check.execute("SELECT status_reason FROM flow_runs WHERE flow_id = 'f-with-reason'");
     assert.equal(r1[0].status_reason, "waiting for gate");
@@ -712,7 +711,7 @@ describe("createRunStore — v5 migration", () => {
 describe("createRunStore — v6 migration", () => {
   test("blocked_summary column no longer appears in PRAGMA table_info", async () => {
     const dbPath = tmpDb();
-    await createRunStore({ dbPath, legacyDbPath: NO_LEGACY }).close();
+    await createRunStore({ dbPath }).close();
     const raw = createClient({ url: `file:${dbPath}` });
     const { rows } = await raw.execute("SELECT name FROM pragma_table_info('flow_runs')");
     const cols = rows.map((r) => r.name);
@@ -730,7 +729,7 @@ describe("createRunStore — v6 migration", () => {
       },
     ]);
 
-    const store = await createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
+    const store = await createRunStore({ dbPath });
     assert.equal((await store.get("f-survives")).statusReason, "waiting for gate");
     store.close();
   });

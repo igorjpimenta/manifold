@@ -55,7 +55,6 @@ async function makeStore(overrides = {}) {
   // await) is never triggered in tests.
   return createFailureStore({
     dbPath: tmpDb(),
-    legacyDbPath: null,
     nodeExecutionsStore: makeFakeNodeExecutions(),
     ...overrides,
   });
@@ -126,9 +125,9 @@ describe("createFailureStore — DB setup", () => {
 
   test("schema is idempotent — opening twice on same file does not throw", async () => {
     const dbPath = tmpDb();
-    const s1 = createFailureStore({ dbPath, legacyDbPath: null, nodeExecutionsStore: makeFakeNodeExecutions() });
+    const s1 = createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     await s1.close();
-    const s2 = createFailureStore({ dbPath, legacyDbPath: null, nodeExecutionsStore: makeFakeNodeExecutions() });
+    const s2 = createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     await s2.close();
   });
 
@@ -195,7 +194,7 @@ describe("createFailureStore — DB setup", () => {
     });
     raw.close();
 
-    const store = await createFailureStore({ dbPath, legacyDbPath: null, nodeExecutionsStore: makeFakeNodeExecutions() });
+    const store = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     const { rows } = await store._db.execute({ sql: "SELECT * FROM failure_events WHERE execution_id = ?", args: [sharedExecId] });
     assert.equal(rows.length, 1, "the migration must dedupe, not throw or leave both rows");
     assert.equal(rows[0].id, currentId, "the row with the later failed_at should survive");
@@ -257,7 +256,7 @@ describe("createFailureStore — DB setup", () => {
     });
     raw.close();
 
-    const store = await createFailureStore({ dbPath, legacyDbPath: null, nodeExecutionsStore: makeFakeNodeExecutions() });
+    const store = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     const { rows: colRows } = await store._db.execute("PRAGMA table_info(failure_events)");
     assert.ok(!colRows.map((r) => r.name).includes("failure_kind"), "failure_kind must be gone");
 
@@ -274,9 +273,9 @@ describe("createFailureStore — DB setup", () => {
 
   test("v14 is idempotent — opening twice on an already-migrated DB does not throw or duplicate rows", async () => {
     const dbPath = tmpDb();
-    const s1 = createFailureStore({ dbPath, legacyDbPath: null, nodeExecutionsStore: makeFakeNodeExecutions() });
+    const s1 = createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     await s1.close();
-    const s2 = await createFailureStore({ dbPath, legacyDbPath: null, nodeExecutionsStore: makeFakeNodeExecutions() });
+    const s2 = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     const { rows } = await s2._db.execute("PRAGMA table_info(failure_events)");
     assert.ok(!rows.map((r) => r.name).includes("failure_kind"));
     s2.close();
@@ -314,7 +313,7 @@ describe("createFailureStore — DB setup", () => {
     }
     raw.close();
 
-    const store = await createFailureStore({ dbPath, legacyDbPath: null, nodeExecutionsStore: makeFakeNodeExecutions() });
+    const store = await createFailureStore({ dbPath, nodeExecutionsStore: makeFakeNodeExecutions() });
     const { rows: colRows } = await store._db.execute("PRAGMA table_info(failure_events)");
     const cols = colRows.map((r) => r.name);
     assert.ok(cols.includes("invocation_id"), "invocation_id must be added by the v11 repair");

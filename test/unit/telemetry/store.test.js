@@ -30,7 +30,7 @@ function makeCostRow(overrides = {}) {
 describe("telemetry/store.js — openStore", () => {
   test("opens the DB and creates the schema without throwing", async () => {
     const dbPath = tmpDb();
-    const store = await openStore({ dbPath, legacyDbPath: null });
+    const store = await openStore({ dbPath });
     assert.equal(await store.getLineage(randomUUID()), null);
     store.close();
     _resetForTests(dbPath);
@@ -40,7 +40,7 @@ describe("telemetry/store.js — openStore", () => {
 describe("telemetry/store.js — upsertLineage / getLineage (unchanged, immediate)", () => {
   test("a row is visible immediately after upsertLineage, no flush needed", async () => {
     const dbPath = tmpDb();
-    const store = await openStore({ dbPath, legacyDbPath: null });
+    const store = await openStore({ dbPath });
     const childKey = randomUUID();
 
     await store.upsertLineage({
@@ -63,7 +63,7 @@ describe("telemetry/store.js — upsertLineage / getLineage (unchanged, immediat
 describe("telemetry/store.js — insertCost (deferred via batch-writer)", () => {
   test("a cost row is not visible until flush() runs", async () => {
     const dbPath = tmpDb();
-    const store = await openStore({ dbPath, legacyDbPath: null });
+    const store = await openStore({ dbPath });
     const row = makeCostRow();
 
     store.insertCost(row);
@@ -88,7 +88,7 @@ describe("telemetry/store.js — insertCost (deferred via batch-writer)", () => 
 
   test("multiple insertCost calls in one window batch into a single flush", async () => {
     const dbPath = tmpDb();
-    const store = await openStore({ dbPath, legacyDbPath: null });
+    const store = await openStore({ dbPath });
     const sessionId = randomUUID();
     const rows = [
       makeCostRow({ session_id: sessionId, msg_id: "m1" }),

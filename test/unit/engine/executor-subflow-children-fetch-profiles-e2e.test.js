@@ -125,7 +125,7 @@ function makeFetchProfilesLikeNode() {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("fetch-profiles-e2e-runs"), legacyDbPath: tmpPath("fetch-profiles-e2e-runs-legacy") });
+  const runStore = await createRunStore({ dbPath: tmpPath("fetch-profiles-e2e-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("fetch-profiles-e2e-execs"));
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
