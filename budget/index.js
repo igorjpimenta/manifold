@@ -107,9 +107,9 @@ const BUDGET_MIGRATIONS = [
       await client.execute("ALTER TABLE queue_items ADD COLUMN enqueuer_session_key TEXT");
     }
   },
-  // v4: kind tag — "node" for per-node approvals (the only prod writer),
-  // "run-start" for pipeline start-gate approvals. Legacy rows read back
-  // as "node" (see deserialize).
+  // kind tag vocabulary: "node" for per-node approvals (the only prod
+  // writer), "run-start" for pipeline start-gate approvals. A row with
+  // no kind reads back as "node" (see deserialize).
   async (client) => {
     const { rows } = await client.execute("SELECT name FROM pragma_table_info('queue_items')");
     const cols = rows.map((r) => r.name);
