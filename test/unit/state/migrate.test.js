@@ -4,11 +4,11 @@
  * Verifies:
  *   - Fresh DBs migrate to the full expected table set (runtime + ops),
  *     with a journal row; reruns are idempotent.
- *   - migrateDatabase() after the legacy createMigrator chain is a no-op
- *     success (ordering coexistence — the chain shapes, snapshots confirm).
+ *   - Snapshots are the sole schema path (no legacy journal on
+ *     snapshot-built DBs).
  *   - Schema parity: every table the real store boot produces matches the
- *     drizzle def column-for-column. A new inline column without a schema.js
- *     update (or vice versa) fails here — that is the whole point.
+ *     drizzle def column-for-column. A column in a def without a generated
+ *     snapshot (or vice versa) fails here — that is the whole point.
  */
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -16,7 +16,7 @@ import os from "node:os";
 import path from "node:path";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
 import {
   migrateDatabase,
@@ -34,22 +34,33 @@ function tmpDb(name) {
   return { dir, dbPath: path.join(dir, `${name}.sqlite`) };
 }
 
-function liveTables(dbPath) {
-  const db = new Database(dbPath, { readonly: true });
+async function liveTables(dbPath) {
+  const db = createClient({ url: `file:${dbPath}` });
   try {
-    return db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
-      .all()
-      .map((r) => r.name);
+    const { rows } = await db.execute(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    );
+    return rows.map((r) => r.name);
   } finally {
     db.close();
   }
 }
 
-function liveColumns(dbPath, table) {
-  const db = new Database(dbPath, { readonly: true });
+async function liveColumns(dbPath, table) {
+  const db = createClient({ url: `file:${dbPath}` });
   try {
-    return db.prepare(`PRAGMA table_info(${table})`).all().map((r) => r.name).sort();
+    const { rows } = await db.execute(`PRAGMA table_info(${table})`);
+    return rows.map((r) => r.name).sort();
+  } finally {
+    db.close();
+  }
+}
+
+async function journalRowCount(dbPath) {
+  const db = createClient({ url: `file:${dbPath}` });
+  try {
+    const { rows } = await db.execute("SELECT COUNT(*) AS n FROM __drizzle_migrations");
+    return rows[0].n;
   } finally {
     db.close();
   }
@@ -87,28 +98,24 @@ describe("migrateDatabase — fresh databases", () => {
     const dbPath = path.join(dir, "runtime.sqlite");
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger: silentLogger });
 
-    const tables = liveTables(dbPath);
+    const tables = await liveTables(dbPath);
     for (const [key, def] of defEntries(runtimeSchema)) {
       assert.ok(tables.includes(getTableConfig(def).name), `table missing: ${key}`);
     }
 
-    const db = new Database(dbPath, { readonly: true });
-    const journal = db.prepare("SELECT COUNT(*) AS n FROM __drizzle_migrations").get();
-    db.close();
-    assert.ok(journal.n >= 1, "journal must record applied snapshots");
+    const n = await journalRowCount(dbPath);
+    assert.ok(n >= 1, "journal must record applied snapshots");
 
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger: silentLogger });
-    const db2 = new Database(dbPath, { readonly: true });
-    const journal2 = db2.prepare("SELECT COUNT(*) AS n FROM __drizzle_migrations").get();
-    db2.close();
-    assert.equal(journal2.n, journal.n, "rerun must not append journal rows");
+    const n2 = await journalRowCount(dbPath);
+    assert.equal(n2, n, "rerun must not append journal rows");
   });
 
   test("ops: creates every def table + journal", async () => {
     const dbPath = path.join(dir, "ops.sqlite");
     await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER, logger: silentLogger });
 
-    const tables = liveTables(dbPath);
+    const tables = await liveTables(dbPath);
     for (const [, def] of defEntries(opsSchema)) {
       assert.ok(tables.includes(getTableConfig(def).name), `table missing: ${getTableConfig(def).name}`);
     }
@@ -176,7 +183,7 @@ describe("migrateDatabase — snapshots only, no chain", () => {
     const store = await createRunStore({ dbPath, logger: silentLogger });
     await store.close?.().catch(() => {});
 
-    const tables = liveTables(dbPath);
+    const tables = await liveTables(dbPath);
     assert.ok(tables.includes("flow_runs"));
     assert.ok(!tables.includes("_schema_version"), "no legacy journal on snapshot-built DBs");
   });
@@ -211,18 +218,25 @@ describe("schema parity — live boot vs drizzle defs", () => {
     async function bootAndWait(dbPath, tables, fn) {
       await fn();
       const deadline = Date.now() + 15000;
+      let firstErr = null;
       for (;;) {
         let seen = [];
         try {
-          const db = new Database(dbPath, { readonly: true });
+          const db = createClient({ url: `file:${dbPath}` });
           try {
-            seen = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((r) => r.name);
+            const { rows } = await db.execute("SELECT name FROM sqlite_master WHERE type='table'");
+            seen = rows.map((r) => r.name);
           } finally {
             db.close();
           }
-        } catch { seen = []; }
+        } catch (e) { firstErr = firstErr ?? e; seen = []; }
         if (tables.every((t) => seen.includes(t))) return;
-        if (Date.now() > deadline) assert.fail(`tables [${tables}] never materialized in ${dbPath} (saw [${seen}])`);
+        if (Date.now() > deadline) {
+          assert.fail(
+            `tables [${tables}] never materialized in ${dbPath} (saw [${seen}])` +
+            (firstErr ? ` first poll error: ${String(firstErr?.message ?? firstErr).slice(0, 200)}` : ""),
+          );
+        }
         await new Promise((r) => setTimeout(r, 100));
       }
     }
@@ -274,7 +288,8 @@ describe("schema parity — live boot vs drizzle defs", () => {
     await bootAndWait(eventsDb, ["flow_events"], async () => {});
 
     const files = [runsDb, execDb, healthDb, sessionDb, failureDb, discussDb, registryDb, admissionDb, eventsDb];
-    const tablesByFile = new Map(files.map((f) => [f, liveTables(f)]));
+    const tablesByFile = new Map();
+    for (const f of files) tablesByFile.set(f, await liveTables(f));
     const allTables = [...new Set([...tablesByFile.values()].flat())].filter(
       (t) => !["__drizzle_migrations", "sqlite_sequence"].includes(t),
     );
@@ -293,7 +308,7 @@ describe("schema parity — live boot vs drizzle defs", () => {
     for (const [, def] of defEntries(runtimeSchema)) {
       const name = getTableConfig(def).name;
       assert.deepEqual(
-        liveColumns(tableFile(name), name),
+        await liveColumns(tableFile(name), name),
         defColumns(def),
         `columns of ${name} must match the def exactly`,
       );

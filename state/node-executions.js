@@ -81,11 +81,11 @@ export function createNodeExecutionsStore(dbPath) {
 async function _createStore(dbPath) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
+    // Generated snapshots are the sole schema path (see state/migrate.js).
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     const { db, client } = await getSharedDb(dbPath);
     // Tracking key deliberately kept as "step-timings" — pure version-history
     // bookkeeping, unrelated to the table's current name/shape.
-    // Generated snapshots are the sole schema path (see state/migrate.js).
-    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
 
     // ── helpers ────────────────────────────────────────────────────────────
 

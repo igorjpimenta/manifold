@@ -29,6 +29,7 @@
   "dependencies": {
     "@igorjpimenta/oc-contracts": "git+https://github.com/igorjpimenta/oc-contracts.git#v1.0.1",
     "@libsql/client": "^0.17.4",
+    "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.2"
   },
   "openclaw": {
@@ -40,7 +41,6 @@
     }
   },
   "devDependencies": {
-    "better-sqlite3": "^13.0.3",
     "drizzle-kit": "^0.31.11"
   }
 }

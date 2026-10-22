@@ -63,9 +63,9 @@ async function _createImpl({ dbPath = DEFAULT_DB_PATH, getLimit } = {}) {
     throw new TypeError("admission-queue-store: getLimit() function is required (e.g. global-concurrency.js's getGlobalConcurrencyLimit)");
   }
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  const { client } = await getSharedDb(dbPath);
   // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+  const { client } = await getSharedDb(dbPath);
 
   // Runs `fn(tx)` inside one BEGIN IMMEDIATE transaction, committing on
   // success and always closing (which rolls back if not committed) — the

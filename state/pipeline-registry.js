@@ -121,9 +121,9 @@ async function _createStore(dbPath) {
   let client;
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
-    ({ client } = await getSharedDb(dbPath));
     // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+    ({ client } = await getSharedDb(dbPath));
   } catch {
     // Purely additive/historical-rendering feature (see this file's own
     // top comment) — if the DB can't open, degrade to a no-op store

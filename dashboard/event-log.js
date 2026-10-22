@@ -39,9 +39,9 @@ const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sql
 async function openEventsDb(dbPath, logger) {
   try {
     mkdirSync(path.dirname(dbPath), { recursive: true });
-    const { client } = await openDb(dbPath);
     // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+    const { client } = await openDb(dbPath);
     return client;
   } catch (err) {
     logger?.warn?.(`manifold event-log: failed to open events DB: ${err?.message ?? err}`);

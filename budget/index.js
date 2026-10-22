@@ -103,10 +103,10 @@ const MOCK_ITEMS = [
 // entirely.
 export async function openStore({ dbPath = DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  const { client } = await getSharedDb(dbPath);
-  await client.execute("PRAGMA foreign_keys = ON");
   // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
+  const { client } = await getSharedDb(dbPath);
+  await client.execute("PRAGMA foreign_keys = ON");
   // The singleton row is runtime state, not schema: every gate_state reader
   // assumes it exists. Seeded unconditionally (was v1's INSERT OR IGNORE).
   await client.execute(`INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`);

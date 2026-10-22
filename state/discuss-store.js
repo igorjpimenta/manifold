@@ -42,9 +42,9 @@ export function createDiscussStore(opts = {}) {
 
 async function _createDiscussStoreImpl({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  const { db, client } = await getSharedDb(dbPath);
   // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+  const { db, client } = await getSharedDb(dbPath);
 
   const _where = (flowId, itemId) => and(eq(discussState.flowId, flowId), eq(discussState.itemId, itemId));
 

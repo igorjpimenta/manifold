@@ -107,9 +107,9 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeE
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? await getNodeExecutionsStore();
   mkdirSync(path.dirname(dbPath), { recursive: true });
-  const { db, client } = await getSharedDb(dbPath);
   // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+  const { db, client } = await getSharedDb(dbPath);
 
   // ── Write-side identity ────────────────────────────────────────────
   // execution_id is the real conflict target (partial UNIQUE index,

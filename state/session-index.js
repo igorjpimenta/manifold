@@ -29,9 +29,9 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, logger } = 
   mkdirSync(path.dirname(dbPath), { recursive: true });
   let db, client;
   try {
-    ({ db, client } = await getSharedDb(dbPath));
     // Generated snapshots are the sole schema path (see state/migrate.js).
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+    ({ db, client } = await getSharedDb(dbPath));
   } catch (err) {
     logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);
     // Return a no-op shim so callers don't need to null-check.

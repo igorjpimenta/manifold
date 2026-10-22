@@ -48,9 +48,9 @@ const INSERT_COST_SQL = `
 
 export async function openStore({ dbPath = DEFAULT_DB_PATH } = {}) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  const { client } = await getSharedDb(dbPath);
   // Generated snapshots are the sole schema path (see state/migrate.js).
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
+  const { client } = await getSharedDb(dbPath);
   await attachFlowsDb(client);
   return makeStore(client, dbPath);
 }
