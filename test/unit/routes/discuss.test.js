@@ -287,13 +287,21 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
 
     // The retry dispatches in the background (setImmediate after the 202);
     // poll the meta sidecar until it flips, bounded and loud on timeout.
+    // Reads tolerate torn writes (writeFile truncates first): an unreadable
+    // or unparsable file just means "not yet".
     const metaPath = path.join(audioDir, `${turnId}.meta.json`);
     const deadline = Date.now() + 5000;
     let updatedMeta = null;
     for (;;) {
-      updatedMeta = JSON.parse(await readFile(metaPath, "utf8"));
-      if (updatedMeta.status === "completed") break;
-      if (Date.now() > deadline) assert.fail(`meta sidecar never flipped to completed (stuck at ${updatedMeta.status})`);
+      try {
+        updatedMeta = JSON.parse(await readFile(metaPath, "utf8"));
+      } catch {
+        updatedMeta = null;
+      }
+      if (updatedMeta?.status === "completed") break;
+      if (Date.now() > deadline) {
+        assert.fail(`meta sidecar never flipped to completed (stuck at ${updatedMeta?.status ?? "unreadable"})`);
+      }
       await new Promise((r) => setTimeout(r, 25));
     }
     assert.equal(updatedMeta.transcript, "hello from retry");
