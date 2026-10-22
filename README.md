@@ -33,7 +33,6 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
 | `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |
-| `…/state/migrator` | `createMigrator` | sibling extension |
 
 The map is pinned by `test/unit/api/public-exports.test.js`; adding or
 removing an entry is a breaking change for the consumers above.
