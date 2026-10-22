@@ -7,6 +7,7 @@ import { getSharedDb, withSharedWrite } from "../state/db.js";
 import os from "node:os";
 import fs from "node:fs";
 import { createMigrator } from "../state/migrator.js";
+import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { migrateFromLegacy } from "../state/consolidate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
 
@@ -126,6 +127,8 @@ export async function openStore({ dbPath = DEFAULT_DB_PATH, legacyDbPath = LEGAC
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const { client } = await getSharedDb(dbPath);
   await createMigrator(client, { name: "telemetry", migrations: MIGRATIONS });
+  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["session_lineage", "cost_by_call"]);
   await attachFlowsDb(client);
   return makeStore(client, dbPath);

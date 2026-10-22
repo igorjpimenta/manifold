@@ -32,6 +32,7 @@ import path from "node:path";
 import os from "node:os";
 import { flowStateEmitter } from "../events.js";
 import { createMigrator } from "../state/migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { migrateFromLegacy } from "../state/consolidate.js";
 
 const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
@@ -60,6 +61,8 @@ async function openEventsDb(dbPath, legacyDbPath, logger) {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     const { client } = await openDb(dbPath);
     await createMigrator(client, { name: "event-log", migrations: MIGRATIONS });
+    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["flow_events"], logger);
     return client;
   } catch (err) {

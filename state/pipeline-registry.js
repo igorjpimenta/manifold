@@ -64,6 +64,7 @@ import path from "node:path";
 import os from "node:os";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
@@ -86,6 +87,9 @@ const MIGRATIONS = [
     await client.execute(`CREATE INDEX IF NOT EXISTS idx_pv_lookup ON pipeline_versions (pipeline_id, registered_at)`);
     await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pv_active ON pipeline_versions (pipeline_id) WHERE retired_at IS NULL`);
 
+    // NOTE: no node_id-variant indexes here on purpose — v2 below drops
+    // whatever names match and recreates them against node_name, so
+    // creating them here would only ever produce same-open dead weight.
     await client.execute(`
       CREATE TABLE IF NOT EXISTS pipeline_node_versions (
         id                    TEXT    PRIMARY KEY,
@@ -100,8 +104,6 @@ const MIGRATIONS = [
         retired_at            INTEGER
       )
     `);
-    await client.execute(`CREATE INDEX IF NOT EXISTS idx_pnv_lookup ON pipeline_node_versions (pipeline_id, node_id, registered_at)`);
-    await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pnv_active ON pipeline_node_versions (pipeline_id, node_id) WHERE retired_at IS NULL`);
   },
   // node_id (from migration 1) is renamed to node_name — it was always a
   // point-in-time DISPLAY LABEL, not a stable identifier. A new node_id
@@ -117,13 +119,21 @@ const MIGRATIONS = [
   // pre-existing row its own freshly-minted node_id, one shared value per
   // (pipeline_id, node_name) group across all of that node's own past
   // rows — they're the same node's own history, not a rename.
+  // Guarded: the DDL runs only while node_name is still missing with
+  // node_id present (baseline-shaped tables already went through this).
+  // The backfill itself only touches rows with NULL node_id, so it stays
+  // unguarded — a no-op wherever there is nothing to mint.
   async (client) => {
-    await client.execute(`DROP INDEX IF EXISTS idx_pnv_lookup`);
-    await client.execute(`DROP INDEX IF EXISTS idx_pnv_active`);
-    await client.execute(`ALTER TABLE pipeline_node_versions RENAME COLUMN node_id TO node_name`);
-    await client.execute(`ALTER TABLE pipeline_node_versions ADD COLUMN node_id TEXT`);
-    await client.execute(`CREATE INDEX IF NOT EXISTS idx_pnv_lookup ON pipeline_node_versions (pipeline_id, node_name, registered_at)`);
-    await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pnv_active ON pipeline_node_versions (pipeline_id, node_name) WHERE retired_at IS NULL`);
+    const { rows: colRows } = await client.execute("SELECT name FROM pragma_table_info('pipeline_node_versions')");
+    const cols = colRows.map((r) => r.name);
+    if (!cols.includes("node_name") && cols.includes("node_id")) {
+      await client.execute(`DROP INDEX IF EXISTS idx_pnv_lookup`);
+      await client.execute(`DROP INDEX IF EXISTS idx_pnv_active`);
+      await client.execute(`ALTER TABLE pipeline_node_versions RENAME COLUMN node_id TO node_name`);
+      await client.execute(`ALTER TABLE pipeline_node_versions ADD COLUMN node_id TEXT`);
+      await client.execute(`CREATE INDEX IF NOT EXISTS idx_pnv_lookup ON pipeline_node_versions (pipeline_id, node_name, registered_at)`);
+      await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_pnv_active ON pipeline_node_versions (pipeline_id, node_name) WHERE retired_at IS NULL`);
+    }
 
     const { rows } = await client.execute(
       `SELECT DISTINCT pipeline_id, node_name FROM pipeline_node_versions WHERE node_id IS NULL`,
@@ -192,6 +202,8 @@ async function _createStore(dbPath) {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     ({ client } = await getSharedDb(dbPath));
     await createMigrator(client, { name: "pipeline-registry", migrations: MIGRATIONS });
+    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   } catch {
     // Purely additive/historical-rendering feature (see this file's own
     // top comment) — if the DB can't open, degrade to a no-op store

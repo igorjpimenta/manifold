@@ -1566,6 +1566,31 @@ with operator-supplied state* above.
 
 Schema enforced in `openclaw.plugin.json: configSchema`.
 
+## Database migrations
+
+Table shapes live in `state/schema.js` (`runtime.sqlite`) and
+`state/schema.ops.js` (`ops.sqlite`) — drizzle definitions, the single
+source of truth. `npm run db:generate` snapshots them into
+`.migrations/<db>/`; `state/migrate.js` applies pending snapshots at
+store open, after each store's own `createMigrator` chain (same libsql
+driver throughout — never a second handle under live traffic). New schema
+changes go in the defs + a generated snapshot — frozen inline chains are
+never edited for shape. `test/unit/state/migrate.test.js` fails the build
+if live-booted columns drift from the defs either way, and if any snapshot
+file carries an unguarded CREATE or a DROP/RENAME.
+
+## Database migrations
+
+Table shapes live in `state/schema.js` (`runtime.sqlite`) and
+`state/schema.ops.js` (`ops.sqlite`) — drizzle definitions, the single
+source of truth. `npm run db:generate` snapshots them into
+`.migrations/<db>/`; `state/migrate.js` applies pending snapshots at
+store open, after each store's own `createMigrator` chain (ordering is
+load-bearing: the chain owns pre-existing databases, snapshots only ever
+add). New schema changes go in the defs + a generated snapshot — never
+in the inline arrays. `test/unit/state/migrate.test.js` fails the build
+if live-booted columns drift from the defs either way.
+
 ## SQLite shape (for direct queries / surgery)
 
 Manifold owns `flow_runs`, `flow_node_invocations`, and

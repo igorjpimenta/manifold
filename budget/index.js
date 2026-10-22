@@ -14,6 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "./lib.js";
 import { createMigrator } from "../state/migrator.js";
+import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { migrateFromLegacy } from "../state/consolidate.js";
 
 const STORE_DIR = path.join(os.homedir(), ".openclaw");
@@ -159,6 +160,8 @@ export async function openStore({ dbPath = DB_PATH, legacyDbPath = LEGACY_DB_PAT
   const { client } = await getSharedDb(dbPath);
   await client.execute("PRAGMA foreign_keys = ON");
   await createMigrator(client, { name: "budget", migrations: BUDGET_MIGRATIONS });
+  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["queue_items", "gate_state"]);
   return client;
 }

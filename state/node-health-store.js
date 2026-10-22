@@ -26,6 +26,7 @@ import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
@@ -37,7 +38,16 @@ const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 // 2 below has never run and try to re-apply it, which would fail the
 // second time since the table it renames FROM no longer exists.
 const MIGRATIONS = [
-  `CREATE TABLE IF NOT EXISTS fallback_node_health (
+  // Guarded: the fallback table only ever needs creating when node_health
+  // itself doesn't exist yet (v2 renames it over). Baseline-shaped
+  // databases skip straight past.
+  async (client) => {
+    const { rows } = await client.execute(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name IN ('node_health', 'fallback_node_health')`
+    );
+    const names = rows.map((r) => r.name);
+    if (names.includes("node_health")) return;
+    await client.execute(`CREATE TABLE IF NOT EXISTS fallback_node_health (
      id                  TEXT    PRIMARY KEY,
      pipeline_id         TEXT    NOT NULL,
      node_id             TEXT    NOT NULL,
@@ -48,23 +58,32 @@ const MIGRATIONS = [
      created_at          INTEGER NOT NULL,
      updated_at          INTEGER NOT NULL,
      ended_at            INTEGER
-   );
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_health_one_active
+   )`);
+    await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_fallback_health_one_active
      ON fallback_node_health (pipeline_id, node_id)
-     WHERE status = 'blocked';
-   CREATE INDEX IF NOT EXISTS idx_fallback_health_pipeline
-     ON fallback_node_health (pipeline_id, status)`,
+     WHERE status = 'blocked'`);
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_fallback_health_pipeline
+     ON fallback_node_health (pipeline_id, status)`);
+  },
   // v2: table renamed to reflect that any node can opt in, not just
   // fallback-shaped ones. SQLite doesn't rename indexes along with their
   // table, so they're dropped and recreated under matching names.
-  `ALTER TABLE fallback_node_health RENAME TO node_health;
-   DROP INDEX IF EXISTS idx_fallback_health_one_active;
-   CREATE UNIQUE INDEX IF NOT EXISTS idx_node_health_one_active
+  // Guarded: runs only while the fallback table exists (baseline-shaped
+  // databases never had one).
+  async (client) => {
+    const { rows } = await client.execute(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='fallback_node_health'`
+    );
+    if (rows.length === 0) return;
+    await client.execute(`ALTER TABLE fallback_node_health RENAME TO node_health`);
+    await client.execute(`DROP INDEX IF EXISTS idx_fallback_health_one_active`);
+    await client.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_node_health_one_active
      ON node_health (pipeline_id, node_id)
-     WHERE status = 'blocked';
-   DROP INDEX IF EXISTS idx_fallback_health_pipeline;
-   CREATE INDEX IF NOT EXISTS idx_node_health_pipeline
-     ON node_health (pipeline_id, status)`,
+     WHERE status = 'blocked'`);
+    await client.execute(`DROP INDEX IF EXISTS idx_fallback_health_pipeline`);
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_node_health_pipeline
+     ON node_health (pipeline_id, status)`);
+  },
 ];
 
 const INSERT_BLOCKED_SQL = `
@@ -85,6 +104,8 @@ export async function createNodeHealthStore({ logger, dbPath = DEFAULT_DB_PATH }
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
   await createMigrator(client, { name: "fallback_node_health", migrations: MIGRATIONS });
+  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
 
   async function isBlocked(pipelineId, nodeId) {
     if (!pipelineId || !nodeId) return false;

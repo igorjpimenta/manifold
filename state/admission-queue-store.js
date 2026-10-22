@@ -37,6 +37,7 @@ import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
@@ -84,6 +85,8 @@ async function _createImpl({ dbPath = DEFAULT_DB_PATH, getLimit } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { client } = await getSharedDb(dbPath);
   await createMigrator(client, { name: "manifold_flow_admission_queue", migrations: MIGRATIONS });
+  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
 
   // Runs `fn(tx)` inside one BEGIN IMMEDIATE transaction, committing on
   // success and always closing (which rolls back if not committed) — the

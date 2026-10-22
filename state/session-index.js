@@ -23,6 +23,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { migrateFromLegacy } from "./consolidate.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
@@ -50,6 +51,8 @@ export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, legacyDbPat
   try {
     ({ db, client } = await getSharedDb(dbPath));
     await createMigrator(client, { name: "session-index", migrations: MIGRATIONS });
+    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["flow_sessions"], logger);
   } catch (err) {
     logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);

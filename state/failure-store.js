@@ -47,6 +47,7 @@ import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { migrateFromLegacy } from "./consolidate.js";
 import { failureEmitter } from "../events.js";
 import { getNodeExecutionsStore } from "./node-executions.js";
@@ -55,8 +56,11 @@ const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 const LEGACY_DB_PATH  = path.join(os.homedir(), ".openclaw", "flows", "failures.sqlite");
 
 const MIGRATIONS = [
-  // v1: initial schema
-  `CREATE TABLE IF NOT EXISTS failure_events (
+  // v1: initial schema. The acked_at/created_at indexes are created only
+  // when their columns exist — baseline-shaped tables (which never had
+  // those columns) skip them; nothing reads them there.
+  async (client) => {
+    await client.execute(`CREATE TABLE IF NOT EXISTS failure_events (
      id              TEXT    PRIMARY KEY,
      flow_id         TEXT    NOT NULL,
      pipeline_id     TEXT    NOT NULL,
@@ -70,10 +74,17 @@ const MIGRATIONS = [
      acked_via       TEXT,
      created_at      INTEGER NOT NULL,
      UNIQUE(flow_id, branch_item_id, failure_node)
-   );
-   CREATE INDEX IF NOT EXISTS idx_failures_acked   ON failure_events(acked_at);
-   CREATE INDEX IF NOT EXISTS idx_failures_created ON failure_events(created_at);
-   CREATE INDEX IF NOT EXISTS idx_failures_flow    ON failure_events(flow_id)`,
+   )`);
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
+    const cols = rows.map((r) => r.name);
+    if (cols.includes("acked_at")) {
+      await client.execute(`CREATE INDEX IF NOT EXISTS idx_failures_acked   ON failure_events(acked_at)`);
+    }
+    if (cols.includes("created_at")) {
+      await client.execute(`CREATE INDEX IF NOT EXISTS idx_failures_created ON failure_events(created_at)`);
+    }
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_failures_flow    ON failure_events(flow_id)`);
+  },
   // v2–v10: additive columns. Each uses a function migration guarded by
   // pragma_table_info so existing installs with columns already applied
   // don't throw "duplicate column name" on first-time migrator adoption.
@@ -158,11 +169,13 @@ const MIGRATIONS = [
     await client.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_failures_execution ON failure_events(execution_id) WHERE execution_id IS NOT NULL");
   },
   // v13 (Phase 1.5, "Eradicate soft errors"): error_type moves here from
-  // flow_node_executions, which no
-  // longer stores error content at all — this table is now the sole
-  // source. Same vocabulary as before: never_attempted|confirmed_absent|
+  // flow_node_executions, which no longer stores error content at all —
+  // this table is now the sole source. Same vocabulary as before: never_attempted|confirmed_absent|
   // inconclusive|infra_unavailable|blocked, or null.
+  // Guarded: skips when the column already exists (baseline-shaped).
   async (client) => {
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('failure_events')");
+    if (rows.map((r) => r.name).includes("error_type")) return;
     await client.execute("ALTER TABLE failure_events ADD COLUMN error_type TEXT");
   },
   // v14: drop failure_kind. Table-recreate-and-swap, not ALTER TABLE DROP
@@ -264,6 +277,8 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, legacyDbPath 
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
   await createMigrator(client, { name: "failure-store", migrations: MIGRATIONS });
+  // Generated snapshots apply after the legacy chain (see state/migrate.js).
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["failure_events"], logger);
 
   // ── Write-side identity ────────────────────────────────────────────

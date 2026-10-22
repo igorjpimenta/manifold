@@ -26,6 +26,7 @@ import { eq, and, inArray, isNull, isNotNull, desc, asc } from "drizzle-orm";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { flowNodeInvocations, flowNodeExecutions } from "./schema.js";
 import { createMigrator } from "./migrator.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
@@ -51,10 +52,13 @@ const MIGRATIONS = [
    CREATE INDEX IF NOT EXISTS idx_fst_flow      ON flow_step_timings(flow_id);
    CREATE INDEX IF NOT EXISTS idx_fst_exited    ON flow_step_timings(exited_at)`,
 
-  // v2: renamed flow_step_timings -> flow_node_executions.
+  // v2: renamed flow_step_timings -> flow_node_executions. The data section
+  // runs only while the legacy timings table exists (fresh databases built
+  // from the baseline snapshot never had one); CREATEs are IF NOT EXISTS
+  // so either shape converges without error.
   async (client) => {
     await client.execute(`
-      CREATE TABLE flow_node_executions (
+      CREATE TABLE IF NOT EXISTS flow_node_executions (
         id          TEXT    PRIMARY KEY,
         flow_id     TEXT    NOT NULL,
         pipeline_id TEXT,
@@ -66,6 +70,10 @@ const MIGRATIONS = [
         error       TEXT
       )
     `);
+    const { rows: timingTables } = await client.execute(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='flow_step_timings'`
+    );
+    if (timingTables.length === 0) return;
     const { rows } = await client.execute(
       `SELECT flow_id, pipeline_id, node_id, branch_item, entered_at, exited_at FROM flow_step_timings`
     );
@@ -96,15 +104,16 @@ const MIGRATIONS = [
       }
     }
     await client.execute(`DROP TABLE flow_step_timings`);
-    await client.execute(`CREATE INDEX idx_fst_pipe_node ON flow_node_executions(pipeline_id, node_id)`);
-    await client.execute(`CREATE INDEX idx_fst_flow ON flow_node_executions(flow_id)`);
-    await client.execute(`CREATE INDEX idx_fst_exited ON flow_node_executions(exited_at)`);
   },
 
   // v3 (Phase 2): split flow_node_executions into flow_node_invocations
   // (one row per logical dispatch, created once) + a narrowed
   // flow_node_executions (one row per attempt, FK to its invocation).
+  // Guarded: runs only while executions still lacks invocation_id
+  // (baseline-shaped tables already went through this split).
   async (client) => {
+    const { rows: execCols } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
+    if (execCols.map((r) => r.name).includes("invocation_id")) return;
     await client.execute(`
       CREATE TABLE flow_node_invocations (
         id          TEXT    PRIMARY KEY,
@@ -166,7 +175,10 @@ const MIGRATIONS = [
   // childFlows being universal). Merges historical duplicates first —
   // __end__ sub-node rows that share (flow_id, node_id, branch_key) but
   // differ only in group_id would collide once group_id is gone.
+  // Guarded: runs only while group_id still exists.
   async (client) => {
+    const { rows: invCols } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
+    if (!invCols.map((r) => r.name).includes("group_id")) return;
     const { rows: dupes } = await client.execute(`
       SELECT flow_id, node_id, COALESCE(branch_key, '') AS bk, MIN(id) AS winner_id
         FROM flow_node_invocations
@@ -192,8 +204,11 @@ const MIGRATIONS = [
   },
 
   // v5: add visit_seq to distinguish fresh passes from
-  // continuations (retries, revivals, re-checks).
+  // continuations (retries, revivals, re-checks). Guarded: skips when
+  // the column already exists (baseline-shaped tables).
   async (client) => {
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
+    if (rows.map((r) => r.name).includes("visit_seq")) return;
     await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN visit_seq INTEGER NOT NULL DEFAULT 1`);
     await client.execute(`DROP INDEX idx_invocations_identity`);
     await client.execute(`
@@ -203,17 +218,28 @@ const MIGRATIONS = [
   },
 
   // v6: kind on flow_node_executions — why this execution happened.
+  // Guarded: skips when the column already exists.
   async (client) => {
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
+    if (rows.map((r) => r.name).includes("kind")) return;
     await client.execute(`ALTER TABLE flow_node_executions ADD COLUMN kind TEXT NOT NULL DEFAULT 'legacy'`);
   },
 
   // v7: rename branch_key -> subflow_key. Drop and recreate the expression
   // index since RENAME COLUMN doesn't rewrite index expressions.
+  // Guarded: the rename runs only while branch_key still exists without
+  // subflow_key. The index creations below run unconditionally (IF NOT
+  // EXISTS): baseline-shaped tables need them from the snapshot-independent
+  // path, legacy tables get them here exactly once.
   async (client) => {
-    await client.execute(`DROP INDEX idx_invocations_identity`);
-    await client.execute(`ALTER TABLE flow_node_invocations RENAME COLUMN branch_key TO subflow_key`);
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
+    const cols = rows.map((r) => r.name);
+    if (cols.includes("branch_key") && !cols.includes("subflow_key")) {
+      await client.execute(`DROP INDEX IF EXISTS idx_invocations_identity`);
+      await client.execute(`ALTER TABLE flow_node_invocations RENAME COLUMN branch_key TO subflow_key`);
+    }
     await client.execute(`
-      CREATE UNIQUE INDEX idx_invocations_identity
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_invocations_identity
         ON flow_node_invocations (flow_id, node_id, COALESCE(subflow_key, ''), visit_seq)
     `);
   },
@@ -224,7 +250,10 @@ const MIGRATIONS = [
   // never_attempted|confirmed_absent|inconclusive|infra_unavailable|blocked
   // vocabulary, moved from a soft-returned field to a thrown error's
   // property. Null for a plain Error or no error at all.
+  // Guarded: skips when the column already exists.
   async (client) => {
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
+    if (rows.map((r) => r.name).includes("error_type")) return;
     await client.execute(`ALTER TABLE flow_node_executions ADD COLUMN error_type TEXT`);
   },
 
@@ -235,9 +264,17 @@ const MIGRATIONS = [
   // execution-window/identity ledger. Plain columns, no constraints
   // reference either — safe to drop directly, no table-recreate-and-swap
   // needed.
+  // Guarded: runs only while at least one dropped column still exists.
   async (client) => {
-    await client.execute(`ALTER TABLE flow_node_executions DROP COLUMN error`);
-    await client.execute(`ALTER TABLE flow_node_executions DROP COLUMN error_type`);
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_executions')");
+    const cols = rows.map((r) => r.name);
+    if (!cols.includes("error") && !cols.includes("error_type")) return;
+    if (cols.includes("error")) {
+      await client.execute(`ALTER TABLE flow_node_executions DROP COLUMN error`);
+    }
+    if (cols.includes("error_type")) {
+      await client.execute(`ALTER TABLE flow_node_executions DROP COLUMN error_type`);
+    }
   },
 
   // v10 ("Option B", Phase B0):
@@ -251,7 +288,10 @@ const MIGRATIONS = [
   // silently inlining an oversized payload. Purely additive — nothing
   // reads these columns yet; B0 only starts building history for the
   // later assembly phase (B1+).
+  // Guarded: skips when result_json already exists (baseline-shaped).
   async (client) => {
+    const { rows } = await client.execute("SELECT name FROM pragma_table_info('flow_node_invocations')");
+    if (rows.map((r) => r.name).includes("result_json")) return;
     await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN result_json TEXT`);
     await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN result_written_at INTEGER`);
     await client.execute(`ALTER TABLE flow_node_invocations ADD COLUMN result_too_large_bytes INTEGER`);
@@ -347,6 +387,8 @@ async function _createStore(dbPath) {
     // Tracking key deliberately kept as "step-timings" — pure version-history
     // bookkeeping, unrelated to the table's current name/shape.
     await createMigrator(client, { name: "step-timings", migrations: MIGRATIONS });
+    // Generated snapshots apply after the legacy chain (see state/migrate.js).
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
 
     // ── helpers ────────────────────────────────────────────────────────────
 
