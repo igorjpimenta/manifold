@@ -4,8 +4,8 @@
  * Verifies:
  *   - Fresh DBs migrate to the full expected table set (runtime + ops),
  *     with a journal row; reruns are idempotent.
- *   - Snapshots are the sole schema path (no legacy journal on
- *     snapshot-built DBs).
+ *   - Snapshots are the sole schema path (journals only to
+ *     __drizzle_migrations).
  *   - Schema parity: every table the real store boot produces matches the
  *     drizzle def column-for-column. A column in a def without a generated
  *     snapshot (or vice versa) fails here — that is the whole point.
@@ -185,7 +185,7 @@ describe("migrateDatabase — snapshots only, no chain", () => {
 
     const tables = await liveTables(dbPath);
     assert.ok(tables.includes("flow_runs"));
-    assert.ok(!tables.includes("_schema_version"), "no legacy journal on snapshot-built DBs");
+    assert.ok(!tables.includes("_schema_version"), "snapshots journal only to __drizzle_migrations");
   });
 });
 

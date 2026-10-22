@@ -6,14 +6,14 @@
 // Call sites run this BEFORE opening any libsql handle for the file, and it
 // runs at most once per file per process (migratedPaths): a second driver
 // writing under live handles is the one ordering that was observed to
-// poison them, so the first opener upgrades while no handle exists yet and
-// later opens find the journal current. Cross-process safety comes from the
-// drizzle journal transaction + busy_timeout, same posture as winch.
+// poison them, so the first opener applies pending snapshots while no
+// handle exists yet and later opens find the journal current. Cross-process
+// safety comes from the drizzle journal transaction + busy_timeout, same
+// posture as winch.
 //
-// Snapshots are the sole schema path — databases predating the snapshot
-// era are not upgraded (pre-release; delete and resync). A snapshot that
-// fails throws here, failing the open fast with the file named, instead of
-// surfacing as confusing missing-column errors on first query later.
+// Snapshots are the sole schema path. A snapshot that fails throws here,
+// failing the open fast with the file named, instead of surfacing as
+// missing-column errors on first query later.
 //
 // The 0000 baseline files carry hand-added IF NOT EXISTS on every CREATE
 // (one-time anchor edit — drizzle-kit emits plain CREATE). Future
@@ -55,8 +55,7 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
     migrate(drizzle(sqlite, { schema: SCHEMAS.get(migrationsFolder) ?? {} }), { migrationsFolder });
   } catch (err) {
     throw new Error(
-      `migrate: ${migrationsFolder} snapshot failed on ${dbPath} ` +
-        `(pre-snapshot database? delete and resync): ${err?.message ?? err}`,
+      `migrate: ${migrationsFolder} snapshot failed on ${dbPath}: ${err?.message ?? err}`,
     );
   } finally {
     sqlite.close();
