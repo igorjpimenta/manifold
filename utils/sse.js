@@ -1,13 +1,10 @@
 import http from "node:http";
 
-// Factory — pass a getter so the broadcast ref captured from the gateway
-// method ping handler is available without a module-level mutable variable.
-export function createEmitSseEvent(getGatewayBroadcast) {
+// iOS push transport (HTTP POST to the gateway push endpoint, which
+// forwards the envelope opaquely). WS delivery lives in events/emit.js —
+// this factory only pushes. Canonical envelopes flow through untouched.
+export function createEmitSseEvent() {
   return async function emitSseEvent(event) {
-    const broadcast = getGatewayBroadcast();
-    if (broadcast && typeof event?.type === "string" && event.type.startsWith("discuss.")) {
-      try { broadcast(`plugin.${event.type}`, event); } catch {}
-    }
     const token = process.env.OPENCLAW_GATEWAY_TOKEN;
     if (!token) return { ok: false, error: "no_gateway_token" };
     const body = JSON.stringify(event);

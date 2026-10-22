@@ -65,7 +65,7 @@ export function GateForm({ flowId, pending }: GateFormProps) {
     setError(null);
     try {
       await api.approve(flowId, { itemId, decision, text });
-      // No state mutation here — SSE (flow_changed) will refresh RunDetail
+      // No state mutation here — SSE (run.updated) will refresh RunDetail
       // and the form will disappear once the item is no longer pending.
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

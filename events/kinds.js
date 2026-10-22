@@ -1,18 +1,17 @@
 // events/kinds.js — canonical Phase-1 event-kind registry.
 //
-// Core emits bare kinds (dots only, no `plugin.` prefix); transport
-// boundaries re-apply the prefix plus the exact legacy wire strings in
-// KIND_TO_LEGACY_WIRE, so renaming core never breaks iOS/dashboard
-// mid-migration. Every payload contract here is the minimum a consumer
+// Core emits bare kinds (dots only, no `plugin.` prefix); the gateway
+// boundary adds the prefix. There are no legacy names: a breaking change
+// mints a new kind. Every payload contract here is the minimum a consumer
 // can rely on — producers may attach more fields, never fewer.
 
 // Every kind with a Phase-1 producer. Frozen: adding a kind is a
 // deliberate registry change, never an inline string at a call site.
 // Evolution rule (CloudEvents primer §versioning): additive payload
 // changes keep the kind; a breaking change mints a NEW kind and dual-
-// produces through KIND_TO_LEGACY_WIRE until consumers cut over. There
-// is deliberately no integer version field — an unread version versions
-// nothing; the kind name is the version.
+// produces old and new until consumers cut over. There is deliberately no
+// integer version field — an unread version versions nothing; the kind
+// name is the version.
 export const WIRE_KINDS = Object.freeze([
   "run.created",
   "run.started",
@@ -62,42 +61,13 @@ const REQUIRED_FIELDS = {
 
 export const SESSION_SCOPES = Object.freeze(["node", "discuss"]);
 
-// Gateway egress names. `null` = no gateway wire string (dashboard-only
-// kind; the WS sink skips it). Everything else keeps the exact legacy
-// string current subscribers match on.
-const GATEWAY_WIRE = {
-  "run.created": null,
-  "run.started": "pipeclaw.run.started",
-  "run.updated": "pipeclaw.run.updated",
-  "run.ended": "pipeclaw.run.ended",
-  "gate.opened": "gate.opened",
-  "gate.resolved": "gate.resolved",
-  "session.transcript.completed": "discuss.turn",
-  "session.transcript.failed": "discuss.turn",
-  "session.transcript.updated": "discuss.transcript",
-  "discuss.component.proposed": "discuss.component",
-  "discuss.pending.updated": "discuss.pending",
-  "pipeline.catalog.updated": "pipeclaw.pipeline.catalog.changed",
-  "pipeline.stats.updated": "pipeclaw.pipeline.stats.updated",
-  "budget.queue.updated": "budget.queue.changed",
-  "budget.lock.changed": "gate.lock.changed",
-  "budget.cap.changed": "budget.cap.changed",
-  "cost.record.added": "cost.record.added",
-};
-
-// Dashboard-bus `type` values for the kinds the bus carries.
-// Only kinds the bus carries are listed; the bus migration (slice 4)
-// reads this, nothing else should.
-const DASHBOARD_TYPE = {
-  "run.created": "flow_created",
-  "run.updated": "flow_changed",
-  "run.ended": "flow_terminated",
-  "pipeline.catalog.updated": "pipelines_changed",
-};
-
-// Families eligible for the SSE/iOS-push sink (legacy rule keyed on
-// `type.startsWith("discuss.")`; canonical rule keys on family).
+// Gateway WS carries every wire kind except run.created (dashboard-only;
+// the WS sink skips it). Families eligible for the SSE/iOS-push sink.
 const SSE_FAMILIES = Object.freeze(["session", "discuss"]);
+
+// Dashboard-only kinds (served over the dashboard bus/SSE, never gateway
+// WS) — read by the catalog publisher, nothing else should.
+const DASHBOARD_ONLY = Object.freeze(["run.created"]);
 
 export function isWireKind(kind) {
   return WIRE_KINDS.includes(kind);
@@ -137,18 +107,11 @@ export function assertPayload(kind, payload) {
   return payload;
 }
 
-// Gateway wire name for a kind, or null when the kind has no gateway
-// wire string. Unknown kinds throw — never emit an unmapped name.
-export function gatewayWireName(kind) {
+// True for kinds served over the dashboard bus/SSE only — the gateway WS
+// sink skips them. Unknown kinds throw — never route an unmapped name.
+export function isDashboardOnly(kind) {
   if (!isWireKind(kind)) throw new Error(`unknown event kind: ${kind}`);
-  // `in` check, not `??`: an explicit null means "no gateway wire
-  // string" and must survive instead of falling through to the kind.
-  return kind in GATEWAY_WIRE ? GATEWAY_WIRE[kind] : kind;
-}
-
-export function dashboardLegacyType(kind) {
-  if (!isWireKind(kind)) throw new Error(`unknown event kind: ${kind}`);
-  return DASHBOARD_TYPE[kind] ?? null;
+  return DASHBOARD_ONLY.includes(kind);
 }
 
 export function isSseKind(kind) {

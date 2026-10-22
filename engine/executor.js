@@ -36,7 +36,7 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore }) {
+export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
   // Every agent dispatch resolves its subagent here, so gating here covers
   // revival, cron-started flows at boot and gate continuations alike — see
   // engine/gateway-subagent.js.
@@ -82,6 +82,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     getSubagent: () => resolveSubagent(),
     sessionIndex,
     logger,
+    emit,
   });
 
   // Direct store.setQueued/setRunning, not the CAS-retry-wrapped

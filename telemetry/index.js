@@ -15,7 +15,7 @@ import { registerCliCommands } from "./cli.js";
 import { resolveCost } from "./pricer.js";
 import { checkBudget, initCapStore } from "./budget-alert.js";
 import { registerHttpRoutes } from "./http.js";
-
+import { createEmitter } from "../events/emit.js";
 // Hoisted to module-level so every call's hook closures share the same
 // store/resolver. The SDK can call register() repeatedly (config reload,
 // hot-reload); only the first service start actually opens the DB.
@@ -38,6 +38,10 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
   const dbPath = _dbPath ?? DEFAULT_DB_PATH;
 
   const logger = api.logger;
+
+  // Canonical-kind fan-out for cost.record.added below: canonical wire
+  // name, envelope adds kind.
+  const { emit } = createEmitter({ getBroadcast, logger });
 
   // ── Budget-cap store service ────────────────────────────────────────────────
   // Must load before checkBudget()/the /budget/cap HTTP routes see traffic —
@@ -213,7 +217,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         node_id: lineage?.node_id ?? null,
         item_key: lineage?.item_key ?? null,
       });
-      try { getBroadcast?.()?.('plugin.cost.record.added', { costTotal: cost.total, flowId: lineage?.flow_id ?? null }); } catch {}
+      try { await emit("cost.record.added", { costTotal: cost.total, flowId: lineage?.flow_id ?? null }); } catch {}
       checkBudget({ store, logger, justWroteUsd: cost.total, notify: (payload) => getBroadcast?.()?.("plugin.manifold.budget.alert", payload) });
     } catch (err) {
       logger.warn(`telemetry[before_message_write] ERROR: ${err?.message ?? err}`);

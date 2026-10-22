@@ -1823,7 +1823,8 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     const { resolver, broadcastFn } = makeResolverWithBroadcast(flow);
     const before = Date.now();
     await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "app" });
-    // Both gate.resolved and manifold.run.updated fire on the applied path; find by name.
+    // gate.resolved fires on the applied path via the canonical emitter
+    // (resume patches come from the WS run listener). Find by name.
     const gateCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.gate.resolved");
     assert.ok(gateCall, "plugin.gate.resolved broadcast must fire");
     const [eventName, payload] = gateCall.arguments;
@@ -1832,20 +1833,22 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     assert.equal(payload.itemId, itemId);
     assert.equal(payload.decision, "approve");
     assert.ok(typeof payload.resolvedAt === "number" && payload.resolvedAt >= before, "resolvedAt must be a timestamp");
+    assert.equal(payload.kind, "gate.resolved");
   });
 
-  test("emits 'manifold.run.updated' broadcast when resolution triggers setRunning", async () => {
+  test("does NOT emit a resolver-owned run.updated on resolve (owned by the WS run listener)", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
-    const { resolver, broadcastFn } = makeResolverWithBroadcast(flow);
+    const { resolver, store, executor, broadcastFn } = makeResolverWithBroadcast(flow);
     await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "cli" });
-    const runUpdatedCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.manifold.run.updated");
-    assert.ok(runUpdatedCall, "plugin.manifold.run.updated broadcast must fire");
-    const [, payload] = runUpdatedCall.arguments;
-    assert.equal(payload.flowId, flowId);
-    assert.equal(payload.status, "running");
-    assert.ok(typeof payload.updatedAtMs === "number");
+    const runUpdatedCall = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.run.updated");
+    assert.equal(runUpdatedCall, undefined, "resolver must not emit its own run.updated");
+    // The resume itself still happened through the store.
+    assert.equal(store._current().status, "running");
+    // resume() is dispatched on setImmediate — drain before asserting.
+    await drainImmediate();
+    assert.equal(executor.resume.mock.calls.length, 1);
   });
 
   test("does NOT emit broadcast on already-decided path", async () => {
@@ -1962,32 +1965,32 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
   });
 });
 
-// ─── gateEmitter.gate.closed ──────────────────────────────────────────────────
+// ─── resume without emitter ─────────────────────────────────────────────────
+// Resolving resumes the flow through the store; a failed persist resumes
+// nothing. No emitter participates in either path.
 
-import { gateEmitter } from "../../../events.js";
-
-describe("applyResolutionsAndResume — gateEmitter.gate.closed", () => {
-  test("emits gate.closed on gateEmitter when the gate resolves and flow resumes", async () => {
+describe("applyResolutionsAndResume — resume", () => {
+  test("resolves and resumes the flow with no gateEmitter emission", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
     const store = makeStore(flow);
     const logger = makeLogger();
-
-    let emitted = null;
-    gateEmitter.once("gate.closed", (payload) => { emitted = payload; });
+    const executor = makeExecutor();
 
     const resolver = createGateResolver({
-      api: { logger }, store, executor: makeExecutor(), getBroadcast: () => mock.fn(), admissionQueueStore,
+      api: { logger }, store, executor, getBroadcast: () => mock.fn(), admissionQueueStore,
     });
-    await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "cli" });
+    const res = await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "cli" });
 
-    assert.ok(emitted !== null, "gateEmitter must have fired gate.closed");
-    assert.equal(emitted.flowId, flowId);
-    gateEmitter.removeAllListeners("gate.closed");
+    assert.equal(res.status, "applied");
+    assert.equal(store._current().status, "running", "flow must resume through the store");
+    // resume() is dispatched on setImmediate — drain before asserting.
+    await drainImmediate();
+    assert.equal(executor.resume.mock.calls.length, 1, "executor.resume must fire");
   });
 
-  test("does NOT emit gate.closed when setRunning fails (revision conflict exhausted)", async () => {
+  test("does NOT resume when setRunning fails (revision conflict exhausted)", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, items: [{ itemId }] });
@@ -1995,14 +1998,13 @@ describe("applyResolutionsAndResume — gateEmitter.gate.closed", () => {
     const store = makeStore(flow);
     store.setRunning = mock.fn(() => ({ applied: false, code: "revision_conflict" }));
     const logger = makeLogger();
-    let fired = false;
-    gateEmitter.once("gate.closed", () => { fired = true; });
+    const executor = makeExecutor();
     const resolver = createGateResolver({
-      api: { logger }, store, executor: makeExecutor(), getBroadcast: () => mock.fn(), admissionQueueStore,
+      api: { logger }, store, executor, getBroadcast: () => mock.fn(), admissionQueueStore,
     });
     await resolver.recordItemDecision({ flowId, itemId, decision: "approve", source: "cli" });
     await drainImmediate();
-    assert.equal(fired, false, "gate.closed must not fire when setRunning is rejected");
-    gateEmitter.removeAllListeners("gate.closed");
+    assert.equal(executor.resume.mock.calls.length, 0, "executor.resume must not fire when setRunning is rejected");
+    assert.equal(store._current().status, "blocked", "flow must stay blocked");
   });
 });

@@ -480,10 +480,10 @@ export interface RunCompare {
 // ─── SSE events (from /api/events) ───────────────────────────────────────────
 
 export type SseEvent =
-  | { type: "flow_created"; flowId: string; at: number; status: RunStatus; lastStep: string | null; currentStep: string | null; pipelineId: string | null }
-  | { type: "flow_changed"; flowId: string; at: number; prevStatus: RunStatus; currStatus: RunStatus; prevStep: string | null; currStep: string | null; revision: number; stateKeysAdded: string[]; stateKeysRemoved: string[]; waitKind: string | null }
-  | { type: "flow_terminated"; flowId: string; at: number; status: RunStatus }
-  | { type: "pipelines_changed"; at: number; size: number; ids: string[] };
+  | { kind: "run.created"; flowId: string; at: number; status: RunStatus; lastStep: string | null; currentStep: string | null; pipelineId: string | null }
+  | { kind: "run.updated"; flowId: string; at: number; prevStatus: RunStatus; currStatus: RunStatus; prevStep: string | null; currStep: string | null; revision: number; stateKeysAdded: string[]; stateKeysRemoved: string[]; waitKind: string | null }
+  | { kind: "run.ended"; flowId: string; at: number; status: RunStatus }
+  | { kind: "pipeline.catalog.updated"; at: number; size: number; ids: string[] };
 
 export interface ArtifactEntry {
   name: string;

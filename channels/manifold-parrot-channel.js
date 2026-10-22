@@ -1,8 +1,8 @@
 // manifold-parrot-channel.js — Manifold Discuss channel plugin.
 //
 // Full SDK channel: inbound via dispatchInboundDirectDmWithRuntime, outbound
-// via the deliver callback → SSE (emitSseEvent). The HTTP route is a thin
-// bridge — auth, flow/target resolution, system-prompt injection — then
+// via the deliver callback → session transcript events. The HTTP route is a
+// thin bridge — auth, flow/target resolution, system-prompt injection — then
 // hands off to the channel runtime for agent dispatch.
 //
 // Entry point: call createManifoldParrotChannelEntry(deps).register(api) from
@@ -19,7 +19,7 @@ export function createManifoldParrotChannelEntry({
   discussStore,
   resolveDiscussTarget,
   stampDiscussSession,
-  emitSseEvent,
+  emit,
 }) {
   // Captured once during startAccount; used by the HTTP handler.
   let channelRuntimeRef = null;
@@ -212,20 +212,6 @@ export function createManifoldParrotChannelEntry({
                 deliver: async (payload) => {
                   const replyText = typeof payload === "string" ? payload
                     : (payload?.text ?? payload?.body ?? payload?.content ?? "");
-                  // Components are seeded by tools during the turn via componentEmitter.
-                  // Read them here for: (a) backward-compat proposedDraft/proposedMeta on
-                  // the message, (b) including in the discuss.turn SSE for state sync.
-                  let proposedDraft = null;
-                  let proposedMeta = null;
-                  let components = [];
-                  try {
-                    components = (await discussStore?.getComponents?.(flow.flowId, target.itemId)) ?? [];
-                    const draftComp = components.find((c) => c.kind === "proposed_draft");
-                    const metaComp  = components.find((c) => c.kind === "proposed_meta");
-                    if (draftComp) proposedDraft = draftComp.text ?? null;
-                    if (metaComp)  proposedMeta  = metaComp.fields ?? null;
-                  } catch {}
-
                   const durationMs = Date.now() - startMs;
                   try {
                     await discussStore.appendMessage(flow.flowId, target.itemId, {
@@ -241,16 +227,14 @@ export function createManifoldParrotChannelEntry({
                     api.logger.warn(`manifold-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
                   }
 
-                  const pushRes = await emitSseEvent({
-                    type: "discuss.turn",
+                  // Canonical text field only — proposal artifacts travel as
+                  // discuss.component.proposed events, not turn dupes.
+                  const pushRes = await emit("session.transcript.completed", {
+                    scope: "discuss",
+                    text: replyText,
                     turnId,
                     flowId: flow.flowId,
                     itemId: target.itemId,
-                    status: "completed",
-                    reply: replyText,
-                    proposedDraft,
-                    proposedMeta,
-                    components,
                     durationMs,
                     emittedAtMs: Date.now(),
                   });
@@ -268,14 +252,12 @@ export function createManifoldParrotChannelEntry({
                     await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                     await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
                   } catch {}
-                  await emitSseEvent({
-                    type: "discuss.turn",
+                  await emit("session.transcript.failed", {
+                    scope: "discuss",
                     turnId,
                     flowId: flow.flowId,
                     itemId: target.itemId,
-                    status: "failed",
                     error: err?.message ?? String(err),
-                    emittedAtMs: Date.now(),
                   });
                 },
               });
@@ -302,14 +284,12 @@ export function createManifoldParrotChannelEntry({
                 await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                 await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);
               } catch {}
-              await emitSseEvent({
-                type: "discuss.turn",
+              await emit("session.transcript.failed", {
+                scope: "discuss",
                 turnId,
                 flowId: flow.flowId,
                 itemId: target.itemId,
-                status: "failed",
                 error: err?.message ?? String(err),
-                emittedAtMs: Date.now(),
               });
             }
 

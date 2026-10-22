@@ -1,5 +1,6 @@
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { gateEmitter } from "../events.js";
+import { createEmitter } from "../events/emit.js";
 import { assembleState } from "../engine/executor-helpers.js";
 import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
@@ -50,6 +51,10 @@ const VALID_SOURCES = ["app", "dashboard", "cli", "pipeline"];
 
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;
+  // Canonical-kind fan-out for this resolver's WS emission (events/emit.js):
+  // validated envelope + `plugin.`-prefixed wire names, never throws
+  // on transport faults — the same contract the inline broadcasts had.
+  const { emit } = createEmitter({ getBroadcast, logger });
   // Injectable for tests (defaults to the real singleton in production) —
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
@@ -297,11 +302,8 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       if (result.applied) {
         logger.info(`manifold [${flowId.slice(0, 8)}] gate-resolver: resolved ${newResultsThisPass.length} (${approvedIds.length} approve, ${rejectedIds.length} reject total)${undecidedCount > 0 ? `; ${undecidedCount} still awaiting` : ""}${result.queued ? "; queued — waiting for a shared admission slot to resume" : "; resuming"}`);
         gateEmitter.emit("gate.closed", { flowId, nodeId });
-        // Two live constraints on this broadcast: the event name must carry
-        // the `plugin.manifold.` prefix or the scope allowlist silently
-        // drops it, and RunSummaryPatch decodes `updatedAtMs` specifically —
-        // an `updatedAt` key would be delivered and then ignored.
-        try { getBroadcast?.()?.('plugin.manifold.run.updated', { flowId, status: 'running', updatedAtMs: Date.now() }); } catch {}
+        // Resume patches for this write come from the WS run listener's
+        // per-revision patch — emit no second shape here; iOS decodes one.
         // Human-gate apply hook: fires per item, immediately after THAT
         // item's decision lands — the "write the moment this one decides,
         // don't wait for siblings" semantics, for both a root-level gate
@@ -561,7 +563,8 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     logger.info(`manifold [${flowId.slice(0, 8)}] gate-resolver: ${itemId} → ${decision} (source=${source})`);
 
     await maybeResolveFlow(flowId, awaitCompletion);
-    try { getBroadcast?.()?.('plugin.gate.resolved', { flowId, itemId, decision, resolvedAt: Date.now() }); } catch {}
+    // Canonical gate.resolved: wire name is the kind (`plugin.gate.resolved`).
+    try { await emit("gate.resolved", { flowId, itemId, decision, resolvedAt: Date.now() }); } catch {}
     return { ok: true, status: "applied" };
   }
 

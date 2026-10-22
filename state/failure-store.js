@@ -1,10 +1,7 @@
 // failure-store.js — durable record of flow / branch failures, for
 // operator triage via a consumer's Failures surface + deep links.
 //
-// Storage:  ~/.openclaw/runtime.sqlite   (consolidated store; see DEFAULT_DB_PATH).
-// ~/.openclaw/flows/failures.sqlite is only consulted as a legacy migration
-// source — its data, if present, is copied in on first open and the file
-// is then deleted (see migrateFromLegacy / LEGACY_DB_PATH below).
+// Storage:  ~/.openclaw/runtime.sqlite (see DEFAULT_DB_PATH).
 //
 // Why a separate db file rather than another table in registry.sqlite:
 // schema isolation. failure_events is queried independently from
@@ -47,12 +44,10 @@ import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { createMigrator } from "./migrator.js";
-import { migrateFromLegacy } from "./consolidate.js";
 import { failureEmitter } from "../events.js";
 import { getNodeExecutionsStore } from "./node-executions.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const LEGACY_DB_PATH  = path.join(os.homedir(), ".openclaw", "flows", "failures.sqlite");
 
 const MIGRATIONS = [
   // v1: initial schema
@@ -257,14 +252,13 @@ export function createFailureStore(opts = {}) {
   } });
 }
 
-async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, legacyDbPath = LEGACY_DB_PATH, logger, nodeExecutionsStore } = {}) {
+async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeExecutionsStore } = {}) {
   // Injectable for tests (defaults to the real singleton in production) —
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? await getNodeExecutionsStore();
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
   await createMigrator(client, { name: "failure-store", migrations: MIGRATIONS });
-  if (legacyDbPath) await migrateFromLegacy(client, legacyDbPath, ["failure_events"], logger);
 
   // ── Write-side identity ────────────────────────────────────────────
   // execution_id is the real conflict target (partial UNIQUE index,

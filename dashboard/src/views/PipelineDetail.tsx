@@ -40,14 +40,14 @@ export function PipelineDetail({ pipelineId }: { pipelineId: string }) {
   const loadCost = () => { api.pipelineCost(pipelineId, 30).then(setCost).catch(() => setCost(null)); };
   // Pipeline-declared views walk small payloads (currently a sent/*.md
   // dir for the proposal pipeline's outcome funnel). Fast enough to
-  // refire on flow_terminated when more records may have landed; also
+  // refire on run.ended when more records may have landed; also
   // loads on mount + pipeline switch.
   const loadViews = () => { api.pipelineViews(pipelineId, 30).then(setPipelineViews).catch(() => setPipelineViews(null)); };
 
   useEffect(() => { loadDef(); loadStats(); loadCost(); loadViews(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [pipelineId]);
   useSse((evt) => {
-    if (evt.type === "pipelines_changed") { loadDef(); loadStats(); }
-    else if (evt.type === "flow_created" || evt.type === "flow_changed" || evt.type === "flow_terminated") {
+    if (evt.kind === "pipeline.catalog.updated") { loadDef(); loadStats(); }
+    else if (evt.kind === "run.created" || evt.kind === "run.updated" || evt.kind === "run.ended") {
       loadStats();
     }
   });
