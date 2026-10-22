@@ -33,7 +33,7 @@ import { toolErr, resolveGateContext } from "./shared.js";
 export function registerReportDraftBlockedTool({ api }) {
   api.registerTool((ctx) => ({
     name: "report_draft_blocked",
-    label: "Pipeclaw: report a draft blocked on missing profile info",
+    label: "Manifold: report a draft blocked on missing profile info",
     description:
       "Use when you cannot draft honestly because the profile/portfolio has no evidence for something the listing requires — do NOT fabricate experience, and do NOT reply with free text describing the block. Call this tool instead. If you already see more than one gap, report ALL of them in one call via the `questions` array rather than calling this tool once per gap — that costs the operator an extra round-trip for no benefit. For each question, include `hint` when the listing gives you a concrete detail for free (a quoted requirement, a named stack) — it's shown to the operator right next to the question so they don't have to re-open the listing. `outPath` must be copied verbatim from your brief. `jobId` is optional — it's auto-resolved from your session's own listing context; only pass it explicitly if you have a reason to override that.\n\nIf the operator already declined a prior gap question (dealbreaker/skip/no), do NOT use this tool to ask something else instead — call `report_draft_skip` instead.",
     parameters: {

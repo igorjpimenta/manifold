@@ -1,5 +1,5 @@
 /**
- * Unit tests for agent/tools/pipeclaw-start.js — registerGraphFlowTool (pipeclaw_start).
+ * Unit tests for agent/tools/manifold-start.js — registerGraphFlowTool (manifold_start).
  *
  * Verifies validation, ensurePipelinesLoaded, executor.start call, setImmediate
  * runFlow, and lineage recordTrigger wiring.
@@ -8,7 +8,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { registerGraphFlowTool } from "../../../../agent/tools/pipeclaw-start.js";
+import { registerGraphFlowTool } from "../../../../agent/tools/manifold-start.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -49,7 +49,7 @@ function flushSetImmediate() {
 
 // ── registerGraphFlowTool ────────────────────────────────────────────────────
 
-describe("registerGraphFlowTool — pipeclaw_start", () => {
+describe("registerGraphFlowTool — manifold_start", () => {
   function makeStartDeps(overrides = {}) {
     const pipelinesRef = { value: new Map([["my_pipeline", {}]]) };
     const executor = {
@@ -70,11 +70,11 @@ describe("registerGraphFlowTool — pipeclaw_start", () => {
     assert.equal(typeof tools[0], "function");
   });
 
-  test("registered tool is named pipeclaw_start", () => {
+  test("registered tool is named manifold_start", () => {
     const { api, tools, pipelinesRef, executor } = makeStartDeps();
     registerGraphFlowTool({ api, executor, pipelinesRef });
     const def = tools[0]({});
-    assert.equal(def.name, "pipeclaw_start");
+    assert.equal(def.name, "manifold_start");
   });
 
   test("returns toolErr when pipelineId is missing", async () => {

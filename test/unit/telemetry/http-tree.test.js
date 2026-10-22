@@ -74,7 +74,7 @@ describe("registerTreeRoutes registration", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerTreeRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    assert.ok(api._routes.has("/pipeclaw/telemetry/tree/expand"));
+    assert.ok(api._routes.has("/manifold/telemetry/tree/expand"));
   });
 });
 
@@ -85,9 +85,9 @@ describe("/tree/expand parent=__root__", () => {
     const api = makeApi();
     const { json, bad, parseRange } = makeHelpers();
     registerTreeRoutes({ api, getStore: () => null, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/tree/expand?parent=__root__"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=__root__"), res);
     assert.equal(res.statusCode, 503);
   });
 
@@ -96,9 +96,9 @@ describe("/tree/expand parent=__root__", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerTreeRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/tree/expand?parent=__root__"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=__root__"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res._body);
     assert.equal(body.parent, "__root__");
@@ -121,9 +121,9 @@ describe("/tree/expand parent=__root__", () => {
       args: [Date.now(), 0.02, "cron-owner", "my-job", "agent:main:cron:my-job", "agent:main:cron:my-job"],
     });
     registerTreeRoutes({ api, getStore: () => ({ _client: client }), logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/tree/expand?parent=__root__"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=__root__"), res);
     const body = JSON.parse(res._body);
     assert.ok(body.children.length >= 1);
     for (const c of body.children) {
@@ -155,9 +155,9 @@ describe("/tree/expand parent=trigger:<kind>", () => {
       });
     }
     registerTreeRoutes({ api, getStore: () => ({ _client: client }), logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/tree/expand?parent=trigger%3Aexplicit"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=trigger%3Aexplicit"), res);
     const body = JSON.parse(res._body);
 
     const adHoc = body.children.find((c) => c.label === "Ad-hoc sessions");
@@ -181,9 +181,9 @@ describe("/tree/expand invalid parent shapes", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerTreeRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/tree/expand?parent=bogus-shape"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=bogus-shape"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -192,9 +192,9 @@ describe("/tree/expand invalid parent shapes", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerTreeRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/tree/expand?parent=pipeline%7Ca%7Cb"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=pipeline%7Ca%7Cb"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -203,9 +203,9 @@ describe("/tree/expand invalid parent shapes", () => {
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerTreeRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/pipeclaw/telemetry/tree/expand?parent=node%7Conly-one-segment"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=node%7Conly-one-segment"), res);
     assert.equal(res.statusCode, 400);
   });
 });
@@ -229,9 +229,9 @@ describe("/tree/expand parent=flow:<id>", () => {
       args: [Date.now(), 0.02, flowId, "NODE_B", "agent:w:sub:s2", "agent:w:sub:s2", "explicit"],
     });
     registerTreeRoutes({ api, getStore: () => ({ _client: client }), logger: null, json, bad, parseRange });
-    const def = api._routes.get("/pipeclaw/telemetry/tree/expand");
+    const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq(`/pipeclaw/telemetry/tree/expand?parent=flow%3A${flowId}`), res);
+    await def.handler(makeReq(`/manifold/telemetry/tree/expand?parent=flow%3A${flowId}`), res);
     const body = JSON.parse(res._body);
     assert.equal(body.parent, `flow:${flowId}`);
     assert.equal(body.children.length, 2);

@@ -1,4 +1,4 @@
-// pipeclaw-start.js — registers the pipeclaw_start agent tool.
+// manifold-start.js — registers the manifold_start agent tool.
 
 import { toolErr } from "./shared.js";
 
@@ -10,10 +10,10 @@ export function registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipel
   // NULL flow_id and pipeline-run costs can't be attributed back to the cron
   // that fired them. (Object-form registration omits ctx entirely.)
   api.registerTool((ctx) => ({
-    name: "pipeclaw_start",
-    label: "Pipeclaw: start a pipeline run",
+    name: "manifold_start",
+    label: "Manifold: start a pipeline run",
     description:
-      "Start a new run of a registered pipeclaw pipeline. Returns the flowId so the caller can watch progress with `openclaw pipeclaw status <flowId>`. The pipeline definition must already be loaded from workspace/.pipelines/.",
+      "Start a new run of a registered manifold pipeline. Returns the flowId so the caller can watch progress with `openclaw manifold status <flowId>`. The pipeline definition must already be loaded from workspace/.pipelines/.",
     parameters: {
       type: "object",
       additionalProperties: false,
@@ -49,7 +49,7 @@ export function registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipel
       try {
         const triggeredBy = {
           kind: "agent_tool",
-          label: "Agent · pipeclaw_start",
+          label: "Agent · manifold_start",
           ts: Date.now(),
         };
         const record = await executor.start(pipelineId, args ?? {}, triggeredBy);
@@ -65,7 +65,7 @@ export function registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipel
         try {
           const parentKey = ctx?.sessionKey ?? null;
           if (!parentKey) {
-            api?.logger?.warn?.(`pipeclaw tool: lineage edge skipped for ${record.flowId} — ctx.sessionKey is null`);
+            api?.logger?.warn?.(`manifold tool: lineage edge skipped for ${record.flowId} — ctx.sessionKey is null`);
           } else if (api?.runtime?.lineage?.recordTrigger) {
             await api.runtime.lineage.recordTrigger({
               flowId: record.flowId,
@@ -75,23 +75,23 @@ export function registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipel
             });
           }
         } catch (err) {
-          try { api?.logger?.warn?.(`pipeclaw tool: lineage edge skipped: ${err?.message ?? err}`); } catch {}
+          try { api?.logger?.warn?.(`manifold tool: lineage edge skipped: ${err?.message ?? err}`); } catch {}
         }
         // Fire the executor loop async — the tool returns immediately so the
         // calling agent isn't blocked for the duration of the pipeline run.
         setImmediate(() => {
           executor.runFlow(record.flowId, "fresh").catch((err) => {
-            try { (api?.logger ?? console).warn?.(`pipeclaw tool: runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`); } catch {}
+            try { (api?.logger ?? console).warn?.(`manifold tool: runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`); } catch {}
           });
         });
         return {
           content: [
-            { type: "text", text: `Started ${pipelineId}\n  flowId: ${record.flowId}\n  runId: ${record.stateJson?.runId}\n  watch: openclaw pipeclaw status ${record.flowId}` },
+            { type: "text", text: `Started ${pipelineId}\n  flowId: ${record.flowId}\n  runId: ${record.stateJson?.runId}\n  watch: openclaw manifold status ${record.flowId}` },
           ],
         };
       } catch (err) {
         return toolErr(`start failed: ${err?.message ?? err}`);
       }
     },
-  }), { name: "pipeclaw_start" });
+  }), { name: "manifold_start" });
 }

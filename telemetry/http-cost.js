@@ -1,4 +1,4 @@
-// /pipeclaw/telemetry/cost/* routes — aggregate and drill-down cost views.
+// /manifold/telemetry/cost/* routes — aggregate and drill-down cost views.
 import {
   displayRootLabel, displayRootKind, stripTeamPrefix,
   UNATTRIBUTED_LABEL, UNATTRIBUTED_FILTER,
@@ -48,7 +48,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
   // ─── /cost/today ───────────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET",
-    path: "/pipeclaw/telemetry/cost/today",
+    path: "/manifold/telemetry/cost/today",
     auth: "plugin",
     handler: async (req, res) => {
       const store = getStore();
@@ -76,15 +76,15 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
   });
 
   // ─── uniform group-by handlers ─────────────────────────────────────────────
-  api.registerHttpRoute({ method: "GET", path: "/pipeclaw/telemetry/cost/by-root",    auth: "plugin", handler: makeGroupHandler("root_label", "root_label", ["root_kind"]) });
-  api.registerHttpRoute({ method: "GET", path: "/pipeclaw/telemetry/cost/by-trigger", auth: "plugin", handler: makeGroupHandler("root_kind",  "root_kind") });
-  api.registerHttpRoute({ method: "GET", path: "/pipeclaw/telemetry/cost/by-pipeline",auth: "plugin", handler: makeGroupHandler("pipeline_id","pipeline_id") });
-  api.registerHttpRoute({ method: "GET", path: "/pipeclaw/telemetry/cost/by-flow",    auth: "plugin", handler: makeGroupHandler("flow_id",    "flow_id", ["pipeline_id"]) });
-  api.registerHttpRoute({ method: "GET", path: "/pipeclaw/telemetry/cost/by-node",    auth: "plugin", handler: makeGroupHandler("node_id",    "node_id", ["flow_id"]) });
+  api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-root",    auth: "plugin", handler: makeGroupHandler("root_label", "root_label", ["root_kind"]) });
+  api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-trigger", auth: "plugin", handler: makeGroupHandler("root_kind",  "root_kind") });
+  api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-pipeline",auth: "plugin", handler: makeGroupHandler("pipeline_id","pipeline_id") });
+  api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-flow",    auth: "plugin", handler: makeGroupHandler("flow_id",    "flow_id", ["pipeline_id"]) });
+  api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-node",    auth: "plugin", handler: makeGroupHandler("node_id",    "node_id", ["flow_id"]) });
 
   // ─── /cost/by-session ──────────────────────────────────────────────────────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/cost/by-session", auth: "plugin",
+    method: "GET", path: "/manifold/telemetry/cost/by-session", auth: "plugin",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");
@@ -115,7 +115,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
 
   // ─── /cost/runs ────────────────────────────────────────────────────────────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/cost/runs", auth: "plugin",
+    method: "GET", path: "/manifold/telemetry/cost/runs", auth: "plugin",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");
@@ -162,10 +162,10 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     },
   });
 
-  api.registerHttpRoute({ method: "GET", path: "/pipeclaw/telemetry/cost/by-model",   auth: "plugin", handler: makeGroupHandler("model", "model", ["provider"]) });
+  api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-model",   auth: "plugin", handler: makeGroupHandler("model", "model", ["provider"]) });
 
   // ─── /cost/by-cron-job ─────────────────────────────────────────────────────
-  api.registerHttpRoute({ method: "GET", path: "/pipeclaw/telemetry/cost/by-cron-job", auth: "plugin", handler: async (req, res) => {
+  api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-cron-job", auth: "plugin", handler: async (req, res) => {
     const store = getStore();
     if (!store) return bad(res, "lineage store not ready");
     try {
@@ -183,7 +183,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
 
   // ─── /cost/by-day ──────────────────────────────────────────────────────────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/cost/by-day", auth: "plugin",
+    method: "GET", path: "/manifold/telemetry/cost/by-day", auth: "plugin",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");
@@ -222,7 +222,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
 
   // ─── /cost/by-hour ─────────────────────────────────────────────────────────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/cost/by-hour", auth: "plugin", match: "exact",
+    method: "GET", path: "/manifold/telemetry/cost/by-hour", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");
@@ -295,7 +295,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
 
   // ─── /cost/top-calls ───────────────────────────────────────────────────────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/cost/top-calls", auth: "plugin",
+    method: "GET", path: "/manifold/telemetry/cost/top-calls", auth: "plugin",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");
@@ -357,7 +357,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
 
   // ─── /cost/breakdown ───────────────────────────────────────────────────────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/cost/breakdown", auth: "plugin", match: "exact",
+    method: "GET", path: "/manifold/telemetry/cost/breakdown", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");
@@ -545,7 +545,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
 
   // ─── /cost/home ────────────────────────────────────────────────────────────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/cost/home", auth: "plugin", match: "exact",
+    method: "GET", path: "/manifold/telemetry/cost/home", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");

@@ -1,5 +1,5 @@
 // Executed-path trail under the run-detail main graph: the flow's visited
-// top-level nodes (from GET /pipeclaw/runs/:flowId/tree — see RunDetail.tsx)
+// top-level nodes (from GET /manifold/runs/:flowId/tree — see RunDetail.tsx)
 // rendered as pills with ❯ separators. Consecutive duplicates (a genuine
 // loop-back reentry, e.g. PROPOSE → PROPOSE) get a `repeat` style so the
 // operator can distinguish a single step from the same step happening twice.

@@ -1,7 +1,7 @@
-// budget — approval queue module absorbed into pipeclaw.
+// budget — approval queue module absorbed into manifold.
 //
 // Owns the SQLite store at ~/.openclaw/ops.sqlite (DB_PATH). Registers HTTP
-// routes under /pipeclaw/budget/*. Sets api.runtime.approvalQueue with the
+// routes under /manifold/budget/*. Sets api.runtime.approvalQueue with the
 // async API that executor.js calls per-node (isGateLocked,
 // lookupNodeDecision, enqueueNodeApproval).
 
@@ -200,11 +200,11 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       clientPromise = openStoreFn()
         .then((c) => {
           client = c;
-          api.logger.info("[pipeclaw/budget] store ready at " + DB_PATH);
+          api.logger.info("[manifold/budget] store ready at " + DB_PATH);
           return c;
         })
         .catch((err) => {
-          api.logger.warn(`[pipeclaw/budget] store attach failed: ${err?.message ?? err}`);
+          api.logger.warn(`[manifold/budget] store attach failed: ${err?.message ?? err}`);
           clientPromise = null; // allow a later call to retry instead of wedging on a permanently-rejected promise
           throw err;
         });
@@ -213,16 +213,16 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
   }
 
   api.registerService({
-    id: "pipeclaw-budget-store",
+    id: "manifold-budget-store",
     start: async () => { await ensureClient(); },
     stop: async () => {
       try { client?.close?.(); } catch { /* ignore */ }
     },
   });
 
-  // GET /pipeclaw/budget/pending
+  // GET /manifold/budget/pending
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/pending",
+    path: "/manifold/budget/pending",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -237,9 +237,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /pipeclaw/budget/decide  { ids: string[], decision: "approve"|"reject" }
+  // POST /manifold/budget/decide  { ids: string[], decision: "approve"|"reject" }
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/decide",
+    path: "/manifold/budget/decide",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -276,10 +276,10 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
             if (onFlowResume) {
               try { await onFlowResume({ flowId: row.flow_id, nodeId: row.node, decision }); } catch {}
             }
-            api.logger.info(`[pipeclaw/budget] ${decision} per-node — resuming flow=${String(row.flow_id).slice(0,8)} node=${row.node}`);
+            api.logger.info(`[manifold/budget] ${decision} per-node — resuming flow=${String(row.flow_id).slice(0,8)} node=${row.node}`);
           } else if (decision === "approve" && row.pipeline_id) {
             _loopback(
-              "/pipeclaw/_elev/start",
+              "/manifold/_elev/start",
               {
                 pipelineId: row.pipeline_id,
                 args: row.pipeline_args ? JSON.parse(row.pipeline_args) : {},
@@ -288,11 +288,11 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
               },
               { "x-skip-gate": "1" }
             );
-            api.logger.info(`[pipeclaw/budget] approve start-gate — firing pipeline=${row.pipeline_id}`);
+            api.logger.info(`[manifold/budget] approve start-gate — firing pipeline=${row.pipeline_id}`);
           }
         }
       }
-      api.logger.info(`[pipeclaw/budget] ${decision}: ${updated}/${ids.length}`);
+      api.logger.info(`[manifold/budget] ${decision}: ${updated}/${ids.length}`);
       if (updated > 0) {
         try { await emit("budget.queue.updated", { decision, count: updated }); } catch {}
       }
@@ -303,9 +303,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // GET /pipeclaw/budget/history
+  // GET /manifold/budget/history
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/history",
+    path: "/manifold/budget/history",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -320,9 +320,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /pipeclaw/budget/mock  { count?: number }
+  // POST /manifold/budget/mock  { count?: number }
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/mock",
+    path: "/manifold/budget/mock",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -352,9 +352,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // GET /pipeclaw/budget/gate
+  // GET /manifold/budget/gate
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/gate",
+    path: "/manifold/budget/gate",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -364,7 +364,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       const today = todayLocal();
       if (row?.locked && row?.day && row.day < today) {
         await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=0, day=? WHERE id='singleton'", args: [today] }));
-        api.logger.info(`[pipeclaw/budget] gate auto-unlocked on stale day rollover (was ${row.day})`);
+        api.logger.info(`[manifold/budget] gate auto-unlocked on stale day rollover (was ${row.day})`);
       }
       const locked = isGateLocked(row, today);
       res.statusCode = 200;
@@ -374,16 +374,16 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /pipeclaw/budget/gate/lock
+  // POST /manifold/budget/gate/lock
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/gate/lock",
+    path: "/manifold/budget/gate/lock",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=1, day=? WHERE id='singleton'", args: [today] }));
-      api.logger.info(`[pipeclaw/budget] gate locked day=${today}`);
+      api.logger.info(`[manifold/budget] gate locked day=${today}`);
       try { await emit("budget.lock.changed", { locked: true, day: today }); } catch {}
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
@@ -392,16 +392,16 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /pipeclaw/budget/gate/unlock
+  // POST /manifold/budget/gate/unlock
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/gate/unlock",
+    path: "/manifold/budget/gate/unlock",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=0, day=? WHERE id='singleton'", args: [today] }));
-      api.logger.info(`[pipeclaw/budget] gate unlocked day=${today}`);
+      api.logger.info(`[manifold/budget] gate unlocked day=${today}`);
       try { await emit("budget.lock.changed", { locked: false, day: today }); } catch {}
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
@@ -410,16 +410,16 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /pipeclaw/budget/items — programmatic item creation (called by pipeclaw gate)
+  // POST /manifold/budget/items — programmatic item creation (called by manifold gate)
   api.registerHttpRoute({
-    path: "/pipeclaw/budget/items",
+    path: "/manifold/budget/items",
     auth: "gateway",
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
       const body = await readBody(req);
       if (!body) { res.statusCode = 400; res.end("invalid json"); return true; }
-      const { label, agent = "pipeclaw", agentEmoji = "🔁", trigger = "manual",
+      const { label, agent = "manifold", agentEmoji = "🔁", trigger = "manual",
               pipelineId, pipelineArgs, brief, costLow = 0, costHigh = 0,
               modelChain = [], tokenEstimate = null, pipeline = null, node = null,
               enqueuerSessionKey = null } = body;
@@ -441,7 +441,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
                tokenEstimate ?? null, pipelineId, JSON.stringify(pipelineArgs ?? {}),
                enqueuerSessionKey ?? null, now],
       }));
-      api.logger.info(`[pipeclaw/budget] queued pipeline=${pipelineId} item=${id}`);
+      api.logger.info(`[manifold/budget] queued pipeline=${pipelineId} item=${id}`);
       res.statusCode = 201;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: true, itemId: id }));
@@ -503,7 +503,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
                  pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        args: [id, label, agent ?? "pipeclaw", agentEmoji ?? "🔁", trigger,
+        args: [id, label, agent ?? "manifold", agentEmoji ?? "🔁", trigger,
                costLow, costHigh, brief ?? null, JSON.stringify(modelChain ?? []),
                pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
                pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
@@ -512,5 +512,5 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   };
 
-  api.logger.info("[pipeclaw/budget] routes registered at /pipeclaw/budget/*");
+  api.logger.info("[manifold/budget] routes registered at /manifold/budget/*");
 }

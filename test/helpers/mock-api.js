@@ -1,4 +1,4 @@
-// Shared test helpers for pipeclaw route unit tests.
+// Shared test helpers for manifold route unit tests.
 
 /**
  * Returns a mock `api` that records every registerHttpRoute / registerGatewayMethod /

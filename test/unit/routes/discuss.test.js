@@ -13,7 +13,7 @@ import path from "node:path";
 import os from "node:os";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../ios/auth.js", import.meta.url).href;
+const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
 await mock.module(authUrl, {
   exports: {
     authorizeBridgeRequest: async () => ({ ok: true }),
@@ -154,7 +154,7 @@ describe("registerDiscussHandlers — handleDiscuss builds ctx.state via assembl
     const deps = makeDeps(api, { pipelinesRef, runStore, nodeExecutionsStore });
     const { handleDiscuss } = registerDiscussHandlers(deps);
 
-    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss`, { text: "what's going on?" });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss`, { text: "what's going on?" });
     const res = createMockRes();
     await handleDiscuss(req, res, sourceFlow);
 
@@ -209,7 +209,7 @@ describe("registerDiscussHandlers — handleDiscussHistory awaits discussStore.g
     });
     const { handleDiscussHistory } = registerDiscussHandlers(deps);
 
-    const req = createMockReq("GET", `/pipeclaw/runs/${sourceFlow.flowId}/discuss/history`);
+    const req = createMockReq("GET", `/manifold/runs/${sourceFlow.flowId}/discuss/history`);
     const res = createMockRes();
     await handleDiscussHistory(req, res, sourceFlow);
 
@@ -250,7 +250,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     const { mkdir, writeFile, readFile } = await import("node:fs/promises");
     await mkdir(audioDir, { recursive: true });
     const turnId = "11111111-1111-1111-1111-111111111111";
-    const audioUrl = `/pipeclaw/runs/${testFlowId}/discuss/audio/${turnId}.m4a`;
+    const audioUrl = `/manifold/runs/${testFlowId}/discuss/audio/${turnId}.m4a`;
     await writeFile(path.join(audioDir, `${turnId}.m4a`), Buffer.from("fake audio bytes"));
     await writeFile(path.join(audioDir, `${turnId}.meta.json`), JSON.stringify({
       turnId, itemId, audioUrl, transcript: null, status: "failed",
@@ -275,7 +275,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 
-    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
 
@@ -366,7 +366,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     api.runtime = { mediaUnderstanding: { transcribeAudioFile: async () => ({ text: "x" }) } };
     const deps = makeDeps(api, { pipelinesRef });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
-    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId: "does-not-exist", itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId: "does-not-exist", itemId });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 404);
@@ -377,7 +377,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     const { api } = createMockApi();
     const deps = makeDeps(api, { pipelinesRef });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
-    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { itemId });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 400);

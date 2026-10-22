@@ -1,14 +1,16 @@
 import { getNodeExecutionsStore } from "../state/node-executions.js";
+import { gateEmitter } from "../events.js";
 import { createEmitter } from "../events/emit.js";
 import { assembleState } from "../engine/executor-helpers.js";
 import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
 // gate-resolver.js — channel-agnostic resolution for gate items.
 //
-// One write site for every channel that records a decision on a gate
+// One write site for every consumer that records a decision on a gate
 // item: the dashboard's POST /approve (source="dashboard"), the CLI's
-// `pipeclaw approve` (source="cli"), and the live-activity-bridge's iOS
-// intent route (source="ios"). All of them call `recordItemDecision`, which:
+// `manifold approve` (source="cli"), and a harness/app bridge over the
+// gateway REST surface (source="app"). All of them call
+// `recordItemDecision`, which:
 //
 //   1. validates the flow (status, kind, item membership)
 //   2. idempotently merges {decision, source, decidedAt, ...} into
@@ -18,12 +20,11 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 //      setRunning + executor.resume so the flow actually advances.
 //
 // "human-gate" appears in this module only as the wait-kind discriminator the
-// executor stamps; nothing here talks to a specific delivery channel.
-// Channel-specific delivery + cleanup (e.g. deleteMessage on cross-channel
-// decision) lives in each delivery service module, which imports this
-// factory (the dashboard and CLI each do). iOS Live Activities are the sole
-// interactive push channel: non-bundled plugins can't get Telegram buttons
-// through the platform's channel path.
+// executor stamps; nothing here talks to a specific delivery channel. The
+// gateway broadcasts manifold.gate.opened/closed over WS with the payload
+// below, and each consumer (app bridge, dashboard, CLI) decides how to
+// surface it. Channel-specific delivery + cleanup lives in that consumer,
+// which calls this factory the same way the dashboard and CLI do.
 //
 // Per-process design: the factory closes over a store + executor instance,
 // so the gateway and the CLI each spin up their own resolver (different
@@ -39,14 +40,14 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 // `ctx` (apply's first arg) is the flow-level assembled state, matching
 // PRIME_FILL's existing apply(state, item) signature.
 //
-// Channels allowed to resolve a gate. Mostly human-driven (iOS approval
-// intents, dashboard buttons, CLI), plus
+// Consumers allowed to resolve a gate. Mostly human-driven (app approval,
+// dashboard buttons, CLI), plus
 // `pipeline` for automated self-resolutions — used by audit / sweep
 // nodes inside other pipelines that need to cancel stale gates whose
 // underlying state changed out from under the operator (e.g. poll-
 // inbox's EVICT_GATES cancelling reply/touch gates after the listing
 // got a reply or was won).
-const VALID_SOURCES = ["ios", "dashboard", "cli", "pipeline"];
+const VALID_SOURCES = ["app", "dashboard", "cli", "pipeline"];
 
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;
@@ -86,7 +87,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
         enteredAt: now, exitedAt: now, error: errMsg,
       });
     } catch (err) {
-      logger.warn(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: persistApplyFailureMarker itself failed: ${err?.message ?? err}`);
+      logger.warn(`manifold [${flowId.slice(0, 8)}] gate-resolver: persistApplyFailureMarker itself failed: ${err?.message ?? err}`);
     }
   }
 
@@ -135,7 +136,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       // short-circuits on store.get returning null), so the flow stays
       // blocked until a restart/revival picks up the persisted decision.
       if (result.code === "not_found" && !(await store.get(flowId))) {
-        logger.info(`pipeclaw gate-resolver: ${flowId.slice(0, 8)} not in Map; writing decision via sql-direct`);
+        logger.info(`manifold gate-resolver: ${flowId.slice(0, 8)} not in Map; writing decision via sql-direct`);
         return writeSqlDirect(flowId, flow.revision, next);
       }
       if (result.code !== "revision_conflict") return result;
@@ -231,7 +232,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
   // (and, on sustained revision contention, a further round via setTimeout)
   // and returns before either fires — correct for the long-lived HTTP/
   // dashboard/iOS callers that use this, but fatal for the CLI's
-  // one-shot `pipeclaw approve` process, which needs the resume (and any
+  // one-shot `manifold approve` process, which needs the resume (and any
   // scheduled retry round) to have genuinely finished before it exits.
   async function applyResolutionsAndResume(flowId, resolutions, retryRound = 0, awaitCompletion = false) {
     // Revision-aware: re-read on conflict. Appends new decisions to
@@ -299,7 +300,8 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
         api,
       });
       if (result.applied) {
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: resolved ${newResultsThisPass.length} (${approvedIds.length} approve, ${rejectedIds.length} reject total)${undecidedCount > 0 ? `; ${undecidedCount} still awaiting` : ""}${result.queued ? "; queued — waiting for a shared admission slot to resume" : "; resuming"}`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] gate-resolver: resolved ${newResultsThisPass.length} (${approvedIds.length} approve, ${rejectedIds.length} reject total)${undecidedCount > 0 ? `; ${undecidedCount} still awaiting` : ""}${result.queued ? "; queued — waiting for a shared admission slot to resume" : "; resuming"}`);
+        gateEmitter.emit("gate.closed", { flowId, nodeId });
         // Resume patches for this write come from the WS run listener's
         // per-revision patch — emit no second shape here; iOS decodes one.
         // Human-gate apply hook: fires per item, immediately after THAT
@@ -356,7 +358,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
               await gateNode.apply(applyCtx, r, matchedItem);
             } catch (err) {
               const errMessage = err?.message ?? String(err);
-              logger.warn(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: apply(${nodeId}, ${r.itemId}) threw: ${errMessage}`);
+              logger.warn(`manifold [${flowId.slice(0, 8)}] gate-resolver: apply(${nodeId}, ${r.itemId}) threw: ${errMessage}`);
               // Beyond the warn log: persist a durable, operator-visible
               // marker. Without this, the gate decision still commits (the
               // item is approved/rejected either way) but if apply()'s own
@@ -386,7 +388,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
             // decisions that arrived mid-flight.
             await maybeResolveFlow(flowId, awaitCompletion);
           } catch (err) {
-            logger.warn(`pipeclaw gate-resolver: resume [${flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+            logger.warn(`manifold gate-resolver: resume [${flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
           }
         };
         if (awaitCompletion) await resumeAndReconsume();
@@ -394,7 +396,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
         return;
       }
       if (result.code !== "revision_conflict") {
-        logger.warn(`pipeclaw gate-resolver: setRunning failed for ${flowId.slice(0, 8)}: ${result.code}`);
+        logger.warn(`manifold gate-resolver: setRunning failed for ${flowId.slice(0, 8)}: ${result.code}`);
         return;
       }
       await new Promise((r) => setTimeout(r, 25 + attempt * 25));
@@ -402,11 +404,11 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     if (retryRound < MAX_ROUNDS - 1) {
       const delayMs = ROUND_BACKOFF_MS * (retryRound + 1);
       logger.warn(
-        `pipeclaw gate-resolver: setRunning failed for ${flowId.slice(0, 8)}: retry_exhausted ` +
+        `manifold gate-resolver: setRunning failed for ${flowId.slice(0, 8)}: retry_exhausted ` +
         `(round ${retryRound + 1}/${MAX_ROUNDS}); scheduling another round in ${delayMs}ms`
       );
       const runNextRound = () => applyResolutionsAndResume(flowId, resolutions, retryRound + 1, awaitCompletion).catch((err) => {
-        logger.warn(`pipeclaw gate-resolver: scheduled retry round for ${flowId.slice(0, 8)} threw: ${err?.message ?? err}`);
+        logger.warn(`manifold gate-resolver: scheduled retry round for ${flowId.slice(0, 8)} threw: ${err?.message ?? err}`);
       });
       if (awaitCompletion) {
         await new Promise((r) => setTimeout(r, delayMs));
@@ -424,7 +426,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     // starting point for further live retries (avoids retrying forever
     // against a genuinely wedged flow).
     logger.warn(
-      `pipeclaw gate-resolver: setRunning failed for ${flowId.slice(0, 8)}: retry_exhausted after ${MAX_ROUNDS} rounds — ` +
+      `manifold gate-resolver: setRunning failed for ${flowId.slice(0, 8)}: retry_exhausted after ${MAX_ROUNDS} rounds — ` +
       `decision remains durably recorded in approvalPending; will self-heal via flow-revival.js's stuck-gate-decision reconciliation pass on next restart`
     );
   }
@@ -452,7 +454,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     // Defense in depth: detect payloads that echo the gate's own
     // description back as `editedText` — the iOS edit intent can ship the
     // whole dialog body (including its "Approve to send / Reject to drop /
-    // To edit, run in a terminal: openclaw pipeclaw respond ..." footer)
+    // To edit, run in a terminal: openclaw manifold respond ..." footer)
     // instead of the operator's typed input. The check looks for any of
     // the description's telltale strings; one match is enough since these
     // never appear in genuine reply text.
@@ -460,12 +462,12 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       const tellTale = [
         "Approve to send",
         "Reject to drop",
-        "openclaw pipeclaw respond",
+        "openclaw manifold respond",
         "─── Approve to send",
       ];
       if (tellTale.some((s) => editedText.includes(s))) {
         logger.warn(
-          `pipeclaw [${flowId.slice(0, 8)}] gate-resolver: ${itemId} edit payload looks like the gate description itself (source=${source}); rejecting to avoid shipping it as a reply`
+          `manifold [${flowId.slice(0, 8)}] gate-resolver: ${itemId} edit payload looks like the gate description itself (source=${source}); rejecting to avoid shipping it as a reply`
         );
         return { ok: false, code: "edit_text_looks_like_description" };
       }
@@ -513,7 +515,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       // consulted that by here. An existing approvalPending entry is
       // therefore always treated as a genuine duplicate.
       logger.info(
-        `pipeclaw [${flowId.slice(0, 8)}] gate-resolver: ${itemId} already decided (${existing.decision} via ${existing.source ?? "?"}); ignoring duplicate from ${source}`
+        `manifold [${flowId.slice(0, 8)}] gate-resolver: ${itemId} already decided (${existing.decision} via ${existing.source ?? "?"}); ignoring duplicate from ${source}`
       );
       return { ok: true, status: "already-decided" };
     }
@@ -555,10 +557,10 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       },
     }));
     if (!writeResult.applied) {
-      logger.warn(`pipeclaw gate-resolver: persist decision failed for ${flowId.slice(0, 8)}:${itemId}: ${writeResult.code}`);
+      logger.warn(`manifold gate-resolver: persist decision failed for ${flowId.slice(0, 8)}:${itemId}: ${writeResult.code}`);
       return { ok: false, code: writeResult.code ?? "persist_failed" };
     }
-    logger.info(`pipeclaw [${flowId.slice(0, 8)}] gate-resolver: ${itemId} → ${decision} (source=${source})`);
+    logger.info(`manifold [${flowId.slice(0, 8)}] gate-resolver: ${itemId} → ${decision} (source=${source})`);
 
     await maybeResolveFlow(flowId, awaitCompletion);
     // Canonical gate.resolved: wire name is the kind (`plugin.gate.resolved`).

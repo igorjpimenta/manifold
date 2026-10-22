@@ -16,7 +16,7 @@
  *
  * mock.module must be registered before engine/executor.js is imported (it
  * imports withLock at module-load time and caches the reference) — every
- * pipeclaw-internal module here is loaded via a dynamic `await import()`
+ * manifold-internal module here is loaded via a dynamic `await import()`
  * AFTER the mock is in place, not a static top-level import.
  *
  * Isolated-sandbox discipline:

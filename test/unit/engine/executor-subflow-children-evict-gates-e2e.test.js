@@ -4,7 +4,7 @@
  * EVICT_GATES (single kind:"code" sub-node, CANCEL → __end__) — the same
  * simplest topology as the sibling freelance_workana-poll-listings'
  * EVICT_STALE test. CANCEL is a trivial no-op stand-in — zero
- * real HTTP calls to /pipeclaw/gate/resolve anywhere in this fixture.
+ * real HTTP calls to /manifold/gate/resolve anywhere in this fixture.
  *
  * Isolated-sandbox discipline (per the incident writeup):
  * independent tmp-sqlite run-store/node-executions/state-store instances,

@@ -76,14 +76,14 @@ describe("createEmitSseEvent — push", () => {
     await new Promise((resolve) => server.close(resolve));
   });
 
-  test("POSTs the envelope untouched to /pipeclaw/ios/push", async () => {
+  test("POSTs the envelope untouched to /manifold/ios/push", async () => {
     const emit = createEmitSseEvent();
     const event = { kind: "session.transcript.completed", scope: "discuss", text: "hi" };
     const result = await emit(event);
 
     assert.equal(result.ok, true);
     assert.equal(received.length, 1);
-    assert.equal(received[0].path, "/pipeclaw/ios/push");
+    assert.equal(received[0].path, "/manifold/ios/push");
     assert.equal(received[0].auth, "Bearer test-token-for-sse-tests");
     assert.deepEqual(received[0].body, event);
   });

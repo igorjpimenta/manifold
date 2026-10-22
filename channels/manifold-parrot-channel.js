@@ -1,12 +1,12 @@
-// pipeclaw-parrot-channel.js — Pipeclaw Discuss channel plugin.
+// manifold-parrot-channel.js — Manifold Discuss channel plugin.
 //
 // Full SDK channel: inbound via dispatchInboundDirectDmWithRuntime, outbound
 // via the deliver callback → session transcript events. The HTTP route is a
 // thin bridge — auth, flow/target resolution, system-prompt injection — then
 // hands off to the channel runtime for agent dispatch.
 //
-// Entry point: call createPipeclawParrotChannelEntry(deps).register(api) from
-// inside pipeclaw's registerFull.
+// Entry point: call createManifoldParrotChannelEntry(deps).register(api) from
+// inside manifold's registerFull, after emitSseEvent is wired up.
 
 import { createChatChannelPlugin, defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
 import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-inbound";
@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 
-export function createPipeclawParrotChannelEntry({
+export function createManifoldParrotChannelEntry({
   readStore,
   discussStore,
   resolveDiscussTarget,
@@ -28,11 +28,11 @@ export function createPipeclawParrotChannelEntry({
   const plugin = {
     ...createChatChannelPlugin({
       base: {
-        id: "pipeclaw-parrot",
+        id: "manifold-parrot",
         meta: {
-          id: "pipeclaw-parrot",
-          label: "PipeClaw Parrot",
-          selectionLabel: "PipeClaw Parrot",
+          id: "manifold-parrot",
+          label: "Manifold Parrot",
+          selectionLabel: "Manifold Parrot",
           docsPath: "",
           blurb: "Full-tool-access agent sessions for operator ↔ agent dialogue",
         },
@@ -56,7 +56,7 @@ export function createPipeclawParrotChannelEntry({
       startAccount: async (ctx) => {
         channelRuntimeRef = ctx.channelRuntime;
         cfgRef = ctx.cfg;
-        ctx.log?.info(`[pipeclaw-parrot] channel runtime ready`);
+        ctx.log?.info(`[manifold-parrot] channel runtime ready`);
         // Keep the account "running" until the gateway shuts down.
         await new Promise((_resolve, reject) => {
           if (ctx.abortSignal?.aborted) { reject(new Error("aborted")); return; }
@@ -67,13 +67,13 @@ export function createPipeclawParrotChannelEntry({
   };
 
   return defineChannelPluginEntry({
-    id: "pipeclaw-parrot",
-    name: "PipeClaw Parrot",
+    id: "manifold-parrot",
+    name: "Manifold Parrot",
     description: "Full-tool-access channel for operator ↔ agent direct sessions",
     plugin,
     registerFull(api) {
       api.registerHttpRoute({
-        path: "/channels/pipeclaw-parrot/message",
+        path: "/channels/manifold-parrot/message",
         auth: "plugin",
         match: "exact",
         handler: async (req, res) => {
@@ -84,7 +84,7 @@ export function createPipeclawParrotChannelEntry({
             return true;
           }
 
-          const { authorizeBridgeRequest, sendUnauthorized } = await import("../ios/auth.js");
+          const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
           const authz = await authorizeBridgeRequest(req);
           if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
 
@@ -108,7 +108,7 @@ export function createPipeclawParrotChannelEntry({
           if (!channelRuntimeRef || !cfgRef) {
             res.statusCode = 503;
             res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ ok: false, code: "channel_not_ready", error: "pipeclaw-parrot channel runtime not initialized" }));
+            res.end(JSON.stringify({ ok: false, code: "channel_not_ready", error: "manifold-parrot channel runtime not initialized" }));
             return true;
           }
 
@@ -138,7 +138,7 @@ export function createPipeclawParrotChannelEntry({
                 pipelineId: flow.stateJson?.pipelineId ?? null,
               }));
             } catch (err) {
-              api.logger.warn(`pipeclaw-parrot: promptBuilder threw for ${flow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
+              api.logger.warn(`manifold-parrot: promptBuilder threw for ${flow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
             }
           }
 
@@ -162,7 +162,7 @@ export function createPipeclawParrotChannelEntry({
             });
             await discussStore.setTurnStatus(flow.flowId, target.itemId, "running", turnId);
           } catch (err) {
-            api.logger.warn(`pipeclaw-parrot: discuss-store write (operator msg): ${err?.message ?? err}`);
+            api.logger.warn(`manifold-parrot: discuss-store write (operator msg): ${err?.message ?? err}`);
           }
 
           import("node:fs/promises").then(({ mkdir, writeFile }) => {
@@ -181,10 +181,10 @@ export function createPipeclawParrotChannelEntry({
               // Override resolveAgentRoute so each discuss.agent gets its own
               // channel session + tool scope, regardless of static bindings.
               const targetAgent = target.agent;
-              const targetSessionKey = `agent:${targetAgent}:pipeclaw-parrot:direct:${peerId}`;
+              const targetSessionKey = `agent:${targetAgent}:manifold-parrot:direct:${peerId}`;
               const result = await dispatchInboundDirectDmWithRuntime({
                 cfg: cfgRef,
-                channel: "pipeclaw-parrot",
+                channel: "manifold-parrot",
                 accountId: "default",
                 peer: { kind: "direct", id: peerId },
                 runtime: {
@@ -199,13 +199,13 @@ export function createPipeclawParrotChannelEntry({
                     },
                   },
                 },
-                channelLabel: "pipeclaw-parrot",
+                channelLabel: "manifold-parrot",
                 conversationLabel: `flow:${flowIdShort}/${target.itemId}`,
                 rawBody: text,
                 bodyForAgent: text,
                 senderId: "operator",
                 senderAddress: "operator",
-                recipientAddress: "pipeclaw-parrot",
+                recipientAddress: "manifold-parrot",
                 messageId: turnId,
                 timestamp: new Date().toISOString(),
                 ...(extraContext ? { extraContext } : {}),
@@ -224,7 +224,7 @@ export function createPipeclawParrotChannelEntry({
                     await discussStore.clearPending(flow.flowId, target.itemId);
                     await discussStore.setTurnStatus(flow.flowId, target.itemId, "idle", null);
                   } catch (err) {
-                    api.logger.warn(`pipeclaw-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
+                    api.logger.warn(`manifold-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
                   }
 
                   // Canonical text field only — proposal artifacts travel as
@@ -239,13 +239,13 @@ export function createPipeclawParrotChannelEntry({
                     emittedAtMs: Date.now(),
                   });
                   if (!pushRes.ok) {
-                    api.logger.warn(`pipeclaw-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed`);
+                    api.logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: SSE push failed: ${pushRes.error || `HTTP ${pushRes.status}`}`);
                   } else {
-                    api.logger.info(`pipeclaw-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: completed → SSE pushed`);
+                    api.logger.info(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: completed → SSE pushed`);
                   }
                 },
                 onRecordError: (err) => {
-                  api.logger.warn(`pipeclaw-parrot [${flowIdShort}]: record error: ${err?.message ?? err}`);
+                  api.logger.warn(`manifold-parrot [${flowIdShort}]: record error: ${err?.message ?? err}`);
                 },
                 onDispatchError: async (err) => {
                   try {
@@ -279,7 +279,7 @@ export function createPipeclawParrotChannelEntry({
               }
 
             } catch (err) {
-              api.logger.warn(`pipeclaw-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
+              api.logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
               try {
                 await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                 await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);

@@ -140,7 +140,7 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
     await gen1Api.runtime.approvalQueue.isGateLocked(); // attaches gen1's client
 
     const today = todayLocal();
-    const gen1Route = gen1Api._routes.find((r) => r.path === "/pipeclaw/budget/gate/lock");
+    const gen1Route = gen1Api._routes.find((r) => r.path === "/manifold/budget/gate/lock");
     await gen1Route.handler({ method: "POST" }, fakeRes());
 
     const gen2Api = makeFakeApi();
@@ -189,7 +189,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
       flowId: "flow-1", nodeId: "SCORE_LLM", pipelineId: "p", label: "SCORE_LLM",
     });
-    const route = api._routes.find((r) => r.path === "/pipeclaw/budget/decide");
+    const route = api._routes.find((r) => r.path === "/manifold/budget/decide");
     await route.handler(postReq({ ids: [itemId], decision: "approve" }), fakeRes());
 
     const call = calls.find((c) => c.name === "plugin.budget.queue.updated");
@@ -213,7 +213,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
       flowId: "flow-9", nodeId: "SUBMIT", pipelineId: "p", label: "SUBMIT",
     });
-    const route = api._routes.find((r) => r.path === "/pipeclaw/budget/decide");
+    const route = api._routes.find((r) => r.path === "/manifold/budget/decide");
     await route.handler(postReq({ ids: [itemId], decision: "reject" }), fakeRes());
 
     assert.equal(resumes.length, 1);
@@ -248,9 +248,9 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath(), legacyDbPath: null }), getBroadcast });
     await api.runtime.approvalQueue.isGateLocked();
 
-    const lockRoute = api._routes.find((r) => r.path === "/pipeclaw/budget/gate/lock");
+    const lockRoute = api._routes.find((r) => r.path === "/manifold/budget/gate/lock");
     await lockRoute.handler({ method: "POST" }, fakeRes());
-    const unlockRoute = api._routes.find((r) => r.path === "/pipeclaw/budget/gate/unlock");
+    const unlockRoute = api._routes.find((r) => r.path === "/manifold/budget/gate/unlock");
     await unlockRoute.handler({ method: "POST" }, fakeRes());
 
     const locked = calls.filter((c) => c.name === "plugin.budget.lock.changed");

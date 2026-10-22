@@ -14,7 +14,7 @@ async function writeDraftBodyToFile(draftPath, newBody, logger) {
     await writeFile(draftPath, out, "utf-8");
     return { ok: true };
   } catch (err) {
-    logger?.warn?.(`pipeclaw apply-draft body write failed for ${draftPath}: ${err?.message ?? err}`);
+    logger?.warn?.(`manifold apply-draft body write failed for ${draftPath}: ${err?.message ?? err}`);
     return { ok: false, error: err?.message ?? String(err) };
   }
 }
@@ -39,13 +39,13 @@ async function writeDraftMetaToFile(draftPath, fields, logger) {
     await writeFile(draftPath, out, "utf-8");
     return { ok: true };
   } catch (err) {
-    logger?.warn?.(`pipeclaw apply-draft meta write failed for ${draftPath}: ${err?.message ?? err}`);
+    logger?.warn?.(`manifold apply-draft meta write failed for ${draftPath}: ${err?.message ?? err}`);
     return { ok: false, error: err?.message ?? String(err) };
   }
 }
 
 export async function persistRevisedDraft({ flowId, itemId, newDraft, source, store, logger }) {
-  if (source !== "ios" && looksLikeMetaNarration(newDraft)) {
+  if (source !== "app" && looksLikeMetaNarration(newDraft)) {
     return { applied: false, code: "rejected_meta_narration" };
   }
   {

@@ -50,7 +50,7 @@ export function createPersist({ store, failureStore, notifyFlowEnteredWaiting, l
       const result = await store.setRunning({ flowId, expectedRevision: rev, lastStep, stateJson: toPersistableState(curState) });
       if (result.applied) return result;
       if (result.code !== "revision_conflict") {
-        logger.warn(`pipeclaw [${flowId.slice(0, 8)}] setRunning failed: ${result.code}`);
+        logger.warn(`manifold [${flowId.slice(0, 8)}] setRunning failed: ${result.code}`);
         return result;
       }
       const fresh = await store.get(flowId);
@@ -83,11 +83,11 @@ export function createPersist({ store, failureStore, notifyFlowEnteredWaiting, l
             if (fresh) {
               const ret = notifyFlowEnteredWaiting(fresh);
               if (ret && typeof ret.then === "function") {
-                ret.catch((err) => logger?.warn?.(`pipeclaw [${args.flowId.slice(0, 8)}] notifyFlowEnteredWaiting rejected: ${err?.message ?? err}`));
+                ret.catch((err) => logger?.warn?.(`manifold [${args.flowId.slice(0, 8)}] notifyFlowEnteredWaiting rejected: ${err?.message ?? err}`));
               }
             }
           } catch (err) {
-            logger?.warn?.(`pipeclaw [${args.flowId.slice(0, 8)}] notifyFlowEnteredWaiting threw: ${err?.message ?? err}`);
+            logger?.warn?.(`manifold [${args.flowId.slice(0, 8)}] notifyFlowEnteredWaiting threw: ${err?.message ?? err}`);
           }
         }
         return result;
@@ -188,7 +188,7 @@ export function createPersist({ store, failureStore, notifyFlowEnteredWaiting, l
             errorType,
           });
         } catch (err) {
-          logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] recordEngineFailure threw: ${err?.message ?? err}`);
+          logger?.warn?.(`manifold [${flowId.slice(0, 8)}] recordEngineFailure threw: ${err?.message ?? err}`);
         }
         return result;
       }

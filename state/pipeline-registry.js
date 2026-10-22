@@ -351,7 +351,7 @@ async function _createStore(dbPath) {
         await withSharedWrite(dbPath, () => client.batch(queries));
       }
     } catch (err) {
-      logger?.warn?.(`pipeclaw pipeline-registry: reconcile failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold pipeline-registry: reconcile failed: ${err?.message ?? err}`);
     }
   }
 

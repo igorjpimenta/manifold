@@ -1,4 +1,4 @@
-# pipeclaw — engine internals (run lifetime)
+# manifold — engine internals (run lifetime)
 
 Split out of `README.md` to keep that file focused on pipeline authoring.
 Read this when debugging executor behaviour, working on `engine/executor.js`
@@ -25,7 +25,7 @@ terminal path.
 
 `state-store` wraps `run-store`; all reads and CAS writes go to
 `runtime.sqlite` only. `registry.sqlite` (platform) is never written by
-pipeclaw — it is fully retired.
+manifold — it is fully retired.
 
 - **`runStore.X()`** → `runtime.sqlite` `flow_runs` (sole read/write store — dashboard, revival, gate-resolver)
 - **`nodeExecutionsStore.X()`** → `runtime.sqlite` `flow_node_invocations` / `flow_node_executions` (one row per logical node dispatch / per attempt — also the identity source for a subflow node's real children, see *Subflow data flow* below)
@@ -129,7 +129,7 @@ persistWaitingRetrying({ waitJson, statusReason })
 //   method's own name — there is no "waiting" status value in this
 //   schema, see Status transitions below), revision++
 ```
-Flow stops here; resumes via `POST /pipeclaw/resume-from-gate`.
+Flow stops here; resumes via `POST /manifold/resume-from-gate`.
 
 **`skippedInfo`** (`_skipped` sentinel returned)
 ```js
@@ -169,7 +169,7 @@ verdict = pipeline.runAudit?.successCriteria({ ...enrichedState, ...finalState }
 
 ## Resume from blocked
 
-`POST /pipeclaw/resume-from-gate { flowId, nodeId, decision }`
+`POST /manifold/resume-from-gate { flowId, nodeId, decision }`
 
 Route handler:
 1. Reads flow from `runtime.sqlite` via `store.get()`.

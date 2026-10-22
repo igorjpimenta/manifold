@@ -7,7 +7,7 @@ export function Layout({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 flex items-center gap-3 sm:gap-4 bg-bg-elev px-3 sm:px-5 py-[10px] border-b border-border">
-        <a href="#/" className="font-mono font-semibold tracking-wide text-fg">pipeclaw</a>
+        <a href="#/" className="font-mono font-semibold tracking-wide text-fg">manifold</a>
         <nav className="flex gap-3 sm:gap-4 flex-1">
           <a href="#/" className="text-fg-dim py-1 hover:no-underline hover:text-fg">runs</a>
           <a href="#/pipelines" className="text-fg-dim py-1 hover:no-underline hover:text-fg">pipelines</a>

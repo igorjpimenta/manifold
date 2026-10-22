@@ -1,4 +1,4 @@
-// cli.js — registers the `openclaw pipeclaw <subcommand>` CLI surface.
+// cli.js — registers the `openclaw manifold <subcommand>` CLI surface.
 //
 // IMPORTANT: CLI handlers run in a separate openclaw process from the gateway,
 // so the `pipelinesRef` populated by the gateway's loader-service is NOT
@@ -58,11 +58,11 @@ function withExit(action) {
 }
 
 export function registerCliCommands({ program, executor, store, pipelinesRef, logger, dashboardUrl, api, nodeHealthStore, ownerSessionKey, runStore, nodeExecutionsStore, admissionQueueStore }) {
-  const root = program.command("pipeclaw");
+  const root = program.command("manifold");
   root.description("Run state-graph pipelines defined in workspace/.pipelines/");
   const failureStore = createFailureStore({ logger, nodeExecutionsStore });
 
-  // pipeclaw list
+  // manifold list
   root
     .command("list")
     .description("List loaded pipelines (from workspace/.pipelines/)")
@@ -70,7 +70,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       await ensurePipelinesLoaded(pipelinesRef, logger);
       const all = [...pipelinesRef.value.values()];
       if (all.length === 0) {
-        console.log("pipeclaw: no pipelines loaded.");
+        console.log("manifold: no pipelines loaded.");
         return;
       }
       for (const p of all) {
@@ -80,7 +80,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       }
     }));
 
-  // pipeclaw start <pipelineId>
+  // manifold start <pipelineId>
   root
     .command("start <pipelineId>")
     .description("Start a new run of a pipeline. Blocks until the flow reaches terminal or human-gate.")
@@ -89,7 +89,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       await ensurePipelinesLoaded(pipelinesRef, logger);
       const args = options.args ? safeParseJson(options.args) : {};
       if (args === null) {
-        console.error(`pipeclaw: --args must be valid JSON`);
+        console.error(`manifold: --args must be valid JSON`);
         process.exit(1);
       }
       try {
@@ -112,9 +112,9 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
             rootLabel: pipelineId,
           });
         } catch (err) {
-          logger?.warn?.(`pipeclaw start (cli): lineage edge skipped: ${err?.message ?? err}`);
+          logger?.warn?.(`manifold start (cli): lineage edge skipped: ${err?.message ?? err}`);
         }
-        console.log(`pipeclaw: started ${pipelineId} → flowId=${record.flowId}`);
+        console.log(`manifold: started ${pipelineId} → flowId=${record.flowId}`);
         // The shared admission pool was full at start() time — the flow is
         // durably queued (state/admission-queue-store.js) and will run once
         // a slot frees, but that promotion happens via the long-running
@@ -137,25 +137,25 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
         // incident this fixes.
         await waitForFlowSettlement(record.flowId, { store, runStore, nodeExecutionsStore, logger });
         const final = await store.get(record.flowId);
-        console.log(`\npipeclaw: ${record.flowId} → ${final?.status ?? "?"} (step=${final?.lastStep ?? "?"})`);
+        console.log(`\nmanifold: ${record.flowId} → ${final?.status ?? "?"} (step=${final?.lastStep ?? "?"})`);
       } catch (err) {
-        console.error(`pipeclaw: start failed: ${err.message}`);
+        console.error(`manifold: start failed: ${err.message}`);
         process.exit(1);
       }
     }));
 
-  // pipeclaw status <flowId>
+  // manifold status <flowId>
   root
     .command("status <flowId>")
     .description("Show current state and pending gates of a flow run")
     .action(withExit(async (flowId) => {
       const flow = await store.get(flowId);
       if (!flow) {
-        console.error(`pipeclaw: flow not found: ${flowId}`);
+        console.error(`manifold: flow not found: ${flowId}`);
         process.exit(1);
       }
       const state = flow.stateJson ?? {};
-      console.log(`pipeclaw: ${flow.flowId}`);
+      console.log(`manifold: ${flow.flowId}`);
       console.log(`  pipeline:   ${state.pipelineId ?? "?"}`);
       console.log(`  status:     ${flow.status}`);
       console.log(`  step:       ${flow.lastStep}`);
@@ -178,12 +178,12 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       }
     }));
 
-  // pipeclaw retry <flowId>
+  // manifold retry <flowId>
   //
   // README.md's CLI table documented this command since before task #267's
   // audit, but nothing ever registered it — the only working path to
   // routes/operator-retry.js's retryFailureBranch (which takes a failure
-  // *id*, not a flowId) was the /pipeclaw/_elev/retry-failure HTTP route.
+  // *id*, not a flowId) was the /manifold/_elev/retry-failure HTTP route.
   // Closes that gap: looks up the flow's own most recent OPEN failure_events
   // row (retryFailureBranch's own topology walk resolves the correct node
   // to retry from regardless of which of a flow's open failures is passed,
@@ -211,7 +211,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       const openFailures = (await failureStore.list({ resolved: false, limit: 1000 }))
         .filter((f) => f.flow_id === flowId);
       if (openFailures.length === 0) {
-        console.error(`pipeclaw: no open failure found for flow ${flowId}`);
+        console.error(`manifold: no open failure found for flow ${flowId}`);
         process.exit(1);
       }
       const failure = openFailures.reduce((a, b) => (a.failed_at >= b.failed_at ? a : b));
@@ -220,7 +220,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       });
       const result = await retryFailureBranch({ id: failure.id, via: "cli", awaitCompletion: true });
       if (result.code !== "ok") {
-        console.error(`pipeclaw: retry failed (${result.code}): ${result.reason ?? "unknown"}`);
+        console.error(`manifold: retry failed (${result.code}): ${result.reason ?? "unknown"}`);
         process.exit(1);
       }
       // retryFailureBranch's own awaitCompletion:true only awaits the ONE
@@ -230,7 +230,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       // in flight here. See wait-for-flow-settlement.js's header.
       if (result.mode === "cascade-redirect") {
         const okResults = result.results.filter((r) => r.code === "ok");
-        console.log(`pipeclaw: retry for ${flowId} — redirected to ${result.redirectedTo.length} underlying failure(s), ${okResults.length} retried`);
+        console.log(`manifold: retry for ${flowId} — redirected to ${result.redirectedTo.length} underlying failure(s), ${okResults.length} retried`);
         for (const r of okResults) {
           await waitForFlowSettlement(r.flowId, { store, runStore, nodeExecutionsStore, logger });
           const final = await store.get(r.flowId);
@@ -239,19 +239,19 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       } else {
         await waitForFlowSettlement(flowId, { store, runStore, nodeExecutionsStore, logger });
         const final = await store.get(flowId);
-        console.log(`pipeclaw: retry for ${flowId} → ${final?.status ?? "?"} (failureNode=${result.failureNode}, rootNode=${result.rootNode}, cleared=[${result.cleared.join(",")}])`);
+        console.log(`manifold: retry for ${flowId} → ${final?.status ?? "?"} (failureNode=${result.failureNode}, rootNode=${result.rootNode}, cleared=[${result.cleared.join(",")}])`);
       }
     }));
 
-  // pipeclaw node-health status [pipelineId]
-  // pipeclaw node-health reset <pipelineId> <nodeId>
+  // manifold node-health status [pipelineId]
+  // manifold node-health reset <pipelineId> <nodeId>
   //
   // Both live under one `node-health` parent command — Commander's
   // `.command(nameAndArgs)` only reads the first whitespace-delimited
   // token as the command name, so two top-level `.command("node-health
   // ...")` calls would collide ("cannot add command 'node-health' as
   // already have command 'node-health'"), crashing CLI registration for
-  // every `pipeclaw` subcommand, not just these two.
+  // every `manifold` subcommand, not just these two.
   const nodeHealthCmd = root
     .command("node-health")
     .description("Inspect or reset a node's agent-dispatch circuit breaker.");
@@ -268,7 +268,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .action(withExit(async (pipelineId, options) => {
       const rows = await nodeHealthStore.list(pipelineId, options.all ? {} : { status: "blocked" });
       if (rows.length === 0) {
-        console.log(pipelineId ? `pipeclaw: no node-health blocks for ${pipelineId}` : "pipeclaw: no node-health blocks");
+        console.log(pipelineId ? `manifold: no node-health blocks for ${pipelineId}` : "manifold: no node-health blocks");
         return;
       }
       for (const r of rows) {
@@ -289,13 +289,13 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .action(withExit(async (pipelineId, nodeId) => {
       const result = await nodeHealthStore.reset(pipelineId, nodeId, { via: "cli" });
       if (result.reset === 0) {
-        console.log(`pipeclaw: ${pipelineId}/${nodeId} was not blocked; nothing to reset`);
+        console.log(`manifold: ${pipelineId}/${nodeId} was not blocked; nothing to reset`);
         return;
       }
-      console.log(`pipeclaw: ${pipelineId}/${nodeId} reset — eligible for dispatch again`);
+      console.log(`manifold: ${pipelineId}/${nodeId} reset — eligible for dispatch again`);
     }));
 
-  // pipeclaw approve <flowId> <itemId> <decision> [text]
+  // manifold approve <flowId> <itemId> <decision> [text]
   //
   // Blocks until the resumed flow reaches terminal or blocked again — same
   // reasoning as `retry` above: gates/gate-resolver.js's
@@ -313,16 +313,16 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .action(withExit(async (flowId, itemId, decision, options) => {
       decision = String(decision).toLowerCase();
       if (!["approve", "reject", "edit"].includes(decision)) {
-        console.error(`pipeclaw: decision must be approve|reject|edit`);
+        console.error(`manifold: decision must be approve|reject|edit`);
         process.exit(1);
       }
       if (decision === "edit" && !options.text) {
-        console.error(`pipeclaw: edit requires --text`);
+        console.error(`manifold: edit requires --text`);
         process.exit(1);
       }
 
       // Same channel-agnostic resolver the TG callback handler, the
-      // dashboard, and the /pipeclaw/gate/resolve route use. Spun up
+      // dashboard, and the /manifold/gate/resolve route use. Spun up
       // here against this CLI process's own store + executor — the
       // gateway has its own resolver instance, but writes still serialize
       // through the underlying SQL store so cross-process resolution is
@@ -348,7 +348,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
         awaitCompletion: true,
       });
       if (!result.ok) {
-        console.error(`pipeclaw: ${result.code}`);
+        console.error(`manifold: ${result.code}`);
         process.exit(1);
       }
       // recordItemDecision's own awaitCompletion:true only awaits the ONE
@@ -359,12 +359,12 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       await waitForFlowSettlement(flowId, { store, runStore, nodeExecutionsStore, logger });
       const final = await store.get(flowId);
       console.log(
-        `pipeclaw: ${decision} "${itemId}" (${result.status})` +
+        `manifold: ${decision} "${itemId}" (${result.status})` +
         (final ? ` — flow → ${final.status ?? "?"} (step=${final.lastStep ?? "?"})` : "")
       );
     }));
 
-  // pipeclaw rerun <sourceFlowId> — start a fresh run of the same pipeline
+  // manifold rerun <sourceFlowId> — start a fresh run of the same pipeline
   // with the same args (or overridden via --args). Stamps state.rerunOf so
   // the lineage is queryable. Subject to the singleton-per-pipeline guard.
   root
@@ -375,16 +375,16 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       await ensurePipelinesLoaded(pipelinesRef, logger);
       const argsOverride = options.args ? safeParseJson(options.args) : undefined;
       if (options.args && argsOverride === null) {
-        console.error(`pipeclaw: --args must be valid JSON`);
+        console.error(`manifold: --args must be valid JSON`);
         process.exit(1);
       }
       let record;
       try { record = await executor.rerun(sourceFlowId, argsOverride); }
       catch (err) {
-        console.error(`pipeclaw: rerun failed: ${err.message}`);
+        console.error(`manifold: rerun failed: ${err.message}`);
         process.exit(1);
       }
-      console.log(`pipeclaw: re-ran ${sourceFlowId.slice(0, 8)} → flowId=${record.flowId}`);
+      console.log(`manifold: re-ran ${sourceFlowId.slice(0, 8)} → flowId=${record.flowId}`);
       try { await executor.runFlow(record.flowId, "fresh"); }
       catch { /* ignore — error surface is the next status read */ }
       // See wait-for-flow-settlement.js's header — the runFlow() await
@@ -392,10 +392,10 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       // not any childFlows:true children it spawned along the way.
       await waitForFlowSettlement(record.flowId, { store, runStore, nodeExecutionsStore, logger });
       const final = await store.get(record.flowId);
-      console.log(`pipeclaw: ${record.flowId.slice(0, 8)} → ${final?.status ?? "?"} (step=${final?.lastStep ?? "?"})`);
+      console.log(`manifold: ${record.flowId.slice(0, 8)} → ${final?.status ?? "?"} (step=${final?.lastStep ?? "?"})`);
     }));
 
-  // pipeclaw cancel <flowId> — terminal transition for a non-terminal flow.
+  // manifold cancel <flowId> — terminal transition for a non-terminal flow.
   // Does not preempt in-flight subagent calls; they finish and their results
   // are discarded (the executor's setRunning fails the revision check).
   root
@@ -405,16 +405,16 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .action(withExit(async (flowId, options) => {
       const flow = await store.get(flowId);
       if (!flow) {
-        console.error(`pipeclaw: flow not found: ${flowId}`);
+        console.error(`manifold: flow not found: ${flowId}`);
         process.exit(1);
       }
       if (TERMINAL_STATUS_SET.has(flow.status)) {
-        console.error(`pipeclaw: flow is already terminal (status=${flow.status}); nothing to cancel`);
+        console.error(`manifold: flow is already terminal (status=${flow.status}); nothing to cancel`);
         process.exit(1);
       }
       const result = await executor.cancel(flowId, options.reason ?? null);
       if (!result?.cancelled) {
-        console.error(`pipeclaw: cancel did not apply: ${result?.reason ?? "unknown"}`);
+        console.error(`manifold: cancel did not apply: ${result?.reason ?? "unknown"}`);
         process.exit(1);
       }
       // executor.cancel() releases this flow's admission slot (and wakes a
@@ -422,10 +422,10 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       // triggerParentResume before its promise resolves, so no second
       // explicit release is needed here — by the time `cancel()` above
       // returns, the real one has already landed.
-      console.log(`pipeclaw: cancelled ${flowId.slice(0, 8)} (was ${flow.status})`);
+      console.log(`manifold: cancelled ${flowId.slice(0, 8)} (was ${flow.status})`);
     }));
 
-  // pipeclaw resume-admitted <flowId> — recovery for an "orphaned
+  // manifold resume-admitted <flowId> — recovery for an "orphaned
   // promotion": a flow stuck status='queued' whose flow-start/child-dispatch
   // admission row is already 'admitted' (it holds a live pool slot) because
   // some past release() promoted it and the promotion's resume was dropped
@@ -444,31 +444,31 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .action(withExit(async (flowId) => {
       const flow = await store.get(flowId);
       if (!flow) {
-        console.error(`pipeclaw: flow not found: ${flowId}`);
+        console.error(`manifold: flow not found: ${flowId}`);
         process.exit(1);
       }
       if (flow.status !== "queued") {
-        console.error(`pipeclaw: flow is not queued (status=${flow.status}); nothing to force-resume`);
+        console.error(`manifold: flow is not queued (status=${flow.status}); nothing to force-resume`);
         process.exit(1);
       }
       const kind = flow.waitJson?.kind;
       if (kind !== "flow-start" && kind !== "child-dispatch") {
-        console.error(`pipeclaw: wait kind "${kind ?? "?"}" isn't resumable this way — only flow-start/child-dispatch hold a durable admission with no in-process waiter of their own`);
+        console.error(`manifold: wait kind "${kind ?? "?"}" isn't resumable this way — only flow-start/child-dispatch hold a durable admission with no in-process waiter of their own`);
         process.exit(1);
       }
       if (!admissionQueueStore) {
-        console.error("pipeclaw: no admissionQueueStore wired in");
+        console.error("manifold: no admissionQueueStore wired in");
         process.exit(1);
       }
       const admitted = await admissionQueueStore.listByStatus("admitted");
       const held = admitted.find((r) => r.flowId === flowId && r.kind === kind);
       if (!held) {
-        console.error(`pipeclaw: flow does not hold a live '${kind}' admission — it's genuinely still queued, not orphaned. Wait for the normal release/promotion cycle instead of forcing this.`);
+        console.error(`manifold: flow does not hold a live '${kind}' admission — it's genuinely still queued, not orphaned. Wait for the normal release/promotion cycle instead of forcing this.`);
         process.exit(1);
       }
       const result = await flipToRunningAndResume({ parentFlowId: flowId, runStore, resume: executor.resume, logger, api });
       if (!result.resumed) {
-        console.error(`pipeclaw: force-resume did not apply: ${result.reason ?? "unknown"}`);
+        console.error(`manifold: force-resume did not apply: ${result.reason ?? "unknown"}`);
         process.exit(1);
       }
       await waitForFlowSettlement(flowId, { store, runStore, nodeExecutionsStore, logger });
@@ -487,14 +487,14 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
           admissionQueueStore.releaseByFlow({ flowId, kind: "child-dispatch" }).catch(() => ({ released: false, promoted: null })),
         ]);
         await wakePromotedRelease(results, {
-          runStore, resume: executor.resume, logger, api, context: "pipeclaw resume-admitted: cleanup-release",
+          runStore, resume: executor.resume, logger, api, context: "manifold resume-admitted: cleanup-release",
         });
       }
       const final = await store.get(flowId);
-      console.log(`pipeclaw: force-resumed ${flowId.slice(0, 8)} → ${final?.status ?? "?"}`);
+      console.log(`manifold: force-resumed ${flowId.slice(0, 8)} → ${final?.status ?? "?"}`);
     }));
 
-  // pipeclaw release-leaked-admission <flowId> — recovery for the OTHER
+  // manifold release-leaked-admission <flowId> — recovery for the OTHER
   // admission-pool failure mode (see engine/admission-promotion-resume.js's
   // header for the orphaned-promotion one resume-admitted above handles): a
   // flow_admission_queue row is only ever supposed to exist while its owning
@@ -512,15 +512,15 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .action(withExit(async (flowId) => {
       const flow = await store.get(flowId);
       if (!flow) {
-        console.error(`pipeclaw: flow not found: ${flowId}`);
+        console.error(`manifold: flow not found: ${flowId}`);
         process.exit(1);
       }
       if (!TERMINAL_STATUS_SET.has(flow.status)) {
-        console.error(`pipeclaw: flow is not terminal (status=${flow.status}) — this command only cleans up a leak on an already-finished flow; use resume-admitted or cancel for a live one`);
+        console.error(`manifold: flow is not terminal (status=${flow.status}) — this command only cleans up a leak on an already-finished flow; use resume-admitted or cancel for a live one`);
         process.exit(1);
       }
       if (!admissionQueueStore) {
-        console.error("pipeclaw: no admissionQueueStore wired in");
+        console.error("manifold: no admissionQueueStore wired in");
         process.exit(1);
       }
       let releasedCount = 0;
@@ -528,29 +528,29 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
         const result = await admissionQueueStore.releaseByFlow({ flowId, kind });
         if (!result.released) continue;
         releasedCount++;
-        console.log(`pipeclaw: released leaked ${kind} admission for ${flowId.slice(0, 8)}`);
+        console.log(`manifold: released leaked ${kind} admission for ${flowId.slice(0, 8)}`);
         if (result.promoted) {
           const r = await wakePromotedRelease(result, {
-            runStore, resume: executor.resume, logger, api, context: `pipeclaw release-leaked-admission [${flowId.slice(0, 8)}]`,
+            runStore, resume: executor.resume, logger, api, context: `manifold release-leaked-admission [${flowId.slice(0, 8)}]`,
           });
           console.log(`  promoted ${result.promoted.flowId.slice(0, 8)} (${result.promoted.kind}) into the freed slot — resumed=${r.resumed}${r.resumed ? "" : ` reason=${r.reason}`}`);
         }
       }
       if (releasedCount === 0) {
-        console.log(`pipeclaw: flow ${flowId.slice(0, 8)} held no live admission — nothing to release`);
+        console.log(`manifold: flow ${flowId.slice(0, 8)} held no live admission — nothing to release`);
       }
     }));
 
-  // pipeclaw runs — list our managed runs
+  // manifold runs — list our managed runs
   root
     .command("runs")
-    .description("List flow runs created by pipeclaw")
+    .description("List flow runs created by manifold")
     .option("--status <s>", "Filter by status (running, blocked, succeeded, failed, cancelled)")
     .action(withExit(async (options) => {
       const all = await store.list();
       const filtered = options.status ? all.filter((f) => f.status === options.status) : all;
       if (filtered.length === 0) {
-        console.log(`pipeclaw: no runs${options.status ? ` with status=${options.status}` : ""}.`);
+        console.log(`manifold: no runs${options.status ? ` with status=${options.status}` : ""}.`);
         return;
       }
       filtered.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
@@ -562,7 +562,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       if (filtered.length > 30) console.log(`  ... and ${filtered.length - 30} more`);
     }));
 
-  // pipeclaw pause <flowId> — stop the before_dispatch hook from claiming
+  // manifold pause <flowId> — stop the before_dispatch hook from claiming
   // operator messages for this flow. Useful when you want to talk to the
   // main agent without disrupting an active Vulcan priming interview.
   root
@@ -574,18 +574,18 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
         const matches = (await store.list()).filter((f) => f.flowId.startsWith(flowId));
         if (matches.length === 1) flowId = matches[0].flowId;
         else if (matches.length > 1) {
-          console.error(`pipeclaw: ambiguous prefix "${flowId}" — ${matches.length} matches`);
+          console.error(`manifold: ambiguous prefix "${flowId}" — ${matches.length} matches`);
           process.exit(1);
         } else {
-          console.error(`pipeclaw: no flow found with id "${flowId}"`);
+          console.error(`manifold: no flow found with id "${flowId}"`);
           process.exit(1);
         }
       }
       pauseFlow(flowId);
-      console.log(`pipeclaw: paused ${flowId.slice(0, 8)} — operator messages will route to the main agent. Resume with: openclaw pipeclaw resume ${flowId.slice(0, 8)}`);
+      console.log(`manifold: paused ${flowId.slice(0, 8)} — operator messages will route to the main agent. Resume with: openclaw manifold resume ${flowId.slice(0, 8)}`);
     }));
 
-  // pipeclaw resume <flowId> — re-engage the before_dispatch claim.
+  // manifold resume <flowId> — re-engage the before_dispatch claim.
   root
     .command("resume <flowId>")
     .description("Re-engage the priming claim for this flow — operator messages route back to the priming session.")
@@ -593,48 +593,48 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       const matches = (await store.list()).filter((f) => f.flowId.startsWith(flowId));
       if (matches.length === 1) flowId = matches[0].flowId;
       else if (matches.length > 1) {
-        console.error(`pipeclaw: ambiguous prefix "${flowId}" — ${matches.length} matches`);
+        console.error(`manifold: ambiguous prefix "${flowId}" — ${matches.length} matches`);
         process.exit(1);
       }
       resumeFlow(flowId);
-      console.log(`pipeclaw: resumed ${flowId.slice(0, 8)} — operator messages will route to the priming session again.`);
+      console.log(`manifold: resumed ${flowId.slice(0, 8)} — operator messages will route to the priming session again.`);
     }));
 
-  // pipeclaw dashboard — print URL and open the browser to the read-only UI.
+  // manifold dashboard — print URL and open the browser to the read-only UI.
   // The dashboard service runs in the gateway process; the CLI just opens a
   // window pointing at it. Doesn't check liveness — the user will see a
   // connection error in their browser if the gateway isn't running.
   root
     .command("dashboard")
-    .description("Open the read-only pipeclaw dashboard in your browser.")
+    .description("Open the read-only manifold dashboard in your browser.")
     .option("--no-open", "Just print the URL; don't launch a browser.")
     .option("--url <url>", "Override the URL to open (defaults to the configured dashboard host/port).")
     .action(withExit((options) => {
       const url = options.url || dashboardUrl || "http://127.0.0.1:7430";
-      console.log(`pipeclaw dashboard: ${url}`);
+      console.log(`manifold dashboard: ${url}`);
       if (options.open === false) return;
       const { cmd, args } = browserOpenCommand(url);
       if (!cmd) {
-        console.log(`pipeclaw dashboard: no platform-appropriate opener; open the URL manually.`);
+        console.log(`manifold dashboard: no platform-appropriate opener; open the URL manually.`);
         return;
       }
       try {
         const child = spawn(cmd, args, { stdio: "ignore", detached: true });
-        child.on("error", (err) => console.log(`pipeclaw dashboard: opener "${cmd}" failed (${err.message}); open the URL manually.`));
+        child.on("error", (err) => console.log(`manifold dashboard: opener "${cmd}" failed (${err.message}); open the URL manually.`));
         child.unref();
       } catch (err) {
-        console.log(`pipeclaw dashboard: failed to launch browser (${err.message}); open the URL manually.`);
+        console.log(`manifold dashboard: failed to launch browser (${err.message}); open the URL manually.`);
       }
     }));
 
-  // pipeclaw paused — list paused flows
+  // manifold paused — list paused flows
   root
     .command("paused")
     .description("List flows currently paused (operator side-channel active).")
     .action(withExit(async () => {
       const paused = [...listPaused()];
       if (paused.length === 0) {
-        console.log("pipeclaw: no flows are paused.");
+        console.log("manifold: no flows are paused.");
         return;
       }
       for (const flowId of paused) {

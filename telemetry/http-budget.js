@@ -1,4 +1,4 @@
-// /pipeclaw/telemetry/budget/* routes — cap read/write + alert test.
+// /manifold/telemetry/budget/* routes — cap read/write + alert test.
 import {
   currentCapUSD, setCapAndPersist,
   currentLockThreshold, setLockThresholdAndPersist,
@@ -12,7 +12,7 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
   const { emit } = createEmitter({ getBroadcast, logger });
   // ─── /budget/cap — read / update the operator-set daily cap ───────────────
   api.registerHttpRoute({
-    path: "/pipeclaw/telemetry/budget/cap", auth: "plugin", match: "exact",
+    path: "/manifold/telemetry/budget/cap", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       if (req.method === "GET") {
         return json(res, { capUSD: currentCapUSD() });
@@ -42,7 +42,7 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
 
   // ─── /budget/gate-threshold — read / update the auto-lock threshold ───────
   api.registerHttpRoute({
-    path: "/pipeclaw/telemetry/budget/gate-threshold", auth: "plugin", match: "exact",
+    path: "/manifold/telemetry/budget/gate-threshold", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       if (req.method === "GET") {
         return json(res, { lockThreshold: currentLockThreshold() });
@@ -69,7 +69,7 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
 
   // ─── /budget/cap-history — SCD2 cap/threshold versions (oldest first) ──────
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/budget/cap-history", auth: "plugin", match: "exact",
+    method: "GET", path: "/manifold/telemetry/budget/cap-history", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       try {
         const rows = await getCapHistory();
@@ -92,7 +92,7 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
   // distinct from the debounce file, which only suppresses same-day re-fires;
   // every threshold fire is durably logged here with its timestamp.
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/budget/alert-history", auth: "plugin", match: "exact",
+    method: "GET", path: "/manifold/telemetry/budget/alert-history", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       try {
         const url = new URL(req.url, "http://x");
@@ -114,14 +114,14 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
 
   // ─── /budget/test-alert — fire a test push without mutating persisted state
   api.registerHttpRoute({
-    method: "POST", path: "/pipeclaw/telemetry/budget/test-alert", auth: "plugin", match: "exact",
+    method: "POST", path: "/manifold/telemetry/budget/test-alert", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       try {
         const store = getStore();
         if (!store) return bad(res, "lineage store not ready");
         const url = new URL(req.url, "http://x");
         const threshold = Number(url.searchParams.get("threshold") || 0.5);
-        await testFireAlert({ store, logger, threshold });
+        await testFireAlert({ store, logger, threshold, notify: (payload) => getBroadcast?.()?.("plugin.manifold.budget.alert", payload) });
         json(res, { ok: true, threshold });
       } catch (err) {
         logger?.warn?.(`lineage[http /budget/test-alert]: ${err?.message ?? err}`);

@@ -29,7 +29,7 @@
 //
 // Usage pattern:
 //   In your external (auth: "plugin") route:
-//     const { ok, status, body } = await invokeElevated("/pipeclaw/_elev/start", payload);
+//     const { ok, status, body } = await invokeElevated("/manifold/_elev/start", payload);
 //     res.statusCode = status;
 //     res.end(body);
 //   In your internal (auth: "gateway") route:
@@ -58,7 +58,7 @@ const GATEWAY_HOST = "127.0.0.1";
  * Caller is responsible for content-type interpretation.
  *
  * `opts.timeoutMs` defaults to 30s — fine for routes that schedule work
- * and return quickly (e.g. /pipeclaw/_elev/start kicks off a flow via
+ * and return quickly (e.g. /manifold/_elev/start kicks off a flow via
  * setImmediate). Routes that block on subagent.run (e.g. /_elev/discuss
  * waits up to 5 min for Herculano to compose a reply) MUST pass a
  * timeout above the inner wait, or the loopback gives up while the

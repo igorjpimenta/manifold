@@ -1,11 +1,11 @@
 /**
  * Unit tests for engine/loader.js's createPipelinesLoader.
  *
- * Regression coverage for the 2026-08-04 boot race: pipeclaw-flow-revival
+ * Regression coverage for the 2026-08-04 boot race: manifold-flow-revival
  * (and executor.js's per-flow fallback) used to each independently check
  * `pipelinesRef.value.size > 0` and start their own loadPipelines() pass if
  * they observed it still empty — so a caller arriving while the
- * "pipeclaw-loader" service's own load was still in flight would kick off a
+ * "manifold-loader" service's own load was still in flight would kick off a
  * second, uncoordinated load and could act before either completed,
  * intermittently failing orphan revival with "pipeline not loaded: <id>".
  * createPipelinesLoader replaces that heuristic with one memoized promise
@@ -64,7 +64,7 @@ describe("createPipelinesLoader — memoized single load", () => {
     const pipelinesRef = { value: new Map() };
     const ensurePipelinesLoaded = createPipelinesLoader("/fake/dir", null, pipelinesRef, { load });
 
-    // Mirrors pipeclaw-loader and pipeclaw-flow-revival both calling
+    // Mirrors manifold-loader and manifold-flow-revival both calling
     // ensurePipelinesLoaded() before the underlying load has resolved.
     const p1 = ensurePipelinesLoaded();
     const p2 = ensurePipelinesLoaded();

@@ -114,7 +114,7 @@ export function createNodeRunner({
     const pipelineId = state?.pipelineId ?? null;
     if (entry.circuitBreaker && await nodeHealthStore?.isBlocked(pipelineId, nodeId)) {
       throw new Error(
-        `unhealthy agent dispatch: "${nodeId}" is blocked after a prior failure — reset via "openclaw pipeclaw node-health reset ${pipelineId} ${nodeId}" once the underlying issue is confirmed fixed`
+        `unhealthy agent dispatch: "${nodeId}" is blocked after a prior failure — reset via "openclaw manifold node-health reset ${pipelineId} ${nodeId}" once the underlying issue is confirmed fixed`
       );
     }
     const gate = await maybeBudgetGate({

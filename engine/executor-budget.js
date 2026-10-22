@@ -33,7 +33,7 @@ export function createBudgetGate({ getApprovalQueue, logger, nodeCallStats: node
         pipeline: pipelineName,
         pipelineId,
         label: itemLabel,
-        agent: node?.agent ?? "pipeclaw",
+        agent: node?.agent ?? "manifold",
         agentEmoji: agentEmojiFor(node?.agent),
         trigger: "cron",
         brief,
@@ -42,9 +42,9 @@ export function createBudgetGate({ getApprovalQueue, logger, nodeCallStats: node
         modelChain: [],
         tokenEstimate: null,
       });
-      logger?.info?.(`pipeclaw [${flowId.slice(0,8)}] ${nodeId}: budget gate locked — queued item=${itemId} (~$${estimate.low.toFixed(4)}-$${estimate.high.toFixed(4)})`);
+      logger?.info?.(`manifold [${flowId.slice(0,8)}] ${nodeId}: budget gate locked — queued item=${itemId} (~$${estimate.low.toFixed(4)}-$${estimate.high.toFixed(4)})`);
     } catch (err) {
-      logger?.warn?.(`pipeclaw [${flowId.slice(0,8)}] ${nodeId}: enqueue failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold [${flowId.slice(0,8)}] ${nodeId}: enqueue failed: ${err?.message ?? err}`);
     }
     return { pause: true, blockedInfo: budgetGateBlockedInfo(nodeId, itemId) };
   }

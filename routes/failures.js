@@ -5,9 +5,9 @@
 // (implemented in routes/operator-retry.js) remain.
 
 export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
-  // ── GET /pipeclaw/failures ─────────────────────────────────────────────
+  // ── GET /manifold/failures ─────────────────────────────────────────────
   api.registerHttpRoute({
-    path: "/pipeclaw/failures",
+    path: "/manifold/failures",
     auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
@@ -17,7 +17,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../ios/auth.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -37,7 +37,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ rows, count: rows.length }));
       } catch (err) {
-        api.logger.warn(`pipeclaw /failures handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold /failures handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));
@@ -46,9 +46,9 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
     },
   });
 
-  // ── POST /pipeclaw/failures/<id>/retry ──────────────────────────────────
+  // ── POST /manifold/failures/<id>/retry ──────────────────────────────────
   api.registerHttpRoute({
-    path: "/pipeclaw/failures/",
+    path: "/manifold/failures/",
     auth: "plugin",
     match: "prefix",
     handler: async (req, res) => {
@@ -58,30 +58,30 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../ios/auth.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
 
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
-      const tail = url.pathname.slice("/pipeclaw/failures/".length);
+      const tail = url.pathname.slice("/manifold/failures/".length);
       let raw = "";
       for await (const chunk of req) raw += chunk;
       let body = {};
       try { body = raw ? JSON.parse(raw) : {}; }
       catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const via = typeof body?.via === "string" ? body.via : "ios";
+      const via = typeof body?.via === "string" ? body.via : "app";
 
       try {
         const retryMatch = tail.match(/^([^/]+)\/retry$/);
         if (retryMatch) {
           const id = decodeURIComponent(retryMatch[1]);
           try {
-            const elev = await invokeElevated("/pipeclaw/_elev/retry-failure", { id, via });
+            const elev = await invokeElevated("/manifold/_elev/retry-failure", { id, via });
             res.statusCode = elev.status || 500;
             res.setHeader("Content-Type", "application/json");
             res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
           } catch (err) {
-            api.logger.warn(`pipeclaw retry handler error: ${err?.message ?? err}`);
+            api.logger.warn(`manifold retry handler error: ${err?.message ?? err}`);
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -91,7 +91,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         res.statusCode = 404;
         res.end("unknown failures subroute");
       } catch (err) {
-        api.logger.warn(`pipeclaw /failures/ handler error: ${err?.message ?? err}`);
+        api.logger.warn(`manifold /failures/ handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));

@@ -1,6 +1,6 @@
-// run-store.js — pipeclaw-owned flow_runs in runtime.sqlite.
+// run-store.js — manifold-owned flow_runs in runtime.sqlite.
 //
-// This is the sole read/write store for pipeclaw flows. No dual-write;
+// This is the sole read/write store for manifold flows. No dual-write;
 // registry.sqlite is never touched. All executor transitions go through the
 // CAS methods here.
 //
@@ -9,7 +9,7 @@
 // If rowsAffected === 0 → disambiguate via SELECT revision, status to return the
 // right code: not_found | terminal | revision_conflict.
 //
-// Boot migration: copies pipeclaw-owned rows from registry.sqlite on first
+// Boot migration: copies manifold-owned rows from registry.sqlite on first
 // boot (idempotent — INSERT OR IGNORE; skipped when the table is non-empty).
 
 import path from "node:path";
@@ -24,8 +24,6 @@ import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
-const CONTROLLER_PREFIX = "pipeclaw:";
-
 // Exported so callers deciding "is this flow cancellable / already done"
 // (e.g. the CLI's and dashboard's own cancel handlers) check against the
 // real terminal set instead of hand-rolling their own allowlist of active
@@ -38,7 +36,7 @@ const TERMINAL_SET = TERMINAL_STATUS_SET;
 
 const MIGRATIONS = [
   // v1: initial schema. Omits shape + requester_origin_json (never
-  // read/written by pipeclaw). Column set has to cover the out-of-store
+  // read/written by manifold). Column set has to cover the out-of-store
   // raw-SQL readers that hit flow_runs directly, bypassing this store —
   // telemetry/resolver.js selects flow_id, owner_key, pipeline_id, status,
   // created_at via its own readonly handle.
@@ -79,11 +77,12 @@ const MIGRATIONS = [
      ON flow_runs (parent_flow_node_execution_id)
      WHERE parent_flow_node_execution_id IS NOT NULL;
    ALTER TABLE flow_runs ADD COLUMN pipeline_id TEXT;
-    UPDATE flow_runs SET pipeline_id = CASE
-      WHEN controller_id LIKE 'pipeclaw:%'   THEN SUBSTR(controller_id, 10)
-      ELSE controller_id
+   UPDATE flow_runs SET pipeline_id = CASE
+     WHEN controller_id LIKE 'manifold:%'   THEN SUBSTR(controller_id, 10)
+     WHEN controller_id LIKE 'graph-flow:%' THEN SUBSTR(controller_id, 12)
+     ELSE controller_id
     END;
-   CREATE INDEX IF NOT EXISTS idx_flow_runs_pipeline_id ON flow_runs (pipeline_id);
+    CREATE INDEX IF NOT EXISTS idx_flow_runs_pipeline_id ON flow_runs (pipeline_id);
    DROP INDEX IF EXISTS idx_pfr_controller;
    ALTER TABLE flow_runs DROP COLUMN controller_id;
    ALTER TABLE flow_runs DROP COLUMN sync_mode;
@@ -130,7 +129,7 @@ export function createRunStore(opts = {}) {
 async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   const { db, client } = await getSharedDb(dbPath);
-  await createMigrator(client, { name: "pipeclaw_flow_runs", migrations: MIGRATIONS });
+  await createMigrator(client, { name: "manifold_flow_runs", migrations: MIGRATIONS });
 
   // ── CAS failure classifier ───────────────────────────────────────────────
 

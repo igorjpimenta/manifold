@@ -1,5 +1,5 @@
 // failure-store.js — durable record of flow / branch failures, for
-// operator triage via iOS Failures section + APNs deep-links.
+// operator triage via a consumer's Failures surface + deep links.
 //
 // Storage:  ~/.openclaw/runtime.sqlite (see DEFAULT_DB_PATH).
 //
@@ -541,14 +541,14 @@ async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeE
         invocationId, executionId, errorType,
       });
       if (insertedId) {
-        logger?.info?.(`pipeclaw failure-store: ${errorType ?? "engine-failed"} ${flowId.slice(0, 8)} (${pipelineId}) at ${failureNode || "<engine>"}`);
+        logger?.info?.(`manifold failure-store: ${errorType ?? "engine-failed"} ${flowId.slice(0, 8)} (${pipelineId}) at ${failureNode || "<engine>"}`);
         const context = await get(insertedId);
         if (context) failureEmitter.emit("failure.created", context);
         return { recorded: 1 };
       }
       return { recorded: 0 };
     } catch (err) {
-      logger?.warn?.(`pipeclaw failure-store: recordEngineFailure failed: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold failure-store: recordEngineFailure failed: ${err?.message ?? err}`);
       return { recorded: 0 };
     }
   }

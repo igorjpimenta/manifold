@@ -13,7 +13,7 @@ export function createEmitSseEvent() {
         hostname: "127.0.0.1",
         port: Number(process.env.OPENCLAW_GATEWAY_PORT) || 18789,
         method: "POST",
-        path: "/pipeclaw/ios/push",
+        path: "/manifold/ios/push",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`,

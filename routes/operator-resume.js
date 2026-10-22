@@ -23,10 +23,10 @@ export async function resumeFlowFromGate({
   if (!result.queued) {
     setImmediate(() => {
       executor.resume(flowId).catch((err) => {
-        logger.warn(`pipeclaw resume-from-gate: runFlow [${flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+        logger.warn(`manifold resume-from-gate: runFlow [${flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
       });
     });
   }
-  logger.info(`pipeclaw: resume-from-gate flow=${flowId.slice(0, 8)} node=${nodeId ?? "?"} decision=${decision ?? "?"}${result.queued ? " (queued for admission)" : ""}`);
+  logger.info(`manifold: resume-from-gate flow=${flowId.slice(0, 8)} node=${nodeId ?? "?"} decision=${decision ?? "?"}${result.queued ? " (queued for admission)" : ""}`);
   return { ok: true, flowId, queued: result.queued };
 }

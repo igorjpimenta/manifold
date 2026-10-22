@@ -1,8 +1,8 @@
 // auth.js — bearer-token check for the bridge's HTTP routes. Accepts EITHER
 // the shared env-var gateway token (legacy / bootstrap / break-glass) OR a
 // per-device token issued by `openclaw devices approve`. Used by every
-// route the bridge registers + by the /pipeclaw/gate/resolve route in
-// the pipeclaw plugin (sibling import).
+// route the bridge registers + by the /manifold/gate/resolve route in
+// the manifold plugin (sibling import).
 //
 // Why we own auth here instead of using `auth: "gateway"`: the gateway's
 // built-in token check validates against process.env.OPENCLAW_GATEWAY_TOKEN
@@ -21,7 +21,7 @@ import { timingSafeEqual } from "node:crypto";
 
 // Paired-device list is on-disk — cache the parse for one TTL window so every incoming
 // bridge request (each of these routes is auth-checked per-call, including
-// hot ones like /pipeclaw/ios/state that the app can poll frequently) doesn't
+// hot ones like /manifold/ios/state that the app can poll frequently) doesn't
 // re-read and re-parse the JSON file from scratch. Revocation is visible
 // within one TTL window; acceptable for an operator-grade tool.
 const PAIRED_CACHE_TTL_MS = 30_000;

@@ -30,7 +30,7 @@ async function settled(promise) {
 
 // ─── not the gateway process ─────────────────────────────────────────────────
 
-describe("a process where pipeclaw's services never start (the CLI)", () => {
+describe("a process where manifold's services never start (the CLI)", () => {
   test("whenReady resolves at once", async () => {
     const { api } = makeApi();
     const r = registerGatewayReadiness(api, { state: createReadinessState() });

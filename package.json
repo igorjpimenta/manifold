@@ -1,5 +1,5 @@
 {
-  "name": "@igorjpimenta/oc-pipeclaw",
+  "name": "@igorjpimenta/manifold",
   "version": "0.0.0",
   "private": true,
   "license": "UNLICENSED",
@@ -11,14 +11,13 @@
     "./lock": "./locks/lock.js",
     "./browser-tabs": "./locks/browser-tabs.js",
     "./elevation": "./elevation.js",
-    "./digest": "./telemetry/digest-push.js",
     "./tool-handoff": "./state/tool-handoff.js",
     "./profile-lock": "./hooks/profile-write-lock.js",
-    "./ios-auth": "./ios/auth.js",
     "./state/db": "./state/db.js",
     "./state/batch-writer": "./state/batch-writer.js",
     "./state/schema": "./state/schema.js",
-    "./state/migrator": "./state/migrator.js"
+    "./state/migrator": "./state/migrator.js",
+    "./bridge-auth": "./auth/bridge.js"
   },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",

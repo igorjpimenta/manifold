@@ -169,13 +169,13 @@ export async function beginTabSession(profile, { logger } = {}) {
   try {
     beforeIds = new Set((await listPageTabs(profile)).map((t) => t.targetId));
   } catch (err) {
-    logger?.warn?.(`pipeclaw browser-tabs: pre-listTabs(${profile}) failed: ${err?.message ?? err} — proceeding without the readiness guarantee`);
+    logger?.warn?.(`manifold browser-tabs: pre-listTabs(${profile}) failed: ${err?.message ?? err} — proceeding without the readiness guarantee`);
   }
   if (beforeIds.size === 0) {
     try {
       await openBlankTab(profile);
     } catch (err) {
-      logger?.warn?.(`pipeclaw browser-tabs: openTab(${profile}) failed: ${err?.message ?? err} — proceeding anyway`);
+      logger?.warn?.(`manifold browser-tabs: openTab(${profile}) failed: ${err?.message ?? err} — proceeding anyway`);
     }
   }
   return { profile, beforeIds };
@@ -187,7 +187,7 @@ export async function beginTabSession(profile, { logger } = {}) {
 export async function endTabSession(session, { logger, isOwned } = {}) {
   if (!session?.profile) return;
   if (isOwned && !isOwned()) {
-    logger?.warn?.(`pipeclaw browser-tabs: lock for ${session.profile} is no longer ours — leaving tabs to the current holder`);
+    logger?.warn?.(`manifold browser-tabs: lock for ${session.profile} is no longer ours — leaving tabs to the current holder`);
     return;
   }
   try {
@@ -195,7 +195,7 @@ export async function endTabSession(session, { logger, isOwned } = {}) {
     const newIds = after.map((t) => t.targetId).filter((id) => !session.beforeIds.has(id));
     await closeTabs(session.profile, newIds);
   } catch (err) {
-    logger?.warn?.(`pipeclaw browser-tabs: post-cleanup(${session.profile}) failed: ${err?.message ?? err}`);
+    logger?.warn?.(`manifold browser-tabs: post-cleanup(${session.profile}) failed: ${err?.message ?? err}`);
   }
 }
 

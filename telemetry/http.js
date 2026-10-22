@@ -1,20 +1,20 @@
-// HTTP routes for pipeclaw telemetry. Mounted under /pipeclaw/telemetry/*.
+// HTTP routes for manifold telemetry. Mounted under /manifold/telemetry/*.
 //
 // All routes are GET/PUT, read-only except budget cap writes, and return JSON.
 // Auth: "plugin" — operator session only, matches dashboard semantics.
 //
 // Routes:
-//   /pipeclaw/telemetry/cost/today                       — running total + top movers
-//   /pipeclaw/telemetry/cost/by-root  [?since=&until=]   — group by root sessionKey
-//   /pipeclaw/telemetry/cost/by-trigger                  — group by root_kind (cron / telegram / explicit / ...)
-//   /pipeclaw/telemetry/cost/by-cron-job                 — group by cron job name
-//   /pipeclaw/telemetry/cost/by-pipeline                 — group by pipeline_id
-//   /pipeclaw/telemetry/cost/by-flow  [?pipeline_id=]    — group by flow_id (drill-down inside a pipeline)
-//   /pipeclaw/telemetry/cost/by-node  [?flow_id=]        — group by node_id (drill-down inside a flow)
-//   /pipeclaw/telemetry/cost/by-model                    — group by provider+model
-//   /pipeclaw/telemetry/cost/by-day   [?days=14]         — group by local day for the last N days
-//   /pipeclaw/telemetry/cost/top-calls [?limit=20]       — most expensive single LLM calls
-//   /pipeclaw/telemetry/cost/home                        — combined Home-tile payload
+//   /manifold/telemetry/cost/today                       — running total + top movers
+//   /manifold/telemetry/cost/by-root  [?since=&until=]   — group by root sessionKey
+//   /manifold/telemetry/cost/by-trigger                  — group by root_kind (cron / telegram / explicit / ...)
+//   /manifold/telemetry/cost/by-cron-job                 — group by cron job name
+//   /manifold/telemetry/cost/by-pipeline                 — group by pipeline_id
+//   /manifold/telemetry/cost/by-flow  [?pipeline_id=]    — group by flow_id (drill-down inside a pipeline)
+//   /manifold/telemetry/cost/by-node  [?flow_id=]        — group by node_id (drill-down inside a flow)
+//   /manifold/telemetry/cost/by-model                    — group by provider+model
+//   /manifold/telemetry/cost/by-day   [?days=14]         — group by local day for the last N days
+//   /manifold/telemetry/cost/top-calls [?limit=20]       — most expensive single LLM calls
+//   /manifold/telemetry/cost/home                        — combined Home-tile payload
 
 import { registerCostRoutes }    from "./http-cost.js";
 import { registerTreeRoutes }    from "./http-tree.js";

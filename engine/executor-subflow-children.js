@@ -88,7 +88,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
   // this function) to executor.js's own NodeBlocked handling, unchanged.
   const items = await Promise.resolve(node.selector(state, { needs: makeNeedsCtx({ node, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
   if (!Array.isArray(items) || items.length === 0) {
-    logger?.info?.(`pipeclaw [${flowId.slice(0, 8)}] ${nodeId}: 0 items, skipping (childFlows)`);
+    logger?.info?.(`manifold [${flowId.slice(0, 8)}] ${nodeId}: 0 items, skipping (childFlows)`);
     return { stateUpdate: {} };
   }
 
@@ -125,7 +125,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
     const item = items[itemIndex];
     const subflowKey = deriveSubflowKey(node, item);
     if (subflowKey == null || subflowKey === "") {
-      logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] ${nodeId}: item ${itemIndex} produced an empty subflowKey, skipping`);
+      logger?.warn?.(`manifold [${flowId.slice(0, 8)}] ${nodeId}: item ${itemIndex} produced an empty subflowKey, skipping`);
       continue;
     }
     validItems.push({ item, itemIndex, subflowKey: String(subflowKey) });
@@ -167,12 +167,12 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
     const settled = resolved[i];
     const v = validItems[i];
     if (settled.status === "rejected") {
-      logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] ${nodeId}: failed to spawn child for item ${v.itemIndex} (subflowKey=${v.subflowKey}): ${settled.reason?.message ?? settled.reason}`);
+      logger?.warn?.(`manifold [${flowId.slice(0, 8)}] ${nodeId}: failed to spawn child for item ${v.itemIndex} (subflowKey=${v.subflowKey}): ${settled.reason?.message ?? settled.reason}`);
       continue;
     }
     const { childFlowId, created: isNew, guarded } = settled.value;
     if (guarded) {
-      logger?.info?.(`pipeclaw [${flowId.slice(0, 8)}] ${nodeId}: item ${v.itemIndex} (subflowKey=${v.subflowKey}) rejected by dispatchGuard, skipping`);
+      logger?.info?.(`manifold [${flowId.slice(0, 8)}] ${nodeId}: item ${v.itemIndex} (subflowKey=${v.subflowKey}) rejected by dispatchGuard, skipping`);
       continue;
     }
     childFlowIds.push(childFlowId);
@@ -234,7 +234,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
   for (const c of toDispatch) {
     setImmediate(() => {
       runFlow(c.childFlowId, "fresh").catch((err) => {
-        logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] ${nodeId}: child ${c.childFlowId.slice(0, 8)} runFlow failed: ${err?.message ?? err}`);
+        logger?.warn?.(`manifold [${flowId.slice(0, 8)}] ${nodeId}: child ${c.childFlowId.slice(0, 8)} runFlow failed: ${err?.message ?? err}`);
       });
     });
   }
@@ -257,7 +257,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
     for (let i = 0; i < settled.length; i++) {
       if (settled[i].status === "rejected") {
         const c = toQueue[i];
-        logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] ${nodeId}: failed to queue child ${c.childFlowId.slice(0, 8)} (item ${c.itemIndex}): ${settled[i].reason?.message ?? settled[i].reason}`);
+        logger?.warn?.(`manifold [${flowId.slice(0, 8)}] ${nodeId}: failed to queue child ${c.childFlowId.slice(0, 8)} (item ${c.itemIndex}): ${settled[i].reason?.message ?? settled[i].reason}`);
       }
     }
   });

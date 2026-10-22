@@ -1,27 +1,27 @@
-# pipeclaw
+# manifold
 
-LangGraph-style pipeline runtime for openclaw. Plugin id: `pipeclaw`.
-Live installs land at `~/.openclaw/extensions/pipeclaw/`; the source lives
-in the private repo `igorjpimenta/oc-pipeclaw`. This README is written
+LangGraph-style pipeline runtime for openclaw. Plugin id: `manifold`.
+Live installs land at `~/.openclaw/extensions/manifold/`; the source lives
+in the private repo `igorjpimenta/manifold`. This README is written
 for LLM agents doing engineering work in this plugin or building new
 pipelines that target it.
 
 **Source and install.** Install/update a release with
-`openclaw plugins install git:igorjpimenta/oc-pipeclaw@<version> --force --dangerously-force-unsafe-install`
+`openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install`
 (see `RELEASING.md` for the release process).
-Development clone: `~/.dev/job/igorpimenta/oc-pipeclaw`. Story worktrees are
+Development clone: `~/.dev/job/igorpimenta/manifold`. Story worktrees are
 created at `<clone>/.doppler/worktrees/<story>`, and each story ships as its
 own PR (base `feat/plugin`).
 
 ## Public API
 
 Consumers (oc-config, and later stories) install this repo as the
-`@igorjpimenta/oc-pipeclaw` git dependency and import **only** through these
+`@igorjpimenta/manifold` git dependency and import **only** through these
 subpaths. Deep file paths are not a contract — only this table is.
 
 | Subpath | Exports | Consumed by |
 | --- | --- | --- |
-| `@igorjpimenta/oc-pipeclaw` | plugin entry (default) | openclaw runtime |
+| `@igorjpimenta/manifold` | plugin entry (default) | openclaw runtime |
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
 | `…/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
 | `…/browser-tabs` | `browserProfileForLock`, `beginTabSession`, `endTabSession` | browser-lease extension |
@@ -29,7 +29,7 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | run/tool handoff helpers (`notifyToolFired`, `registerDispatch`, …) | oc-config |
 | `…/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` | oc-config |
-| `…/ios-auth` | `authorizeBridgeRequest`, `sendUnauthorized` | oc-config |
+| `…/bridge-auth` | `authorizeBridgeRequest`, `sendUnauthorized` | oc-config |
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
 | `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |
@@ -60,7 +60,7 @@ it focused on orientation and quick reference:
 - [Node authoring reference](#node-authoring-reference)
 - [Groups (compound parents in the dashboard)](#groups-compound-parents-in-the-dashboard)
 - [Conventions](#conventions-and-what-breaks-if-you-violate-them)
-- [Session keys (subagents spawned by pipeclaw)](#session-keys-subagents-spawned-by-pipeclaw)
+- [Session keys (subagents spawned by manifold)](#session-keys-subagents-spawned-by-manifold)
 - [State conventions](#state-conventions)
 - [Status transitions](#status-transitions)
 - [CLI](#cli)
@@ -125,7 +125,7 @@ is terminal; `human-gate` builds `waitJson` and blocks), and persists the
 outcome — a `stateUpdate` advances and loops again, a thrown error or
 `_error` sentinel fails/blocks the flow, `__end__` runs `runAudit` and
 writes the terminal status (`succeeded`/`failed`/`skipped`). Blocked flows
-resume via `POST /pipeclaw/resume-from-gate`; any non-terminal flow can be
+resume via `POST /manifold/resume-from-gate`; any non-terminal flow can be
 cancelled by an operator. See `ENGINE_INTERNALS.md` for the exact
 persistence call at each step and the full status-transition map.
 
@@ -346,11 +346,11 @@ Live example: `freelance_workana-proposal/index.js`'s `skip` handler
 writes `workspace/.shared/freelance/workana/skipped/<jobId>.md` so
 future FILTER passes exclude the listing. Implementation lives in
 `recovery-actions.js` (descriptor merge + handler lookup); HTTP
-dispatch in `index.js: /pipeclaw/failures/<id>/action/<kind>`.
+dispatch in `index.js: /manifold/failures/<id>/action/<kind>`.
 
 ## Common author mistakes (read this before writing a pipeline)
 
-If you've written pipelines for other graph runtimes (LangGraph, n8n, Airflow, etc.), some of pipeclaw's names and call conventions will not be what you expect. The loader catches the structural mistakes; the runtime catches the rest. Skim this table first — every row below has been hit by a real author shipping a real pipeline.
+If you've written pipelines for other graph runtimes (LangGraph, n8n, Airflow, etc.), some of manifold's names and call conventions will not be what you expect. The loader catches the structural mistakes; the runtime catches the rest. Skim this table first — every row below has been hit by a real author shipping a real pipeline.
 
 | Wrong | Right | What breaks |
 |---|---|---|
@@ -359,14 +359,14 @@ If you've written pipelines for other graph runtimes (LangGraph, n8n, Airflow, e
 | `description: "..."` (top-level) | `goal: "..."` | Silently ignored — dashboard renders `goal`. Cosmetic only, but the pipeline list looks empty. |
 | `buildBrief: ({ state, item }) => "string"` | `promptBuilder: (state) => "string"` | Runtime calls `node.promptBuilder(state)` positionally, always single-arg — your function gets `state` not `{state, item}`. Subagent receives garbage. Inside a `subflow` sub-node, the item is `state.item`, not a second argument. |
 | `apply: ({ state, output }) => ({...})` (object destructure) | `apply: (state, output) => ({...})` | Same as above — runtime calls positionally, always `(state, output)`, whether the node is top-level or a `subflow` sub-node (`applyResult` also accepted for `agent` kind). There is no `subCtx` and no 3-arg form — a `subflow` sub-node is dispatched exactly like a top-level node; the item lives at `state.item`. |
-| Gate node with `apply: …`, `buildPayload: …`, `delivery: …`, `buttons: […]` | Gate node with `approvalRequestBuilder: (state, itemId) => ({title, description})` only | Gate's apply path is owned by `gate-resolver.js` (the oc-pipeclaw-ios bridge wires the callback). A decision lands in `state.approvedIds`/`state.rejectedIds` (or `state.approvalPending[itemId]` mid-flight) — read it in your edge function, e.g. `edges.GATE: (state) => state.approvedIds?.includes(state.item?.id) ? "STAMP" : "STAMP_REJECT"`. |
+| Gate node with `apply: …`, `buildPayload: …`, `delivery: …`, `buttons: […]` | Gate node with `approvalRequestBuilder: (state, itemId) => ({title, description})` only | Gate's apply path is owned by `gate-resolver.js` (a consumer bridge wires the callback). A decision lands in `state.approvedIds`/`state.rejectedIds` (or `state.approvalPending[itemId]` mid-flight) — read it in your edge function, e.g. `edges.GATE: (state) => state.approvedIds?.includes(state.item?.id) ? "STAMP" : "STAMP_REJECT"`. |
 | Edge function reads `flow.data` or a `subCtx` argument inside a `subflow` sub-node | Edge function reads `state` directly — same as top-level | There is no `subCtx`. Inside a subflow sub-node: `edges.GATE: (state) => state.GATE?.decision === "approve" ? "STAMP" : "__end__"` (or read `state.approvedIds`, per the row above) — the subflow item is `state.item`. |
 | Fallback pair declared via naming convention only | Add a `groups:` entry tying the pair | The dashboard won't render them as a compound parent. See *Groups (compound parents in the dashboard)* below. |
 | Node id with hyphen (`send-cr`) | Node id with underscore/upper (`SEND_CR`) | See *Node IDs are token-style — no hyphens* below. |
 
 ### What the validator catches (loader.js)
 
-These are hard-stops at pipeline load time — the gateway log shows `pipeclaw loader: <id>/ failed to load: <reason>`:
+These are hard-stops at pipeline load time — the gateway log shows `manifold loader: <id>/ failed to load: <reason>`:
 
 | Loader error | Fix |
 |---|---|
@@ -389,7 +389,7 @@ Past the loader, these only surface during a real flow:
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
 - **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
-- **Cross-process lock with no installed `lock.js`** — `crossProcessLock: "browser:foo"` requires the helper at `~/.openclaw/extensions/pipeclaw/locks/lock.js`. Already present in stock installs.
+- **Cross-process lock with no installed `lock.js`** — `crossProcessLock: "browser:foo"` requires the helper at `~/.openclaw/extensions/manifold/locks/lock.js`. Already present in stock installs.
 
 ### Two gotchas that *look* like bugs but aren't
 
@@ -445,7 +445,7 @@ export default {
   id: "myteam_my-flow",
   goal: "one-line description shown in the dashboard",
   // Identity surfaces wherever the pipeline shows up in operator UIs.
-  //   emoji      — dashboard headers, push notifications, Live Activity widgets
+  //   emoji      — dashboard headers, consumer notifications, Live Activity widgets
   //   sfSymbol   — iOS Inbox pipeline-row icon (any valid SF Symbol name; see
   //                Apple's SF Symbols app). Falls back to "tray.fill" on the
   //                bridge when omitted, so this field is optional but recommended.
@@ -530,7 +530,7 @@ export default {
 | `agent`             | `agent`, `promptBuilder(state)`, `applyResult(state, output)`. Optional `circuitBreaker: true` — see *Circuit breaker* below. | `stateUpdate`          | normal edge                               |
 | `subflow`           | `selector(state) => Item[]`, `flow: { nodes, edges }` (required — no other shape). Never set `.groupId` — it's always the node's own id; the loader throws if you set it. See *Subflow nodes (childFlows)* below for the full authoring guide. | one real child `flow_runs` per item; parent blocks (`waitJson.kind:"children-pending"`) until every sibling child is terminal, then auto-resumes **if `mode` is satisfied** — otherwise the parent is failed directly, with a real retryable `failure_events` row | normal edge, once all children terminal and `mode` satisfied |
 | `human-gate`        | `pendingSelector(state) => Item[]`. Each item is `string` *or* `{ id: string, reason?, hint?, text?, editable? }` — see *Human-gate pending item shape* below | sets `waitJson`; flow → `blocked` | resumes via CLI `approve` / `respond` *or* dashboard GateForm |
-| `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery + callback handled by the app-side bridge (oc-pipeclaw-ios: iPhone Inbox + AgentApproval LA). Optional `discuss: { agent, promptBuilder }` opts the gate into an iOS chat surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
+| `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the gateway broadcasts `manifold.gate.opened` / `manifold.gate.closed` over WS with the full payload, and the bridge decides how to surface it (inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into an iOS chat surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
 
 A `code`-then-`agent` fallback (deterministic primary path, LLM-driven
 recovery leg) is no longer a distinct node kind — author it as a
@@ -594,14 +594,14 @@ blocked, with a message that includes the exact reset command:
 
 ```
 unhealthy agent dispatch: "<nodeId>" is blocked after a prior failure —
-reset via "openclaw pipeclaw node-health reset <pipelineId> <nodeId>"
+reset via "openclaw manifold node-health reset <pipelineId> <nodeId>"
 once the underlying issue is confirmed fixed
 ```
 
 On a genuine dispatch failure it calls `nodeHealthStore.markUnhealthy(...)`
 before re-throwing, which blocks every future dispatch of that
 `(pipelineId, nodeId)` pair until an operator resets it — see *CLI*
-below (`openclaw pipeclaw node-health status|reset`). Deliberately does
+below (`openclaw manifold node-health status|reset`). Deliberately does
 **not** mark unhealthy for `NodeBlocked` (an ordinary budget-gate pause,
 not a dispatch failure) or `GatewayHandoffNeeded` (the subagent runtime
 being unreachable in the current context, not evidence the agent itself
@@ -760,10 +760,10 @@ edited result must read from there.
 
 A `human-gate` node can optionally let the operator chat with an agent
 about a pending item before deciding. The chat lives on a dedicated iOS
-Inbox screen and is delivered through the **pipeclaw-parrot** channel
-(`POST /channels/pipeclaw-parrot/message`).
+Inbox screen and is delivered through the **manifold-parrot** channel
+(`POST /channels/manifold-parrot/message`).
 
-**Global default** — set `pipeclawParrot.defaultAgent` in `openclaw.json`
+**Global default** — set `manifoldParrot.defaultAgent` in `openclaw.json`
 so every gate in every pipeline gets a discuss channel without declaring
 its own `discuss` block:
 
@@ -771,10 +771,10 @@ its own `discuss` block:
 {
   "plugins": {
     "entries": {
-      "pipeclaw": {
+      "manifold": {
         "enabled": true,
         "config": {
-          "pipeclawParrot": {
+          "manifoldParrot": {
             "defaultAgent": "main"
           }
         }
@@ -817,15 +817,15 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 
 | Concern | Behavior |
 |---|---|
-| Channel | `pipeclaw-parrot` — the built-in discuss channel. Operator messages arrive at `POST /channels/pipeclaw-parrot/message` with `{ flowId, itemId, text }`. |
-| Session key | `agent:<agent>:pipeclaw-parrot:direct:<flowIdShort>-<gateNodeId>-<itemId>` — stamped on the first turn and locked for the gate's lifetime. |
+| Channel | `manifold-parrot` — the built-in discuss channel. Operator messages arrive at `POST /channels/manifold-parrot/message` with `{ flowId, itemId, text }`. |
+| Session key | `agent:<agent>:manifold-parrot:direct:<flowIdShort>-<gateNodeId>-<itemId>` — stamped on the first turn and locked for the gate's lifetime. |
 | Session stamp | Written to `~/.openclaw/discuss-sessions/<flowId8>__<gateNodeId>__<itemId>.json` on first turn so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
 | Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires `discuss.component` SSE immediately; Apply button appears on iOS. |
 | Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` SSE; updates the chip row on iOS. `budget` must be a positive integer. |
 | subflow (sub-node gate) | Gates inside `flow.nodes` opt in identically. `resolveDiscussTarget` walks `subflow` parents and picks the first `kind: "human-gate"` sub-node with a `discuss` block. |
-| Resolution order | Stamped session → node `discuss.agent` → `pipeclawParrot.defaultAgent` in openclaw.json. |
-| iOS history | `GET /pipeclaw/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
+| Resolution order | Stamped session → node `discuss.agent` → `manifoldParrot.defaultAgent` in openclaw.json. |
+| iOS history | `GET /manifold/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
 
 **Pipeline authors:** `promptBuilder` is your contract surface. Inline the
 listing context, current draft, and orchestration rules the agent needs.
@@ -858,7 +858,7 @@ The node is responsible for interpreting the choice in its next run
 via `state.userAnswers[nodeId].at(-1).text`. If `choices` is omitted,
 the textarea remains.
 
-`choices` is invisible to the CLI (`pipeclaw respond` still takes
+`choices` is invisible to the CLI (`manifold respond` still takes
 free text) and to the iOS Live Activity bridge (which has its own
 approve/deny opinion regardless of `choices`). It's a dashboard-form
 hint, not a contract.
@@ -941,7 +941,7 @@ fallback). Slugs may (and usually do) contain hyphens.
 ```jsonc
 "plugins": {
   "entries": {
-    "pipeclaw": {
+    "manifold": {
       "enabled": true,
       "config": {                      // ← NOT flat on the entry
         "dashboardHost": "127.0.0.1"
@@ -971,7 +971,7 @@ each gated independently by the operator. Don't use for pipelines
 that share a real-world resource (browser, login, etc.); the
 serialization is doing real work there.
 
-## Session keys (subagents spawned by pipeclaw)
+## Session keys (subagents spawned by manifold)
 
 ```
 agent:<agentId>:subagent:gf-<flowId.slice(0,8)>-<seed>
@@ -1008,7 +1008,7 @@ Keys the executor writes; the dashboard reads:
 `_stepHistory` (removed) — used to be a `string[]` of ordered node ids
 visited, driving the dashboard path-trail. Fully removed from the engine;
 the dashboard now derives the same path-trail from `GET
-/pipeclaw/runs/:flowId/tree` (`flow_node_invocations`/`flow_node_executions`),
+/manifold/runs/:flowId/tree` (`flow_node_invocations`/`flow_node_executions`),
 one row per invocation rather than one entry per dispatch — a retried node
 collapses to a single pill instead of showing consecutive duplicates. Also
 worth knowing: `state_json` itself no longer accumulates a key per
@@ -1021,8 +1021,8 @@ Errors are NOT a state field — pipeline code never writes them directly.
 Every node failure (top-level or inside a `subflow`) is recorded to
 `flow_node_executions` (via `nodeExecutionsStore.write(..., error)`) and
 served normalized as `errorEntries: [{ nodeId, subflowKey, message, at, executionId, invocationId }]` —
-a top-level field sibling to `stateJson` on `GET /pipeclaw/runs/:flowId`
-and on each row of `GET /pipeclaw/runs/:flowId/subflows`, not something
+a top-level field sibling to `stateJson` on `GET /manifold/runs/:flowId`
+and on each row of `GET /manifold/runs/:flowId/subflows`, not something
 nested inside `stateJson`. Dashboard/iOS render from `errorEntries`, not
 from any `state.errors` key.
 
@@ -1069,19 +1069,19 @@ stateDiagram-v2
 ## CLI
 
 ```
-openclaw pipeclaw list
-openclaw pipeclaw runs
-openclaw pipeclaw start <pipelineId> [--args <json>] [--detach]
-openclaw pipeclaw status <flowId>
-openclaw pipeclaw respond <flowId> <text>
-openclaw pipeclaw approve <flowId> <itemId> <decision>
-openclaw pipeclaw retry <flowId>
-openclaw pipeclaw pause <flowId>
-openclaw pipeclaw resume <flowId>
-openclaw pipeclaw paused
-openclaw pipeclaw dashboard
-openclaw pipeclaw node-health status [pipelineId] [--all]
-openclaw pipeclaw node-health reset <pipelineId> <nodeId>
+openclaw manifold list
+openclaw manifold runs
+openclaw manifold start <pipelineId> [--args <json>] [--detach]
+openclaw manifold status <flowId>
+openclaw manifold respond <flowId> <text>
+openclaw manifold approve <flowId> <itemId> <decision>
+openclaw manifold retry <flowId>
+openclaw manifold pause <flowId>
+openclaw manifold resume <flowId>
+openclaw manifold paused
+openclaw manifold dashboard
+openclaw manifold node-health status [pipelineId] [--all]
+openclaw manifold node-health reset <pipelineId> <nodeId>
 ```
 
 Implementation: `cli.js`.
@@ -1093,15 +1093,14 @@ Declared in `openclaw.plugin.json`, one tool per file under `agent/tools/`
 
 | Tool                      | File                                    | Signature input fields        | Purpose                                             |
 | ------------------------- | ---------------------------------------- | ------------------------------ | ---------------------------------------------------- |
-| `pipeclaw_start`          | `agent/tools/pipeclaw-start.js`          | `pipelineId`, optional `args` | Start a flow. Returns `flowId`.                     |
-| `pipeclaw_send_push`      | `agent/tools/pipeclaw-send-push.js`      | `title` (optional), `text`    | Send a one-way APNs push notification to every registered device. |
+| `manifold_start`          | `agent/tools/manifold-start.js`          | `pipelineId`, optional `args` | Start a flow. Returns `flowId`.                     |
 | `propose_draft`           | `agent/tools/propose-draft.js`           | `text` (required); `flowId`/`itemId` auto-resolved from session context | Propose a revised draft during a discuss session.   |
 | `propose_draft_meta`      | `agent/tools/propose-draft-meta.js`      | `fields` (required); `flowId`/`itemId` auto-resolved from session context | Propose budget/timeframe/language changes.          |
 | `submit_draft`            | `agent/tools/submit-draft.js`            | `outPath`, `body`, `language`, `budget`, `timeframe` (required); `jobId` auto-resolved | Write a structured draft to disk (stamps YAML frontmatter deterministically instead of a hand-typed heredoc). |
 | `report_draft_blocked`    | `agent/tools/report-draft-blocked.js`    | `outPath`, `questions` (required); `jobId` auto-resolved | Report that drafting is blocked on missing profile/portfolio evidence, structured instead of free-text. |
 
-**Removed (2026-07 tool deprecation):** `pipeclaw_respond`,
-`pipeclaw_notify_block`, `pipeclaw_list_blocked` — no longer registered;
+**Removed (2026-07 tool deprecation):** `manifold_respond`,
+`manifold_notify_block`, `manifold_list_blocked` — no longer registered;
 don't reflexively restore them if you see stale references elsewhere.
 
 Shared helpers (`toolErr`, `META_FIELD_WHITELIST`, `normalizePendingFields`)
@@ -1115,7 +1114,7 @@ live in `agent/tools/shared.js`.
    loader rejects registration for undeclared names.
 3. Register with `api.registerTool({ name: "...", ... })` — **prefer the
    object form**. Only reach for the factory form
-   (`api.registerTool((ctx) => ({ name: "...", ... }))`, as `pipeclaw_start`
+   (`api.registerTool((ctx) => ({ name: "...", ... }))`, as `manifold_start`
    does) when you actually need `ctx` (e.g. `ctx.sessionKey`) in closure.
 4. **If you use the factory form, you MUST pass `{ name: "..." }` as the
    second argument**: `api.registerTool((ctx) => ({...}), { name: "..." })`.
@@ -1128,11 +1127,11 @@ live in `agent/tools/shared.js`.
    picking the *first* matching registry entry, a single factory-form tool
    registered without `opts.name` can silently hijack lookups for every
    *other* tool in the plugin — surfacing as `plugin tool runtime missing
-   (pipeclaw): <unrelated-tool-name>` at call time for tools that are
+   (manifold): <unrelated-tool-name>` at call time for tools that are
    otherwise correctly registered. This bit `propose_draft` in production
-   because `pipeclaw_start` (registered first, factory-form, no
+   because `manifold_start` (registered first, factory-form, no
    `opts.name`) silently poisoned lookups for it — see git history on
-   `agent/tools/pipeclaw-start.js`.
+   `agent/tools/manifold-start.js`.
 5. Wire the register call into `index.js`.
 6. Add a test file under `test/unit/agent/tools/<tool-name>.test.js`
    mirroring the source file 1:1.
@@ -1316,13 +1315,13 @@ the `byOutcome` breakdown, and overall `created → won` %.
 1. Create `~/.openclaw/workspace/.pipelines/<id>/index.js`.
 2. Default-export an object matching *Pipeline schema (canonical)*.
 3. No restart needed — `pipelines-watcher.js` reloads on change.
-4. Verify with `openclaw pipeclaw list` or
+4. Verify with `openclaw manifold list` or
    `GET /api/pipelines/<id>`.
 
 ### Run a pipeline once
 
 ```
-openclaw pipeclaw start my-pipeline --args '{"someInput":"x"}'
+openclaw manifold start my-pipeline --args '{"someInput":"x"}'
 ```
 
 Without `--detach`, the CLI blocks driving the executor loop until
@@ -1334,7 +1333,7 @@ is created but never driven** (see *Operational quirks*).
 When the operator wants to drive a pipeline for a specific input the
 pipeline's normal SCAN/ENUMERATE stage wouldn't produce — e.g. "run
 the proposal flow for *this* listing URL" — neither `--args` nor the
-`pipeclaw_start` tool fits: the pipeline's discovery stage still
+`manifold_start` tool fits: the pipeline's discovery stage still
 runs. Instead, insert a `flow_runs` row at `status='running'` +
 `current_step='__start__'` with pre-populated `state_json`. The
 gateway's *revival service* catches it at the next boot (~15s delay)
@@ -1354,7 +1353,7 @@ run the infra step manually before seeding, or set the row's
 ### Inspect why a flow failed
 
 ```
-openclaw pipeclaw status <flowId>          # shows status, currentStep, waitJson
+openclaw manifold status <flowId>          # shows status, currentStep, waitJson
 ```
 
 Or open the dashboard at `#/runs/<flowId>`:
@@ -1374,11 +1373,11 @@ failure_node)`; UPSERT semantics on re-records (see
 ```bash
 # Open rows (default: not resolved, not ignored)
 curl -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:18789/pipeclaw/failures
+  http://127.0.0.1:18789/manifold/failures
 
 # Include resolved + ignored — what the iOS Inbox fetches in one shot
 curl -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:18789/pipeclaw/failures?resolved=all&ignored=all&limit=200'
+  'http://127.0.0.1:18789/manifold/failures?resolved=all&ignored=all&limit=200'
 ```
 
 Each row carries an `available_actions[]` array — descriptor list of
@@ -1395,13 +1394,13 @@ above).
 # and would include future custom kinds without code changes here.
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"via":"ios"}' \
-  http://127.0.0.1:18789/pipeclaw/failures/<id>/action/<kind>
+  http://127.0.0.1:18789/manifold/failures/<id>/action/<kind>
 
 # Framework-default routes — same semantics, dedicated URLs:
-curl -X POST .../pipeclaw/failures/<id>/retry      # surgical branch retry
-curl -X POST .../pipeclaw/failures/<id>/ignore     # snooze
-curl -X POST .../pipeclaw/failures/<id>/unignore   # restore
-curl -X POST .../pipeclaw/failures/<id>/skip       # back-compat alias for /action/skip
+curl -X POST .../manifold/failures/<id>/retry      # surgical branch retry
+curl -X POST .../manifold/failures/<id>/ignore     # snooze
+curl -X POST .../manifold/failures/<id>/unignore   # restore
+curl -X POST .../manifold/failures/<id>/skip       # back-compat alias for /action/skip
 ```
 
 `/retry` walks the failure's own flow (a top-level flow, OR a `subflow`
@@ -1424,9 +1423,9 @@ Three surfaces, same underlying operation:
 
 ```
 # CLI
-openclaw pipeclaw approve <flowId> <itemId> approve            # human-gate / gate
-openclaw pipeclaw approve <flowId> <itemId> edit --text "..."  # replace agent output
-openclaw pipeclaw respond <flowId> "the answer"                # needs-info (free-form)
+openclaw manifold approve <flowId> <itemId> approve            # human-gate / gate
+openclaw manifold approve <flowId> <itemId> edit --text "..."  # replace agent output
+openclaw manifold respond <flowId> "the answer"                # needs-info (free-form)
 
 # Dashboard: open #/runs/<flowId> → "waiting on …" card. Approve/reject buttons are
 # always rendered; the edit button shows only when the pending item has
@@ -1450,7 +1449,7 @@ Three escalating strategies. Use the lowest one that fits.
 **A. Whole flow, fresh from `__start__` (creates a new flow id):**
 
 ```
-curl -X POST http://127.0.0.1:18789/pipeclaw/runs/<flowId>/rerun
+curl -X POST http://127.0.0.1:18789/manifold/runs/<flowId>/rerun
 ```
 
 Routes through `executor.rerunFromSource` — copies the source flow's
@@ -1471,7 +1470,7 @@ failures flow, pointed at the CHILD's own flowId instead of the parent's:
 ```
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"via":"ios"}' \
-  http://127.0.0.1:18789/pipeclaw/failures/<id>/retry
+  http://127.0.0.1:18789/manifold/failures/<id>/retry
 ```
 
 where `<id>` is the failure event recorded against the child's own
@@ -1526,7 +1525,7 @@ with operator-supplied state* above.
 | `pipeline "<id>" already has 1 active flow(s)`                                                       | Singleton guard. Cancel/finish the prior run. `executor.js: start` line 105.                  |
 | `Unrecognized key: "<name>"` from `openclaw doctor` or gateway start                                 | Plugin config not nested under `.config`. See *Conventions §3*.                                |
 | Flow stuck at `__start__` in `running` for forever                                                   | `--detach` was used. CLI never invoked `runFlow`. Restart the gateway (revival picks orphans) or re-run without `--detach`. |
-| `pipeclaw: flow not found: <shortId>`                                                              | CLI commands take full UUID, not the dashboard's 8-char display id.                            |
+| `manifold: flow not found: <shortId>`                                                              | CLI commands take full UUID, not the dashboard's 8-char display id.                            |
 | Dashboard transcript pane shows long messy nodeId, no item                                           | Pipeline uses a node id with a hyphen. Fix the node id. See *Conventions §1*.                  |
 | Dashboard pipeline detail renders blank black                                                        | `pipeline.nodes` is an array instead of an object keyed by id. Fix the export shape.            |
 | `itemId "<x>" not in pending list. Pending: [object Object]`                                         | `pendingSelector` returned objects without `.id`. Items must be `{ id: string, … }`.            |
@@ -1536,7 +1535,7 @@ with operator-supplied state* above.
 - **`--detach` is a footgun.** It creates the flow record without
   driving the executor loop. The flow stays at `__start__` in
   `running` until something fires `executor.runFlow(flowId)`. The
-  gateway's *revival service* (registered in `index.js: pipeclaw-flow-revival`)
+  gateway's *revival service* (registered in `index.js: manifold-flow-revival`)
   picks up orphans at gateway boot. Practical fix: run without
   `--detach` inside a background shell instead.
 - **No `cancel` CLI command.** Terminal status is only `succeeded` /
@@ -1553,11 +1552,11 @@ with operator-supplied state* above.
 ## Plugin config (default values)
 
 ```jsonc
-"plugins.entries.pipeclaw": {
+"plugins.entries.manifold": {
   "enabled": true,
   "config": {
     "pipelinesDir":      "~/.openclaw/workspace/.pipelines",   // discovery root
-    "ownerSessionKey":   "agent:main:explicit:pipeclaw-owner",
+    "ownerSessionKey":   "agent:main:explicit:manifold-owner",
     "dashboardEnabled":  true,
     "dashboardPort":     7430,
     "dashboardHost":     "127.0.0.1"
@@ -1569,17 +1568,17 @@ Schema enforced in `openclaw.plugin.json: configSchema`.
 
 ## SQLite shape (for direct queries / surgery)
 
-Pipeclaw owns `flow_runs`, `flow_node_invocations`, and
+Manifold owns `flow_runs`, `flow_node_invocations`, and
 `flow_node_executions`, all in `runtime.sqlite` — the sole read/write
 store for the dashboard, revival, gate-resolver, and executor.
 `registry.sqlite` is the platform's own store and is never written by
-pipeclaw. All direct SQL surgery should target `runtime.sqlite`. Use the
+manifold. All direct SQL surgery should target `runtime.sqlite`. Use the
 [`dql` skill](../../.claude/skills/dql) (`oc-dql`) for read-only
 inspection — it's the safe default; only reach for raw `sqlite3` when you
 actually intend to write.
 
 ```
-file: ~/.openclaw/runtime.sqlite   ← pipeclaw read/write store (use this)
+file: ~/.openclaw/runtime.sqlite   ← manifold read/write store (use this)
 table: flow_runs
 
 flow_id             TEXT PRIMARY KEY

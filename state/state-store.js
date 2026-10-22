@@ -1,4 +1,4 @@
-// state-store.js — thin wrapper over run-store for pipeclaw flow state.
+// state-store.js — thin wrapper over run-store for manifold flow state.
 //
 // All reads and CAS writes go directly through runStore (runtime.sqlite).
 // No dual-write; registry.sqlite is never touched.

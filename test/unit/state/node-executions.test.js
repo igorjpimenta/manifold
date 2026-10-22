@@ -1812,7 +1812,7 @@ describe("summarizeChildrenByFlowIds()", () => {
 
 // ─── listInvocationsForFlow() / listExecutionsForInvocation() ─────────────────
 // Data source for the run-detail node tree (routes/runs.js's
-// GET /pipeclaw/runs/:flowId/tree[/expand]) — invocation-granular rows with
+// GET /manifold/runs/:flowId/tree[/expand]) — invocation-granular rows with
 // a drill-in to full per-execution-attempt history.
 
 describe("listInvocationsForFlow()", () => {

@@ -1,4 +1,4 @@
-// /pipeclaw/telemetry/tree/expand — lazy-load one level of the genealogy cost tree.
+// /manifold/telemetry/tree/expand — lazy-load one level of the genealogy cost tree.
 import { displayRootKind, displayRootLabel, stripTeamPrefix } from "./labels.js";
 import {
   peersForKind, ATTR_JOIN, ATTR_ROOT_KIND, ATTR_ROOT_LABEL,
@@ -8,7 +8,7 @@ import {
 
 export function registerTreeRoutes({ api, getStore, logger, json, bad, parseRange }) {
   api.registerHttpRoute({
-    method: "GET", path: "/pipeclaw/telemetry/tree/expand", auth: "plugin", match: "exact",
+    method: "GET", path: "/manifold/telemetry/tree/expand", auth: "plugin", match: "exact",
     handler: async (req, res) => {
       const store = getStore();
       if (!store) return bad(res, "lineage store not ready");

@@ -1,4 +1,4 @@
-// shared.js — helpers used by more than one pipeclaw agent tool.
+// shared.js — helpers used by more than one manifold agent tool.
 
 import { getSharedResolver } from "../../telemetry/index.js";
 
@@ -49,7 +49,7 @@ export function normalizePendingFields(fields) {
 // resolves the gate context automatically") depends on this.
 //
 // `ctx` is the per-invocation factory-form tool context (see
-// pipeclaw-start.js) — `ctx.sessionKey` is the CALLING agent's own session,
+// manifold-start.js) — `ctx.sessionKey` is the CALLING agent's own session,
 // not its spawner's. Backed by the telemetry lineage resolver's persisted
 // parent/child spawn graph (session_lineage table): the discuss session's
 // row carries flowId/itemId (stamped once, on its first turn, via

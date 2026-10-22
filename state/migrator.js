@@ -1,6 +1,6 @@
 // createMigrator(client, { name, migrations })
 //
-// Unified schema migration runner for all pipeclaw SQLite stores.
+// Unified schema migration runner for all manifold SQLite stores.
 // Designed to work with a shared DB file (Phase 1 consolidation) or a
 // per-store file — the `name` discriminator keeps version rows separate.
 //

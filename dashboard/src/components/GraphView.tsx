@@ -25,7 +25,7 @@ interface GraphViewProps {
   pipeline: Pipeline;
   run?: FlowRunFull | null;
   /** Executed-path source (SUBFLOW_PARENT_STATE_ACCESS.design.md's Phase
-   *  3b) — GET /pipeclaw/runs/:flowId/tree's items, replacing
+   *  3b) — GET /manifold/runs/:flowId/tree's items, replacing
    *  run.stateJson._stepHistory. null/undefined while loading or on a run
    *  with no history yet; tracedNodes/tracedEdges then stay null too. */
   tree?: FlowTreeItem[] | null;

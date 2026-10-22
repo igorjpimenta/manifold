@@ -1,4 +1,4 @@
-// executor.js — runs a pipeclaw pipeline against a managed flow_run.
+// executor.js — runs a manifold pipeline against a managed flow_run.
 //
 // Lifecycle of one flow:
 //   1. Caller invokes start(pipelineId)
@@ -64,7 +64,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     try {
       return (await nodeExecutions.write(args)) ?? {};
     } catch (err) {
-      logger.warn(`pipeclaw [${args.flowId.slice(0, 8)}] nodeExecutions.write threw: ${err?.message ?? err}`);
+      logger.warn(`manifold [${args.flowId.slice(0, 8)}] nodeExecutions.write threw: ${err?.message ?? err}`);
       return {};
     }
   }
@@ -196,7 +196,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     };
 
     const record = await store.create({ pipelineId, initialState });
-    logger.info(`pipeclaw [${record.flowId.slice(0, 8)}] start: pipeline=${pipelineId} runId=${runId.slice(0, 8)}`);
+    logger.info(`manifold [${record.flowId.slice(0, 8)}] start: pipeline=${pipelineId} runId=${runId.slice(0, 8)}`);
 
     // Per-pipeline singleton gate. Default (unset) is unlimited — the
     // shared admission pool below is the only gate almost every pipeline
@@ -209,7 +209,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       const others = await runStore.listRunsPage({ pipelineId });
       const active = others.find((r) => r.flowId !== record.flowId && !isTerminal(r.status));
       if (active) {
-        logger.info(`pipeclaw [${record.flowId.slice(0, 8)}] start: skipped — ${pipelineId} already has an active run (flowId=${active.flowId.slice(0, 8)}, status=${active.status})`);
+        logger.info(`manifold [${record.flowId.slice(0, 8)}] start: skipped — ${pipelineId} already has an active run (flowId=${active.flowId.slice(0, 8)}, status=${active.status})`);
         await store.skip({
           flowId: record.flowId,
           expectedRevision: record.revision,
@@ -230,7 +230,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     // or caller retry needed.
     const admission = await admissionQueueStore.admit({ kind: "flow-start", flowId: record.flowId });
     if (admission.status === "queued") {
-      logger.info(`pipeclaw [${record.flowId.slice(0, 8)}] start: queued — no admission slot available yet`);
+      logger.info(`manifold [${record.flowId.slice(0, 8)}] start: queued — no admission slot available yet`);
       await store.setQueued({
         flowId: record.flowId,
         expectedRevision: record.revision,
@@ -260,15 +260,15 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     while (true) {
       const flow = await store.get(flowId);
       if (!flow) {
-        logger.warn(`pipeclaw [${flowId.slice(0, 8)}] vanished mid-execution`);
+        logger.warn(`manifold [${flowId.slice(0, 8)}] vanished mid-execution`);
         return;
       }
       if (isTerminal(flow.status)) {
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] terminal (${flow.status})`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] terminal (${flow.status})`);
         return;
       }
       if (isBlocked(flow.status)) {
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] ${flow.status} at ${flow.lastStep} on ${flow.waitJson?.kind ?? "?"}`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] ${flow.status} at ${flow.lastStep} on ${flow.waitJson?.kind ?? "?"}`);
         return;
       }
       // A flow queued for its OWN flow-start or child-dispatch admission
@@ -285,19 +285,19 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       // so falling through and re-resolving the edge is exactly how a
       // boot-revived queued orphan on a lock is meant to retry.
       if (isQueued(flow.status) && (flow.waitJson?.kind === "flow-start" || flow.waitJson?.kind === "child-dispatch")) {
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] queued at ${flow.lastStep} on ${flow.waitJson?.kind}`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] queued at ${flow.lastStep} on ${flow.waitJson?.kind}`);
         return;
       }
 
       const state = flow.stateJson ?? {};
       if (state._paused) {
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] paused at ${flow.lastStep}`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] paused at ${flow.lastStep}`);
         return;
       }
       const pipelineId = state.pipelineId;
       if (pipelineId && !pipelinesRef.value.get(pipelineId) && typeof ensurePipelinesLoaded === "function") {
         try { await ensurePipelinesLoaded(); } catch (err) {
-          logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ensurePipelinesLoaded failed: ${err?.message ?? err}`);
+          logger.warn(`manifold [${flowId.slice(0, 8)}] ensurePipelinesLoaded failed: ${err?.message ?? err}`);
         }
       }
       const pipeline = pipelineId ? pipelinesRef.value.get(pipelineId) : null;
@@ -391,7 +391,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
               };
             }
           } catch (err) {
-            logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] pipeline.display() threw: ${err?.message ?? err}`);
+            logger?.warn?.(`manifold [${flowId.slice(0, 8)}] pipeline.display() threw: ${err?.message ?? err}`);
           }
         }
         const successCriteria = pipeline.runAudit?.successCriteria;
@@ -400,7 +400,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
           try {
             verdict = await Promise.resolve(successCriteria({ ...enrichedState, ...finalState }));
           } catch (err) {
-            logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] successCriteria threw: ${err?.message ?? err}`);
+            logger?.warn?.(`manifold [${flowId.slice(0, 8)}] successCriteria threw: ${err?.message ?? err}`);
           }
           if (verdict === "failed") {
             await persistFailRetrying({
@@ -409,7 +409,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
               message: finalState._successCriteriaReason ?? "successCriteria: failed",
               failureNode: "__end__",
             });
-            logger.info(`pipeclaw [${flowId.slice(0, 8)}] __end__ → failed (successCriteria)`);
+            logger.info(`manifold [${flowId.slice(0, 8)}] __end__ → failed (successCriteria)`);
             return;
           }
           if (verdict === "skipped") {
@@ -418,12 +418,12 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
               state: finalState,
               reason: finalState._successCriteriaReason ?? "successCriteria: skipped",
             });
-            logger.info(`pipeclaw [${flowId.slice(0, 8)}] __end__ → skipped (successCriteria)`);
+            logger.info(`manifold [${flowId.slice(0, 8)}] __end__ → skipped (successCriteria)`);
             return;
           }
         }
         await persistFinishRetrying({ flowId, revision: flow.revision, state: finalState });
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] __end__`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] __end__`);
         return;
       }
 
@@ -437,7 +437,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
         return;
       }
 
-      logger.info(`pipeclaw [${flowId.slice(0, 8)}] → ${nextNodeId} (${node.kind})`);
+      logger.info(`manifold [${flowId.slice(0, 8)}] → ${nextNodeId} (${node.kind})`);
 
       const enteredAt = Date.now();
       // Re-pointed off flow_node_invocations by a later cleanup pass (was
@@ -505,7 +505,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
             hint: "No automatic resume — requires a scope-gap fix at the call site or manual task-revival.",
             _kind: "needs-gateway-handoff",
           };
-          logger.info(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} → needs-gateway-handoff: ${err.message}`);
+          logger.info(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} → needs-gateway-handoff: ${err.message}`);
         } else {
           const msg = err?.message ?? String(err);
           // Duck-typed, not `instanceof NodeFailure` — pipeline/shared code
@@ -517,7 +517,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
           // boundary even for a genuine NodeFailure. A plain Error never
           // has .errorType set, so this is equivalent and robust either way.
           const errorType = err?.errorType ?? null;
-          logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
+          logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
           // No error/errorType here — flow_node_executions is purely an
           // execution-window/identity ledger; every throw's actual content
           // now goes to failure_events instead, via the recordEngineFailure
@@ -554,9 +554,9 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
                 message: msg, state, invocationId: written.invocationId ?? null, executionId: written.executionId ?? null, errorType,
               });
             } catch (recErr) {
-              logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] recordEngineFailure (cascade) threw: ${recErr?.message ?? recErr}`);
+              logger?.warn?.(`manifold [${flowId.slice(0, 8)}] recordEngineFailure (cascade) threw: ${recErr?.message ?? recErr}`);
             }
-            logger.info(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} → cascading (its own edge decides what happens next)`);
+            logger.info(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} → cascading (its own edge decides what happens next)`);
             await persistRunningRetrying({
               flowId, revision: flow.revision, lastStep: nextNodeId,
               state: {
@@ -581,7 +581,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       if (blockedInfo) {
         if (!blockedInfo._kind) {
           const msg = blockedInfo.reason ?? `${nextNodeId} blocked without declaring a wait kind`;
-          logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
+          logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
           const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId: nextNodeId, enteredAt, exitedAt, kind: execKind, invocationId, isNewInvocation: isNew });
           await persistFailRetrying({
             flowId, revision: flow.revision, state,
@@ -608,7 +608,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
           validateGateLayout(waitJsonForBlock.items);
         } catch (err) {
           const msg = err?.message ?? String(err);
-          logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
+          logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
           const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId: nextNodeId, enteredAt, exitedAt, kind: execKind, invocationId, isNewInvocation: isNew });
           await persistFailRetrying({
             flowId, revision: flow.revision, state,
@@ -618,7 +618,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
           return;
         }
         const summary = `${nextNodeId}: ${waitJsonForBlock.reason}`;
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] ${waitJsonForBlock.kind} → waiting (will re-run ${nextNodeId} on resume)\n  reason: ${waitJsonForBlock.reason}\n  hint: ${waitJsonForBlock.hint}`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] ${waitJsonForBlock.kind} → waiting (will re-run ${nextNodeId} on resume)\n  reason: ${waitJsonForBlock.reason}\n  hint: ${waitJsonForBlock.hint}`);
         await persistWaitingRetrying({
           flowId, revision: flow.revision, lastStep,
           blockingNodeId: nextNodeId,
@@ -631,7 +631,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       }
 
       if (skippedInfo) {
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId}: _skipped — ${skippedInfo.reason}`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] ${nextNodeId}: _skipped — ${skippedInfo.reason}`);
         await persistSkipRetrying({
           flowId, revision: flow.revision,
           state,
@@ -671,7 +671,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
           validateGateLayout(waitJson.items);
         } catch (err) {
           const msg = err?.message ?? String(err);
-          logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
+          logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
           const written = await safeWriteExecution({ flowId, pipelineId: entryState.pipelineId ?? null, nodeId: nextNodeId, enteredAt, exitedAt, kind: execKind, invocationId, isNewInvocation: isNew });
           await persistFailRetrying({
             flowId, revision: persistRevision, state: entryState,
@@ -685,7 +685,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
         // comment) — removed rather than keep computing a wide state merge
         // just to feed an argument no pipeline reads.
         const summary = describeWaitFallback(waitJson, nextNodeId);
-        logger.info(`pipeclaw [${flowId.slice(0, 8)}] ${reentrant ? "reentrant gate" : "gate"} → blocked\n${summary}`);
+        logger.info(`manifold [${flowId.slice(0, 8)}] ${reentrant ? "reentrant gate" : "gate"} → blocked\n${summary}`);
         await persistWaitingRetrying({
           flowId, revision: persistRevision,
           lastStep: reentrant ? lastStep : nextNodeId,
@@ -742,7 +742,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
         // silently continuing, so the operator sees the true cause.
         if (reason !== "race") {
           const msg = `resultJson write failed (${reason})`;
-          logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} ${msg}`);
+          logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} ${msg}`);
           const written = await safeWriteExecution({ flowId, pipelineId: entryState.pipelineId ?? null, nodeId: nextNodeId, enteredAt, exitedAt, kind: execKind, invocationId, isNewInvocation: isNew });
           await persistFailRetrying({
             flowId, revision: persistRevision, state: entryState,
@@ -751,7 +751,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
           });
           return;
         }
-        logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} resultJson write failed (race) — another writer already completed this invocation`);
+        logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} resultJson write failed (race) — another writer already completed this invocation`);
       }
 
       const runResult = await persistRunningRetrying({
@@ -760,7 +760,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       });
       if (!runResult.applied) {
         const msg = `state persist failed: ${runResult.code}`;
-        logger.warn(`pipeclaw [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
+        logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
         const written = await safeWriteExecution({ flowId, pipelineId: entryState.pipelineId ?? null, nodeId: nextNodeId, enteredAt, exitedAt, kind: execKind, invocationId, isNewInvocation: isNew });
         await persistFailRetrying({
           flowId, revision: persistRevision, state: entryState,
@@ -795,7 +795,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       }
       setImmediate(() => {
         runFlow(record.flowId, "fresh").catch((err) => {
-          logger?.warn?.(`pipeclaw invokePipeline(${targetPipelineId}) [${record.flowId.slice(0, 8)}]: runFlow failed: ${err?.message ?? err}`);
+          logger?.warn?.(`manifold invokePipeline(${targetPipelineId}) [${record.flowId.slice(0, 8)}]: runFlow failed: ${err?.message ?? err}`);
         });
       });
       return { invoked: true, target: targetPipelineId, flowId: record.flowId };
@@ -842,7 +842,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
         });
       }
     } catch (err) {
-      logger?.warn?.(`pipeclaw rerun: failed to stamp rerunOf on [${record.flowId.slice(0, 8)}]: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold rerun: failed to stamp rerunOf on [${record.flowId.slice(0, 8)}]: ${err?.message ?? err}`);
     }
     return record;
   }
@@ -890,11 +890,11 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     const pipeline = pipelinesRef.value.get(state.pipelineId);
     const node = pipeline?.nodes?.[nodeId];
     if (!node || node.kind !== "agent") {
-      logger.warn(`pipeclaw revival [${flowId8}]: reviveAgentKindOrphan called for non-agent node "${nodeId}"`);
+      logger.warn(`manifold revival [${flowId8}]: reviveAgentKindOrphan called for non-agent node "${nodeId}"`);
       return;
     }
 
-    logger.info(`pipeclaw revival [${flowId8}]: reviving interrupted agent-node "${nodeId}"`);
+    logger.info(`manifold revival [${flowId8}]: reviving interrupted agent-node "${nodeId}"`);
     const enteredAt = Date.now();
     // Resolved up front (not after executeNode returns) so a tool call made
     // during this revived dispatch can register itself under the SAME
@@ -931,7 +931,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       // `instanceof NodeFailure` isn't reliable across this codebase's
       // module-loading boundaries.
       const errorType = err?.errorType ?? null;
-      logger.warn(`pipeclaw revival [${flowId8}]: agent-node "${nodeId}" revival failed: ${msg}`);
+      logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" revival failed: ${msg}`);
       // Revival always continues the exact node that crashed — there's no
       // fresh dispatch decision here (unlike runFlow's loop,
       // which resolves an edge to decide nextNodeId), so kind is hardcoded
@@ -950,7 +950,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     if (blockedInfo) {
       if (!blockedInfo._kind) {
         const msg = blockedInfo.reason ?? `${nodeId} blocked without declaring a wait kind`;
-        logger.warn(`pipeclaw revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);
+        logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);
         // Same reasoning as above — revival is always a continuation.
         const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId, enteredAt, exitedAt: Date.now(), kind: "revival" });
         await persistFailRetrying({
@@ -1028,7 +1028,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       // hides it.
       if (reason !== "race") {
         const msg = `resultJson write failed (${reason})`;
-        logger.warn(`pipeclaw revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);
+        logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);
         const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId, enteredAt, exitedAt: Date.now(), kind: "revival" });
         await persistFailRetrying({
           flowId, revision: flow.revision, state,
@@ -1037,10 +1037,10 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
         });
         return;
       }
-      logger.warn(`pipeclaw revival [${flowId8}]: agent-node "${nodeId}" resultJson write failed (race) — another writer already completed this invocation`);
+      logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" resultJson write failed (race) — another writer already completed this invocation`);
     }
     await persistRunningRetrying({ flowId, revision: flow.revision, lastStep: nodeId, state: entryState });
-    logger.info(`pipeclaw revival [${flowId8}]: agent-node "${nodeId}" revived — continuing`);
+    logger.info(`manifold revival [${flowId8}]: agent-node "${nodeId}" revived — continuing`);
     return runFlow(flowId, "revival");
   }
 
@@ -1053,12 +1053,12 @@ async function runAuditIfConfigured({ flowId, pipeline, state, logger }) {
   const audit = pipeline?.runAudit;
   if (!audit) return;
   if (typeof audit.runsDir !== "string" || typeof audit.summarize !== "function") {
-    logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] runAudit malformed (need runsDir:string + summarize:function); skipping`);
+    logger?.warn?.(`manifold [${flowId.slice(0, 8)}] runAudit malformed (need runsDir:string + summarize:function); skipping`);
     return;
   }
   const runId = state?.runId;
   if (!runId) {
-    logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] runAudit: state.runId missing; skipping`);
+    logger?.warn?.(`manifold [${flowId.slice(0, 8)}] runAudit: state.runId missing; skipping`);
     return;
   }
   try {
@@ -1068,7 +1068,7 @@ async function runAuditIfConfigured({ flowId, pipeline, state, logger }) {
     let summary;
     try { summary = await Promise.resolve(audit.summarize(state)); }
     catch (err) {
-      logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] runAudit.summarize threw: ${err?.message ?? err}`);
+      logger?.warn?.(`manifold [${flowId.slice(0, 8)}] runAudit.summarize threw: ${err?.message ?? err}`);
       return;
     }
     if (summary && typeof summary === "object") {
@@ -1079,6 +1079,6 @@ async function runAuditIfConfigured({ flowId, pipeline, state, logger }) {
       );
     }
   } catch (err) {
-    logger?.warn?.(`pipeclaw [${flowId.slice(0, 8)}] runAudit failed: ${err?.message ?? err}`);
+    logger?.warn?.(`manifold [${flowId.slice(0, 8)}] runAudit failed: ${err?.message ?? err}`);
   }
 }

@@ -1,6 +1,6 @@
 // In-memory substring search across the dashboard's flow_runs view.
 //
-// Why in-memory and not SQLite FTS5: pipeclaw's dashboard opens
+// Why in-memory and not SQLite FTS5: manifold's dashboard opens
 // registry.sqlite read-only (see sql-store.js) and is not the schema
 // owner. Adding an FTS5 mirror table requires writes + triggers managed
 // by whoever owns the schema, which the dashboard explicitly does not.
@@ -18,7 +18,7 @@
 //     one table, so subflow failures are now searchable for free — the old
 //     state.errors[]-only approach never indexed subflow sub-state at all.
 //   ✗ Top-level state keys — not searchable: dashboard/server.js's
-//     fetchAllRuns() goes through the gateway's /pipeclaw/runs LIST
+//     fetchAllRuns() goes through the gateway's /manifold/runs LIST
 //     route, which never selects the raw state_json column (only
 //     flowId/pipelineId/status/lastStep/statusReason/timestamps +
 //     _display-derived fields); adaptRun() synthesizes stateJson as
@@ -36,7 +36,7 @@ export function searchRuns(runs, query, opts = {}) {
   const limit = opts.limit ?? DEFAULT_LIMIT;
   const contextChars = opts.contextChars ?? DEFAULT_CONTEXT_CHARS;
   // Map<flowId, ErrorEntry[]> — caller fetches once via the gateway's
-  // GET /pipeclaw/errors (failureStore.queryErrorsByFlowIds, Phase 1.5)
+  // GET /manifold/errors (failureStore.queryErrorsByFlowIds, Phase 1.5)
   // so this stays a pure function, DB-free.
   const errorsByFlow = opts.errorsByFlow ?? new Map();
   // Structured status filter applied BEFORE the free-text match —

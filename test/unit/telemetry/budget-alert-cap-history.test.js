@@ -14,8 +14,8 @@ import {
 // deterministic (DEFAULT_CAP_USD/DEFAULT_LOCK_THRESHOLD) regardless of
 // whatever the real ~/.openclaw/lineage/.cap.json on this machine holds.
 async function freshStore() {
-  const dbPath = path.join(os.tmpdir(), `pipeclaw-cap-history-test-${randomUUID()}.sqlite`);
-  const legacyCapFile = path.join(os.tmpdir(), `pipeclaw-cap-history-test-legacy-${randomUUID()}.json`);
+  const dbPath = path.join(os.tmpdir(), `manifold-cap-history-test-${randomUUID()}.sqlite`);
+  const legacyCapFile = path.join(os.tmpdir(), `manifold-cap-history-test-legacy-${randomUUID()}.json`);
   await initCapStore({ dbPath, legacyCapFile });
   return dbPath;
 }
@@ -91,7 +91,7 @@ describe("budget-alert cap_versions (SCD2)", () => {
   });
 
   it("re-initCapStore against the same path loads the already-active row, not the legacy default", async () => {
-    const dbPath = path.join(os.tmpdir(), `pipeclaw-cap-history-test-${randomUUID()}.sqlite`);
+    const dbPath = path.join(os.tmpdir(), `manifold-cap-history-test-${randomUUID()}.sqlite`);
     await initCapStore({ dbPath });
     await setCapAndPersist(1.23);
 

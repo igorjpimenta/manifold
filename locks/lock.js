@@ -1,6 +1,6 @@
 // lock.js — cross-process mutex on a shared resource (e.g., Chrome profile).
 //
-// Bypasses the in-process pipeclaw step-lock by living on disk: any
+// Bypasses the in-process manifold step-lock by living on disk: any
 // consumer (pipeline nodes, ad-hoc CLI scripts, future automation) can
 // acquire the same lock and serialize against each other.
 //
@@ -26,7 +26,7 @@
 //   the waiter asks it before reaping. A kind with no registered resolver,
 //   kind "process", and owner-less locks fall back to the staleMs rule below.
 //   Whoever registers a kind decides what "resolved" means for it — e.g.
-//   pipeclaw's invocation owner is resolved once the invocation wrote its
+//   manifold's invocation owner is resolved once the invocation wrote its
 //   result or its flow is terminal.
 //
 // Stale recovery (in this order):
@@ -128,7 +128,7 @@ export function unregisterOwnerResolver(kind) {
 }
 
 // Maps an agent session to the owner its tool calls should lock as — e.g.
-// pipeclaw registers the dispatching invocation for the session it spawns.
+// manifold registers the dispatching invocation for the session it spawns.
 export function registerSessionOwner(sessionKey, owner) {
   if (sessionKey && owner?.kind && owner?.id) shared().sessionOwners.set(sessionKey, owner);
 }
@@ -409,7 +409,7 @@ export async function withLock(name, fn, opts = {}) {
   // anyone, including the SAME process, once the file exists), so a nested
   // withLock() call for the same name from within an already-locked async
   // call chain would otherwise poll forever waiting for itself to release
-  // — a guaranteed self-deadlock. Concretely: a pipeclaw fallback node
+  // — a guaranteed self-deadlock. Concretely: a manifold fallback node
   // (e.g. SUBMIT) can declare crossProcessLock: "browser:freelance" and
   // hold it for its whole dispatch, while its own recover.before sequence
   // dispatches a node (e.g. ENSURE_INFRA_AGENT) that ALSO declares

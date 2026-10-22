@@ -345,7 +345,7 @@ describe("hasSessionForNode()", () => {
 // The reverse of hasSessionForNode: given just a session key (the shape a
 // task_runs row from boot/taskflow-revive.js's orphan scan carries — no
 // flowId in hand), resolve which flow it belongs to, so the orphan scan can
-// delegate a pipeclaw-owned orphan to that flow's own revival path.
+// delegate a manifold-owned orphan to that flow's own revival path.
 
 describe("flowIdForSessionKey()", () => {
   test("returns null when no record exists for that session key", async () => {
