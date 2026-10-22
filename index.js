@@ -469,6 +469,12 @@ export default definePluginEntry({
 
     let _gatewayBroadcast = null;
 
+    // Shared broadcast accessor for sibling plugins (e.g. ios-transport):
+    // dereferenced per call so load order never matters — whichever plugin
+    // reads it gets the current ref, null until the first ping captures it.
+    api.runtime = api.runtime ?? {};
+    api.runtime.manifold = { getBroadcast: () => _gatewayBroadcast };
+
     // Proposal-artifact fan-out (routes/discuss-component.js): persists the
     // component, then emits canonical proposed + derived pending through
     // the shared emitter. Egress carries canonical kinds.

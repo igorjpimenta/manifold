@@ -1,0 +1,24 @@
+{
+  "id": "manifold-ios-transport",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true,
+    "onConfigPaths": [
+      "plugins.entries.manifold-ios-transport"
+    ]
+  },
+  "contracts": {
+    "tools": []
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "pollIntervalMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "description": "How often the bridge scans manifold state for iOS-worthy arrivals. Default: 15000."
+      }
+    }
+  }
+}
