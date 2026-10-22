@@ -25,7 +25,6 @@ import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
 const CONTROLLER_PREFIX = "pipeclaw:";
-const LEGACY_PREFIX = "graph-flow:";
 
 // Exported so callers deciding "is this flow cancellable / already done"
 // (e.g. the CLI's and dashboard's own cancel handlers) check against the
@@ -80,11 +79,10 @@ const MIGRATIONS = [
      ON flow_runs (parent_flow_node_execution_id)
      WHERE parent_flow_node_execution_id IS NOT NULL;
    ALTER TABLE flow_runs ADD COLUMN pipeline_id TEXT;
-   UPDATE flow_runs SET pipeline_id = CASE
-     WHEN controller_id LIKE 'pipeclaw:%'   THEN SUBSTR(controller_id, 10)
-     WHEN controller_id LIKE 'graph-flow:%' THEN SUBSTR(controller_id, 12)
-     ELSE controller_id
-   END;
+    UPDATE flow_runs SET pipeline_id = CASE
+      WHEN controller_id LIKE 'pipeclaw:%'   THEN SUBSTR(controller_id, 10)
+      ELSE controller_id
+    END;
    CREATE INDEX IF NOT EXISTS idx_flow_runs_pipeline_id ON flow_runs (pipeline_id);
    DROP INDEX IF EXISTS idx_pfr_controller;
    ALTER TABLE flow_runs DROP COLUMN controller_id;

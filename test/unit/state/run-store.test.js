@@ -556,15 +556,10 @@ describe("createRunStore — v3 migration", () => {
         sql: `INSERT INTO flow_runs (flow_id, controller_id, status, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
         args: ["f-pipeclaw", "pipeclaw:foo", "succeeded", "{}", 0, 0],
       },
-      {
-        sql: `INSERT INTO flow_runs (flow_id, controller_id, status, state_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-        args: ["f-legacy", "graph-flow:bar", "succeeded", "{}", 0, 0],
-      },
     ]);
 
     const store = await createRunStore({ dbPath, legacyDbPath: NO_LEGACY });
     assert.equal((await store.get("f-pipeclaw")).pipelineId, "foo");
-    assert.equal((await store.get("f-legacy")).pipelineId, "bar");
     store.close();
   });
 
