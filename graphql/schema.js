@@ -5,75 +5,90 @@
 // Query-only by design: writes go through the POST routes, so reads
 // never emit domain events (single-writer).
 //
-// Reads come from the domain stores where they exist (failureStore,
-// runStore) and raw sqlite where no store reader exists (queue_items,
-// gate_state, gate_records — same precedent as budget/index.js).
+// Leaf types inherit the database schema (columns.js builds fields from
+// the drizzle table defs — the same files migrations generate from), so
+// a renamed column breaks loudly instead of drifting. Reads come from
+// the domain stores where they exist (failureStore, runStore) and raw
+// sqlite where no store reader exists (queue_items, gate_state,
+// gate_records — same precedent as budget/index.js).
 import os from "node:os";
 import path from "node:path";
-import { buildSchema, execute, parse, validate } from "graphql";
+import {
+  GraphQLSchema,
+  GraphQLObjectType,
+  GraphQLString,
+  GraphQLInt,
+  GraphQLFloat,
+  GraphQLList,
+  GraphQLNonNull,
+  GraphQLID,
+  execute,
+  parse,
+  validate,
+} from "graphql";
 import { createClient } from "@libsql/client";
+import { failureEvents, flowRuns } from "../state/schema.js";
+import { queueItems, gateState } from "../state/schema.ops.js";
+import { objectType } from "./columns.js";
 
 export const DEFAULT_RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 export const DEFAULT_OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
 
-export const typeDefs = `
-  type Failure {
-    id: ID!
-    flowId: String
-    pipelineId: String
-    nodeId: String
-    summary: String
-    errorType: String
-    failedAt: Int
-  }
-  type Approval {
-    id: ID!
-    flowId: String
-    node: String
-    label: String
-    agent: String
-    createdAt: Int
-  }
-  type Gate {
-    locked: Int
-    day: String
-  }
-  type FlowRun {
-    flowId: ID!
-    pipelineId: String
-    status: String
-    createdAt: Int
-    updatedAt: Int
-  }
-  type Snapshot {
-    failures: [Failure!]!
-    approvals: [Approval!]!
-    gate: Gate
-    runningCount: Int!
-    emittedAtMs: Float!
-  }
-  type InboxItem {
-    activityId: ID!
-    flowId: String!
-    itemId: String!
-    nodeId: String
-    pipelineId: String
-    agentName: String
-    title: String
-    emittedAtMs: Float
-    gateKind: String
-    payload: String!
-  }
-  type Query {
-    failures(limit: Int = 50): [Failure!]!
-    approvals: [Approval!]!
-    gate: Gate
-    runs(status: String, limit: Int = 50): [FlowRun!]!
-    run(flowId: ID!): FlowRun
-    snapshot: Snapshot!
-    inbox: [InboxItem!]!
-  }
-`;
+// Public leaf subsets: one word to publish a new column, internals
+// (state_json, tokens, handles) stay out by default. Joined extras
+// declared with explicit types beside the table list.
+const Failure = objectType({
+  name: "Failure",
+  table: failureEvents,
+  columns: ["id", "flow_id", "failed_at", { name: "failure_summary", as: "summary" }, "error_type"],
+  extras: { pipelineId: GraphQLString, nodeId: GraphQLString },
+});
+
+const Approval = objectType({
+  name: "Approval",
+  table: queueItems,
+  columns: ["id", "flow_id", "node", "label", "agent", "created_at"],
+});
+
+const Gate = objectType({
+  name: "Gate",
+  table: gateState,
+  columns: ["locked", "day"],
+});
+
+const FlowRun = objectType({
+  name: "FlowRun",
+  table: flowRuns,
+  columns: ["flow_id", "pipeline_id", "status", "created_at", "updated_at"],
+  extras: { flowId: new GraphQLNonNull(GraphQLID) },
+});
+
+const Snapshot = new GraphQLObjectType({
+  name: "Snapshot",
+  fields: {
+    failures: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(Failure))) },
+    approvals: { type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(Approval))) },
+    gate: { type: Gate },
+    runningCount: { type: new GraphQLNonNull(GraphQLInt) },
+    emittedAtMs: { type: GraphQLFloat },
+  },
+});
+
+const InboxItem = new GraphQLObjectType({
+  name: "InboxItem",
+  fields: {
+    activityId: { type: new GraphQLNonNull(GraphQLID) },
+    flowId: { type: new GraphQLNonNull(GraphQLString) },
+    itemId: { type: new GraphQLNonNull(GraphQLString) },
+    nodeId: { type: GraphQLString },
+    pipelineId: { type: GraphQLString },
+    agentName: { type: GraphQLString },
+    title: { type: GraphQLString },
+    emittedAtMs: { type: GraphQLFloat },
+    gateKind: { type: GraphQLString },
+    payload: { type: new GraphQLNonNull(GraphQLString) },
+  },
+});
 
 function openDb(dbPath) {
   return createClient({ url: `file:${dbPath}` });
@@ -274,7 +289,37 @@ export function createRootValue({
   };
 }
 
-const schema = buildSchema(typeDefs);
+export const schema = new GraphQLSchema({
+  // No custom field resolvers: the root value's functions are invoked
+  // by the default resolver with (args), so the query layer stays a
+  // thin projection over createRootValue.
+  query: new GraphQLObjectType({
+    name: "Query",
+    fields: {
+      failures: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(Failure))),
+        args: { limit: { type: GraphQLInt, defaultValue: 50 } },
+      },
+      approvals: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(Approval))),
+      },
+      gate: { type: Gate },
+      runs: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(FlowRun))),
+        args: { status: { type: GraphQLString }, limit: { type: GraphQLInt, defaultValue: 50 } },
+      },
+      run: {
+        type: FlowRun,
+        args: { flowId: { type: new GraphQLNonNull(GraphQLID) } },
+      },
+      snapshot: { type: new GraphQLNonNull(Snapshot) },
+      inbox: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(InboxItem))),
+      },
+    },
+  }),
+  types: [Failure, Approval, Gate, FlowRun, Snapshot, InboxItem],
+});
 
 export async function executeQuery({ root, query, variables = {} }) {
   let document;

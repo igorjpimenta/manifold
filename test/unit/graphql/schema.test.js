@@ -12,7 +12,7 @@ import os from "node:os";
 import fs from "node:fs";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
-import { createRootValue, executeQuery } from "../../../graphql/schema.js";
+import { createRootValue, executeQuery, schema } from "../../../graphql/schema.js";
 
 function tmpDb(name) {
   const dir = path.join(os.tmpdir(), `graphql-test-${randomUUID()}`);
@@ -98,6 +98,29 @@ function makeRoot() {
   });
   return { root, runtimeDbPath, opsDbPath };
 }
+
+describe("graphql schema — inherits the drizzle defs", () => {
+  function fieldNames(typeName) {
+    return Object.keys(schema.getType(typeName).getFields()).sort();
+  }
+
+  test("leaf fields track the table columns (rename-proof)", () => {
+    assert.deepEqual(fieldNames("Failure"), ["errorType", "failedAt", "flowId", "id", "nodeId", "pipelineId", "summary"]);
+    assert.deepEqual(fieldNames("Approval"), ["agent", "createdAt", "flowId", "id", "label", "node"]);
+    assert.deepEqual(fieldNames("Gate"), ["day", "locked"]);
+    assert.deepEqual(fieldNames("FlowRun"), ["createdAt", "flowId", "pipelineId", "status", "updatedAt"]);
+    assert.deepEqual(
+      Object.keys(schema.getQueryType().getFields()).sort(),
+      ["approvals", "failures", "gate", "inbox", "run", "runs", "snapshot"],
+    );
+  });
+
+  test("unknown columns throw at build time instead of drifting", async () => {
+    const { columnFields } = await import("../../../graphql/columns.js");
+    const { failureEvents } = await import("../../../state/schema.js");
+    assert.throws(() => columnFields(failureEvents, ["no_such_column"]), /not on table/);
+  });
+});
 
 describe("graphql schema — store-backed fields", () => {
   test("failures maps store rows; runs filter by status; run resolves", async () => {
