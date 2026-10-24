@@ -16,6 +16,7 @@ import { resolveCost } from "./pricer.js";
 import { checkBudget, initCapStore } from "./budget-alert.js";
 import { registerHttpRoutes } from "./http.js";
 import { createEmitter } from "../events/emit.js";
+import { configureApi as configureDigestPushApi } from "./digest-push.js";
 // Hoisted to module-level so every call's hook closures share the same
 // store/resolver. The SDK can call register() repeatedly (config reload,
 // hot-reload); only the first service start actually opens the DB.
@@ -38,6 +39,10 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
   const dbPath = _dbPath ?? DEFAULT_DB_PATH;
 
   const logger = api.logger;
+
+  // Pipeline digest pushes (weekly-stats, reply-sla) reach apns through
+  // the digest module's singleton.
+  configureDigestPushApi(api);
 
   // Canonical-kind fan-out for cost.record.added below: canonical wire
   // name, envelope adds kind.
