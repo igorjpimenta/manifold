@@ -2,7 +2,7 @@
  * Unit tests for graphql/schema.js
  *
  * Store-backed fields (failures, runs) run against stub stores (the
- * stores own their tests); raw-sql fields (approvals, gate, inbox) run
+ * stores own their tests); raw-sql fields (approvals, gate, openGates) run
  * against real tmp sqlite files.
  */
 import { test, describe } from "node:test";
@@ -111,7 +111,7 @@ describe("graphql schema — inherits the drizzle defs", () => {
     assert.deepEqual(fieldNames("FlowRun"), ["createdAt", "flowId", "pipelineId", "status", "updatedAt"]);
     assert.deepEqual(
       Object.keys(schema.getQueryType().getFields()).sort(),
-      ["approvals", "failures", "gate", "inbox", "run", "runs", "snapshot"],
+      ["approvals", "failures", "gate", "openGates", "run", "runs", "snapshot"],
     );
   });
 
@@ -142,7 +142,7 @@ describe("graphql schema — store-backed fields", () => {
 });
 
 describe("graphql schema — raw-sql fields", () => {
-  test("approvals, gate, snapshot, inbox", async () => {
+  test("approvals, gate, snapshot, openGates", async () => {
     const { root, runtimeDbPath, opsDbPath } = makeRoot();
     await seedOps(opsDbPath);
     await seedRuntime(runtimeDbPath);
@@ -153,11 +153,11 @@ describe("graphql schema — raw-sql fields", () => {
     const s = await executeQuery({ root, query: "{ snapshot { failures { id } approvals { id } gate { locked } runningCount } }" });
     assert.equal(s.data.snapshot.runningCount, 1);
     assert.equal(s.data.snapshot.failures.length, 1);
-    const i = await executeQuery({ root, query: "{ inbox { activityId flowId itemId title gateKind payload } }" });
+    const i = await executeQuery({ root, query: "{ openGates { activityId flowId itemId title gateKind payload } }" });
     assert.equal(i.errors, undefined);
-    assert.equal(i.data.inbox.length, 1);
-    assert.equal(i.data.inbox[0].activityId, "flow-1:gap:1");
-    assert.equal(JSON.parse(i.data.inbox[0].payload).title, "Need input");
+    assert.equal(i.data.openGates.length, 1);
+    assert.equal(i.data.openGates[0].activityId, "flow-1:gap:1");
+    assert.equal(JSON.parse(i.data.openGates[0].payload).title, "Need input");
   });
 
   test("invalid query errors; missing tables degrade to empty", async () => {
@@ -170,10 +170,10 @@ describe("graphql schema — raw-sql fields", () => {
       runtimeDbPath: tmpDb("e1"),
       opsDbPath: tmpDb("e2"),
     });
-    const out = await executeQuery({ root: empty, query: "{ approvals { id } gate { locked } inbox { activityId } }" });
+    const out = await executeQuery({ root: empty, query: "{ approvals { id } gate { locked } openGates { activityId } }" });
     assert.equal(out.errors, undefined);
     assert.deepEqual(out.data.approvals, []);
     assert.equal(out.data.gate, null);
-    assert.deepEqual(out.data.inbox, []);
+    assert.deepEqual(out.data.openGates, []);
   });
 });
