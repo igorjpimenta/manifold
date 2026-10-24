@@ -74,8 +74,8 @@ const Snapshot = new GraphQLObjectType({
   },
 });
 
-const InboxItem = new GraphQLObjectType({
-  name: "InboxItem",
+const OpenGate = new GraphQLObjectType({
+  name: "OpenGate",
   fields: {
     activityId: { type: new GraphQLNonNull(GraphQLID) },
     flowId: { type: new GraphQLNonNull(GraphQLString) },
@@ -203,7 +203,7 @@ export function createRootValue({
   // consumed records carry consumedAt). Context-joined from flow_runs
   // (pipeline) and queue_items (agent/label) — both LEFT, missing
   // context degrades to nulls consumers already tolerate.
-  async function queryInbox() {
+  async function queryOpenGates() {
     let gateRows = [];
     const pipeByFlow = {};
     try {
@@ -219,7 +219,7 @@ export function createRootValue({
         db.close();
       }
     } catch (err) {
-      logger?.warn?.(`graphql: inbox gate read failed: ${err?.message ?? err}`);
+      logger?.warn?.(`graphql: openGates gate read failed: ${err?.message ?? err}`);
       return [];
     }
     const agentByItem = {};
@@ -285,7 +285,7 @@ export function createRootValue({
       runningCount: await runningCount(),
       emittedAtMs: Date.now(),
     }),
-    inbox: () => queryInbox(),
+    openGates: () => queryOpenGates(),
   };
 }
 
@@ -313,12 +313,12 @@ export const schema = new GraphQLSchema({
         args: { flowId: { type: new GraphQLNonNull(GraphQLID) } },
       },
       snapshot: { type: new GraphQLNonNull(Snapshot) },
-      inbox: {
-        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(InboxItem))),
+      openGates: {
+        type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(OpenGate))),
       },
     },
   }),
-  types: [Failure, Approval, Gate, FlowRun, Snapshot, InboxItem],
+  types: [Failure, Approval, Gate, FlowRun, Snapshot, OpenGate],
 });
 
 export async function executeQuery({ root, query, variables = {} }) {

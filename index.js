@@ -57,7 +57,7 @@ import { registerOperatorRoutes } from "./routes/operator.js";
 import { resumeFlowFromGate } from "./routes/operator-resume.js";
 import { registerFailureRoutes } from "./routes/failures.js";
 import { registerGraphqlRoutes } from "./routes/graphql.js";
-import { registerAdminProxyRoutes } from "./routes/admin-proxy.js";
+import { registerHealthRoutes } from "./routes/health.js";
 import { registerPipelineRoutes } from "./routes/pipelines.js";
 import { registerBudgetRoutes } from "./budget/index.js";
 import { registerTelemetry } from "./telemetry/index.js";
@@ -556,7 +556,7 @@ export default definePluginEntry({
       runStore,
     });
 
-    registerAdminProxyRoutes({ api });
+    registerHealthRoutes({ api });
 
     registerPipelineRoutes({
       api,
