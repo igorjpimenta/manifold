@@ -2,25 +2,19 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { openDb } from "../state/db.js";
+import { getSharedDb } from "../state/db.js";
 
 const LCM_DB_PATH = path.join(os.homedir(), ".openclaw", "lcm.db");
 
-// Opened once and shared across all requests. readOnly handles are safe for
-// concurrent reads. Lazy so a missing lcm.db at startup doesn't crash the route.
-// The existsSync check must run BEFORE openDb: openDb's createClient queues a
-// file connection that rejects with nobody awaiting it when the file is
-// absent, and that unobserved rejection surfaces as a process-level failure
-// (or a test-runner file failure) instead of reaching the 503 below.
-let _lcm = null;
-async function sharedLcmDb() {
+// Shared across requests and never closed: closing a libsql handle would
+// checkpoint and unlink lcm.db's -wal under the context engine's connection.
+// The existsSync guard preserves the 503-below for a missing file instead
+// of letting the failure surface at first execute.
+function sharedLcmDb() {
   if (!fs.existsSync(LCM_DB_PATH)) {
     throw new Error("lcm.db not found");
   }
-  if (!_lcm) {
-    _lcm = await openDb(LCM_DB_PATH, { readonly: true });
-  }
-  return _lcm;
+  return getSharedDb(LCM_DB_PATH, { readonly: true });
 }
 
 export function registerSessionRoutes({ api, logger, json, bad }) {
@@ -38,7 +32,6 @@ export function registerSessionRoutes({ api, logger, json, bad }) {
         lcm = await sharedLcmDb();
       } catch (err) {
         logger?.warn?.(`lineage[sessions/parts] lcm.db open failed: ${err?.message}`);
-        _lcm = null;  // reset so next request retries the open
         return json(res, { error: "lcm.db not available" }, 503);
       }
       try {

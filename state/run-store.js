@@ -441,18 +441,26 @@ async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
     },
 
     // { [status]: count } for top-level runs, optionally filtered by pipeline.
+    // Additive dashboard data: a failed count must degrade to no counts, the
+    // same contract as get/list — GET /manifold/runs renders the runs list
+    // whatever this returns, and letting it throw turns an additive card
+    // into a 500 for the whole response.
     async listStatusCounts({ pipelineId } = {}) {
-      const conditions = [isNull(flowRuns.parentInvocationId)];
-      if (pipelineId) conditions.push(eq(flowRuns.pipelineId, pipelineId));
-      const rows = await db.select({
-        status: flowRuns.status,
-        n:      sql`COUNT(*)`.mapWith(Number),
-      }).from(flowRuns)
-        .where(and(...conditions))
-        .groupBy(flowRuns.status);
-      const out = {};
-      for (const { status, n } of rows) out[status ?? "unknown"] = n;
-      return out;
+      try {
+        const conditions = [isNull(flowRuns.parentInvocationId)];
+        if (pipelineId) conditions.push(eq(flowRuns.pipelineId, pipelineId));
+        const rows = await db.select({
+          status: flowRuns.status,
+          n:      sql`COUNT(*)`.mapWith(Number),
+        }).from(flowRuns)
+          .where(and(...conditions))
+          .groupBy(flowRuns.status);
+        const out = {};
+        for (const { status, n } of rows) out[status ?? "unknown"] = n;
+        return out;
+      } catch {
+        return {};
+      }
     },
 
     // Aggregate stats for a single pipeline in two queries.

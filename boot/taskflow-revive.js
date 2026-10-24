@@ -8,7 +8,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { openDb } from "../state/db.js";
+import { getSharedDb } from "../state/db.js";
 import os from "node:os";
 import { REVIVAL_MSG } from "../engine/revival-messages.js";
 import { isManifoldOwnedSessionKey } from "../engine/executor-helpers.js";
@@ -60,18 +60,17 @@ export function isManifoldOwnedSession({ agentId, sessionKey }, { agentsRoot = D
 
 export async function queryRunningOrphans(dbPath) {
   if (!existsSync(dbPath)) return [];
-  const { client } = await openDb(dbPath, { readonly: true });
-  try {
-    const { rows } = await client.execute(
-      `SELECT task_id, agent_id, child_session_key, runtime, last_event_at
-         FROM task_runs
-        WHERE status = 'running'
-        ORDER BY last_event_at DESC`,
-    );
-    return rows;
-  } finally {
-    try { client.close(); } catch {}
-  }
+  // Shared, never closed: runs.sqlite's writer is the tasks runtime's own
+  // connection, and closing a libsql handle here checkpoints and unlinks the
+  // -wal under it — the other driver then reads a stale shm until restart.
+  const { client } = await getSharedDb(dbPath, { readonly: true });
+  const { rows } = await client.execute(
+    `SELECT task_id, agent_id, child_session_key, runtime, last_event_at
+       FROM task_runs
+      WHERE status = 'running'
+      ORDER BY last_event_at DESC`,
+  );
+  return rows;
 }
 
 export async function cancelOrphan(api, sessionKey, taskId) {

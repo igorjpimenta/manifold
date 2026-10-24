@@ -1,6 +1,6 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { openDb } from "../state/db.js";
+import { getSharedDb } from "../state/db.js";
 import os from "node:os";
 
 export const REVISION_RETRY_LIMIT = 5;
@@ -11,9 +11,10 @@ export async function fetchSessionError(sessionKey) {
   if (!sessionKey) return null;
   const dbPath = path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
   if (!existsSync(dbPath)) return null;
-  let client;
   try {
-    ({ client } = await openDb(dbPath, { readonly: true }));
+    // Shared, never closed: closing a libsql handle to runs.sqlite checkpoints
+    // and unlinks the -wal under the tasks runtime's own connection.
+    const { client } = await getSharedDb(dbPath, { readonly: true });
     // child_session_key is stored as "agent:<type>:subagent:<sessionKey>"; the
     // executor's sessionKey is just the bare suffix. Try both to handle keys
     // written by different SDK versions.
@@ -24,8 +25,6 @@ export async function fetchSessionError(sessionKey) {
     return rows[0]?.error ?? null;
   } catch {
     return null;
-  } finally {
-    try { client?.close(); } catch {}
   }
 }
 

@@ -10,7 +10,7 @@
 // from leaf to root.
 
 import path from "node:path";
-import { openDb } from "../state/db.js";
+import { getSharedDb } from "../state/db.js";
 import os from "node:os";
 import fs from "node:fs";
 import { classify, agentIdOf } from "./grammar.js";
@@ -35,25 +35,25 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
   async function loadFlows() {
     if (flowsByPrefix && Date.now() - lastFlowsLoadTs < FLOWS_TTL_MS) return;
     if (!fs.existsSync(flowsDbPath)) { flowsByPrefix = new Map(); return; }
-    const { client } = await openDb(flowsDbPath, { readonly: true });
-    try {
-      // flow_runs carries pipeline_id as a direct column (the SELECT below
-      // depends on that shape); there is no controller_id column. Failures
-      // here are swallowed by the try/catch in every hook that calls
-      // resolver.walk/resolve, so a schema surprise shows up as missing
-      // lineage rather than a throw.
-      const rows = await execAll(client,
-        `SELECT flow_id, owner_key, pipeline_id, status, created_at FROM flow_runs`
-      );
-      const map = new Map();
-      for (const r of rows) {
-        const k = String(r.flow_id).slice(0, 8);
-        if (!map.has(k)) map.set(k, []);
-        map.get(k).push(r);
-      }
-      flowsByPrefix = map;
-      lastFlowsLoadTs = Date.now();
-    } finally { client.close(); }
+    // Shared, never closed: a close here would checkpoint and unlink
+    // runtime.sqlite's -wal under the long-lived writer connection.
+    const { client } = await getSharedDb(flowsDbPath, { readonly: true });
+    // flow_runs carries pipeline_id as a direct column (the SELECT below
+    // depends on that shape); there is no controller_id column. Failures
+    // here are swallowed by the try/catch in every hook that calls
+    // resolver.walk/resolve, so a schema surprise shows up as missing
+    // lineage rather than a throw.
+    const rows = await execAll(client,
+      `SELECT flow_id, owner_key, pipeline_id, status, created_at FROM flow_runs`
+    );
+    const map = new Map();
+    for (const r of rows) {
+      const k = String(r.flow_id).slice(0, 8);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push(r);
+    }
+    flowsByPrefix = map;
+    lastFlowsLoadTs = Date.now();
   }
 
   function loadCron() {
