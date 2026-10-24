@@ -56,9 +56,7 @@ import { registerRunRoutes } from "./routes/runs.js";
 import { registerOperatorRoutes } from "./routes/operator.js";
 import { resumeFlowFromGate } from "./routes/operator-resume.js";
 import { registerFailureRoutes } from "./routes/failures.js";
-import { registerGraphqlRoutes } from "./routes/graphql.js";
-import { registerAdminProxyRoutes } from "./routes/admin-proxy.js";
-import { registerPipelineRoutes } from "./routes/pipelines.js";
+import { registerGraphqlRoutes } from "./routes/graphql.js";import { registerPipelineRoutes } from "./routes/pipelines.js";
 import { registerBudgetRoutes } from "./budget/index.js";
 import { registerTelemetry } from "./telemetry/index.js";
 import { scanAndCleanup as taskflowScanAndCleanup } from "./boot/taskflow-revive.js";
@@ -555,8 +553,6 @@ export default definePluginEntry({
       failureStore,
       runStore,
     });
-
-    registerAdminProxyRoutes({ api });
 
     registerPipelineRoutes({
       api,
