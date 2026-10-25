@@ -10,7 +10,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { resolveCost } from "./pricer.js";
-import { openDb } from "../state/db.js";
+import { getSharedDb } from "../state/db.js";
 import { execAll } from "./http-helpers.js";
 
 const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
@@ -121,9 +121,7 @@ async function backfillChildFlowTriggerEdges({ store, resolver, logger, force = 
   if (!fs.existsSync(runtimeDbPath)) return stats;
 
   let rows;
-  const { client: rtClient } = await openDb(runtimeDbPath, { readonly: true });
-  try {
-    rows = await execAll(rtClient, `
+  rows = await execAll((await getSharedDb(runtimeDbPath, { readonly: true })).client, `
       SELECT fr.flow_id AS child_flow_id, fr.pipeline_id AS child_pipeline_id,
              fr.created_at AS created_at, fni.flow_id AS parent_flow_id
         FROM flow_runs fr
@@ -131,9 +129,6 @@ async function backfillChildFlowTriggerEdges({ store, resolver, logger, force = 
        WHERE fr.parent_invocation_id IS NOT NULL
        ORDER BY fr.created_at ASC
     `);
-  } finally {
-    rtClient.close();
-  }
 
   await store._client.execute("BEGIN");
   try {

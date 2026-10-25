@@ -8,6 +8,13 @@ import * as schema from './schema.js';
 //
 // readonly opens skip WAL/autocheckpoint/busy_timeout — those are writer concerns.
 // WAL mode on the write connection already allows concurrent reads without extra config.
+//
+// `readonly` is a PRAGMA choice, not a read-only open: libsql's local client
+// rejects `?mode=ro` (URL_PARAM_NOT_SUPPORTED), so every handle here can write.
+// A closed handle therefore checkpoints and unlinks the -wal/-shm, which breaks
+// any other connection (in this process or another) still holding them. Use
+// getSharedDb() for anything opened while the gateway runs; close() only at
+// process shutdown or on a per-test file that nobody else shares.
 export async function openDb(dbPath, { readonly = false } = {}) {
   const client = createClient({ url: `file:${dbPath}` });
   if (!readonly) {

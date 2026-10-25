@@ -26,9 +26,9 @@ import {
   parse,
   validate,
 } from "graphql";
-import { createClient } from "@libsql/client";
 import { failureEvents, flowRuns } from "../state/schema.js";
 import { queueItems, gateState } from "../state/schema.ops.js";
+import { getSharedDb } from "../state/db.js";
 import { objectType } from "./columns.js";
 
 export const DEFAULT_RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
@@ -91,7 +91,7 @@ const OpenGate = new GraphQLObjectType({
 });
 
 function openDb(dbPath) {
-  return createClient({ url: `file:${dbPath}` });
+  return getSharedDb(dbPath, { readonly: true }).then(({ client }) => client);
 }
 
 function toFailure(r) {
@@ -137,9 +137,8 @@ export function createRootValue({
   }
 
   async function queryApprovals() {
-    let db = null;
     try {
-      db = openDb(opsDbPath);
+      const db = await openDb(opsDbPath);
       await db.execute("PRAGMA busy_timeout = 30000");
       const { rows } = await db.execute(
         "SELECT id, flow_id, node, label, agent, created_at FROM queue_items WHERE status = 'pending' ORDER BY created_at DESC LIMIT 200",
@@ -155,15 +154,12 @@ export function createRootValue({
     } catch (err) {
       logger?.warn?.(`graphql: approvals query failed: ${err?.message ?? err}`);
       return [];
-    } finally {
-      try { db?.close(); } catch {}
     }
   }
 
   async function queryGate() {
-    let db = null;
     try {
-      db = openDb(opsDbPath);
+      const db = await openDb(opsDbPath);
       await db.execute("PRAGMA busy_timeout = 30000");
       const { rows } = await db.execute("SELECT locked, day FROM gate_state WHERE id = 'singleton' LIMIT 1");
       const g = rows[0];
@@ -171,8 +167,6 @@ export function createRootValue({
     } catch (err) {
       logger?.warn?.(`graphql: gate query failed: ${err?.message ?? err}`);
       return null;
-    } finally {
-      try { db?.close(); } catch {}
     }
   }
 
@@ -207,17 +201,13 @@ export function createRootValue({
     let gateRows = [];
     const pipeByFlow = {};
     try {
-      const db = openDb(runtimeDbPath);
+      const db = await openDb(runtimeDbPath);
+      await db.execute("PRAGMA busy_timeout = 30000");
+      gateRows = (await db.execute("SELECT flow_id, node_id, record_json, updated_at FROM gate_records")).rows;
       try {
-        await db.execute("PRAGMA busy_timeout = 30000");
-        gateRows = (await db.execute("SELECT flow_id, node_id, record_json, updated_at FROM gate_records")).rows;
-        try {
-          const f = await db.execute("SELECT flow_id, pipeline_id FROM flow_runs");
-          for (const r of f.rows) pipeByFlow[r.flow_id] = r.pipeline_id ?? null;
-        } catch {}
-      } finally {
-        db.close();
-      }
+        const f = await db.execute("SELECT flow_id, pipeline_id FROM flow_runs");
+        for (const r of f.rows) pipeByFlow[r.flow_id] = r.pipeline_id ?? null;
+      } catch {}
     } catch (err) {
       logger?.warn?.(`graphql: openGates gate read failed: ${err?.message ?? err}`);
       return [];
@@ -225,16 +215,12 @@ export function createRootValue({
     const agentByItem = {};
     const labelByItem = {};
     try {
-      const db = openDb(opsDbPath);
-      try {
-        await db.execute("PRAGMA busy_timeout = 30000");
-        const q = await db.execute("SELECT id, label, agent FROM queue_items WHERE status = 'pending'");
-        for (const r of q.rows) {
-          agentByItem[r.id] = r.agent ?? null;
-          labelByItem[r.id] = r.label ?? null;
-        }
-      } finally {
-        db.close();
+      const db = await openDb(opsDbPath);
+      await db.execute("PRAGMA busy_timeout = 30000");
+      const q = await db.execute("SELECT id, label, agent FROM queue_items WHERE status = 'pending'");
+      for (const r of q.rows) {
+        agentByItem[r.id] = r.agent ?? null;
+        labelByItem[r.id] = r.label ?? null;
       }
     } catch {}
     const out = [];
