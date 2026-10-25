@@ -194,22 +194,19 @@ export function createRootValue({
 
   // Open gate items for triage surfaces, read from persisted gate_records
   // (the engine writes requestPayload incl. layout at gate-block time;
-  // consumed records carry consumedAt). Context-joined from flow_runs
-  // (pipeline) and queue_items (agent/label) — both LEFT, missing
-  // context degrades to nulls consumers already tolerate.
+  // consumed records carry consumedAt). Pipeline context resolves per
+  // flow through the run store's indexed get — never a full flow_runs
+  // scan: on a multi-GB hot file, an unbounded scan races WAL growth
+  // and dies with SHORT_READ, while indexed point reads stay clear.
+  // Queue context merges from one bounded pending scan.
   async function queryOpenGates() {
     let gateRows = [];
-    const pipeByFlow = {};
     try {
       const db = await openDb(runtimeDbPath);
       await db.execute("PRAGMA busy_timeout = 30000");
       gateRows = (await db.execute("SELECT flow_id, node_id, record_json, updated_at FROM gate_records")).rows;
-      try {
-        const f = await db.execute("SELECT flow_id, pipeline_id FROM flow_runs");
-        for (const r of f.rows) pipeByFlow[r.flow_id] = r.pipeline_id ?? null;
-      } catch {}
     } catch (err) {
-      logger?.warn?.(`graphql: openGates gate read failed: ${err?.message ?? err}`);
+      logger?.warn?.(`graphql: openGates records read failed: ${err?.message ?? err}`);
       return [];
     }
     const agentByItem = {};
@@ -232,6 +229,11 @@ export function createRootValue({
         continue;
       }
       if (record?.consumedAt != null) continue;
+      let pipelineId = null;
+      try {
+        const run = await runStore.get(g.flow_id);
+        pipelineId = run?.pipelineId ?? run?.pipeline_id ?? null;
+      } catch {}
       for (const item of record?.items ?? []) {
         if (!item?.itemId) continue;
         const rp = item.requestPayload ?? {};
@@ -240,7 +242,7 @@ export function createRootValue({
           flowId: g.flow_id,
           itemId: item.itemId,
           nodeId: g.node_id ?? null,
-          pipelineId: pipeByFlow[g.flow_id] ?? null,
+          pipelineId,
           agentName: agentByItem[item.itemId] ?? null,
           title: rp.title ?? labelByItem[item.itemId] ?? null,
           emittedAtMs: g.updated_at ?? null,
