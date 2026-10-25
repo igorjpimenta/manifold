@@ -6,9 +6,8 @@ import { getSharedDb } from "../state/db.js";
 
 const LCM_DB_PATH = path.join(os.homedir(), ".openclaw", "lcm.db");
 
-// Never closed: shared handle, see getSharedDb. The existsSync guard
-// preserves the 503-below for a missing file instead of letting the
-// failure surface at first execute.
+// The existsSync guard preserves the 503-below for a missing file instead
+// of letting the failure surface at first execute.
 function sharedLcmDb() {
   if (!fs.existsSync(LCM_DB_PATH)) {
     throw new Error("lcm.db not found");

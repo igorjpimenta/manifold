@@ -121,7 +121,6 @@ async function backfillChildFlowTriggerEdges({ store, resolver, logger, force = 
   if (!fs.existsSync(runtimeDbPath)) return stats;
 
   let rows;
-  // Never closed: shared handle, see getSharedDb.
   rows = await execAll((await getSharedDb(runtimeDbPath, { readonly: true })).client, `
       SELECT fr.flow_id AS child_flow_id, fr.pipeline_id AS child_pipeline_id,
              fr.created_at AS created_at, fni.flow_id AS parent_flow_id

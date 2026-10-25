@@ -60,10 +60,8 @@ export function isManifoldOwnedSession({ agentId, sessionKey }, { agentsRoot = D
 
 export async function queryRunningOrphans(dbPath) {
   if (!existsSync(dbPath)) return [];
-  // Never closed: shared handle, see getSharedDb.
   const { client } = await getSharedDb(dbPath, { readonly: true });
-  const { rows } = await client.execute(
-    `SELECT task_id, agent_id, child_session_key, runtime, last_event_at
+  const { rows } = await client.execute(    `SELECT task_id, agent_id, child_session_key, runtime, last_event_at
        FROM task_runs
       WHERE status = 'running'
       ORDER BY last_event_at DESC`,

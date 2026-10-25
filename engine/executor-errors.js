@@ -12,7 +12,6 @@ export async function fetchSessionError(sessionKey) {
   const dbPath = path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
   if (!existsSync(dbPath)) return null;
   try {
-    // Never closed: shared handle, see getSharedDb.
     const { client } = await getSharedDb(dbPath, { readonly: true });
     // child_session_key is stored as "agent:<type>:subagent:<sessionKey>"; the
     // executor's sessionKey is just the bare suffix. Try both to handle keys
