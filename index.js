@@ -36,6 +36,8 @@ import {
   registerReportDraftSkipTool,
 } from "./agent/tools/index.js";
 import { readPending, clearPending, setPendingText, mergePendingFields } from "./state/pending-store.js";
+import { checkDb } from "./state/db-health.js";
+import { writeCorruptionAlert } from "./state/db-guard.js";
 import { createGateResolver } from "./gates/gate-resolver.js";
 import { createEventBus } from "./dashboard/event-log.js";
 import { createDashboardServer } from "./dashboard/server.js";
@@ -715,5 +717,22 @@ export default definePluginEntry({
       },
       stop: async () => {},
     });
+
+    // ── Boot gate: refuse to finish loading on unreadable primaries ──────────
+    // A blind manifold mints wrong gate decisions and drops pushes. Fail
+    // here, loudly, instead: the alert names the file, launchd respawns
+    // into this same refusal until it heals. Synchronous probe — register
+    // must stay synchronous, and better-sqlite3 is already a dependency.
+    for (const dbPath of [
+      runtimeDbPath,
+      path.join(os.homedir(), ".openclaw", "ops.sqlite"),
+    ]) {
+      const check = checkDb(dbPath);
+      if (!check.ok) {
+        api.logger.error(`manifold: refusing boot — unreadable database ${dbPath}: ${check.error}`);
+        writeCorruptionAlert({ dbPath, phase: "boot", error: check.error });
+        process.exit(1);
+      }
+    }
   },
 });

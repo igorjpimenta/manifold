@@ -30,6 +30,7 @@ import { failureEvents, flowRuns } from "../state/schema.js";
 import { queueItems, gateState } from "../state/schema.ops.js";
 import { getSharedDb } from "../state/db.js";
 import { objectType } from "./columns.js";
+import { noteDbFailure } from "../state/db-guard.js";
 
 export const DEFAULT_RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 export const DEFAULT_OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
@@ -132,7 +133,8 @@ export function createRootValue({
       return (rows ?? []).map(toFailure);
     } catch (err) {
       logger?.warn?.(`graphql: failures query failed: ${err?.message ?? err}`);
-      return [];
+      noteDbFailure(err, { dbPath: runtimeDbPath, logger });
+      throw err;
     }
   }
 
@@ -153,7 +155,8 @@ export function createRootValue({
       }));
     } catch (err) {
       logger?.warn?.(`graphql: approvals query failed: ${err?.message ?? err}`);
-      return [];
+      noteDbFailure(err, { dbPath: opsDbPath, logger });
+      throw err;
     }
   }
 
@@ -166,7 +169,8 @@ export function createRootValue({
       return g ? { locked: g.locked ?? 0, day: g.day ?? null } : null;
     } catch (err) {
       logger?.warn?.(`graphql: gate query failed: ${err?.message ?? err}`);
-      return null;
+      noteDbFailure(err, { dbPath: opsDbPath, logger });
+      throw err;
     }
   }
 
@@ -179,7 +183,8 @@ export function createRootValue({
       return (rows ?? []).map(toFlowRun);
     } catch (err) {
       logger?.warn?.(`graphql: runs query failed: ${err?.message ?? err}`);
-      return [];
+      noteDbFailure(err, { dbPath: runtimeDbPath, logger });
+      throw err;
     }
   }
 
@@ -188,7 +193,8 @@ export function createRootValue({
       return toFlowRun(await runStore.get(flowId));
     } catch (err) {
       logger?.warn?.(`graphql: run query failed: ${err?.message ?? err}`);
-      return null;
+      noteDbFailure(err, { dbPath: runtimeDbPath, logger });
+      throw err;
     }
   }
 
@@ -207,7 +213,8 @@ export function createRootValue({
       gateRows = (await db.execute("SELECT flow_id, node_id, record_json, updated_at FROM gate_records")).rows;
     } catch (err) {
       logger?.warn?.(`graphql: openGates records read failed: ${err?.message ?? err}`);
-      return [];
+      noteDbFailure(err, { dbPath: runtimeDbPath, logger });
+      throw err;
     }
     const agentByItem = {};
     const labelByItem = {};
