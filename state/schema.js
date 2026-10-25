@@ -19,6 +19,7 @@ export const flowRuns = sqliteTable('flow_runs', {
 }, (table) => [
   index('idx_pfr_status').on(table.status).where(sql`${table.endedAt} IS NULL`),
   index('idx_pfr_updated').on(desc(table.updatedAt)),
+  index('idx_pfr_created').on(desc(table.createdAt)),
   uniqueIndex('idx_pfr_parent_invocation').on(table.parentInvocationId).where(sql`${table.parentInvocationId} IS NOT NULL`),
   index('idx_flow_runs_pipeline_id').on(table.pipelineId),
 ]);
@@ -98,6 +99,7 @@ export const failureEvents = sqliteTable('failure_events', {
   errorType:      text('error_type'),
 }, (table) => [
   index('idx_failures_flow').on(table.flowId),
+  index('idx_failures_failed_at').on(desc(table.failedAt)),
   index('idx_failures_invocation').on(table.invocationId),
   uniqueIndex('idx_failures_execution').on(table.executionId).where(sql`${table.executionId} IS NOT NULL`),
 ]);
