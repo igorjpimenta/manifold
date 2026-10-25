@@ -35,8 +35,7 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
   async function loadFlows() {
     if (flowsByPrefix && Date.now() - lastFlowsLoadTs < FLOWS_TTL_MS) return;
     if (!fs.existsSync(flowsDbPath)) { flowsByPrefix = new Map(); return; }
-    // Shared, never closed: a close here would checkpoint and unlink
-    // runtime.sqlite's -wal under the long-lived writer connection.
+    // Never closed: shared handle, see getSharedDb.
     const { client } = await getSharedDb(flowsDbPath, { readonly: true });
     // flow_runs carries pipeline_id as a direct column (the SELECT below
     // depends on that shape); there is no controller_id column. Failures

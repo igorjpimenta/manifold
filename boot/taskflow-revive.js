@@ -60,9 +60,7 @@ export function isManifoldOwnedSession({ agentId, sessionKey }, { agentsRoot = D
 
 export async function queryRunningOrphans(dbPath) {
   if (!existsSync(dbPath)) return [];
-  // Shared, never closed: runs.sqlite's writer is the tasks runtime's own
-  // connection, and closing a libsql handle here checkpoints and unlinks the
-  // -wal under it — the other driver then reads a stale shm until restart.
+  // Never closed: shared handle, see getSharedDb.
   const { client } = await getSharedDb(dbPath, { readonly: true });
   const { rows } = await client.execute(
     `SELECT task_id, agent_id, child_session_key, runtime, last_event_at
