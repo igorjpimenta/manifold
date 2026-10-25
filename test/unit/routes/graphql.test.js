@@ -7,6 +7,11 @@
  */
 import { test, mock, describe } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import fs from "node:fs";
+import { randomUUID } from "node:crypto";
+import { createClient } from "@libsql/client";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
 const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
@@ -19,13 +24,32 @@ await mock.module(authUrl, {
 
 const { registerGraphqlRoutes } = await import("../../../routes/graphql.js");
 
+function tmpDb(name) {
+  const dir = path.join(os.tmpdir(), `graphql-route-test-${randomUUID()}`);
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, `${name}.sqlite`);
+}
+
+async function seedOps(dbPath) {
+  const db = createClient({ url: `file:${dbPath}` });
+  await db.execute(`CREATE TABLE queue_items (
+    id TEXT PRIMARY KEY, label TEXT NOT NULL, agent TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL, flow_id TEXT, node TEXT
+  )`);
+  await db.execute(`CREATE TABLE gate_state (
+    id TEXT NOT NULL PRIMARY KEY DEFAULT 'singleton', locked INTEGER NOT NULL DEFAULT 0, day TEXT
+  )`);
+  await db.execute("INSERT INTO gate_state (id, locked) VALUES ('singleton', 0)");
+  db.close();
+}
+
 function makeDeps(api, overrides = {}) {
   return {
     api,
     failureStore: { list: async () => [] },
     runStore: { listRunsPage: async () => [], get: async () => null },
-    runtimeDbPath: ":memory:",
-    opsDbPath: ":memory:",
+    runtimeDbPath: tmpDb("runtime"),
+    opsDbPath: tmpDb("ops"),
     ...overrides,
   };
 }
@@ -58,10 +82,12 @@ describe("registerGraphqlRoutes — registration", () => {
 
   test("authorized snapshot query executes against stub stores", async () => {
     const { api, routes } = createMockApi();
-    registerGraphqlRoutes(makeDeps(api, {
+    const deps = makeDeps(api, {
       failureStore: { list: async () => [{ id: "f1", flow_id: "flow-1" }] },
       runStore: { listRunsPage: async () => [], get: async () => null },
-    }));
+    });
+    await seedOps(deps.opsDbPath);
+    registerGraphqlRoutes(deps);
     const res = createMockRes();
     await routes[0].handler(postReq({ query: "{ snapshot { failures { id } runningCount } }" }), res);
     assert.equal(res.statusCode, 200);

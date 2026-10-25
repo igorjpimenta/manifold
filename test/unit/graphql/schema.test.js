@@ -122,6 +122,20 @@ describe("graphql schema — inherits the drizzle defs", () => {
   });
 });
 
+describe("graphql schema — failures surface as errors, not empty", () => {
+  test("store throw becomes errors array with null data field", async () => {
+    const failing = createRootValue({
+      failureStore: { list: async () => { throw Object.assign(new Error("boom"), { code: "SOME_ERR" }); } },
+      runStore: { listRunsPage: async () => [], get: async () => null },
+      runtimeDbPath: tmpDb("runtime"),
+      opsDbPath: tmpDb("ops"),
+    });
+    const out = await executeQuery({ root: failing, query: "{ failures { id } }" });
+    assert.ok((out.errors ?? []).length > 0);
+    assert.match(out.errors[0].message, /boom/);
+  });
+});
+
 describe("graphql schema — store-backed fields", () => {
   test("failures maps store rows; runs filter by status; run resolves", async () => {
     const { root, runtimeDbPath, opsDbPath } = makeRoot();
@@ -160,7 +174,7 @@ describe("graphql schema — raw-sql fields", () => {
     assert.equal(JSON.parse(i.data.openGates[0].payload).title, "Need input");
   });
 
-  test("invalid query errors; missing tables degrade to empty", async () => {
+  test("invalid query errors; missing tables fail loudly, never fake-empty", async () => {
     const { root } = makeRoot();
     const bad = await executeQuery({ root, query: "{ nope }" });
     assert.ok((bad.errors ?? []).length > 0);
@@ -171,9 +185,6 @@ describe("graphql schema — raw-sql fields", () => {
       opsDbPath: tmpDb("e2"),
     });
     const out = await executeQuery({ root: empty, query: "{ approvals { id } gate { locked } openGates { activityId } }" });
-    assert.equal(out.errors, undefined);
-    assert.deepEqual(out.data.approvals, []);
-    assert.equal(out.data.gate, null);
-    assert.deepEqual(out.data.openGates, []);
+    assert.ok((out.errors ?? []).length > 0, "DB failures must surface as errors, not empty lists");
   });
 });
