@@ -18,7 +18,10 @@ The tag is the version, verbatim — no `v` prefix: `package.json`
 `2026.10.20` → tag `2026.10.20`. Tags are never rewritten or deleted — a
 consumer pin is permanent; a mistake ships as a new date, not a retag.
 A same-day rebuild appends `-beta.N` (`2026.10.20-beta.1`); a fix that
-ships tomorrow gets tomorrow's date.
+ships tomorrow gets tomorrow's date. Numbering starts at `beta.1` —
+never `beta.0`: the installer's strict CalVer parser requires the
+sequence above zero and rejects `beta.0`, so a zero-suffixed tag is
+uninstallable by contract.
 
 ## Order of operations
 
