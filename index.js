@@ -19,6 +19,7 @@ import { createInvocationOwnerResolver } from "./locks/invocation-owner.js";
 import { getNodeExecutionsStore } from "./state/node-executions.js";
 import { createAdmissionQueueStore } from "./state/admission-queue-store.js";
 import { createExecutor } from "./engine/executor.js";
+import { createOpenClawHarness } from "./harness/openclaw.js";
 import { configureGlobalConcurrency, getGlobalConcurrencyLimit } from "./engine/global-concurrency.js";
 import { createFailureStore } from "./state/failure-store.js";
 import { createNodeHealthStore } from "./state/node-health-store.js";
@@ -272,6 +273,13 @@ export default definePluginEntry({
       getDashboardBroadcast: () => (dashboardBusRef ? (e) => dashboardBusRef.broadcast(e) : null),
     });
 
+    const openClawHarness = createOpenClawHarness({
+      api,
+      getWorkingSubagent: () => moduleState.workingSubagent,
+      whenGatewayReady: () => gatewayReadiness.whenReady(),
+      sessionIndex,
+      emit: emitCanonical,
+    });
     const executor = createExecutor({
       api,
       store,
@@ -287,6 +295,7 @@ export default definePluginEntry({
       getWorkingSubagent: () => moduleState.workingSubagent,
       whenGatewayReady: () => gatewayReadiness.whenReady(),
       emit: emitCanonical,
+      harness: openClawHarness,
     });
     resumeParentRef.resume = executor.resume;
 
