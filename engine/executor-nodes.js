@@ -45,7 +45,16 @@ export function createNodeRunner({
   nodeExecutionsStore,
   nodeHealthStore,
   pipelinesRef,
+  push,
 }) {
+  // Best-effort URL push: a failing/slow target never breaks the run —
+  // unawaited with its rejection dropped, and a throwing notify caught.
+  function firePush(event, fields) {
+    if (!push || typeof push.notify !== "function") return;
+    try {
+      Promise.resolve(push.notify(event, fields)).catch(() => {});
+    } catch {}
+  }
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
   // "agent" branches in executeNodeBody — this function has no fallback-
@@ -149,6 +158,7 @@ export function createNodeRunner({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
     });
+    firePush("agent.dispatched", { flowId, nodeId, sessionKey, agent: entry.agent ?? null });
     // tool-handoff.js: lets a tool this session calls mid-turn (e.g.
     // submit_score) resolve its own invocationId from ctx.sessionKey and
     // hand structured data back to this node's apply() — see that module's
@@ -281,6 +291,7 @@ export function createNodeRunner({
         lastOpenedAt: now,
       };
       await nodeExecutionsStore.writeGateRecord(flowId, nodeId, gateRecord);
+      firePush("gate.opened", { flowId, nodeId, pending: gateRecord.pending });
       const waitJson = {
         kind: "human-gate",
         nodeId,

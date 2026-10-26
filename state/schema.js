@@ -236,3 +236,15 @@ export const modelHealth = sqliteTable('model_health', {
   updatedAt:      integer('updated_at').notNull(),
 });
 
+// One row per harness id: the URL manifold POSTs harness lifecycle events
+// to (agent.dispatched, gate.opened, push.test), plus optional bearer and
+// timeout. Read by resolvePushTarget (harness/push.js); written by
+// autoregisterPushTarget (harness/openclaw.js).
+export const pushTargets = sqliteTable('push_targets', {
+  harness:   text('harness').primaryKey(),
+  url:       text('url').notNull(),
+  bearer:    text('bearer'),
+  timeoutMs: integer('timeout_ms'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});

@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { createHarnessPort } from "./Harness.js";
+import { notifyPush, pushPayload } from "./push.js";
 import { defaultAgentSessionKey } from "../engine/executor-helpers.js";
 import { GatewayHandoffNeeded } from "../engine/executor-errors.js";
 import { createGatewaySubagentGate } from "../engine/gateway-subagent.js";
@@ -61,4 +62,37 @@ export function createOpenClawHarness({ api, getWorkingSubagent, whenGatewayRead
       return defaultAgentSessionKey(agent, flowId, nodeId, itemKey);
     },
   });
+}
+
+// Self-registers this harness's push target at boot, mirroring winch's
+// plugins/openclaw autoregister: idempotent upsert + verifying test ping.
+// Disarmed without a bearer or base URL. Never throws — boot must not fail
+// because a push target couldn't register. runner is injectable
+// (url, init) => Response; defaults to global fetch via notifyPush.
+export async function autoregisterPushTarget({ pushTargets, baseUrl, harness = "openclaw", bearer, timeoutMs, runner, logger } = {}) {
+  const resolvedBearer = bearer ?? process.env.MANIFOLD_PUSH_BEARER ?? "";
+  const resolvedBase = baseUrl ?? process.env.MANIFOLD_PUSH_BASE_URL ?? null;
+  if (!resolvedBearer) return { ok: false, reason: "disarmed" };
+  if (typeof resolvedBase !== "string" || !/^https?:\/\//i.test(resolvedBase.trim())) {
+    return { ok: false, reason: "no-base-url" };
+  }
+  const url = `${resolvedBase.trim().replace(/\/$/, "")}/api/manifold/push`;
+  try {
+    await pushTargets?.upsert?.(harness, { url, bearer: resolvedBearer, timeoutMs: timeoutMs ?? null });
+  } catch (err) {
+    logger?.warn?.(`manifold: push self-registration failed for harness ${harness}: ${err?.message ?? err}`);
+    return { ok: false, reason: "upsert-failed" };
+  }
+  const verify = await notifyPush(
+    { url, bearer: resolvedBearer, timeoutMs },
+    pushPayload({ event: "push.test", harness }),
+    logger,
+    { runner },
+  );
+  if (!verify.ok) {
+    logger?.warn?.(`manifold: push target registered for harness ${harness} -> ${url} but test ping failed (${verify.reason})`);
+    return { ok: false, reason: "test-failed" };
+  }
+  logger?.info?.(`manifold: push target self-registered for harness ${harness} -> ${url}`);
+  return { ok: true };
 }

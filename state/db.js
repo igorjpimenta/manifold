@@ -118,3 +118,34 @@ export function withSharedWrite(dbPath, fn, { maxAttempts = 200 } = {}) {
   _writeQueues.set(dbPath, result.then(() => {}, () => {}));
   return result;
 }
+
+import path from "node:path";
+import os from "node:os";
+
+// Env-overridable sqlite locations shared by every manifold store. The
+// harness adapter's own storePaths() honors the same MANIFOLD_* vars (see
+// harness/openclaw.js), so defaults and harness agree unless the harness
+// explicitly relocates its files.
+export function defaultRuntimeDbPath() {
+  return process.env.MANIFOLD_RUNTIME_DB || path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+}
+
+export function defaultOpsDbPath() {
+  return process.env.MANIFOLD_OPS_DB || path.join(os.homedir(), ".openclaw", "ops.sqlite");
+}
+
+// A harness-provided storePaths() wins over the defaults above, so a
+// harness that relocates its sqlite files carries every manifold store —
+// including push targets — with it. Never throws: falls back to defaults.
+export function resolveStorePaths(harness = null) {
+  const defaults = {
+    dataDir: path.join(os.homedir(), ".openclaw"),
+    runtimeDb: defaultRuntimeDbPath(),
+    opsDb: defaultOpsDbPath(),
+  };
+  try {
+    const fromHarness = typeof harness?.storePaths === "function" ? harness.storePaths() : null;
+    if (fromHarness && typeof fromHarness === "object") return { ...defaults, ...fromHarness };
+  } catch {}
+  return defaults;
+}

@@ -19,7 +19,10 @@ import { createInvocationOwnerResolver } from "./locks/invocation-owner.js";
 import { getNodeExecutionsStore } from "./state/node-executions.js";
 import { createAdmissionQueueStore } from "./state/admission-queue-store.js";
 import { createExecutor } from "./engine/executor.js";
-import { createOpenClawHarness } from "./harness/openclaw.js";
+import { createOpenClawHarness, autoregisterPushTarget } from "./harness/openclaw.js";
+import { resolvePushTarget, notifyPush, pushPayload } from "./harness/push.js";
+import { createPushTargetsStore } from "./state/push-targets.js";
+import { resolveStorePaths } from "./state/db.js";
 import { createEventStream } from "./harness/events.js";
 import { configureGlobalConcurrency, getGlobalConcurrencyLimit } from "./engine/global-concurrency.js";
 import { createFailureStore } from "./state/failure-store.js";
@@ -150,6 +153,27 @@ export default definePluginEntry({
         type: "integer",
         minimum: 1,
         description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8.",
+      },
+      pushUrl: {
+        type: "string",
+        description: "Single URL manifold POSTs harness lifecycle events to for every harness (harness/push.js). Default: unset (push disabled unless a push target row or pushUrls entry resolves). Env: MANIFOLD_PUSH_URL.",
+      },
+      pushUrls: {
+        type: "object",
+        description: "Per-harness push URLs, keyed by harness id. Each value is a URL string or {url, bearer, timeoutMs}. Default: unset.",
+      },
+      pushBearer: {
+        type: "string",
+        description: "Bearer token sent as Authorization on single-URL pushes. Env: MANIFOLD_PUSH_BEARER.",
+      },
+      pushTimeoutMs: {
+        type: "integer",
+        minimum: 1,
+        description: "Push POST timeout in milliseconds. Default: 3000. Env: MANIFOLD_PUSH_TIMEOUT_MS.",
+      },
+      pushBaseUrl: {
+        type: "string",
+        description: "Public base URL this harness POSTs back to, for push self-registration (autoregisterPushTarget). Env: MANIFOLD_PUSH_BASE_URL.",
       },
       profilePath: {
         type: "string",
@@ -288,6 +312,42 @@ export default definePluginEntry({
       sessionIndex,
       emit: emitFanout,
     });
+    // Per-harness URL push delivery (harness/push.js) alongside the
+    // in-process stream above: pushTargets rows (state/push-targets.js)
+    // resolve to a POST target per harness id. Lazy Promise-proxy like
+    // nodeHealthStore — register() is synchronous, callers await methods.
+    const _pushTargetsPromise = createPushTargetsStore({
+      logger: api.logger,
+      dbPath: resolveStorePaths(openClawHarness).runtimeDb,
+    });
+    const pushTargets = {
+      upsert(h, v) { return _pushTargetsPromise.then((st) => st.upsert(h, v)); },
+      get(h) { return _pushTargetsPromise.then((st) => st.get(h)); },
+      getAll() { return _pushTargetsPromise.then((st) => st.getAll()); },
+      remove(h) { return _pushTargetsPromise.then((st) => st.remove(h)); },
+      close() { _pushTargetsPromise.then((st) => st.close?.()).catch(() => {}); },
+    };
+    const pushTimeoutEnv = Number(process.env.MANIFOLD_PUSH_TIMEOUT_MS);
+    const pushConfig = {
+      pushUrls: userCfg.pushUrls ?? null,
+      pushUrl: userCfg.pushUrl ?? process.env.MANIFOLD_PUSH_URL ?? null,
+      pushBearer: userCfg.pushBearer ?? process.env.MANIFOLD_PUSH_BEARER ?? null,
+      pushTimeoutMs: Number.isInteger(userCfg.pushTimeoutMs) ? userCfg.pushTimeoutMs
+        : (Number.isInteger(pushTimeoutEnv) && pushTimeoutEnv > 0 ? pushTimeoutEnv : null),
+    };
+    // {notify(event, fields)} closing over this process's harness id —
+    // the engine calls it best-effort and never awaits it.
+    const push = {
+      async notify(event, fields = {}) {
+        try {
+          const target = await resolvePushTarget({ pushTargets, harnessId: openClawHarness.id, config: pushConfig });
+          if (!target) return { ok: false, reason: "disabled" };
+          return await notifyPush(target, pushPayload({ event, harness: openClawHarness.id, ...fields }), api.logger);
+        } catch {
+          return { ok: false, reason: "error" };
+        }
+      },
+    };
     const executor = createExecutor({
       api,
       store,
@@ -304,6 +364,7 @@ export default definePluginEntry({
       whenGatewayReady: () => gatewayReadiness.whenReady(),
       emit: emitCanonical,
       harness: openClawHarness,
+      push,
     });
     resumeParentRef.resume = executor.resume;
 
@@ -723,6 +784,28 @@ export default definePluginEntry({
     });
 
     // ── Runtime-capture service ──────────────────────────────────────────────
+
+    api.registerService({
+      id: "manifold-push-autoregister",
+      start: async (ctx) => {
+        const logger = ctx?.logger ?? api.logger;
+        try {
+          const result = await autoregisterPushTarget({
+            pushTargets,
+            baseUrl: userCfg.pushBaseUrl ?? process.env.MANIFOLD_PUSH_BASE_URL ?? null,
+            harness: openClawHarness.id,
+            bearer: pushConfig.pushBearer,
+            timeoutMs: pushConfig.pushTimeoutMs,
+            logger,
+          });
+          if (!result.ok && result.reason !== "disarmed") {
+            logger.info(`manifold: push autoregister skipped (${result.reason})`);
+          }
+        } catch (err) {
+          logger.warn(`manifold: push autoregister failed: ${err?.message ?? err}`);
+        }
+      },
+    });
 
     api.registerService({
       id: "manifold-runtime-capture",

@@ -36,7 +36,7 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit, harness }) {
+export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit, harness, push }) {
   const gateSubagent = createGatewaySubagentGate({ whenGatewayReady });
   const harnessSubagent = harness && typeof harness.getSubagent === "function" ? harness.getSubagent() : null;
   function resolveSubagent() {
@@ -175,6 +175,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
+    push,
   });
 
   /**

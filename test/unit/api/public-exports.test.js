@@ -76,11 +76,17 @@ const PUBLIC_API = {
     exports: [
       "createHarnessPort",
       "assertHarnessShape",
+      "createOpenClawHarness",
+      "autoregisterPushTarget",
+      "resolvePushTarget",
+      "notifyPush",
+      "pushPayload",
+      "DEFAULT_PUSH_TIMEOUT_MS",
     ],
   },
   "./state/db": {
     file: "./state/db.js",
-    exports: ["openDb", "getSharedDb", "isSqliteBusy", "withSharedWrite"],
+    exports: ["openDb", "getSharedDb", "isSqliteBusy", "withSharedWrite", "defaultRuntimeDbPath", "defaultOpsDbPath", "resolveStorePaths"],
   },
   "./state/batch-writer": {
     file: "./state/batch-writer.js",
@@ -97,6 +103,7 @@ const PUBLIC_API = {
       "flowSessions",
       "nodeHealth",
       "modelHealth",
+      "pushTargets",
     ],
   },
 };
