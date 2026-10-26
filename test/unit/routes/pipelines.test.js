@@ -23,6 +23,10 @@ const { registerPipelineRoutes } = await import("../../../routes/pipelines.js");
 function makeDeps(api, overrides = {}) {
   return {
     api,
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
+    },
     pipelinesRef: { value: new Map() },
     readStore: { listAllPipelineStats: () => new Map() },
     ensurePipelinesLoaded: async () => {},

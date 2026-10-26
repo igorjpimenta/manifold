@@ -17,10 +17,15 @@ await mock.module(authUrl, {
 
 const { registerHealthRoutes } = await import("../../../routes/health.js");
 
+const stubAuth = {
+  authorizeBridgeRequest: async () => ({ ok: true }),
+  sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
+};
+
 describe("registerHealthRoutes", () => {
   test("registers GET /manifold/health and answers with version + per-file status", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api });
+    registerHealthRoutes({ api, auth: stubAuth });
     assert.equal(routes.length, 1);
     assert.equal(routes[0].path, "/manifold/health");
     const res = createMockRes();
@@ -38,7 +43,7 @@ describe("registerHealthRoutes", () => {
 
   test("POST rejected with 405", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api });
+    registerHealthRoutes({ api, auth: stubAuth });
     const res = createMockRes();
     await routes[0].handler(createMockReq("POST", "/manifold/health"), res);
     assert.equal(res.statusCode, 405);

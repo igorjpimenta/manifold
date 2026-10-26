@@ -7,6 +7,7 @@ import { createRootValue, executeQuery } from "../graphql/schema.js";
 
 export function registerGraphqlRoutes({
   api,
+  auth,
   failureStore,
   runStore,
   runtimeDbPath,
@@ -24,7 +25,7 @@ export function registerGraphqlRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../plugins/openclaw/manifold/auth/bridge.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = auth;
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       let raw = "";

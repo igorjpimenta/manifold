@@ -31,6 +31,10 @@ function makeDeps(api, overrides = {}) {
     api,
     failureStore: { list: () => [], get: () => null },
     invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
+    },
     ...overrides,
   };
 }

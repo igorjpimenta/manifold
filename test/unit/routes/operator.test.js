@@ -86,6 +86,10 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef: { value: new Map() },
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
+    },
     stampDiscussSession: async () => {},
     normalizePendingFields: async () => ({}),
     readPending: () => null,

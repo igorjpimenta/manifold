@@ -49,6 +49,9 @@ test("the adapter opts into startup activation", () => {
 // lookup in routes/operator-discuss.js, stays lazy and is allowed). A static
 // `from "openclaw/…"` in core would hard-fail resolution for git-dependency
 // consumers that never install openclaw.
+// Core must also never import from the adapter: the dependency direction is
+// adapter -> core, never core -> plugins/. The adapter injects everything
+// core needs (bridge auth, device pairing) as constructor/registrar params.
 test("no static openclaw imports outside plugins/ and test/", () => {
   const files = execFileSync("git", ["ls-files", "-z", "*.js"], { cwd: root, encoding: "utf8" })
     .split("\0")
@@ -57,4 +60,20 @@ test("no static openclaw imports outside plugins/ and test/", () => {
   const STATIC_OPENCLAW_RE = /(?:from\s+["']openclaw\/|import\s*["']openclaw\/)/;
   const offenders = files.filter((f) => STATIC_OPENCLAW_RE.test(readFileSync(path.join(root, f), "utf8"))).sort();
   assert.deepEqual(offenders, [], `static openclaw imports outside plugins/: ${offenders.join(", ")}`);
+});
+
+test("no core file imports from a plugins/ path (static or dynamic)", () => {
+  const files = execFileSync("git", ["ls-files", "-z", "*.js"], { cwd: root, encoding: "utf8" })
+    .split("\0")
+    .filter(Boolean)
+    .filter((f) => !f.startsWith("test/") && !f.startsWith("plugins/"));
+  // Matches static `from "…plugins/…"` (any relative depth and quote
+  // style) plus the dynamic `import("…plugins/…")` equivalents.
+  const STATIC_PLUGINS_RE = /from\s+["'](?:\.\.?\/)+plugins\//;
+  const DYNAMIC_PLUGINS_RE = /import\(\s*["'](?:\.\.?\/)?plugins\//;
+  const offenders = files.filter((f) => {
+    const src = readFileSync(path.join(root, f), "utf8");
+    return STATIC_PLUGINS_RE.test(src) || DYNAMIC_PLUGINS_RE.test(src);
+  }).sort();
+  assert.deepEqual(offenders, [], `core imports from plugins/: ${offenders.join(", ")}`);
 });

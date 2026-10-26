@@ -64,6 +64,10 @@ function makeDeps(api, overrides = {}) {
     costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
     pipelinesRef: { value: new Map() },
     invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
+    },
     failureStore: {
       queryErrorsByFlow: async (flowId) => queryErrorsByFlowImpl(flowId),
       queryErrorsByFlowIds: async (flowIds) => queryErrorsByFlowIdsImpl(flowIds),

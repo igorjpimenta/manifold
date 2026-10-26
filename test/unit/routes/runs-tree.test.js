@@ -108,6 +108,10 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef,
     pipelineRegistryStore: makeMockPipelineRegistryStore(pipelinesRef),
     invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
+    },
     failureStore: { queryErrorsByFlow: async (flowId) => queryErrorsByFlowImpl(flowId) },
     discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
     handleDiscuss:           async () => {},

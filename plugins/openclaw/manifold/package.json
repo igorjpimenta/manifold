@@ -2,6 +2,11 @@
   "name": "@igorjpimenta/manifold-openclaw",
   "version": "2026.10.26-beta.1",
   "description": "OpenClaw companion for manifold: registers pipeline agent tools, discuss routes, the manifold-parrot channel, and boot services on the gateway.",
+  "exports": {
+    ".": "./index.js",
+    "./bridge-auth": "./auth/bridge.js",
+    "./profile-lock": "./hooks/profile-write-lock.js"
+  },
   "license": "UNLICENSED",
   "type": "module",
   "repository": {

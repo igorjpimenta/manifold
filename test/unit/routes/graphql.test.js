@@ -47,6 +47,10 @@ function makeDeps(api, overrides = {}) {
   return {
     api,
     failureStore: { list: async () => [] },
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
+    },
     runStore: { listRunsPage: async () => [], get: async () => null },
     runtimeDbPath: tmpDb("runtime"),
     opsDbPath: tmpDb("ops"),

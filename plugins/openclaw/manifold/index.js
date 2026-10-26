@@ -61,6 +61,11 @@ import { registerFailureRoutes } from "../../../routes/failures.js";
 import { registerGraphqlRoutes } from "../../../routes/graphql.js";
 import { registerHealthRoutes } from "../../../routes/health.js";
 import { registerPipelineRoutes } from "../../../routes/pipelines.js";
+// Adapter-owned modules injected into core: the bridge guards every
+// plugin-auth route and the device-pairing helper authenticates the
+// dashboard. Core never imports these itself.
+import { authorizeBridgeRequest, sendUnauthorized } from "./auth/bridge.js";
+import { pairDashboardDevice } from "./dashboard/device.js";
 import { registerBudgetRoutes } from "../../../budget/index.js";
 import { registerTelemetry } from "../../../telemetry/index.js";
 import { scanAndCleanup as taskflowScanAndCleanup } from "../../../boot/taskflow-revive.js";
@@ -507,6 +512,7 @@ export default definePluginEntry({
 
     registerRunRoutes({
       api,
+      auth: { authorizeBridgeRequest, sendUnauthorized },
       readStore,
       costForAllPipelines,
       runStore,
@@ -525,6 +531,7 @@ export default definePluginEntry({
 
     registerOperatorRoutes({
       api,
+      auth: { authorizeBridgeRequest, sendUnauthorized },
       store,
       readStore,
       executor,
@@ -548,20 +555,23 @@ export default definePluginEntry({
 
     registerFailureRoutes({
       api,
+      auth: { authorizeBridgeRequest, sendUnauthorized },
       failureStore,
       invokeElevated,
     });
 
     registerGraphqlRoutes({
       api,
+      auth: { authorizeBridgeRequest, sendUnauthorized },
       failureStore,
       runStore,
     });
 
-    registerHealthRoutes({ api });
+    registerHealthRoutes({ api, auth: { authorizeBridgeRequest, sendUnauthorized } });
 
     registerPipelineRoutes({
       api,
+      auth: { authorizeBridgeRequest, sendUnauthorized },
       pipelinesRef,
       readStore,
       ensurePipelinesLoaded,
@@ -625,6 +635,7 @@ export default definePluginEntry({
         publishCatalogChanged(info).catch(() => {});
       });
       const dashboardServer = createDashboardServer({
+        pairDevice: pairDashboardDevice,
         writeStore: store,
         pipelinesRef,
         pipelineRegistryStore,
