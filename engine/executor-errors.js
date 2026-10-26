@@ -1,29 +1,11 @@
-import path from "node:path";
-import { existsSync } from "node:fs";
-import { getSharedDb } from "../state/db.js";
-import os from "node:os";
-
 export const REVISION_RETRY_LIMIT = 5;
 
-// Read the last recorded error for a session from the tasks DB. Best-effort:
-// returns null on any failure so callers can fall back gracefully.
+// Dropped legacy: the openclaw tasks DB (~/.openclaw/tasks/runs.sqlite) is
+// no longer read — core never reads harness homes. Always resolves null so
+// callers fall back to their default detail.
 export async function fetchSessionError(sessionKey) {
-  if (!sessionKey) return null;
-  const dbPath = path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
-  if (!existsSync(dbPath)) return null;
-  try {
-    const { client } = await getSharedDb(dbPath, { readonly: true });
-    // child_session_key is stored as "agent:<type>:subagent:<sessionKey>"; the
-    // executor's sessionKey is just the bare suffix. Try both to handle keys
-    // written by different SDK versions.
-    const { rows } = await client.execute({
-      sql: "SELECT error FROM task_runs WHERE (child_session_key = ? OR child_session_key LIKE '%:subagent:' || ?) AND error IS NOT NULL ORDER BY ended_at DESC LIMIT 1",
-      args: [sessionKey, sessionKey],
-    });
-    return rows[0]?.error ?? null;
-  } catch {
-    return null;
-  }
+  void sessionKey;
+  return null;
 }
 
 /**
