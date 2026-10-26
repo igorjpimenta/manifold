@@ -30,11 +30,11 @@ const DEFAULT_PROFILE_PATH = path.join(os.homedir(), ".openclaw", "workspace", "
 const READ_TOOL_NAME = "read";
 const WAIT_TIMEOUT_MS = 60_000;
 
-export function registerProfileReadGate(api, { profilePath = DEFAULT_PROFILE_PATH } = {}) {
-  api.on("before_tool_call", async (event) => {
+export function registerProfileReadGate(harness, { profilePath = DEFAULT_PROFILE_PATH, logger = null } = {}) {
+  harness.registerHook("before_tool_call", async (event) => {
     if (event?.toolName !== READ_TOOL_NAME) return;
     if (event?.params?.path !== profilePath) return;
-    api?.logger?.info?.(`profile-read-gate: barrier hit for PROFILE.md read (runId=${event.runId ?? "?"})`);
+    logger?.info?.(`profile-read-gate: barrier hit for PROFILE.md read (runId=${event.runId ?? "?"})`);
     const lock = await acquireLock(lockNameForFile(profilePath), { timeoutMs: WAIT_TIMEOUT_MS, pollMs: 250 });
     await lock.release();
   }, { priority: 50, timeoutMs: WAIT_TIMEOUT_MS });

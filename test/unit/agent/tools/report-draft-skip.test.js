@@ -59,7 +59,7 @@ describe("registerReportDraftSkipTool — report_draft_skip", () => {
 
   function makeTool(ctx = {}) {
     const { api, tools } = createToolApi();
-    registerReportDraftSkipTool({ api });
+    registerReportDraftSkipTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger });
     return findTool(tools, "report_draft_skip", ctx);
   }
 

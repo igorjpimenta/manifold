@@ -16,8 +16,8 @@ const MANIFOLD_VERSION = require("../package.json").version;
 const RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 const OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
 
-export function registerHealthRoutes({ api }) {
-  api.registerHttpRoute({
+export function registerHealthRoutes({ registerHttpRoute, logger }) {
+  registerHttpRoute({
     path: "/manifold/health",
     auth: "plugin",
     match: "exact",
@@ -40,7 +40,7 @@ export function registerHealthRoutes({ api }) {
           ok = false;
           const err = new Error(check.error);
           err.code = check.code;
-          noteDbFailure(err, { dbPath, logger: api.logger });
+          noteDbFailure(err, { dbPath, logger });
         }
       }
       res.statusCode = 200;

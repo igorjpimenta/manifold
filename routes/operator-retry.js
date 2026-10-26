@@ -78,7 +78,6 @@ export function createRetryFailure({
   ownerSessionKey,
   admissionQueueStore,
   logger,
-  api,
 }) {
   async function retryFailureBranch({ id, via, awaitCompletion = false }) {
     const failure = await failureStore.get(id);
@@ -153,7 +152,7 @@ export function createRetryFailure({
         const result = await admitAndSetRunning({
           flowId, expectedRevision: effectiveRevision, lastStep: "__start__", stateJson: nextState,
           parentInvocationId: flow.parentInvocationId, store, admissionQueueStore,
-          runStore, resume: executor.resume, logger, api,
+          runStore, resume: executor.resume, logger,
         });
         if (!result.applied) {
           return { code: "conflict", reason: `setRunning failed: ${result.reason ?? result.code ?? "unknown"}` };
@@ -268,7 +267,7 @@ export function createRetryFailure({
       const result = await admitAndSetRunning({
         flowId, expectedRevision: effectiveRevision, lastStep: priorStep, stateJson: nextState,
         parentInvocationId: flow.parentInvocationId, store, admissionQueueStore,
-        runStore, resume: executor.resume, logger, api,
+        runStore, resume: executor.resume, logger,
       });
       if (!result.applied) {
         return { code: "conflict", reason: `setRunning failed: ${result.reason ?? result.code ?? "unknown"}` };

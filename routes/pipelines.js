@@ -1,11 +1,11 @@
-export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePipelinesLoaded }) {
+export function registerPipelineRoutes({ registerHttpRoute, logger, pipelinesRef, readStore, ensurePipelinesLoaded }) {
   // GET /manifold/pipelines — catalog of pipeline definitions joined with
   // run-history vitals. Mirrors the dashboard's /api/pipelines but trimmed
   // to what the iPhone Pipelines list view needs at a glance (lastRunAt,
   // todayCount, succeeded/failed today, success-rate over a recent window).
   // No cost (slow JSONL walking lives in the per-pipeline detail route).
   // Historical pipelines (no def on disk but runs in db) are appended last.
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/pipelines",
     auth: "plugin",
     match: "exact",
@@ -106,7 +106,7 @@ export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePip
           generatedAtMs: nowMs,
         }));
       } catch (err) {
-        api.logger.warn(`manifold pipelines handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold pipelines handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));

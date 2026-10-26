@@ -36,7 +36,7 @@ function makeMockApi() {
 }
 
 function register(api) {
-  registerProfileReadGate(api, { profilePath: PROFILE_PATH });
+  registerProfileReadGate({ registerHook: (event, handler, opts) => api.on(event, handler, opts) }, { profilePath: PROFILE_PATH });
 }
 
 describe("registerProfileReadGate", () => {

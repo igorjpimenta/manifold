@@ -13,7 +13,7 @@ function makeApi() {
   const calls = [];
   const record = (name) => async (p) => { calls.push({ name, p }); };
   const api = {
-    on: (name, fn) => { (hooks[name] ??= []).push(fn); },
+    registerHook: (name, fn) => { (hooks[name] ??= []).push(fn); },
     runtime: { subagent: { run: record("run"), waitForRun: record("waitForRun"), getSessionMessages: record("getSessionMessages") } },
   };
   return { api, calls, fire: (name) => (hooks[name] ?? []).forEach((fn) => fn({ port: 18789 }, {})) };
@@ -79,7 +79,7 @@ describe("shared state — registrations after readiness (reloads, second module
     boot.fire("gateway_start");
 
     const hooks = [];
-    const later = { on: (name) => hooks.push(name) };
+    const later = { registerHook: (name) => hooks.push(name) };
     const r = registerGatewayReadiness(later, { state });
     r.markGatewayProcess();
     assert.equal(r.isReady(), true);

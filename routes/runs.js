@@ -3,7 +3,8 @@ import { getAllSubflowGroups } from "../state/subflow-state.js";
 import { assembleState } from "../engine/executor-helpers.js";
 
 export function registerRunRoutes({
-  api,
+  registerHttpRoute,
+  logger,
   readStore,
   costForAllPipelines,
   runStore,
@@ -23,7 +24,7 @@ export function registerRunRoutes({
 
   // ── GET /manifold/cost ─────────────────────────────────────────────────
 
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/cost",
     auth: "plugin",
     match: "exact",
@@ -59,7 +60,7 @@ export function registerRunRoutes({
           pipelines: cost.pipelines,
         }));
       } catch (err) {
-        api.logger.warn(`manifold cost handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold cost handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));
@@ -70,7 +71,7 @@ export function registerRunRoutes({
 
   // ── GET /manifold/runs ─────────────────────────────────────────────────
 
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/runs",
     auth: "plugin",
     match: "exact",
@@ -155,7 +156,7 @@ export function registerRunRoutes({
           nextBeforeId: last?.flowId ?? null,
         }));
       } catch (err) {
-        api.logger.warn(`manifold runs handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold runs handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -169,7 +170,7 @@ export function registerRunRoutes({
   // Used by the dashboard to enrich its run lists and stats without direct
   // DB access. flowIds is a comma-separated list; max 500 entries.
 
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/errors",
     auth: "plugin",
     match: "exact",
@@ -200,7 +201,7 @@ export function registerRunRoutes({
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ errors }));
       } catch (err) {
-        api.logger.warn(`manifold errors handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold errors handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -211,7 +212,7 @@ export function registerRunRoutes({
 
   // ── GET /manifold/queue ────────────────────────────────────────────────
 
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/queue",
     auth: "plugin",
     match: "exact",
@@ -247,7 +248,7 @@ export function registerRunRoutes({
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ items }));
       } catch (err) {
-        api.logger.warn(`manifold queue handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold queue handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -264,7 +265,7 @@ export function registerRunRoutes({
   // rather than nested under /manifold/runs/ — that path is a
   // prefix-matched route below and this avoids any ambiguity with it).
 
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/tree-summary",
     auth: "plugin",
     match: "exact",
@@ -295,7 +296,7 @@ export function registerRunRoutes({
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ summaries }));
       } catch (err) {
-        api.logger.warn(`manifold tree-summary handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold tree-summary handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -306,7 +307,7 @@ export function registerRunRoutes({
 
   // ── GET+POST /manifold/runs/<flowId>/... ────────────────────────────────
 
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/runs/",
     auth: "plugin",
     match: "prefix",
@@ -396,7 +397,7 @@ export function registerRunRoutes({
         res.end(JSON.stringify({ ok: false, error: "unknown subpath or method" }));
         return true;
       } catch (err) {
-        api.logger.warn(`manifold run-detail handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold run-detail handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -1136,7 +1137,7 @@ export function registerRunRoutes({
       res.setHeader("Content-Type", "application/json");
       res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
     } catch (err) {
-      api.logger.warn(`manifold rerun handler error: ${err?.message ?? err}`);
+      logger.warn(`manifold rerun handler error: ${err?.message ?? err}`);
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));

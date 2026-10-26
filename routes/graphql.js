@@ -6,14 +6,15 @@
 import { createRootValue, executeQuery } from "../graphql/schema.js";
 
 export function registerGraphqlRoutes({
-  api,
+  registerHttpRoute,
+  logger,
   failureStore,
   runStore,
   runtimeDbPath,
   opsDbPath,
 }) {
   // ── POST /manifold/graphql ───────────────────────────────────────────
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/graphql",
     auth: "plugin",
     match: "exact",
@@ -48,7 +49,7 @@ export function registerGraphqlRoutes({
         runStore,
         ...(runtimeDbPath ? { runtimeDbPath } : {}),
         ...(opsDbPath ? { opsDbPath } : {}),
-        logger: api.logger,
+        logger,
       });
       const out = await executeQuery({ root, query: payload?.query, variables: payload?.variables });
       res.statusCode = 200;

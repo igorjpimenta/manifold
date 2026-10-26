@@ -30,8 +30,8 @@ import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { toolErr, resolveGateContext } from "./shared.js";
 
-export function registerReportDraftBlockedTool({ api }) {
-  api.registerTool((ctx) => ({
+export function registerReportDraftBlockedTool({ registerTool, logger }) {
+  registerTool((ctx) => ({
     name: "report_draft_blocked",
     label: "Manifold: report a draft blocked on missing profile info",
     description:
@@ -104,7 +104,7 @@ export function registerReportDraftBlockedTool({ api }) {
       await mkdir(path.dirname(outPath), { recursive: true });
       await writeFile(outPath, content, "utf-8");
 
-      try { api?.logger?.info?.(`report_draft_blocked tool: wrote ${questions.length} question(s) to ${outPath} (job-id=${jobId})`); } catch {}
+      try { logger?.info?.(`report_draft_blocked tool: wrote ${questions.length} question(s) to ${outPath} (job-id=${jobId})`); } catch {}
 
       return {
         content: [

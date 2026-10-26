@@ -9,7 +9,7 @@
 import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
 export async function resumeFlowFromGate({
-  store, readStore, admissionQueueStore, runStore, executor, logger, api,
+  store, readStore, admissionQueueStore, runStore, executor, logger,
   flowId, nodeId, decision,
 }) {
   const flow = (await store.get(flowId)) ?? (await readStore?.get(flowId)) ?? null;
@@ -17,7 +17,7 @@ export async function resumeFlowFromGate({
   const result = await admitAndSetRunning({
     flowId, expectedRevision: flow.revision, lastStep: flow.lastStep, stateJson: flow.stateJson ?? {},
     parentInvocationId: flow.parentInvocationId, store, admissionQueueStore,
-    runStore, resume: executor.resume, logger, api,
+    runStore, resume: executor.resume, logger,
   });
   if (!result.applied) return { ok: false, code: `setRunning failed: ${result.code}` };
   if (!result.queued) {

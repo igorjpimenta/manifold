@@ -224,7 +224,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       ];
       writeSession(tmpHome, "main", "sess-small", lines);
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ logger: api.logger });
       const { status, body } = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-small",
       });
@@ -252,7 +252,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       }
       writeSession(tmpHome, "main", "sess-huge", lines);
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ logger: api.logger });
       const { status, body } = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-huge",
       });
@@ -280,7 +280,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       }
       writeSession(tmpHome, "main", "sess-huge-2", lines);
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ logger: api.logger });
       const first = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-huge-2",
       });
@@ -310,7 +310,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
     try {
       process.env.HOME = tmpHome;
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ logger: api.logger });
       const { status, body } = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-missing",
       });

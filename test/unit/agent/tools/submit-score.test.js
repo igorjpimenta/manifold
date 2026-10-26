@@ -47,7 +47,7 @@ function findTool(tools, name, ctx = {}) {
 
 function makeTool(ctx = {}) {
   const { api, tools } = createToolApi();
-  registerSubmitScoreTool({ api });
+  registerSubmitScoreTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger });
   return findTool(tools, "submit_score", ctx);
 }
 

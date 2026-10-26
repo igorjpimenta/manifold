@@ -22,8 +22,8 @@
 import { setPendingText } from "../../state/pending-store.js";
 import { toolErr, resolveGateContext } from "./shared.js";
 
-export function registerProposeDraftTool({ api, readStore, componentEmitter, discussStore }) {
-  api.registerTool((ctx) => ({
+export function registerProposeDraftTool({ registerTool, logger, readStore, componentEmitter, discussStore }) {
+  registerTool((ctx) => ({
     name: "propose_draft",
     label: "Manifold: propose a draft revision for the operator's gate",
     description:
@@ -95,7 +95,7 @@ export function registerProposeDraftTool({ api, readStore, componentEmitter, dis
         try { await discussStore.setPending(flowId, itemId, text, draftId); } catch {}
       }
       const slotTag = draftId ? `/${draftId}` : "";
-      try { api?.logger?.info?.(`propose_draft tool: stashed ${text.length} chars for ${flowId.slice(0, 8)}/${itemId.slice(0, 40)}${slotTag}`); } catch {}
+      try { logger?.info?.(`propose_draft tool: stashed ${text.length} chars for ${flowId.slice(0, 8)}/${itemId.slice(0, 40)}${slotTag}`); } catch {}
       try {
         if (componentEmitter) {
           await componentEmitter({ flowId, itemId, component: { kind: "proposed_draft", text, draftId: draftId ?? null, updatedAt: Date.now() } });

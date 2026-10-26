@@ -2,14 +2,14 @@
 
 import { toolErr } from "./shared.js";
 
-export function registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipelinesLoaded }) {
+export function registerGraphFlowTool({ registerTool, logger, lineage, executor, pipelinesRef, ensurePipelinesLoaded }) {
   // Factory form — receives a per-invocation tool context with `ctx.sessionKey`,
   // the calling agent's session. Captured in closure so we can record a lineage
   // trigger edge (cron/telegram/operator session → flow_id) right after the
   // executor returns the flowId. Without this the cron-owner lineage row has
   // NULL flow_id and pipeline-run costs can't be attributed back to the cron
   // that fired them. (Object-form registration omits ctx entirely.)
-  api.registerTool((ctx) => ({
+  registerTool((ctx) => ({
     name: "manifold_start",
     label: "Manifold: start a pipeline run",
     description:
@@ -65,9 +65,9 @@ export function registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipel
         try {
           const parentKey = ctx?.sessionKey ?? null;
           if (!parentKey) {
-            api?.logger?.warn?.(`manifold tool: lineage edge skipped for ${record.flowId} — ctx.sessionKey is null`);
-          } else if (api?.runtime?.lineage?.recordTrigger) {
-            await api.runtime.lineage.recordTrigger({
+            logger?.warn?.(`manifold tool: lineage edge skipped for ${record.flowId} — ctx.sessionKey is null`);
+          } else if (lineage?.recordTrigger) {
+            await lineage.recordTrigger({
               flowId: record.flowId,
               runId: record.stateJson?.runId ?? null,
               pipelineId,
@@ -75,13 +75,13 @@ export function registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipel
             });
           }
         } catch (err) {
-          try { api?.logger?.warn?.(`manifold tool: lineage edge skipped: ${err?.message ?? err}`); } catch {}
+          try { logger?.warn?.(`manifold tool: lineage edge skipped: ${err?.message ?? err}`); } catch {}
         }
         // Fire the executor loop async — the tool returns immediately so the
         // calling agent isn't blocked for the duration of the pipeline run.
         setImmediate(() => {
           executor.runFlow(record.flowId, "fresh").catch((err) => {
-            try { (api?.logger ?? console).warn?.(`manifold tool: runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`); } catch {}
+            try { (logger ?? console).warn?.(`manifold tool: runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`); } catch {}
           });
         });
         return {

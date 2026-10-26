@@ -183,15 +183,10 @@ export default definePluginEntry({
     // now the same number; globalConcurrency replaces both.
     configureGlobalConcurrency({ maxConcurrent: userCfg.globalConcurrency });
 
-    // Registered here (rather than deferred) since PROFILE.md reads/edits
-    // can happen from the very first dispatched pipeline run after boot.
     // Both path options fall through to each hook's own os.homedir() default
     // when the config key is absent or undefined, so a zero-config install
     // acquires byte-identical lock names to the workspace-side PROFILE.md
     // writers (gap-answers.js, prime-nodes.js) it shares that lock with.
-    registerProfileReadGate(api, { profilePath: userCfg.profilePath });
-    registerProfileWriteLock(api, { profilePath: userCfg.profilePath, resultsDir: userCfg.profileEditResultsDir });
-    registerScoreToolWakeHook(api);
 
     const pipelinesRef = { value: new Map() };
 
@@ -270,7 +265,15 @@ export default definePluginEntry({
     // by gateway_start; resolves at once in a process that never starts
     // manifold's services (the CLI). Awaited only by the executor's subagent
     // gate (engine/gateway-subagent.js), which every agent dispatch passes.
-    const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
+    // Api-derived narrow deps for every module below: route handlers get
+    // registerHttpRoute + logger + config + runtime (never the raw api);
+    // hooks and the readiness gate get the harness port itself.
+    const registerHttpRoute = (route) => api.registerHttpRoute(route);
+    const registerTool = (def, opts) => api.registerTool(def, opts);
+
+    // Assigned after the harness below — the readiness closure only reads
+    // it lazily via whenGatewayReady, never during construction.
+    let gatewayReadiness = null;
 
     // Assigned in the dashboard section below; the catalog publisher reads
     // it lazily so watcher reloads before dashboard boot stay WS-only.
@@ -287,6 +290,14 @@ export default definePluginEntry({
       sessionIndex,
       emit: emitCanonical,
     });
+    gatewayReadiness = registerGatewayReadiness(openClawHarness, { logger: api.logger });
+
+    // Registered here (rather than deferred) since PROFILE.md reads/edits
+    // can happen from the very first dispatched pipeline run after boot.
+    registerProfileReadGate(openClawHarness, { profilePath: userCfg.profilePath, logger: api.logger });
+    registerProfileWriteLock(openClawHarness, { profilePath: userCfg.profilePath, resultsDir: userCfg.profileEditResultsDir, logger: api.logger });
+    registerScoreToolWakeHook(openClawHarness);
+
     const executor = createExecutor({
       api,
       store,
@@ -317,12 +328,12 @@ export default definePluginEntry({
     // Registered first so it starts first: only the gateway starts plugin
     // services, so this is what tells readiness this process is the gateway
     // (the CLI never gets here, and never waits).
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-gateway-readiness",
       start: () => gatewayReadiness.markGatewayProcess(),
     });
 
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-loader",
       start: async (ctx) => {
         const logger = ctx?.logger ?? api.logger;
@@ -346,7 +357,7 @@ export default definePluginEntry({
     pipelinesWatcher.onReload(() => {
       pipelineRegistryStore.reconcilePipelineVersions(pipelinesRef.value, { logger: api.logger });
     });
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-pipelines-watcher",
       start: () => pipelinesWatcher.start(),
       stop:  () => pipelinesWatcher.stop(),
@@ -362,13 +373,13 @@ export default definePluginEntry({
     // service never reaches its running list, and stop() never fires —
     // meaning the queue's not-yet-flushed buffered writes are silently lost
     // on every shutdown.
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-batch-writer",
       start: async () => {},
       stop: () => flushBatchWriter(),
     });
 
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-flow-revival",
       start: async (ctx) => {
         const logger = ctx?.logger ?? api.logger;
@@ -418,9 +429,7 @@ export default definePluginEntry({
           // their actual ownerKey, not the default manifold-owner key.
           // Legacy graph-flow-owner flows would fail the
           // cancelFlowByIdForOwner equality check otherwise.
-          createCancelStore: (ownerKey) => createStateStore(api, ownerKey, {
-            runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger: api.logger,
-          }),
+          createCancelStore,
           runStore,
           nodeExecutionsStore,
           sessionIndex,
@@ -464,7 +473,7 @@ export default definePluginEntry({
       },
     );
 
-    registerGraphFlowTool({ api, executor, store, pipelinesRef, ensurePipelinesLoaded });
+    registerGraphFlowTool({ registerTool, logger: api.logger, lineage: api.runtime?.lineage, executor, pipelinesRef, ensurePipelinesLoaded });
 
     const readStore = runStore;
     const gateResolver = createGateResolver({
@@ -473,7 +482,7 @@ export default definePluginEntry({
       admissionQueueStore,
     });
 
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-read-store",
       start: async () => {},
       stop: async () => { sessionIndex?.close?.(); },
@@ -496,17 +505,19 @@ export default definePluginEntry({
       opts.respond(true, { ok: true });
     }, { scope: "operator.read" });
 
-    registerSubmitDraftTool({ api, pipelinesRef });
-    registerSubmitScoreTool({ api });
-    registerReportDraftBlockedTool({ api });
-    registerReportDraftSkipTool({ api });
-    registerProposeDraftTool({ api, readStore, componentEmitter, discussStore });
-    registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore });
+    registerSubmitDraftTool({ registerTool, logger: api.logger, pipelinesRef });
+    registerSubmitScoreTool({ registerTool, logger: api.logger });
+    registerReportDraftBlockedTool({ registerTool, logger: api.logger });
+    registerReportDraftSkipTool({ registerTool, logger: api.logger });
+    registerProposeDraftTool({ registerTool, logger: api.logger, readStore, componentEmitter, discussStore });
+    registerProposeDraftMetaTool({ registerTool, logger: api.logger, readStore, componentEmitter, discussStore });
 
     // ── Discuss handlers ─────────────────────────────────────────────────────
 
     const discussHandlers = registerDiscussHandlers({
-      api,
+      logger: api.logger,
+      config: api.config,
+      runtime: api.runtime,
       store,
       pipelinesRef,
       emit: emitCanonical,
@@ -522,7 +533,8 @@ export default definePluginEntry({
     // ── Route modules ────────────────────────────────────────────────────────
 
     registerRunRoutes({
-      api,
+      registerHttpRoute,
+      logger: api.logger,
       readStore,
       costForAllPipelines,
       runStore,
@@ -539,8 +551,15 @@ export default definePluginEntry({
       handleDiscussAudioRetry: discussHandlers.handleDiscussAudioRetry,
     });
 
+    const createCancelStore = (ownerKey) => createStateStore(api, ownerKey, {
+      runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger: api.logger,
+    });
     registerOperatorRoutes({
-      api,
+      registerHttpRoute,
+      logger: api.logger,
+      config: api.config,
+      runtime: api.runtime,
+      createCancelStore,
       store,
       readStore,
       executor,
@@ -563,21 +582,24 @@ export default definePluginEntry({
     });
 
     registerFailureRoutes({
-      api,
+      registerHttpRoute,
+      logger: api.logger,
       failureStore,
       invokeElevated,
     });
 
     registerGraphqlRoutes({
-      api,
+      registerHttpRoute,
+      logger: api.logger,
       failureStore,
       runStore,
     });
 
-    registerHealthRoutes({ api });
+    registerHealthRoutes({ registerHttpRoute, logger: api.logger });
 
     registerPipelineRoutes({
-      api,
+      registerHttpRoute,
+      logger: api.logger,
       pipelinesRef,
       readStore,
       ensurePipelinesLoaded,
@@ -588,7 +610,7 @@ export default definePluginEntry({
       // In-process resume for flow-bound budget approvals (no HTTP loopback).
       onFlowResume: ({ flowId, nodeId, decision }) => resumeFlowFromGate({
         store, readStore, admissionQueueStore, runStore, executor,
-        logger: api.logger, api, flowId, nodeId, decision,
+        logger: api.logger, flowId, nodeId, decision,
       }),
     });
     registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
@@ -601,7 +623,7 @@ export default definePluginEntry({
     const taskflowStartupDelayMs = Number(userCfg.taskflowRevive?.startupDelayMs) >= 0
       ? Number(userCfg.taskflowRevive?.startupDelayMs)
       : 0;
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-taskflow-revive",
       start: async (ctx) => {
         const logger = ctx?.logger ?? api.logger;
@@ -629,7 +651,7 @@ export default definePluginEntry({
       resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
       stampDiscussSession:  discussHandlers.stampDiscussSession,
       emit: emitCanonical,
-    }).register(api);
+    }).register({ registerHttpRoute, logger: api.logger, runtime: api.runtime });
 
     // ── Dashboard ────────────────────────────────────────────────────────────
 
@@ -652,7 +674,7 @@ export default definePluginEntry({
         logger: api.logger,
         recordItemDecision: gateResolver.recordItemDecision,
       });
-      api.registerService({
+      openClawHarness.registerService({
         id: "manifold-dashboard",
         start: async () => {
           dashboardBus.start();
@@ -677,7 +699,7 @@ export default definePluginEntry({
     let _wsRunEventsListener = null;
     let _gateOpenedListener = null;
     let _gateClosedListener = null;
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-ws-run-events",
       start: async () => {
         // Listener body lives in events/ws-run-events.js (unit-covered);
@@ -723,7 +745,7 @@ export default definePluginEntry({
 
     // ── Runtime-capture service ──────────────────────────────────────────────
 
-    api.registerService({
+    openClawHarness.registerService({
       id: "manifold-runtime-capture",
       start: async () => {
         if (!moduleState.workingSubagent && api.runtime?.subagent) {

@@ -75,7 +75,9 @@ export function selectDiscussProvider({ primarySpec, chain, isCooldown }) {
 // ── Discuss handler factory ───────────────────────────────────────────────────
 
 export function createDiscussHandler({
-  api,
+  logger,
+  config,
+  agentRuntime,
   stampDiscussSession,
   normalizePendingFields,
   readPending,
@@ -95,7 +97,6 @@ export function createDiscussHandler({
     if (!flowId || !sessionKey || !sessionId || !agentId || !text) {
       return { status: 400, body: { ok: false, code: "invalid_body", error: "flowId, sessionKey, sessionId, agentId, text required" } };
     }
-    const agentRuntime = api.runtime?.agent;
     if (!agentRuntime?.runEmbeddedAgent) {
       return { status: 503, body: { ok: false, code: "agent_runtime_unavailable", error: "agent runtime not bound" } };
     }
@@ -109,16 +110,16 @@ export function createDiscussHandler({
         mkdirSync(path.dirname(sessionFile), { recursive: true });
         writeFileSync(sessionFile, "", { flag: "w" });
       } catch (err) {
-        api.logger.warn(`manifold discuss: session-file touch failed for ${sessionFile}: ${err?.message ?? err}`);
+        logger.warn(`manifold discuss: session-file touch failed for ${sessionFile}: ${err?.message ?? err}`);
       }
     }
     try {
-      const workspaceDir = agentRuntime.resolveAgentWorkspaceDir(api.config, agentId)
-        ?? agentRuntime.resolveAgentWorkspaceDir(api.config);
+      const workspaceDir = agentRuntime.resolveAgentWorkspaceDir(config, agentId)
+        ?? agentRuntime.resolveAgentWorkspaceDir(config);
       const { resolveAgentEffectiveModelPrimary } = await import("openclaw/plugin-sdk/agent-runtime");
-      const primarySpec = modelOverride ?? resolveAgentEffectiveModelPrimary(api.config, agentId) ?? "";
-      const _agentCfg = !modelOverride && (api.config?.agents?.list ?? []).find((a) => a?.id === agentId);
-      const _modelCfg = _agentCfg ? (_agentCfg?.model ?? api.config?.agents?.defaults?.model) : null;
+      const primarySpec = modelOverride ?? resolveAgentEffectiveModelPrimary(config, agentId) ?? "";
+      const _agentCfg = !modelOverride && (config?.agents?.list ?? []).find((a) => a?.id === agentId);
+      const _modelCfg = _agentCfg ? (_agentCfg?.model ?? config?.agents?.defaults?.model) : null;
       const chain = (_modelCfg && typeof _modelCfg === "object")
         ? [_modelCfg.primary, ...(Array.isArray(_modelCfg.fallbacks) ? _modelCfg.fallbacks : [])]
             .filter((r) => typeof r === "string" && r.length > 0)
@@ -144,11 +145,11 @@ export function createDiscussHandler({
         primarySpec, chain, isCooldown,
       });
       if (activeProvider !== primarySpec.split("/")[0] && activeProvider) {
-        api.logger.info(`manifold discuss: billing cooldown on ${primarySpec.split("/")[0]}, routing to ${activeProvider}/${activeModel}`);
+        logger.info(`manifold discuss: billing cooldown on ${primarySpec.split("/")[0]}, routing to ${activeProvider}/${activeModel}`);
       }
       const _runParams = {
         sessionId, sessionKey, agentId, trigger: "manual", sessionFile, workspaceDir,
-        config: api.config, prompt: text, timeoutMs: 300_000,
+        config, prompt: text, timeoutMs: 300_000,
         ...(systemPrompt ? { extraSystemPrompt: systemPrompt } : {}),
       };
       let result;
@@ -162,7 +163,7 @@ export function createDiscussHandler({
         if (_isBilling && chain.length > 1) {
           const retry = selectDiscussProvider({ primarySpec, chain, isCooldown: (p) => p === activeProvider });
           if (retry.provider && retry.provider !== activeProvider) {
-            api.logger.info(`manifold discuss: billing error on ${activeProvider}, retrying with ${retry.provider}/${retry.model}`);
+            logger.info(`manifold discuss: billing error on ${activeProvider}, retrying with ${retry.provider}/${retry.model}`);
             result = await agentRuntime.runEmbeddedAgent({ ..._runParams, provider: retry.provider, model: retry.model || undefined });
           } else {
             throw firstErr;
@@ -180,12 +181,12 @@ export function createDiscussHandler({
           const _skipped = _activeIdx > 0 ? chain.slice(0, _activeIdx) : [];
           for (const ref of _skipped) {
             const [_p, ..._mPts] = ref.split("/");
-            api.logger.info(`manifold discuss: all providers returned empty (context-filter likely) — retrying with skipped provider ${_p}`);
+            logger.info(`manifold discuss: all providers returned empty (context-filter likely) — retrying with skipped provider ${_p}`);
             try {
               const _l3 = await agentRuntime.runEmbeddedAgent({ ..._runParams, provider: _p, model: _mPts.join("/") || undefined });
               if (_hasText(_l3)) { result = _l3; break; }
             } catch (_l3Err) {
-              api.logger.warn(`manifold discuss: layer-3 ${_p} retry failed: ${_l3Err?.message}`);
+              logger.warn(`manifold discuss: layer-3 ${_p} retry failed: ${_l3Err?.message}`);
             }
           }
         }
@@ -200,7 +201,7 @@ export function createDiscussHandler({
             ? result.payloads.map((p) => p?.text?.trim?.() ?? "").filter(Boolean).join("\n")
             : "");
       if (!replyText) {
-        api.logger.warn(`manifold discuss (elev) [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
+        logger.warn(`manifold discuss (elev) [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
         return { status: 500, body: { ok: false, code: "no_reply_text", error: "agent ran but no assistant text found" } };
       }
       // Harvest child sessions spawned during this turn
@@ -234,7 +235,7 @@ export function createDiscussHandler({
               } catch {}
             }
             if (_ent?.status !== "done" && _ent?.status !== "error") {
-              api.logger.warn(`manifold discuss: child session ${_ck} did not terminate within 60s`);
+              logger.warn(`manifold discuss: child session ${_ck} did not terminate within 60s`);
               continue;
             }
             const _jsonlPath = _ent?.sessionFile
@@ -286,17 +287,17 @@ export function createDiscussHandler({
             if (_eFields) {
               try {
                 mergePendingFields(flowId, itemIdForDraft, _eFields);
-                api.logger.info(`manifold discuss: applied child-session meta [${_ck.slice(-8)}]: ${JSON.stringify(Object.keys(_eFields))}`);
+                logger.info(`manifold discuss: applied child-session meta [${_ck.slice(-8)}]: ${JSON.stringify(Object.keys(_eFields))}`);
               } catch (_err) {
-                api.logger.warn(`manifold discuss: mergePendingFields error: ${_err?.message}`);
+                logger.warn(`manifold discuss: mergePendingFields error: ${_err?.message}`);
               }
             }
             if (_eDraft) {
               try {
                 setPendingText(flowId, itemIdForDraft, _eDraft);
-                api.logger.info(`manifold discuss: applied child-session draft [${_ck.slice(-8)}] (${_eDraft.length} chars)`);
+                logger.info(`manifold discuss: applied child-session draft [${_ck.slice(-8)}] (${_eDraft.length} chars)`);
               } catch (_err) {
-                api.logger.warn(`manifold discuss: setPendingText error: ${_err?.message}`);
+                logger.warn(`manifold discuss: setPendingText error: ${_err?.message}`);
               }
             }
             if ((_eFields || _eDraft) && componentEmitter) {
@@ -313,12 +314,12 @@ export function createDiscussHandler({
                   },
                 });
               } catch (_err) {
-                api.logger.warn(`manifold discuss: componentEmitter error: ${_err?.message}`);
+                logger.warn(`manifold discuss: componentEmitter error: ${_err?.message}`);
               }
             }
           }
         } catch (_outerErr) {
-          api.logger.warn(`manifold discuss: child-session wait/apply error: ${_outerErr?.message}`);
+          logger.warn(`manifold discuss: child-session wait/apply error: ${_outerErr?.message}`);
         }
       }
       let proposedDraft = null;
@@ -329,12 +330,12 @@ export function createDiscussHandler({
         if (currentPending.fields && Object.keys(currentPending.fields).length > 0) proposedMeta = currentPending.fields;
       }
       const durationMs = Date.now() - startedAt;
-      api.logger.info(
+      logger.info(
         `manifold discuss (elev) [${flowId.slice(0, 8)}]: ok in ${durationMs}ms (reply=${replyText.length} chars, proposedDraft=${proposedDraft ? proposedDraft.length + " chars" : "none"}, proposedMeta=${proposedMeta ? JSON.stringify(Object.keys(proposedMeta)) : "none"})`
       );
       return { status: 200, body: { ok: true, reply: replyText, durationMs, editDraftUpdated: false, proposedDraft, proposedMeta } };
     } catch (err) {
-      api.logger.warn(`manifold discuss (elev) handler error: ${err?.message ?? err}`);
+      logger.warn(`manifold discuss (elev) handler error: ${err?.message ?? err}`);
       return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
     }
   }
@@ -354,7 +355,7 @@ export function createDiscussHandler({
 // trade rather than a silent correctness loss.
 const MAX_HISTORY_LINES = 500;
 
-export function createDiscussHistoryHandler({ api }) {
+export function createDiscussHistoryHandler({ logger }) {
   async function handleDiscussHistory(body) {
     const flowId = typeof body.flowId === "string" ? body.flowId : "";
     const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : "";
@@ -385,7 +386,7 @@ export function createDiscussHistoryHandler({ api }) {
         nextOffset = lines.length - start;
         const scanLines = lines.slice(start, end);
         if (hasMore) {
-          api.logger.info(`manifold discuss_history (elev) [${sessionId.slice(0, 8)}]: page [${start},${end}) of ${lines.length} lines, more remain before it`);
+          logger.info(`manifold discuss_history (elev) [${sessionId.slice(0, 8)}]: page [${start},${end}) of ${lines.length} lines, more remain before it`);
         }
         for (const line of scanLines) {
           if (!line.trim()) continue;
@@ -400,7 +401,7 @@ export function createDiscussHistoryHandler({ api }) {
       }
       return { status: 200, body: { ok: true, messages: filterDiscussHistoryMessages(msgs), hasMore, nextOffset } };
     } catch (err) {
-      api.logger.warn(`manifold discuss_history (elev) handler error: ${err?.message ?? err}`);
+      logger.warn(`manifold discuss_history (elev) handler error: ${err?.message ?? err}`);
       return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
     }
   }

@@ -49,7 +49,10 @@ function createMockReqWithBody(method, path_, body) {
 
 function makeDeps(api, overrides = {}) {
   return {
-    api,
+    registerHttpRoute: (route) => api.registerHttpRoute(route),
+    logger: api.logger,
+    config: api.config,
+    runtime: api.runtime,
     store: { get: () => null, list: () => [] },
     pipelinesRef: { value: new Map() },
     emit: async () => ({ ok: true }),

@@ -65,21 +65,21 @@ describe("registerGraphFlowTool — manifold_start", () => {
 
   test("registers one tool via factory form", () => {
     const { api, tools, pipelinesRef, executor } = makeStartDeps();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     assert.equal(tools.length, 1);
     assert.equal(typeof tools[0], "function");
   });
 
   test("registered tool is named manifold_start", () => {
     const { api, tools, pipelinesRef, executor } = makeStartDeps();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const def = tools[0]({});
     assert.equal(def.name, "manifold_start");
   });
 
   test("returns toolErr when pipelineId is missing", async () => {
     const { api, tools, pipelinesRef, executor } = makeStartDeps();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", {}, null);
     assert.equal(result.isError, true);
@@ -88,7 +88,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
 
   test("returns toolErr when pipelineId is not a string (number)", async () => {
     const { api, tools, pipelinesRef, executor } = makeStartDeps();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", { pipelineId: 42 }, null);
     assert.equal(result.isError, true);
@@ -97,7 +97,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
 
   test("returns toolErr when pipelineId not in pipelinesRef", async () => {
     const { api, tools, pipelinesRef, executor } = makeStartDeps();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", { pipelineId: "nonexistent_pipeline" }, null);
     assert.equal(result.isError, true);
@@ -108,7 +108,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
   test("lists (none loaded) when pipelinesRef is empty", async () => {
     const { api, tools, executor } = makeStartDeps();
     const emptyPipelinesRef = { value: new Map() };
-    registerGraphFlowTool({ api, executor, pipelinesRef: emptyPipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef: emptyPipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", { pipelineId: "any_pipe" }, null);
     assert.equal(result.isError, true);
@@ -127,7 +127,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
       runFlow: async () => {},
     };
     const { api, tools } = createToolApi();
-    registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipelinesLoaded });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef, ensurePipelinesLoaded });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", { pipelineId: "lazy_pipeline" }, null);
     assert.equal(loaderCalled, true, "ensurePipelinesLoaded was called");
@@ -139,7 +139,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
     const ensurePipelinesLoaded = async () => { throw new Error("loader boom"); };
     const { api, tools } = createToolApi();
     const executor = { start: () => ({}), runFlow: async () => {} };
-    registerGraphFlowTool({ api, executor, pipelinesRef, ensurePipelinesLoaded });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef, ensurePipelinesLoaded });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", { pipelineId: "any" }, null);
     assert.equal(result.isError, true, "falls through to unknown-pipeline error");
@@ -156,7 +156,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
       runFlow: async () => {},
     };
     const { api, tools } = createToolApi();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     await execute("tc1", { pipelineId: "my_pipeline" }, null);
     assert.equal(startCalls.length, 1);
@@ -175,7 +175,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
       runFlow: async () => {},
     };
     const { api, tools } = createToolApi();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     await execute("tc1", { pipelineId: "my_pipeline", args: { mockMode: true } }, null);
     assert.deepEqual(startCalls[0].args, { mockMode: true });
@@ -188,7 +188,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
       runFlow: async () => {},
     };
     const { api, tools } = createToolApi();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", { pipelineId: "my_pipeline" }, null);
     assert.equal(result.isError, undefined);
@@ -206,7 +206,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
       runFlow: async (flowId) => { runFlowCalls.push(flowId); },
     };
     const { api, tools } = createToolApi();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", { pipelineId: "my_pipeline" }, null);
     // runFlow should NOT be called synchronously
@@ -225,7 +225,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
     };
     const { api, tools } = createToolApi();
     api.runtime.lineage.recordTrigger = (args) => recordTriggerCalls.push(args);
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const ctx = { sessionKey: "sess-abc-123" };
     const def = tools[0](ctx);
     await def.execute("tc1", { pipelineId: "my_pipeline" }, null);
@@ -254,7 +254,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
       // Suspends the way the real resolver walk does.
       return new Promise((resolve) => { releaseTrigger = () => { order.push("recordTrigger:done"); resolve({ ok: true }); }; });
     };
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const def = tools[0]({ sessionKey: "sess-order" });
 
     const toolDone = def.execute("tc1", { pipelineId: "my_pipeline" }, null);
@@ -285,7 +285,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
     };
     const { api, tools, logWarns } = createToolApi();
     api.runtime.lineage.recordTrigger = (args) => recordTriggerCalls.push(args);
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const ctx = { sessionKey: null };
     const def = tools[0](ctx);
     await def.execute("tc1", { pipelineId: "my_pipeline" }, null);
@@ -295,7 +295,7 @@ describe("registerGraphFlowTool — manifold_start", () => {
 
   test("toolErr shape: isError true + content[0].type=text", async () => {
     const { api, tools, pipelinesRef, executor } = makeStartDeps();
-    registerGraphFlowTool({ api, executor, pipelinesRef });
+    registerGraphFlowTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, lineage: api.runtime.lineage, executor, pipelinesRef });
     const { execute } = resolveFactoryTool(tools);
     const result = await execute("tc1", {}, null);
     assert.equal(result.isError, true);

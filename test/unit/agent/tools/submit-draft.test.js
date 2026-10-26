@@ -57,7 +57,7 @@ describe("registerSubmitDraftTool — submit_draft", () => {
 
   function makeTool(ctx = {}, pipelinesRef = undefined) {
     const { api, tools } = createToolApi();
-    registerSubmitDraftTool({ api, pipelinesRef });
+    registerSubmitDraftTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, pipelinesRef });
     return findTool(tools, "submit_draft", ctx);
   }
 

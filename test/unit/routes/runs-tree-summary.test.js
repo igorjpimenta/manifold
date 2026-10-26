@@ -40,7 +40,10 @@ function resetMocks() {
 
 function makeDeps(api, overrides = {}) {
   return {
-    api,
+    registerHttpRoute: (route) => api.registerHttpRoute(route),
+    logger: api.logger,
+    config: api.config,
+    runtime: api.runtime,
     readStore: { list: () => [], get: () => null, listQueued: () => [] },
     costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
     runStore: { listForParentInvocations: () => [] },

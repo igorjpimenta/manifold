@@ -22,7 +22,10 @@ const { registerPipelineRoutes } = await import("../../../routes/pipelines.js");
 
 function makeDeps(api, overrides = {}) {
   return {
-    api,
+    registerHttpRoute: (route) => api.registerHttpRoute(route),
+    logger: api.logger,
+    config: api.config,
+    runtime: api.runtime,
     pipelinesRef: { value: new Map() },
     readStore: { listAllPipelineStats: () => new Map() },
     ensurePipelinesLoaded: async () => {},

@@ -16,8 +16,8 @@
 import { toolErr } from "./shared.js";
 import { resolveInvocationId, writePendingResult } from "../../state/tool-handoff.js";
 
-export function registerSubmitScoreTool({ api }) {
-  api.registerTool((ctx) => ({
+export function registerSubmitScoreTool({ registerTool, logger }) {
+  registerTool((ctx) => ({
     name: "submit_score",
     label: "Manifold: submit a listing's fit score",
     description:
@@ -74,7 +74,7 @@ export function registerSubmitScoreTool({ api }) {
       }
 
       writePendingResult(invocationId, { score, reasons, fitFlags });
-      try { api?.logger?.info?.(`submit_score tool: score=${score} for invocation ${invocationId.slice(0, 8)}`); } catch {}
+      try { logger?.info?.(`submit_score tool: score=${score} for invocation ${invocationId.slice(0, 8)}`); } catch {}
 
       return {
         content: [{ type: "text", text: `score submitted: ${score}` }],

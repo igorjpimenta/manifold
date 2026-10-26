@@ -216,7 +216,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       }
       const failure = openFailures.reduce((a, b) => (a.failed_at >= b.failed_at ? a : b));
       const { retryFailureBranch } = createRetryFailure({
-        store, readStore: runStore, failureStore, pipelinesRef, executor, runStore, ownerSessionKey, admissionQueueStore, logger, api,
+        store, readStore: runStore, failureStore, pipelinesRef, executor, runStore, ownerSessionKey, admissionQueueStore, logger,
       });
       const result = await retryFailureBranch({ id: failure.id, via: "cli", awaitCompletion: true });
       if (result.code !== "ok") {

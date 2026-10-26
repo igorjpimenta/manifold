@@ -33,35 +33,35 @@ beforeEach(() => {
 describe("registerScoreToolWakeHook", () => {
   it("registers exactly one after_tool_call hook, no before_tool_call", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     assert.ok(api._find("after_tool_call"), "after_tool_call handler must be registered");
     assert.equal(api._find("before_tool_call"), undefined);
   });
 
   it("calls notifyToolFired(runId) when submit_score fires", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     api._find("after_tool_call")({ toolName: "submit_score", runId: "run-1" });
     assert.deepEqual(notifyToolFiredCalls, ["run-1"]);
   });
 
   it("ignores a different tool name entirely", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     api._find("after_tool_call")({ toolName: "edit", runId: "run-2" });
     assert.deepEqual(notifyToolFiredCalls, []);
   });
 
   it("does not call notifyToolFired when the event has no runId", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     api._find("after_tool_call")({ toolName: "submit_score" });
     assert.deepEqual(notifyToolFiredCalls, []);
   });
 
   it("does not throw on a null/undefined event", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     const handler = api._find("after_tool_call");
     assert.doesNotThrow(() => handler(null));
     assert.doesNotThrow(() => handler(undefined));
@@ -70,7 +70,7 @@ describe("registerScoreToolWakeHook", () => {
 
   it("does not wake on a rejected call (toolErr()'s isError:true return shape) — the model may still self-correct within the same turn", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     api._find("after_tool_call")({
       toolName: "submit_score",
       runId: "run-3",
@@ -81,7 +81,7 @@ describe("registerScoreToolWakeHook", () => {
 
   it("event.error alone (without result.isError) does not suppress the wake — openclaw core only sets .error on a thrown exception, which a registered tool's execute() never does for a validation rejection", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     api._find("after_tool_call")({
       toolName: "submit_score",
       runId: "run-4",
@@ -93,7 +93,7 @@ describe("registerScoreToolWakeHook", () => {
 
   it("wakes on a successful call with no result field at all (defensive — missing result must not throw)", () => {
     const api = makeMockApi();
-    registerScoreToolWakeHook(api);
+    registerScoreToolWakeHook({ registerHook: (kind, fn, opts) => api.on(kind, fn, opts) });
     assert.doesNotThrow(() => api._find("after_tool_call")({ toolName: "submit_score", runId: "run-5" }));
     assert.deepEqual(notifyToolFiredCalls, ["run-5"]);
   });

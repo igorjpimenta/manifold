@@ -5,7 +5,7 @@
 // thin bridge — auth, flow/target resolution, system-prompt injection — then
 // hands off to the channel runtime for agent dispatch.
 //
-// Entry point: call createManifoldParrotChannelEntry(deps).register(api) from
+// Entry point: call createManifoldParrotChannelEntry(deps).register(deps) from
 // inside manifold's registerFull.
 
 import { randomUUID } from "node:crypto";
@@ -102,8 +102,8 @@ export function createManifoldParrotChannelEntry({
     name: "Manifold Parrot",
     description: "Full-tool-access channel for operator ↔ agent direct sessions",
     plugin,
-    registerFull(api) {
-      api.registerHttpRoute({
+    registerFull({ registerHttpRoute, logger, runtime }) {
+      registerHttpRoute({
         path: "/channels/manifold-parrot/message",
         auth: "plugin",
         match: "exact",
@@ -169,7 +169,7 @@ export function createManifoldParrotChannelEntry({
                 pipelineId: flow.stateJson?.pipelineId ?? null,
               }));
             } catch (err) {
-              api.logger.warn(`manifold-parrot: promptBuilder threw for ${flow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
+              logger.warn(`manifold-parrot: promptBuilder threw for ${flow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
             }
           }
 
@@ -193,7 +193,7 @@ export function createManifoldParrotChannelEntry({
             });
             await discussStore.setTurnStatus(flow.flowId, target.itemId, "running", turnId);
           } catch (err) {
-            api.logger.warn(`manifold-parrot: discuss-store write (operator msg): ${err?.message ?? err}`);
+            logger.warn(`manifold-parrot: discuss-store write (operator msg): ${err?.message ?? err}`);
           }
 
           import("node:fs/promises").then(({ mkdir, writeFile }) => {
@@ -255,7 +255,7 @@ export function createManifoldParrotChannelEntry({
                     await discussStore.clearPending(flow.flowId, target.itemId);
                     await discussStore.setTurnStatus(flow.flowId, target.itemId, "idle", null);
                   } catch (err) {
-                    api.logger.warn(`manifold-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
+                    logger.warn(`manifold-parrot: discuss-store write (agent reply): ${err?.message ?? err}`);
                   }
                   // Canonical text field only — proposal artifacts travel as
                   // discuss.component.proposed events, not turn dupes.
@@ -269,11 +269,11 @@ export function createManifoldParrotChannelEntry({
                     emittedAtMs: Date.now(),
                   });
                   if (!emitRes.ok) {
-                    api.logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: canonical emit failed`);
+                    logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: canonical emit failed`);
                   }
                 },
                 onRecordError: (err) => {
-                  api.logger.warn(`manifold-parrot [${flowIdShort}]: record error: ${err?.message ?? err}`);
+                  logger.warn(`manifold-parrot [${flowIdShort}]: record error: ${err?.message ?? err}`);
                 },
                 onDispatchError: async (err) => {
                   try {
@@ -294,7 +294,7 @@ export function createManifoldParrotChannelEntry({
               // Store peerId (not full sessionKey) so resolveDiscussTarget doesn't double-prefix it.
               if (target.needsStamp) {
                 stampDiscussSession(flow.flowId, gateNodeId, target.itemId, target.agent, peerId);
-                api.runtime?.lineage?.recordSpawn?.({
+                runtime?.lineage?.recordSpawn?.({
                   childSessionKey: result?.route?.sessionKey ?? targetSessionKey,
                   flowId: flow.flowId,
                   nodeId: gateNodeId,
@@ -307,7 +307,7 @@ export function createManifoldParrotChannelEntry({
               }
 
             } catch (err) {
-              api.logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
+              logger.warn(`manifold-parrot [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
               try {
                 await discussStore.stampMessageError(flow.flowId, target.itemId, turnId, err?.message ?? String(err));
                 await discussStore.setTurnStatus(flow.flowId, target.itemId, "error", null);

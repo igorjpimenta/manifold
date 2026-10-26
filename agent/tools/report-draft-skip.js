@@ -19,8 +19,8 @@ import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { toolErr, resolveGateContext } from "./shared.js";
 
-export function registerReportDraftSkipTool({ api }) {
-  api.registerTool((ctx) => ({
+export function registerReportDraftSkipTool({ registerTool, logger }) {
+  registerTool((ctx) => ({
     name: "report_draft_skip",
     label: "Manifold: report the operator declined this listing — skip it",
     description:
@@ -64,7 +64,7 @@ export function registerReportDraftSkipTool({ api }) {
       await mkdir(path.dirname(outPath), { recursive: true });
       await writeFile(outPath, content, "utf-8");
 
-      try { api?.logger?.info?.(`report_draft_skip tool: wrote skip report to ${outPath} (job-id=${jobId})`); } catch {}
+      try { logger?.info?.(`report_draft_skip tool: wrote skip report to ${outPath} (job-id=${jobId})`); } catch {}
 
       return {
         content: [

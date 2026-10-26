@@ -23,8 +23,8 @@ import { notifyToolFired } from "../state/tool-handoff.js";
 
 const SCORE_TOOL_NAME = "submit_score";
 
-export function registerScoreToolWakeHook(api) {
-  api.on("after_tool_call", (event) => {
+export function registerScoreToolWakeHook(harness) {
+  harness.registerHook("after_tool_call", (event) => {
     if (event?.toolName !== SCORE_TOOL_NAME) return;
     if (!event?.runId) return;
     // Only wake on a call that actually stored a pending result.

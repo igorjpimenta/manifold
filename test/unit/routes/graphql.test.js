@@ -45,7 +45,10 @@ async function seedOps(dbPath) {
 
 function makeDeps(api, overrides = {}) {
   return {
-    api,
+    registerHttpRoute: (route) => api.registerHttpRoute(route),
+    logger: api.logger,
+    config: api.config,
+    runtime: api.runtime,
     failureStore: { list: async () => [] },
     runStore: { listRunsPage: async () => [], get: async () => null },
     runtimeDbPath: tmpDb("runtime"),

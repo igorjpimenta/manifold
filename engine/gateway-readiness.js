@@ -44,9 +44,9 @@ export function createReadinessState() {
  *     manifold service has started (not the gateway).
  *   isReady()
  */
-export function registerGatewayReadiness(api, { logger, state = sharedState() } = {}) {
-  if (!state.ready && typeof api?.on === "function") {
-    api.on("gateway_start", () => {
+export function registerGatewayReadiness(harness, { logger, state = sharedState() } = {}) {
+  if (!state.ready && typeof harness.registerHook === "function") {
+    harness.registerHook("gateway_start", () => {
       if (state.ready) return;
       state.ready = true;
       state.resolve();

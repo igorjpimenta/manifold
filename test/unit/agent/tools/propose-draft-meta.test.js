@@ -110,7 +110,7 @@ describe("registerProposeDraftMetaTool — propose_draft_meta", () => {
   function makeMetaDeps({ readStoreFlow = makeGateFlowMeta(), componentEmitter = null, discussStore = null, ctx = {} } = {}) {
     const readStore = { get: (id) => (id === readStoreFlow?.flowId ? readStoreFlow : null) };
     const { api, tools } = createToolApi();
-    registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore });
+    registerProposeDraftMetaTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, readStore, componentEmitter, discussStore });
     const toolDef = findTool(tools, "propose_draft_meta", ctx);
     return { toolDef, readStore };
   }
@@ -326,7 +326,7 @@ describe("registerProposeDraftMetaTool — propose_draft_meta", () => {
     };
     const readStore = { get: () => flow };
     const { api, tools } = createToolApi();
-    registerProposeDraftMetaTool({ api, readStore });
+    registerProposeDraftMetaTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, readStore });
     const toolDef = findTool(tools, "propose_draft_meta");
     const result = await toolDef.execute("tc", { flowId: "fid-ni-meta", itemId: "item-meta", fields: { budget: 7000 } }, null);
     assert.equal(result.isError, true);

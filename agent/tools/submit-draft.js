@@ -72,8 +72,8 @@ function formatFrontmatterValue(v) {
   return needsQuotes ? JSON.stringify(s) : s;
 }
 
-export function registerSubmitDraftTool({ api, pipelinesRef }) {
-  api.registerTool((ctx) => ({
+export function registerSubmitDraftTool({ registerTool, logger, pipelinesRef }) {
+  registerTool((ctx) => ({
     name: "submit_draft",
     label: "Manifold: write a structured draft to disk",
     description:
@@ -222,7 +222,7 @@ export function registerSubmitDraftTool({ api, pipelinesRef }) {
       await mkdir(path.dirname(outPath), { recursive: true });
       await writeFile(outPath, content, "utf-8");
 
-      try { api?.logger?.info?.(`submit_draft tool: wrote ${content.length} chars to ${outPath} (job-id=${jobId})`); } catch {}
+      try { logger?.info?.(`submit_draft tool: wrote ${content.length} chars to ${outPath} (job-id=${jobId})`); } catch {}
 
       return {
         content: [

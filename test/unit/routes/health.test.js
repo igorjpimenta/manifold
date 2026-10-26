@@ -20,7 +20,7 @@ const { registerHealthRoutes } = await import("../../../routes/health.js");
 describe("registerHealthRoutes", () => {
   test("registers GET /manifold/health and answers with version + per-file status", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api });
+    registerHealthRoutes({ registerHttpRoute: (route) => api.registerHttpRoute(route), logger: api.logger });
     assert.equal(routes.length, 1);
     assert.equal(routes[0].path, "/manifold/health");
     const res = createMockRes();
@@ -38,7 +38,7 @@ describe("registerHealthRoutes", () => {
 
   test("POST rejected with 405", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api });
+    registerHealthRoutes({ registerHttpRoute: (route) => api.registerHttpRoute(route), logger: api.logger });
     const res = createMockRes();
     await routes[0].handler(createMockReq("POST", "/manifold/health"), res);
     assert.equal(res.statusCode, 405);

@@ -9,7 +9,7 @@ export const HARNESS_METHODS = [
   "sessionKey",
 ];
 
-export const OPTIONAL_METHODS = ["getSubagent"];
+export const OPTIONAL_METHODS = ["getSubagent", "registerHttpRoute", "registerService"];
 
 export function assertHarnessShape(h, { what = "harness" } = {}) {
   if (!h || typeof h !== "object") throw new Error(`${what}: harness must be an object`);

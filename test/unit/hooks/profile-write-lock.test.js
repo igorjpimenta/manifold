@@ -49,7 +49,7 @@ function makeMockApi() {
 }
 
 function register(api) {
-  registerProfileWriteLock(api, { profilePath: PROFILE_PATH, resultsDir: RESULTS_DIR });
+  registerProfileWriteLock({ registerHook: (event, handler, opts) => api.on(event, handler, opts) }, { profilePath: PROFILE_PATH, resultsDir: RESULTS_DIR });
 }
 
 describe("registerProfileWriteLock", () => {

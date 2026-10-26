@@ -58,7 +58,7 @@ describe("registerReportDraftBlockedTool — report_draft_blocked", () => {
 
   function makeTool(ctx = {}) {
     const { api, tools } = createToolApi();
-    registerReportDraftBlockedTool({ api });
+    registerReportDraftBlockedTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger });
     return findTool(tools, "report_draft_blocked", ctx);
   }
 

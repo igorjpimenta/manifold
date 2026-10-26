@@ -104,7 +104,7 @@ describe("registerProposeDraftTool — propose_draft", () => {
   function makeDraftDeps({ readStoreFlow = makeGateFlow(), componentEmitter = null, discussStore = null, ctx = {} } = {}) {
     const readStore = { get: (id) => (id === readStoreFlow?.flowId ? readStoreFlow : null) };
     const { api, tools } = createToolApi();
-    registerProposeDraftTool({ api, readStore, componentEmitter, discussStore });
+    registerProposeDraftTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, readStore, componentEmitter, discussStore });
     const toolDef = findTool(tools, "propose_draft", ctx);
     return { toolDef, readStore };
   }
@@ -157,7 +157,7 @@ describe("registerProposeDraftTool — propose_draft", () => {
     };
     const readStore = { get: () => flow };
     const { api, tools } = createToolApi();
-    registerProposeDraftTool({ api, readStore });
+    registerProposeDraftTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, readStore });
     const toolDef = findTool(tools, "propose_draft");
     const result = await toolDef.execute("tc", { flowId: "fid-ni", itemId: "item-abc", text: "new text" }, null);
     assert.equal(result.isError, true);
@@ -186,7 +186,7 @@ describe("registerProposeDraftTool — propose_draft", () => {
     };
     const readStore = { get: () => flow };
     const { api, tools } = createToolApi();
-    registerProposeDraftTool({ api, readStore });
+    registerProposeDraftTool({ registerTool: (def, opts) => api.registerTool(def, opts), logger: api.logger, readStore });
     const toolDef = findTool(tools, "propose_draft");
     const result = await toolDef.execute("tc", { flowId: "fid-obj-item", itemId: "item-obj", text: "new text" }, null);
     assert.equal(result.isError, undefined, "object-itemId should resolve correctly");

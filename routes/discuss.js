@@ -13,7 +13,9 @@ import { assembleState } from "../engine/executor-helpers.js";
 // rather than using module-level singletons.
 
 export function registerDiscussHandlers({
-  api,
+  logger,
+  config,
+  runtime,
   store,
   pipelinesRef,
   emit,
@@ -167,7 +169,7 @@ export function registerDiscussHandlers({
         };
         systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
       } catch (err) {
-        api.logger.warn(`manifold discuss promptBuilder threw for ${sourceFlow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
+        logger.warn(`manifold discuss promptBuilder threw for ${sourceFlow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
       }
     }
     const turnId = randomUUID();
@@ -182,12 +184,12 @@ export function registerDiscussHandlers({
       });
       await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "running", turnId);
     } catch (err) {
-      api.logger.warn(`discuss-store write (operator msg): ${err?.message ?? err}`);
+      logger.warn(`discuss-store write (operator msg): ${err?.message ?? err}`);
     }
 
     if (target.needsStamp) {
       stampDiscussSession(sourceFlow.flowId, target.gateNodeId ?? "", target.itemId, target.agent, target.sessionId);
-      api.runtime?.lineage?.recordSpawn?.({ childSessionKey: target.sessionKey, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
+      runtime?.lineage?.recordSpawn?.({ childSessionKey: target.sessionKey, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
     }
 
     import("node:fs/promises").then(({ mkdir, writeFile }) => {
@@ -232,7 +234,7 @@ export function registerDiscussHandlers({
             await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
           }
         } catch (err) {
-          api.logger.warn(`discuss-store write (agent reply): ${err?.message ?? err}`);
+          logger.warn(`discuss-store write (agent reply): ${err?.message ?? err}`);
         }
         const turnKind = succeeded ? "session.transcript.completed" : "session.transcript.failed";
         const emitRes = await emit(turnKind, succeeded
@@ -254,15 +256,15 @@ export function registerDiscussHandlers({
               emittedAtMs: Date.now(),
             });
         if (!emitRes.ok) {
-          api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: canonical emit failed`);
+          logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: canonical emit failed`);
         } else {
-          api.logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${turnKind} emitted`);
+          logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${turnKind} emitted`);
         }
         import("node:fs/promises").then(({ unlink }) =>
           unlink(path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId, `${target.itemId}.pending.json`))
         ).catch(() => { /* non-fatal */ });
       } catch (err) {
-        api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
+        logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
         try {
           await discussStore.stampMessageError(sourceFlow.flowId, target.itemId, turnId, err?.message ?? String(err));
           await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
@@ -292,15 +294,15 @@ export function registerDiscussHandlers({
     sourceFlow, target, turnId, audioPath, audioUrl, metaPath,
     mime, language, systemPrompt, createdAtMs, logPrefix,
   }) {
-    const mu = api.runtime?.mediaUnderstanding;
+    const mu = runtime?.mediaUnderstanding;
     let transcript = "";
     let transcribeError = null;
     try {
-      const muResult = await mu.transcribeAudioFile({ cfg: api.config, filePath: audioPath, mime, language });
+      const muResult = await mu.transcribeAudioFile({ cfg: config, filePath: audioPath, mime, language });
       transcript = typeof muResult?.text === "string" ? muResult.text.trim() : "";
     } catch (err) {
       transcribeError = err?.message ?? String(err);
-      api.logger.warn(`${logPrefix}: transcribe failed: ${transcribeError}`);
+      logger.warn(`${logPrefix}: transcribe failed: ${transcribeError}`);
     }
 
     try {
@@ -313,7 +315,7 @@ export function registerDiscussHandlers({
         createdAtMs, transcribedAtMs: Date.now(),
       }, null, 2));
     } catch (err) {
-      api.logger.warn(`${logPrefix}: meta sidecar update failed: ${err?.message ?? err}`);
+      logger.warn(`${logPrefix}: meta sidecar update failed: ${err?.message ?? err}`);
     }
 
     const transcriptStatus = transcribeError ? "failed" : transcript ? "completed" : "empty";
@@ -370,10 +372,10 @@ export function registerDiscussHandlers({
             emittedAtMs: Date.now(),
           });
       if (!emitRes.ok) {
-        api.logger.warn(`${logPrefix}: canonical emit failed`);
+        logger.warn(`${logPrefix}: canonical emit failed`);
       }
     } catch (err) {
-      api.logger.warn(`${logPrefix}: runner error: ${err?.message ?? err}`);
+      logger.warn(`${logPrefix}: runner error: ${err?.message ?? err}`);
       await emit("session.transcript.failed", {
         scope: "discuss",
         turnId,
@@ -413,7 +415,7 @@ export function registerDiscussHandlers({
       res.end(JSON.stringify({ ok: false, code: target.code, error: target.error }));
       return true;
     }
-    const mu = api.runtime?.mediaUnderstanding;
+    const mu = runtime?.mediaUnderstanding;
     if (!mu?.transcribeAudioFile) {
       res.statusCode = 503;
       res.setHeader("Content-Type", "application/json");
@@ -429,7 +431,7 @@ export function registerDiscussHandlers({
       await mkdir(audioDir, { recursive: true });
       await writeFile(audioPath, Buffer.from(audioB64, "base64"));
     } catch (err) {
-      api.logger.warn(`manifold discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: persist failed: ${err?.message ?? err}`);
+      logger.warn(`manifold discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: persist failed: ${err?.message ?? err}`);
       res.statusCode = 500;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ ok: false, code: "audio_persist_failed", error: err?.message ?? String(err) }));
@@ -444,7 +446,7 @@ export function registerDiscussHandlers({
         turnId, itemId: target.itemId, audioUrl, transcript: null, status: "pending", createdAtMs,
       }, null, 2));
     } catch (err) {
-      api.logger.warn(`manifold discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: pending meta sidecar failed: ${err?.message ?? err}`);
+      logger.warn(`manifold discuss/audio [${flowIdShort}/${turnId.slice(0, 8)}]: pending meta sidecar failed: ${err?.message ?? err}`);
     }
 
     res.statusCode = 202;
@@ -468,7 +470,7 @@ export function registerDiscussHandlers({
         };
         systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
       } catch (err) {
-        api.logger.warn(`manifold discuss/audio promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
+        logger.warn(`manifold discuss/audio promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
       }
     }
 
@@ -508,7 +510,7 @@ export function registerDiscussHandlers({
       res.end(JSON.stringify({ ok: false, code: target.code, error: target.error }));
       return true;
     }
-    const mu = api.runtime?.mediaUnderstanding;
+    const mu = runtime?.mediaUnderstanding;
     if (!mu?.transcribeAudioFile) {
       res.statusCode = 503;
       res.setHeader("Content-Type", "application/json");
@@ -549,7 +551,7 @@ export function registerDiscussHandlers({
         };
         systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
       } catch (err) {
-        api.logger.warn(`manifold discuss/audio/retry promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
+        logger.warn(`manifold discuss/audio/retry promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
       }
     }
 
@@ -763,7 +765,7 @@ export function registerDiscussHandlers({
         } catch { /* sidecar absent or unreadable → no-op */ }
       }
     } catch (err) {
-      api.logger.warn(`manifold discuss history enrichment error: ${err?.message ?? err}`);
+      logger.warn(`manifold discuss history enrichment error: ${err?.message ?? err}`);
       if (!parsed) parsed = { ok: false, code: "internal", error: err?.message ?? String(err) };
     }
     if (parsed?.ok) {
@@ -823,10 +825,10 @@ export function registerDiscussHandlers({
         newDraft: text,
         source,
         store,
-        logger: api.logger,
+        logger,
       });
       if (!r.applied) {
-        api.logger.warn(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: body persist failed: ${r.code}`);
+        logger.warn(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: body persist failed: ${r.code}`);
         res.statusCode = r.code === "rejected_meta_narration" ? 400 : 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: r.code }));
@@ -840,10 +842,10 @@ export function registerDiscussHandlers({
         itemId: target.itemId,
         fields,
         store,
-        logger: api.logger,
+        logger,
       });
       if (!r.applied) {
-        api.logger.warn(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: meta persist failed: ${r.code}`);
+        logger.warn(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: meta persist failed: ${r.code}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, code: r.code }));
@@ -854,7 +856,7 @@ export function registerDiscussHandlers({
     // INTENTIONAL: no gateResolver.recordItemDecision here.
     // Apply revises; Approve commits. They are separate operator intents.
     try { clearPending(sourceFlow.flowId, target.itemId); } catch {}
-    api.logger.info(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: applied (${summary.join(", ")})`);
+    logger.info(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: applied (${summary.join(", ")})`);
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ ok: true }));

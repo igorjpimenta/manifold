@@ -155,7 +155,7 @@ function buildEntry(overrides = {}) {
 
   const { api, routes } = createMockApi();
   api.runtime = { lineage: { recordSpawn: () => {} } };
-  entry.registerFull(api);
+  entry.registerFull({ registerHttpRoute: (route) => api.registerHttpRoute(route), logger: api.logger, runtime: api.runtime });
 
   const route = routes.find((r) => r.path === "/channels/manifold-parrot/message");
 

@@ -21,8 +21,8 @@
 import { mergePendingFields, readPending } from "../../state/pending-store.js";
 import { toolErr, META_FIELD_WHITELIST, normalizePendingFields, resolveGateContext, looksLikeNumericRange } from "./shared.js";
 
-export function registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore }) {
-  api.registerTool((ctx) => ({
+export function registerProposeDraftMetaTool({ registerTool, logger, readStore, componentEmitter, discussStore }) {
+  registerTool((ctx) => ({
     name: "propose_draft_meta",
     label: "Manifold: propose frontmatter metadata changes for the operator's gate",
     description:
@@ -181,7 +181,7 @@ export function registerProposeDraftMetaTool({ api, readStore, componentEmitter,
       if (discussStore) {
         try { await discussStore.mergePendingFields(flowId, itemId, fields); } catch {}
       }
-      try { api?.logger?.info?.(`propose_draft_meta tool: stashed ${Object.keys(fields).join("+")} for ${flowId.slice(0, 8)}/${itemId.slice(0, 40)}`); } catch {}
+      try { logger?.info?.(`propose_draft_meta tool: stashed ${Object.keys(fields).join("+")} for ${flowId.slice(0, 8)}/${itemId.slice(0, 40)}`); } catch {}
       try {
         if (componentEmitter) {
           await componentEmitter({ flowId, itemId, component: { kind: "proposed_meta", fields: normalizePendingFields(fields), updatedAt: Date.now() } });

@@ -13,7 +13,6 @@ import { mock } from "node:test";
 import { resumeFlowFromGate } from "../../../routes/operator-resume.js";
 
 const silentLogger = { info: () => {}, warn: () => {}, error: () => {} };
-const apiStub = { logger: silentLogger };
 
 function makeFlow(overrides = {}) {
   return {
@@ -47,7 +46,7 @@ describe("resumeFlowFromGate — applied", () => {
 
     const result = await resumeFlowFromGate({
       store, readStore: null, admissionQueueStore, runStore: {},
-      executor, logger: silentLogger, api: apiStub,
+      executor, logger: silentLogger,
       flowId: "flow-1", nodeId: "GATE", decision: "approve",
     });
 
@@ -73,7 +72,7 @@ describe("resumeFlowFromGate — applied", () => {
 
     const result = await resumeFlowFromGate({
       store, readStore: null, admissionQueueStore, runStore: {},
-      executor, logger: silentLogger, api: apiStub,
+      executor, logger: silentLogger,
       flowId: "flow-1", nodeId: "GATE", decision: "approve",
     });
 
@@ -92,7 +91,7 @@ describe("resumeFlowFromGate — failures", () => {
       store: { get: async () => null }, readStore: null,
       admissionQueueStore: { admit }, runStore: {},
       executor: { resume: async () => {} },
-      logger: silentLogger, api: apiStub,
+      logger: silentLogger,
       flowId: "missing", nodeId: "GATE", decision: "approve",
     });
     assert.deepEqual(result, { ok: false, code: "flow_not_found" });
@@ -114,7 +113,7 @@ describe("resumeFlowFromGate — failures", () => {
     const result = await resumeFlowFromGate({
       store, readStore: null, admissionQueueStore, runStore: {},
       executor: { resume: async () => {} },
-      logger: silentLogger, api: apiStub,
+      logger: silentLogger,
       flowId: "flow-1", nodeId: "GATE", decision: "approve",
     });
 

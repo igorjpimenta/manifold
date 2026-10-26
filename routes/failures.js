@@ -4,9 +4,9 @@
 // at all, so it has no route here. Only GET (list) and POST .../retry
 // (implemented in routes/operator-retry.js) remain.
 
-export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
+export function registerFailureRoutes({ registerHttpRoute, logger, failureStore, invokeElevated }) {
   // ── GET /manifold/failures ─────────────────────────────────────────────
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/failures",
     auth: "plugin",
     match: "exact",
@@ -37,7 +37,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ rows, count: rows.length }));
       } catch (err) {
-        api.logger.warn(`manifold /failures handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold /failures handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));
@@ -47,7 +47,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
   });
 
   // ── POST /manifold/failures/<id>/retry ──────────────────────────────────
-  api.registerHttpRoute({
+  registerHttpRoute({
     path: "/manifold/failures/",
     auth: "plugin",
     match: "prefix",
@@ -81,7 +81,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
             res.setHeader("Content-Type", "application/json");
             res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
           } catch (err) {
-            api.logger.warn(`manifold retry handler error: ${err?.message ?? err}`);
+            logger.warn(`manifold retry handler error: ${err?.message ?? err}`);
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
@@ -91,7 +91,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         res.statusCode = 404;
         res.end("unknown failures subroute");
       } catch (err) {
-        api.logger.warn(`manifold /failures/ handler error: ${err?.message ?? err}`);
+        logger.warn(`manifold /failures/ handler error: ${err?.message ?? err}`);
         res.statusCode = 500;
         res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: err?.message ?? String(err) }));

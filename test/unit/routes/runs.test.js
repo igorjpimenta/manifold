@@ -59,7 +59,10 @@ function prefixHandler(routes) {
 
 function makeDeps(api, overrides = {}) {
   return {
-    api,
+    registerHttpRoute: (route) => api.registerHttpRoute(route),
+    logger: api.logger,
+    config: api.config,
+    runtime: api.runtime,
     readStore: { listStatusCounts: () => ({}), listRunsPage: () => [], listCostSnapshot: () => [], get: () => null, listQueued: () => [] },
     costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
     pipelinesRef: { value: new Map() },

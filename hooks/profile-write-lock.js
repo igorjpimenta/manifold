@@ -70,28 +70,28 @@ export function profileEditResultPathFor(runId, { resultsDir = DEFAULT_RESULTS_D
 // a name-only lookup — matters if calls ever overlap across sessions).
 const heldLocks = new Map();
 
-export function registerProfileWriteLock(api, { profilePath = DEFAULT_PROFILE_PATH, resultsDir = DEFAULT_RESULTS_DIR } = {}) {
-  api.on("before_tool_call", async (event) => {
+export function registerProfileWriteLock(harness, { profilePath = DEFAULT_PROFILE_PATH, resultsDir = DEFAULT_RESULTS_DIR, logger = null } = {}) {
+  harness.registerHook("before_tool_call", async (event) => {
     if (event?.toolName !== EDIT_TOOL_NAME) return;
     if (event?.params?.path !== profilePath) return;
-    api?.logger?.info?.(`profile-write-lock: acquiring for PROFILE.md edit (runId=${event.runId ?? "?"}, toolCallId=${event.toolCallId ?? "?"})`);
+    logger?.info?.(`profile-write-lock: acquiring for PROFILE.md edit (runId=${event.runId ?? "?"}, toolCallId=${event.toolCallId ?? "?"})`);
     const lock = await acquireLock(lockNameForFile(profilePath), { timeoutMs: ACQUIRE_TIMEOUT_MS, staleMs: STALE_MS });
     if (event.toolCallId) heldLocks.set(event.toolCallId, lock);
-    api?.logger?.info?.(`profile-write-lock: acquired (runId=${event.runId ?? "?"})`);
+    logger?.info?.(`profile-write-lock: acquired (runId=${event.runId ?? "?"})`);
   }, { priority: 50, timeoutMs: ACQUIRE_TIMEOUT_MS + 5_000 });
 
   // after_tool_call is fire-and-forget in the runtime (errors here become a
   // warning log, nothing awaits or retries this handler) — every step below
   // is wrapped defensively so a failure in one doesn't skip the other.
-  api.on("after_tool_call", async (event) => {
+  harness.registerHook("after_tool_call", async (event) => {
     if (event?.toolName !== EDIT_TOOL_NAME) return;
     if (event?.params?.path !== profilePath) return;
 
     const toolCallId = event.toolCallId;
     const lock = toolCallId ? heldLocks.get(toolCallId) : null;
     if (toolCallId) heldLocks.delete(toolCallId);
-    try { await lock?.release(); } catch (err) { api?.logger?.warn?.(`profile-write-lock: release failed: ${err?.message ?? err}`); }
-    api?.logger?.info?.(`profile-write-lock: released (runId=${event.runId ?? "?"}, hadLock=${Boolean(lock)}, success=${!event.error})`);
+    try { await lock?.release(); } catch (err) { logger?.warn?.(`profile-write-lock: release failed: ${err?.message ?? err}`); }
+    logger?.info?.(`profile-write-lock: released (runId=${event.runId ?? "?"}, hadLock=${Boolean(lock)}, success=${!event.error})`);
 
     if (!event.runId) return;
     try {
@@ -102,7 +102,7 @@ export function registerProfileWriteLock(api, { profilePath = DEFAULT_PROFILE_PA
         at: new Date().toISOString(),
       }));
     } catch (err) {
-      api?.logger?.warn?.(`profile-write-lock: could not record edit result for runId=${event.runId}: ${err?.message ?? err}`);
+      logger?.warn?.(`profile-write-lock: could not record edit result for runId=${event.runId}: ${err?.message ?? err}`);
     }
   });
 }

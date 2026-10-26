@@ -28,7 +28,10 @@ const { registerFailureRoutes } = await import("../../../routes/failures.js");
 
 function makeDeps(api, overrides = {}) {
   return {
-    api,
+    registerHttpRoute: (route) => api.registerHttpRoute(route),
+    logger: api.logger,
+    config: api.config,
+    runtime: api.runtime,
     failureStore: { list: () => [], get: () => null },
     invokeElevated: async () => ({}),
     ...overrides,

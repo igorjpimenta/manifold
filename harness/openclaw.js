@@ -47,6 +47,12 @@ export function createOpenClawHarness({ api, getWorkingSubagent, whenGatewayRead
       if (typeof api?.on === "function") return api.on(kind, fn);
       hooks.push([kind, fn]);
     },
+    registerHttpRoute(route) {
+      if (typeof api?.registerHttpRoute === "function") return api.registerHttpRoute(route);
+    },
+    registerService(def) {
+      if (typeof api?.registerService === "function") return api.registerService(def);
+    },
     storePaths() {
       const dataDir = path.join(os.homedir(), ".openclaw");
       return {
