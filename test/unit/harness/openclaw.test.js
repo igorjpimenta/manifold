@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
 import { createOpenClawHarness } from "../../../harness/openclaw.js";
-import { parseIdentity } from "../../../harness/identity.js";
 import { defaultAgentSessionKey } from "../../../engine/executor-helpers.js";
 
 function makeApi(subagent) {
@@ -107,14 +106,14 @@ describe("openclaw harness adapter", () => {
     }
   });
 
-  it("sessionKey carries the defaultAgentSessionKey seed and fails loudly when agent missing", () => {
+  it("sessionKey keeps the gateway-native key shape and fails loudly when agent missing", () => {
     const { api } = makeApi(null);
     const harness = createOpenClawHarness({ api });
     const flowId = "12345678-aaaa-bbbb-cccc-000000000000";
     const key = harness.sessionKey({ agent: "scout", flowId, nodeId: "PROPOSE" });
     const seed = defaultAgentSessionKey("scout", flowId, "PROPOSE");
-    assert.equal(key, `openclaw:scout:${seed}`);
-    assert.deepEqual(parseIdentity(key).harness, "openclaw");
+    assert.equal(key, seed);
+    assert.match(key, /^agent:scout:subagent:gf-/);
     assert.throws(() => harness.sessionKey({ flowId, nodeId: "PROPOSE" }), /unstamped/);
   });
 });

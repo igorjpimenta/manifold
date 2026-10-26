@@ -1,7 +1,6 @@
 import os from "node:os";
 import path from "node:path";
 import { createHarnessPort } from "./Harness.js";
-import { formatIdentity, stampCallMeta } from "./identity.js";
 import { defaultAgentSessionKey } from "../engine/executor-helpers.js";
 import { GatewayHandoffNeeded } from "../engine/executor-errors.js";
 import { createGatewaySubagentGate } from "../engine/gateway-subagent.js";
@@ -57,8 +56,9 @@ export function createOpenClawHarness({ api, getWorkingSubagent, whenGatewayRead
       };
     },
     sessionKey({ agent, session, flowId, nodeId, itemKey }) {
-      const seed = defaultAgentSessionKey(agent, flowId, nodeId, itemKey);
-      return formatIdentity(stampCallMeta({}, { harness: id, agent, session: session ?? seed }));
+      if (!agent) throw new Error("manifold identity: unstamped call refused (agent must be stamped by the calling harness)");
+      if (session) return session;
+      return defaultAgentSessionKey(agent, flowId, nodeId, itemKey);
     },
   });
 }
