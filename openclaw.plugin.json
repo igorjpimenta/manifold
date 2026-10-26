@@ -64,7 +64,28 @@
       "globalConcurrency": {
         "type": "integer",
         "minimum": 1,
-        "description": "Shared ceiling for every flow-run concurrency mechanism \u2014 agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+        "description": "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+      },
+      "pushUrl": {
+        "type": "string",
+        "description": "Single URL manifold POSTs harness lifecycle events to for every harness (harness/push.js). Env: MANIFOLD_PUSH_URL."
+      },
+      "pushUrls": {
+        "type": "object",
+        "description": "Per-harness push URLs, keyed by harness id. Each value is a URL string or {url, bearer, timeoutMs}."
+      },
+      "pushBearer": {
+        "type": "string",
+        "description": "Bearer token sent as Authorization on single-URL pushes. Env: MANIFOLD_PUSH_BEARER."
+      },
+      "pushTimeoutMs": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Push POST timeout in milliseconds. Default: 3000. Env: MANIFOLD_PUSH_TIMEOUT_MS."
+      },
+      "pushBaseUrl": {
+        "type": "string",
+        "description": "Public base URL this harness POSTs back to, for push self-registration. Env: MANIFOLD_PUSH_BASE_URL."
       },
       "profilePath": {
         "type": "string",
