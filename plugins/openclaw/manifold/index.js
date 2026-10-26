@@ -25,6 +25,7 @@ import { createNodeHealthStore } from "../../../state/node-health-store.js";
 import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
+import { wrapSubagentKeys, toGatewaySessionKey, toGatewayKey } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
 import {
   registerGraphFlowTool,
@@ -307,8 +308,16 @@ export default definePluginEntry({
     // classification, which runs while the gateway is still starting).
     const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
-      record(data) { return _sessionIndexPromise.then(si => si.record(data)); },
+      record(data) {
+        return _sessionIndexPromise.then((si) => si.record({
+          ...data,
+          sessionKey: typeof data?.sessionKey === "string" && data.sessionKey.startsWith("mf-") && data?.agent
+            ? toGatewayKey({ opaque: data.sessionKey, agent: data.agent })
+            : data?.sessionKey,
+        }));
+      },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
+      flowIdForSessionKey(sessionKey) { return _sessionIndexPromise.then(si => si.flowIdForSessionKey(sessionKey)); },
       close() { _sessionIndexPromise.then(si => si.close?.()).catch(() => {}); },
     };
 
@@ -341,7 +350,7 @@ export default definePluginEntry({
     };
     const pushStream = createEventStream();
     async function notifyPushEvent({ event, flowId = null, nodeId = null, pipelineId = null, sessionKey = null, agent = null }) {
-      const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey, agent, harnessId: pushHarness });
+      const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey: toGatewaySessionKey(sessionKey, agent), agent, harnessId: pushHarness });
       pushStream.append(payload);
       let dbEntry = null;
       try {
@@ -368,7 +377,10 @@ export default definePluginEntry({
       runStore,
       nodeExecutionsStore,
       admissionQueueStore,
-      getWorkingSubagent: () => moduleState.workingSubagent,
+      // Wrapped at the single injection edge: raw api.runtime.subagent never
+      // reaches core directly (wrapSubagentKeys memoizes, so repeated
+      // resolves don't re-wrap).
+      getWorkingSubagent: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null),
       whenGatewayReady: () => gatewayReadiness.whenReady(),
       emit: emitCanonical,
     });
@@ -801,7 +813,7 @@ export default definePluginEntry({
     // ── Runtime-capture service ──────────────────────────────────────────────
 
     // Push wake route + boot-time self-registration (best-effort).
-    registerPushWebhook({ api, logger: api.logger, getSubagent: () => moduleState.workingSubagent ?? api.runtime?.subagent });
+    registerPushWebhook({ api, logger: api.logger, getSubagent: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null) });
     api.registerService({
       id: "manifold-push-autoregister",
       start: async () => {
@@ -818,7 +830,9 @@ export default definePluginEntry({
       id: "manifold-runtime-capture",
       start: async () => {
         if (!moduleState.workingSubagent && api.runtime?.subagent) {
-          moduleState.workingSubagent = api.runtime.subagent;
+          // Wrapped ONCE here: every core dispatch below resolves through
+          // this reference, so opaque handles map at exactly one edge.
+          moduleState.workingSubagent = wrapSubagentKeys(api.runtime.subagent);
           api.logger.info("manifold: captured working subagent runtime for executor use");
         }
       },

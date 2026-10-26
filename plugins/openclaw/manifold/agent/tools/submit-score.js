@@ -15,6 +15,7 @@
 
 import { toolErr } from "./shared.js";
 import { resolveInvocationId, writePendingResult } from "../../../../../state/tool-handoff.js";
+import { toOpaqueKey } from "../../session-keys.js";
 
 export function registerSubmitScoreTool({ api }) {
   api.registerTool((ctx) => ({
@@ -68,7 +69,11 @@ export function registerSubmitScoreTool({ api }) {
         return toolErr(`score must be ≤30 when a hard gate failed (language=${fitFlags.language}, budget=${fitFlags.budget}, domain=${fitFlags.domain}), got ${score}`);
       }
 
-      const invocationId = resolveInvocationId(ctx?.sessionKey);
+      // ctx.sessionKey arrives gateway-shaped; the dispatch registered
+      // under core's opaque handle (session-keys.js) — map back first,
+      // falling back to the raw key for verbatim explicit overrides.
+      const opaque = toOpaqueKey(ctx?.sessionKey);
+      const invocationId = (opaque != null ? resolveInvocationId(opaque) : null) ?? resolveInvocationId(ctx?.sessionKey);
       if (!invocationId) {
         return toolErr("could not resolve this session's dispatch context — this tool must be called from within a SCORE_LLM node dispatch");
       }

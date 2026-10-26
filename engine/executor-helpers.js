@@ -98,25 +98,30 @@ export function withEditableTextDefault(payload, branchData) {
   return { ...payload, editableText: candidate };
 }
 
-const MANIFOLD_SESSION_MARKER = ":subagent:gf-";
-// Anchored: matches only the exact `:subagent:gf-<8-hex>-` shape
-// defaultAgentSessionKey produces, not any string that merely contains
-// "gf-" somewhere (a custom node.sessionKey/sessionKeyBuilder value could
-// otherwise coincidentally substring-match the old bare .includes() check).
-const MANIFOLD_SESSION_KEY_RE = /:subagent:gf-[0-9a-f]{8}-/;
-
-export function defaultAgentSessionKey(agent, flowId, nodeId, itemKey) {
+// Core-minted opaque handle: `mf-<flow8>-<node>[-<item>]`. No agent prefix,
+// no gateway namespace — the adapter maps this to a gateway key at the edge
+// (plugins/openclaw/manifold/session-keys.js) before any subagent call.
+export function mintAgentSessionKey(flowId, nodeId, itemKey) {
   const seed = itemKey ? `${nodeId.toLowerCase()}-${itemKey}` : nodeId.toLowerCase();
-  return `agent:${agent}${MANIFOLD_SESSION_MARKER}${flowId.slice(0, 8)}-${seed}`;
+  return `mf-${flowId.slice(0, 8)}-${seed}`;
 }
 
-// Convention-based check: true for a session key SHAPED like one
-// defaultAgentSessionKey would build. This is a fallback signal, not an
-// authoritative one — see boot/taskflow-revive.js's isManifoldOwnedSession(),
-// which prefers the session store's own pluginOwnerId field and only falls
-// back to this when that lookup is unavailable.
+// Opaque core handle minted above, verbatim (core-side maps, handoff keys).
+const OPAQUE_SESSION_KEY_RE = /^mf-[0-9a-f]{8}-/;
+// Gateway shape the adapter produces for an opaque handle:
+// `agent:<agent>:subagent:mf-<flow8>-<node>[-<item>]`. Matched so boot-time
+// orphan classification (which only ever sees gateway-shaped keys from
+// task_runs rows) keeps working; the legacy `gf-` shape core used to mint
+// is deliberately NOT matched anymore.
+const GATEWAY_SESSION_KEY_RE = /:subagent:mf-[0-9a-f]{8}-/;
+
+// Convention-based check, same fallback role as before — see
+// boot/taskflow-revive.js's isManifoldOwnedSession(), which prefers the
+// session store's own pluginOwnerId field and only falls back to this
+// when that lookup is unavailable.
 export function isManifoldOwnedSessionKey(sessionKey) {
-  return typeof sessionKey === "string" && MANIFOLD_SESSION_KEY_RE.test(sessionKey);
+  return typeof sessionKey === "string"
+    && (OPAQUE_SESSION_KEY_RE.test(sessionKey) || GATEWAY_SESSION_KEY_RE.test(sessionKey));
 }
 
 export function shortSummary(text) {

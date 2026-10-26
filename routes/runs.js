@@ -952,7 +952,7 @@ export function registerRunRoutes({
     const osMod = await import("node:os");
     const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
-    const subagentKeyPattern = new RegExp(`^agent:([^:]+):subagent:gf-${flowShort}-(.+)$`);
+    const subagentKeyPattern = new RegExp(`^agent:([^:]+):subagent:mf-${flowShort}-(.+)$`);
     const discussKeyPattern  = new RegExp(`^agent:([^:]+):(?:gf-discuss-|manifold-parrot:direct:)${flowShort}-(.+)$`);
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;
