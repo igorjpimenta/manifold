@@ -1,7 +1,7 @@
 // failure-store.js — durable record of flow / branch failures, for
 // operator triage via a consumer's Failures surface + deep links.
 //
-// Storage:  ~/.openclaw/runtime.sqlite (see DEFAULT_DB_PATH).
+// Storage:  ~/.openclaw/runtime.sqlite (see defaultDbPath()).
 //
 // Why a separate db file rather than another table in registry.sqlite:
 // schema isolation. failure_events is queried independently from
@@ -38,7 +38,7 @@
 
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
 import { flowRuns } from "./schema.js";
 import path from "node:path";
 import os from "node:os";
@@ -47,7 +47,9 @@ import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { failureEmitter } from "../events.js";
 import { getNodeExecutionsStore } from "./node-executions.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+function defaultDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
 // Maps a failure's (error_type, summary) to the operator action the iOS
 // Inbox should surface for this row:
@@ -101,7 +103,7 @@ export function createFailureStore(opts = {}) {
   } });
 }
 
-async function _createFailureStoreImpl({ dbPath = DEFAULT_DB_PATH, logger, nodeExecutionsStore, emit } = {}) {
+async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeExecutionsStore, emit } = {}) {
   // Injectable for tests (defaults to the real singleton in production) —
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? await getNodeExecutionsStore();

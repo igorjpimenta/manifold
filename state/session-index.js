@@ -8,23 +8,25 @@
 // on disk directly. This index is written but currently has no reader
 // in production code.
 //
-// Storage: ~/.openclaw/runtime.sqlite (see DEFAULT_DB_PATH).
+// Storage: ~/.openclaw/runtime.sqlite (see defaultDbPath()).
 //
 // INSERT OR IGNORE via UNIQUE(flow_id, session_key) — recording the same
 // session key twice (e.g. on error-retry with the same key) is a no-op.
 
 import { mkdirSync } from "node:fs";
 import { eq, and } from "drizzle-orm";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
 import { flowSessions } from "./schema.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+function defaultDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
-export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
+export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   let db, client;
   try {

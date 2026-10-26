@@ -1,6 +1,7 @@
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
+export { resolveStorePaths } from './paths.js';
 
 // Returns { db, client } where:
 //   db     — Drizzle ORM instance; use for typed queries
