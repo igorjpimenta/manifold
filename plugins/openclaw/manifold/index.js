@@ -65,7 +65,6 @@ import { registerPipelineRoutes } from "../../../routes/pipelines.js";
 // plugin-auth route and the device-pairing helper authenticates the
 // dashboard.
 import { authorizeBridgeRequest, sendUnauthorized } from "./auth/bridge.js";
-import { pairDashboardDevice } from "./dashboard/device.js";
 import { registerBudgetRoutes } from "../../../budget/index.js";
 import { registerTelemetry } from "../../../telemetry/index.js";
 import { scanAndCleanup as taskflowScanAndCleanup } from "../../../boot/taskflow-revive.js";
@@ -713,8 +712,11 @@ export default definePluginEntry({
         publishCatalogChanged(info).catch(() => {});
       });
       const dashboardServer = createDashboardServer({
-        pairDevice: pairDashboardDevice,
         writeStore: store,
+        readStore,
+        failureStore,
+        discussStore,
+        nodeExecutionsStore,
         pipelinesRef,
         pipelineRegistryStore,
         ensurePipelinesLoaded,
