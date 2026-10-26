@@ -55,6 +55,9 @@ describe("opencode harness adapter", () => {
       dataDir: fallback,
       runtimeDb: path.join(fallback, "runtime.sqlite"),
       opsDb: path.join(fallback, "ops.sqlite"),
+      pendingDir: path.join(fallback, "discuss-pending"),
+      locksDir: path.join(fallback, "locks"),
+      pipelinesDir: path.join(fallback, "workspace", ".pipelines"),
     });
     for (const v of Object.values(harness.storePaths())) {
       assert.doesNotMatch(String(v), /\.openclaw/);

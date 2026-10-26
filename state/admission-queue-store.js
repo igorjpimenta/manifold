@@ -32,13 +32,11 @@
 // the window.
 
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "./db.js";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
-
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
 // Same Proxy-wrapped async-ready factory idiom as run-store.js/state-
 // store.js — every method call transparently awaits store construction
@@ -57,7 +55,7 @@ export function createAdmissionQueueStore(opts = {}) {
   });
 }
 
-async function _createImpl({ dbPath = DEFAULT_DB_PATH, getLimit } = {}) {
+async function _createImpl({ dbPath = resolveStorePaths().runtimeDb, getLimit } = {}) {
   if (typeof getLimit !== "function") {
     throw new TypeError("admission-queue-store: getLimit() function is required (e.g. global-concurrency.js's getGlobalConcurrencyLimit)");
   }

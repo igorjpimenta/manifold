@@ -19,11 +19,9 @@ import { eq, and, inArray, isNotNull } from "drizzle-orm";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { discussState } from "./schema.js";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "./db.js";
 import { mkdirSync } from "node:fs";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
-
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
 function tryParse(s, fallback) {
   if (s == null) return fallback;
@@ -39,7 +37,7 @@ export function createDiscussStore(opts = {}) {
   } });
 }
 
-async function _createDiscussStoreImpl({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
+async function _createDiscussStoreImpl({ dbPath = resolveStorePaths().runtimeDb, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);

@@ -9,7 +9,6 @@
 //   - `parallel`    : fixed set of named `.tasks`, all dispatched concurrently
 
 import path from "node:path";
-import os from "node:os";
 import { createPipelinesLoader } from "./engine/loader.js";
 import { createStateStore } from "./state/state-store.js";
 import { createRunStore } from "./state/run-store.js";
@@ -35,7 +34,7 @@ import {
   registerReportDraftBlockedTool,
   registerReportDraftSkipTool,
 } from "./agent/tools/index.js";
-import { readPending, clearPending, setPendingText, mergePendingFields } from "./state/pending-store.js";
+import { createPendingStore } from "./state/pending-store.js";
 import { checkDb } from "./state/db-health.js";
 import { writeCorruptionAlert } from "./state/db-guard.js";
 import { createGateResolver } from "./gates/gate-resolver.js";
@@ -78,7 +77,6 @@ import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
 import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
 
-const DEFAULT_PIPELINES_DIR = path.join(os.homedir(), ".openclaw", "workspace", ".pipelines");
 // plugin-entry resolves via guarded dynamic import so core (and packaging
 // probes) load without an installed openclaw runtime. Absent SDK degrades to
 // the identity wrapper; register() below only runs inside the gateway.
@@ -90,8 +88,6 @@ try {
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 const DEFAULT_DASHBOARD_PORT = 7430;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
-
-const TASKFLOW_RUNS_DB = path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
 
 // Module-level singleton — captures a working `runtime.subagent` from the
 // gateway-bindable plugin load. The `before_dispatch` hook fires outside that
@@ -169,7 +165,6 @@ export default definePluginEntry({
   }),
   register: (api) => {
     const userCfg = api.pluginConfig ?? {};
-    const pipelinesDir = userCfg.pipelinesDir || DEFAULT_PIPELINES_DIR;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
     const discussDefaultAgent = typeof userCfg.manifoldParrot?.defaultAgent === "string" ? userCfg.manifoldParrot.defaultAgent : null;
     const dashboardEnabled = userCfg.dashboardEnabled !== false;
@@ -188,12 +183,29 @@ export default definePluginEntry({
     // acquires byte-identical lock names to the workspace-side PROFILE.md
     // writers (gap-answers.js, prime-nodes.js) it shares that lock with.
 
+    // Harness owns every on-disk location: resolve once here, thread
+    // explicit values down. Assigned before the stores so every dbPath/dir
+    // below is adapter-resolved; the readiness and emit closures only read
+    // their bindings lazily, never during construction.
+    let gatewayReadiness = null;
+    const openClawHarness = createOpenClawHarness({
+      api,
+      getWorkingSubagent: () => moduleState.workingSubagent,
+      whenGatewayReady: () => gatewayReadiness.whenReady(),
+      // emitCanonical is defined below; read lazily so this stays above the stores.
+      emit: (evt) => emitCanonical(evt),
+    });
+    const storePaths = openClawHarness.storePaths();
+    const pipelinesDir = userCfg.pipelinesDir || storePaths.pipelinesDir;
+    const runtimeDbPath = storePaths.runtimeDb;
+    const taskflowRunsDb = path.join(storePaths.dataDir, "tasks", "runs.sqlite");
+    const { readPending, clearPending, setPendingText, mergePendingFields } =
+      createPendingStore(storePaths.pendingDir);
+
     const pipelinesRef = { value: new Map() };
 
-    const runtimeDbPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-
-    const runStore    = createRunStore({ logger: api.logger });
-    const nodeExecutionsStore = getNodeExecutionsStore();
+    const runStore    = createRunStore({ logger: api.logger, dbPath: runtimeDbPath });
+    const nodeExecutionsStore = getNodeExecutionsStore(runtimeDbPath);
     // Locks taken on behalf of a node invocation (executor-nodes.js's
     // executeNode, and browser tool leases of the sessions it dispatches)
     // stay held until the invocation resolves.
@@ -219,7 +231,7 @@ export default definePluginEntry({
     // record a real failure_events row when a subflow's mode isn't
     // satisfied, not just flip flow_runs.status.
     const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
-    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore, emit: emitCanonical });
+    const failureStore = createFailureStore({ logger: api.logger, dbPath: runtimeDbPath, nodeExecutionsStore, emit: emitCanonical });
     // SCD2 history of node kind/agent/mode (see state/pipeline-registry.js's
     // own header) — separate from failureStore and unrelated to it;
     // constructed here only because runtimeDbPath is already in scope.
@@ -238,7 +250,7 @@ export default definePluginEntry({
     // register() must be synchronous. Same lazy Promise-proxy pattern as
     // sessionIndex below — callers await individual methods without an
     // await here.
-    const _nodeHealthPromise = createNodeHealthStore({ logger: api.logger });
+    const _nodeHealthPromise = createNodeHealthStore({ logger: api.logger, dbPath: runtimeDbPath });
     const nodeHealthStore = {
       isBlocked(p, n) { return _nodeHealthPromise.then(s => s.isBlocked(p, n)); },
       markUnhealthy(p, n, info) { return _nodeHealthPromise.then(s => s.markUnhealthy(p, n, info)); },
@@ -246,7 +258,7 @@ export default definePluginEntry({
       list(p, opts) { return _nodeHealthPromise.then(s => s.list(p, opts)); },
       close() { _nodeHealthPromise.then(s => s.close?.()).catch(() => {}); },
     };
-    const discussStore = createDiscussStore({ logger: api.logger });
+    const discussStore = createDiscussStore({ logger: api.logger, dbPath: runtimeDbPath });
     // createSessionIndex is async (opens sqlite + runs migrations) but
     // register() must be synchronous. Wrap the Promise in a thin proxy so
     // callers can await individual methods without an await here — every
@@ -254,7 +266,7 @@ export default definePluginEntry({
     // always correctly held until the DB is actually open, regardless of
     // how soon after boot it calls in (e.g. flow-revival's orphan
     // classification, which runs while the gateway is still starting).
-    const _sessionIndexPromise = createSessionIndex({ logger: api.logger });
+    const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
       record(data) { return _sessionIndexPromise.then(si => si.record(data)); },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
@@ -271,10 +283,6 @@ export default definePluginEntry({
     const registerHttpRoute = (route) => api.registerHttpRoute(route);
     const registerTool = (def, opts) => api.registerTool(def, opts);
 
-    // Assigned after the harness below — the readiness closure only reads
-    // it lazily via whenGatewayReady, never during construction.
-    let gatewayReadiness = null;
-
     // Assigned in the dashboard section below; the catalog publisher reads
     // it lazily so watcher reloads before dashboard boot stay WS-only.
     let dashboardBusRef = null;
@@ -283,13 +291,6 @@ export default definePluginEntry({
       getDashboardBroadcast: () => (dashboardBusRef ? (e) => dashboardBusRef.broadcast(e) : null),
     });
 
-    const openClawHarness = createOpenClawHarness({
-      api,
-      getWorkingSubagent: () => moduleState.workingSubagent,
-      whenGatewayReady: () => gatewayReadiness.whenReady(),
-      sessionIndex,
-      emit: emitCanonical,
-    });
     gatewayReadiness = registerGatewayReadiness(openClawHarness, { logger: api.logger });
 
     // Registered here (rather than deferred) since PROFILE.md reads/edits
@@ -300,8 +301,10 @@ export default definePluginEntry({
 
     const executor = createExecutor({
       api,
+      config: api.config,
       store,
       pipelinesRef,
+      pipelinesDir,
       ensurePipelinesLoaded,
       logger: api.logger,
       failureStore,
@@ -631,7 +634,7 @@ export default definePluginEntry({
         // Not awaited, same as manifold-flow-revival: its dispatches go
         // through the executor's subagent and wait for gateway readiness,
         // which can't come until this start() returns.
-        taskflowScanAndCleanup(api, TASKFLOW_RUNS_DB, taskflowStartupDelayMs, logger, {
+        taskflowScanAndCleanup(api, taskflowRunsDb, taskflowStartupDelayMs, logger, {
           // Lets a manifold-owned orphan be delegated to the flow's own
           // revival function (engine/executor.js's reviveAgentKindOrphan,
           // via reviveViaFlowRevival) instead of only being skipped —
@@ -763,7 +766,7 @@ export default definePluginEntry({
     // must stay synchronous, and better-sqlite3 is already a dependency.
     for (const dbPath of [
       runtimeDbPath,
-      path.join(os.homedir(), ".openclaw", "ops.sqlite"),
+      storePaths.opsDb,
     ]) {
       const check = checkDb(dbPath);
       if (!check.ok) {

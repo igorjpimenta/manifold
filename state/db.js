@@ -1,6 +1,25 @@
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
+import os from "node:os";
+import path from "node:path";
+
+// Single ownership point for on-disk store locations. Every state/*.js
+// store defaults its dir/dbPath through here (lazy, per call, so
+// MANIFOLD_* env overrides apply even when set after import); each
+// harness adapter mirrors the same shape via its own storePaths() with
+// its own root (~/.openclaw vs ~/.manifold).
+export function resolveStorePaths({ dataDir } = {}) {
+  const root = dataDir ?? path.join(os.homedir(), ".openclaw");
+  return {
+    dataDir: root,
+    runtimeDb: process.env.MANIFOLD_RUNTIME_DB || path.join(root, "runtime.sqlite"),
+    opsDb: process.env.MANIFOLD_OPS_DB || path.join(root, "ops.sqlite"),
+    pendingDir: process.env.MANIFOLD_PENDING_DIR || path.join(root, "discuss-pending"),
+    locksDir: process.env.MANIFOLD_LOCKS_DIR || path.join(root, "locks"),
+    pipelinesDir: process.env.MANIFOLD_PIPELINES_DIR || path.join(root, "workspace", ".pipelines"),
+  };
+}
 
 // Returns { db, client } where:
 //   db     — Drizzle ORM instance; use for typed queries

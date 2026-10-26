@@ -8,13 +8,17 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "../state/db.js";
 
-const STATE_FILE = path.join(os.homedir(), ".openclaw", "state", "manifold-paused.json");
+// State file is harness-owned: every entry point takes an explicit path,
+// defaulting via resolveStorePaths so direct callers keep working.
+function defaultStateFile() {
+  return path.join(resolveStorePaths().dataDir, "state", "manifold-paused.json");
+}
 
-export function listPaused() {
+export function listPaused(stateFile = defaultStateFile()) {
   try {
-    const raw = fs.readFileSync(STATE_FILE, "utf8");
+    const raw = fs.readFileSync(stateFile, "utf8");
     const parsed = JSON.parse(raw);
     return new Set(Array.isArray(parsed) ? parsed : []);
   } catch {
@@ -22,23 +26,23 @@ export function listPaused() {
   }
 }
 
-export function isPaused(flowId) {
-  return listPaused().has(flowId);
+export function isPaused(flowId, stateFile = defaultStateFile()) {
+  return listPaused(stateFile).has(flowId);
 }
 
-export function pause(flowId) {
-  const set = listPaused();
+export function pause(flowId, stateFile = defaultStateFile()) {
+  const set = listPaused(stateFile);
   set.add(flowId);
-  write(set);
+  write(set, stateFile);
 }
 
-export function resume(flowId) {
-  const set = listPaused();
+export function resume(flowId, stateFile = defaultStateFile()) {
+  const set = listPaused(stateFile);
   set.delete(flowId);
-  write(set);
+  write(set, stateFile);
 }
 
-function write(set) {
-  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify([...set]), "utf8");
+function write(set, stateFile) {
+  fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+  fs.writeFileSync(stateFile, JSON.stringify([...set]), "utf8");
 }

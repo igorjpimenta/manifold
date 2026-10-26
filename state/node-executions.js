@@ -21,14 +21,12 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "./db.js";
 import { eq, and, inArray, isNull, isNotNull, desc, asc } from "drizzle-orm";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { flowNodeInvocations, flowNodeExecutions } from "./schema.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
-
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
 // No size cap on resultJson: no cap width is both safe for real payloads
 // and small enough to matter, so writeResult() always stores the full
@@ -65,7 +63,7 @@ function _makeStoreProxy(_p) {
   } });
 }
 
-export function getNodeExecutionsStore(dbPath = DEFAULT_DB_PATH) {
+export function getNodeExecutionsStore(dbPath = resolveStorePaths().runtimeDb) {
   if (!_singleton) {
     _singleton = _makeStoreProxy(_createStore(dbPath));
   }

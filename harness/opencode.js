@@ -43,6 +43,9 @@ export function createOpencodeHarness({ id = "opencode", dataDir, emit, sessionK
         dataDir: root,
         runtimeDb: process.env.MANIFOLD_RUNTIME_DB || path.join(root, "runtime.sqlite"),
         opsDb: process.env.MANIFOLD_OPS_DB || path.join(root, "ops.sqlite"),
+        pendingDir: process.env.MANIFOLD_PENDING_DIR || path.join(root, "discuss-pending"),
+        locksDir: process.env.MANIFOLD_LOCKS_DIR || path.join(root, "locks"),
+        pipelinesDir: process.env.MANIFOLD_PIPELINES_DIR || path.join(root, "workspace", ".pipelines"),
       };
     },
     sessionKey({ agent, session, flowId, nodeId, itemKey }) {

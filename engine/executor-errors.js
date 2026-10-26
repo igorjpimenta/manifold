@@ -1,7 +1,6 @@
 import path from "node:path";
 import { existsSync } from "node:fs";
-import { getSharedDb } from "../state/db.js";
-import os from "node:os";
+import { getSharedDb, resolveStorePaths } from "../state/db.js";
 
 export const REVISION_RETRY_LIMIT = 5;
 
@@ -9,7 +8,7 @@ export const REVISION_RETRY_LIMIT = 5;
 // returns null on any failure so callers can fall back gracefully.
 export async function fetchSessionError(sessionKey) {
   if (!sessionKey) return null;
-  const dbPath = path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
+  const dbPath = path.join(resolveStorePaths().dataDir, "tasks", "runs.sqlite");
   if (!existsSync(dbPath)) return null;
   try {
     const { client } = await getSharedDb(dbPath, { readonly: true });

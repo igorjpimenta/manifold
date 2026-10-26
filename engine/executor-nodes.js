@@ -1,6 +1,6 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "../state/db.js";
 import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
 import { detectBlockedSentinel, detectSkippedSentinel, defaultAgentSessionKey, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
@@ -45,6 +45,10 @@ export function createNodeRunner({
   nodeExecutionsStore,
   nodeHealthStore,
   pipelinesRef,
+  // Artifact root is harness-owned: index.js passes the adapter-resolved
+  // pipelinesDir explicitly; the resolveStorePaths default keeps direct
+  // callers working.
+  pipelinesDir = resolveStorePaths().pipelinesDir,
 }) {
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
@@ -55,7 +59,7 @@ export function createNodeRunner({
   async function dispatchCodeEntry(entry, { state, flowId, nodeId }) {
     const flowId8 = flowId.slice(0, 8);
     const artifactDir = state.runId && state.pipelineId
-      ? path.join(os.homedir(), ".openclaw", "workspace", ".pipelines", state.pipelineId, "runs", state.runId)
+      ? path.join(pipelinesDir, state.pipelineId, "runs", state.runId)
       : null;
     // Same pattern as executeSubflowNode's selector call in executor.js:
     // assembleState(baseState: state). Every kind:"code" node's run() goes

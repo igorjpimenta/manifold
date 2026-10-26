@@ -20,11 +20,11 @@
 
 import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "./db.js";
 
-const DEFAULT_PENDING_DIR = path.join(os.homedir(), ".openclaw", "discuss-pending");
-
-export function createPendingStore(pendingDir) {
+// pendingDir defaults via resolveStorePaths (harness-owned); the module
+// singleton below preserves the historical default-backed import shape.
+export function createPendingStore(pendingDir = resolveStorePaths().pendingDir) {
   function ensureDir() {
     try { mkdirSync(pendingDir, { recursive: true }); } catch {}
   }
@@ -98,6 +98,6 @@ export function createPendingStore(pendingDir) {
   return { readPending, setPendingText, mergePendingFields, clearPending, _dir: pendingDir };
 }
 
-// Default singleton backed by ~/.openclaw/discuss-pending
-const _default = createPendingStore(DEFAULT_PENDING_DIR);
+// Default singleton backed by the harness-owned pending dir
+const _default = createPendingStore();
 export const { readPending, setPendingText, mergePendingFields, clearPending } = _default;

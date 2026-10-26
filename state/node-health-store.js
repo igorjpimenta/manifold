@@ -23,11 +23,9 @@ import { getSharedDb, withSharedWrite } from "./db.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 import { nodeHealth } from "./schema.js";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "./db.js";
 import { mkdirSync } from "node:fs";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
-
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
 const INSERT_BLOCKED_SQL = `
   INSERT OR IGNORE INTO node_health
@@ -43,7 +41,7 @@ const IS_BLOCKED_SQL = `
   SELECT 1 FROM node_health WHERE pipeline_id = ? AND node_id = ? AND status = 'blocked' LIMIT 1
 `;
 
-export async function createNodeHealthStore({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
+export async function createNodeHealthStore({ logger, dbPath = resolveStorePaths().runtimeDb } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);

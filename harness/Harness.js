@@ -1,3 +1,9 @@
+// storePaths() returns { dataDir, runtimeDb, opsDb, pendingDir, locksDir,
+// pipelinesDir }. Each adapter resolves its own root (openclaw:
+// ~/.openclaw; opencode: ~/.manifold, never ~/.openclaw) with
+// MANIFOLD_{RUNTIME_DB,OPS_DB,PENDING_DIR,LOCKS_DIR,PIPELINES_DIR} env
+// overrides. Core takes explicit dirs/dbPaths threaded from the adapter
+// scope — it never reads os.homedir itself.
 export const HARNESS_METHODS = [
   "spawn",
   "waitForRun",

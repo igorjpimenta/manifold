@@ -93,8 +93,14 @@ import path from "node:path";
 import os from "node:os";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { wrapBrowserTabLifecycle } from "./browser-tabs.js";
+import { resolveStorePaths } from "../state/db.js";
 
-const LOCKS_DIR = path.join(os.homedir(), ".openclaw", "locks");
+// Locks dir is harness-owned: every entry point below takes an explicit
+// locksDir (index.js passes the adapter-resolved value), defaulting via
+// resolveStorePaths so direct callers keep working.
+function defaultLocksDir() {
+  return resolveStorePaths().locksDir;
+}
 
 // Tracks lock names held by the CURRENT async call chain (not the whole
 // process) — see withLock() below for why this exists.
@@ -166,8 +172,8 @@ function safeName(name) {
   return name.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-export function lockPathFor(name) {
-  return path.join(LOCKS_DIR, `${safeName(name)}.lock`);
+export function lockPathFor(name, locksDir = defaultLocksDir()) {
+  return path.join(locksDir, `${safeName(name)}.lock`);
 }
 
 // Lock name for a file-keyed mutex. The `file:` prefix plus
@@ -220,8 +226,8 @@ async function readLockHolder(lockPath) {
   }
 }
 
-export async function readLock(name) {
-  return readLockHolder(lockPathFor(name));
+export async function readLock(name, locksDir = defaultLocksDir()) {
+  return readLockHolder(lockPathFor(name, locksDir));
 }
 
 function readLockHolderSync(lockPath) {
@@ -254,13 +260,13 @@ function unlinkIfSameSync(lockPath, expected) {
 // in between. Opt-in via acquireLock's `cooldownMs` — callers that don't
 // pass it see no behavior change (best-effort: a missing/unreadable
 // sentinel just means "no known cooldown to honor").
-function cooldownPath(name) {
-  return path.join(LOCKS_DIR, `${safeName(name)}.cooldown.json`);
+function cooldownPath(name, locksDir) {
+  return path.join(locksDir, `${safeName(name)}.cooldown.json`);
 }
 
-async function readLastReleasedAt(name) {
+async function readLastReleasedAt(name, locksDir) {
   try {
-    const raw = await readFile(cooldownPath(name), "utf-8");
+    const raw = await readFile(cooldownPath(name, locksDir), "utf-8");
     return JSON.parse(raw)?.releasedAt ?? null;
   } catch {
     return null;
@@ -270,9 +276,9 @@ async function readLastReleasedAt(name) {
 // Synchronous by design — called from the same `process.on("exit")`
 // handler that releases the lock file itself, where async writes can't be
 // awaited.
-function markReleasedSync(name) {
+function markReleasedSync(name, locksDir) {
   try {
-    writeFileSync(cooldownPath(name), JSON.stringify({ releasedAt: Date.now(), name }));
+    writeFileSync(cooldownPath(name, locksDir), JSON.stringify({ releasedAt: Date.now(), name }));
   } catch { /* best-effort — worst case, the next acquirer skips its cooldown wait */ }
 }
 
@@ -326,8 +332,9 @@ export async function acquireLock(name, opts = {}) {
   // — see file header on "Stale recovery".
   const { timeoutMs = Infinity, staleMs = 6 * 60 * 60_000, pollMs = 1000, onWouldBlock, cooldownMs = 0, cooldownJitterMs = 0, logger, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = opts;
   const owner = opts.owner ?? currentLockOwner();
-  await mkdir(LOCKS_DIR, { recursive: true });
-  const lockPath = lockPathFor(name);
+  const locksDir = opts.locksDir ?? defaultLocksDir();
+  await mkdir(locksDir, { recursive: true });
+  const lockPath = lockPathFor(name, locksDir);
   const deadline = Number.isFinite(timeoutMs) ? now() + timeoutMs : Infinity;
   const token = randomUUID();
   const mine = { token };
@@ -341,7 +348,7 @@ export async function acquireLock(name, opts = {}) {
       const releaseSync = () => {
         if (released) return;
         released = true;
-        if (unlinkIfSameSync(lockPath, mine)) markReleasedSync(name);
+        if (unlinkIfSameSync(lockPath, mine)) markReleasedSync(name, locksDir);
       };
       // Synchronous release on process exit. Covers process.exit(),
       // unhandled exceptions, and SIGTERM/SIGINT (Node fires the exit
@@ -355,7 +362,7 @@ export async function acquireLock(name, opts = {}) {
       // score — spacing them out does. No-op for callers that don't pass
       // cooldownMs.
       if (cooldownMs > 0) {
-        const lastReleasedAt = await readLastReleasedAt(name);
+        const lastReleasedAt = await readLastReleasedAt(name, locksDir);
         if (lastReleasedAt != null) {
           const targetGap = cooldownMs + (cooldownJitterMs > 0 ? Math.random() * cooldownJitterMs : 0);
           const remaining = targetGap - (now() - lastReleasedAt);
@@ -373,7 +380,7 @@ export async function acquireLock(name, opts = {}) {
           released = true;
           process.removeListener("exit", releaseSync);
           if (unlinkIfSameSync(lockPath, mine)) {
-            markReleasedSync(name);
+            markReleasedSync(name, locksDir);
           } else {
             logger?.warn?.(`lock ${name}: no longer held by this acquisition at release — left the current holder's lock in place`);
           }

@@ -95,14 +95,30 @@ describe("openclaw harness adapter", () => {
       dataDir,
       runtimeDb: path.join(dataDir, "runtime.sqlite"),
       opsDb: path.join(dataDir, "ops.sqlite"),
+      pendingDir: path.join(dataDir, "discuss-pending"),
+      locksDir: path.join(dataDir, "locks"),
+      pipelinesDir: path.join(dataDir, "workspace", ".pipelines"),
     });
     process.env.MANIFOLD_RUNTIME_DB = "/tmp/r.sqlite";
     process.env.MANIFOLD_OPS_DB = "/tmp/o.sqlite";
+    process.env.MANIFOLD_PENDING_DIR = "/tmp/p";
+    process.env.MANIFOLD_LOCKS_DIR = "/tmp/l";
+    process.env.MANIFOLD_PIPELINES_DIR = "/tmp/pl";
     try {
-      assert.deepEqual(harness.storePaths(), { dataDir, runtimeDb: "/tmp/r.sqlite", opsDb: "/tmp/o.sqlite" });
+      assert.deepEqual(harness.storePaths(), {
+        dataDir,
+        runtimeDb: "/tmp/r.sqlite",
+        opsDb: "/tmp/o.sqlite",
+        pendingDir: "/tmp/p",
+        locksDir: "/tmp/l",
+        pipelinesDir: "/tmp/pl",
+      });
     } finally {
       delete process.env.MANIFOLD_RUNTIME_DB;
       delete process.env.MANIFOLD_OPS_DB;
+      delete process.env.MANIFOLD_PENDING_DIR;
+      delete process.env.MANIFOLD_LOCKS_DIR;
+      delete process.env.MANIFOLD_PIPELINES_DIR;
     }
   });
 
