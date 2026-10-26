@@ -20,6 +20,7 @@ import { getNodeExecutionsStore } from "./state/node-executions.js";
 import { createAdmissionQueueStore } from "./state/admission-queue-store.js";
 import { createExecutor } from "./engine/executor.js";
 import { createOpenClawHarness } from "./harness/openclaw.js";
+import { createEventStream } from "./harness/events.js";
 import { configureGlobalConcurrency, getGlobalConcurrencyLimit } from "./engine/global-concurrency.js";
 import { createFailureStore } from "./state/failure-store.js";
 import { createNodeHealthStore } from "./state/node-health-store.js";
@@ -217,6 +218,13 @@ export default definePluginEntry({
     // record a real failure_events row when a subflow's mode isn't
     // satisfied, not just flip flow_runs.status.
     const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
+    // Verbatim harness stream — every adapter.emit(evt) lands here untouched
+    // and still flows to the canonical emitter (gateway WS unchanged).
+    const harnessEventStream = createEventStream();
+    const emitFanout = (evt) => {
+      harnessEventStream.append(evt);
+      return emitCanonical(evt);
+    };
     const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore, emit: emitCanonical });
     // SCD2 history of node kind/agent/mode (see state/pipeline-registry.js's
     // own header) — separate from failureStore and unrelated to it;
@@ -278,7 +286,7 @@ export default definePluginEntry({
       getWorkingSubagent: () => moduleState.workingSubagent,
       whenGatewayReady: () => gatewayReadiness.whenReady(),
       sessionIndex,
-      emit: emitCanonical,
+      emit: emitFanout,
     });
     const executor = createExecutor({
       api,

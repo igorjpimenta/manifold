@@ -8,7 +8,7 @@
 // Entry point: call createManifoldParrotChannelEntry(deps).register(api) from
 // inside manifold's registerFull.
 
-import { createChatChannelPlugin, defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
+import * as defaultChannelCore from "openclaw/plugin-sdk/channel-core";
 import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-inbound";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -20,7 +20,11 @@ export function createManifoldParrotChannelEntry({
   resolveDiscussTarget,
   stampDiscussSession,
   emit,
+  // Injectable channel-core seam — a second harness supplies its own here;
+  // defaults to the statically imported openclaw channel-core.
+  channelCore = defaultChannelCore,
 }) {
+  const { createChatChannelPlugin, defineChannelPluginEntry } = channelCore;
   // Captured once during startAccount; used by the HTTP handler.
   let channelRuntimeRef = null;
   let cfgRef = null;
