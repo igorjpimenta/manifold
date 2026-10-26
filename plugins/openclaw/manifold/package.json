@@ -22,6 +22,7 @@
     "hooks/profile-read-gate.js",
     "hooks/profile-write-lock.js",
     "hooks/score-tool-wake.js",
+    "meta.js",
     "agent/tools/index.js",
     "agent/tools/manifold-start.js",
     "agent/tools/propose-draft.js",
