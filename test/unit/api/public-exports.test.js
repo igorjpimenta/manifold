@@ -64,11 +64,11 @@ const PUBLIC_API = {
     ],
   },
   "./profile-lock": {
-    file: "./hooks/profile-write-lock.js",
+    file: "./plugins/openclaw/manifold/hooks/profile-write-lock.js",
     exports: ["registerProfileWriteLock", "profileEditResultPathFor", "PROFILE_EDIT_RESULTS_DIR"],
   },
   "./bridge-auth": {
-    file: "./auth/bridge.js",
+    file: "./plugins/openclaw/manifold/auth/bridge.js",
     exports: ["authorizeBridgeRequest", "sendUnauthorized"],
   },
   "./state/db": {

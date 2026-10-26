@@ -14,7 +14,7 @@
 // touch disk or a DB).
 
 import { toolErr } from "./shared.js";
-import { resolveInvocationId, writePendingResult } from "../../state/tool-handoff.js";
+import { resolveInvocationId, writePendingResult } from "../../../../../state/tool-handoff.js";
 
 export function registerSubmitScoreTool({ api }) {
   api.registerTool((ctx) => ({

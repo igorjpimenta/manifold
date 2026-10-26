@@ -25,7 +25,7 @@ await mock.module("node:os", {
 const PROFILE_PATH = join(TEST_HOME, "fixture", "profile", "PROFILE.md");
 
 const { lockNameForFile, acquireLock } = await import("../../../locks/lock.js");
-const { registerProfileReadGate } = await import("../../../hooks/profile-read-gate.js");
+const { registerProfileReadGate } = await import("../../../plugins/openclaw/manifold/hooks/profile-read-gate.js");
 
 function makeMockApi() {
   const handlers = [];

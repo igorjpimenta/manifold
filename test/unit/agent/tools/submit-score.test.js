@@ -25,7 +25,7 @@ await mock.module(toolHandoffUrl, {
   },
 });
 
-const { registerSubmitScoreTool } = await import("../../../../agent/tools/submit-score.js");
+const { registerSubmitScoreTool } = await import("../../../../plugins/openclaw/manifold/agent/tools/submit-score.js");
 
 function createToolApi() {
   const tools = [];

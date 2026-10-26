@@ -166,7 +166,7 @@ function collectSchemaPropertyPaths(schemaObjInner, prefix = "") {
 }
 
 function inlineIndexConfigSchemaPaths() {
-  const src = readFileSync(path.join(REPO_ROOT, "index.js"), "utf8");
+  const src = readFileSync(path.join(REPO_ROOT, "plugins/openclaw/manifold/index.js"), "utf8");
   const anchor = src.indexOf("configSchema: () => ({");
   assert.notEqual(anchor, -1, "index.js: inline `configSchema: () => ({` anchor not found");
   const openBrace = src.indexOf("({", anchor) + 1;
@@ -187,7 +187,7 @@ function manifestConfigSchemaPaths(manifest) {
 }
 
 function readManifest() {
-  return JSON.parse(readFileSync(path.join(REPO_ROOT, "openclaw.plugin.json"), "utf8"));
+  return JSON.parse(readFileSync(path.join(REPO_ROOT, "plugins/openclaw/manifold/openclaw.plugin.json"), "utf8"));
 }
 
 describe("openclaw.plugin.json contract parity", () => {

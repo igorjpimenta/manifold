@@ -19,7 +19,7 @@
 // subagent (e.g. Cyrano) that was never given them directly. See
 // resolveGateContext in shared.js.
 
-import { setPendingText } from "../../state/pending-store.js";
+import { setPendingText } from "../../../../../state/pending-store.js";
 import { toolErr, resolveGateContext } from "./shared.js";
 
 export function registerProposeDraftTool({ api, readStore, componentEmitter, discussStore }) {

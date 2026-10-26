@@ -19,7 +19,7 @@
 // purely the wake-up signal race-listening code (executor-subagent.js)
 // waits on.
 
-import { notifyToolFired } from "../state/tool-handoff.js";
+import { notifyToolFired } from "../../../../state/tool-handoff.js";
 
 const SCORE_TOOL_NAME = "submit_score";
 

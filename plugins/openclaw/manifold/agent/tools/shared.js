@@ -1,6 +1,6 @@
 // shared.js — helpers used by more than one manifold agent tool.
 
-import { getSharedResolver } from "../../telemetry/index.js";
+import { getSharedResolver } from "../../../../../telemetry/index.js";
 
 export function toolErr(message) {
   return {

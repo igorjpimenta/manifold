@@ -56,7 +56,7 @@ await mock.module(telemetryUrl, {
   },
 });
 
-const { registerProposeDraftMetaTool } = await import("../../../../agent/tools/propose-draft-meta.js");
+const { registerProposeDraftMetaTool } = await import("../../../../plugins/openclaw/manifold/agent/tools/propose-draft-meta.js");
 
 function createToolApi() {
   const tools = [];

@@ -54,7 +54,7 @@ export function registerOperatorRoutes({
       if (req.method !== "POST") {
         res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = await import("../plugins/openclaw/manifold/auth/bridge.js");
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       api.logger.info(`manifold gate/resolve: via ${authz.via}`);
@@ -138,7 +138,7 @@ export function registerOperatorRoutes({
       if (req.method !== "POST") {
         res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = await import("../plugins/openclaw/manifold/auth/bridge.js");
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       let raw = "";
@@ -234,7 +234,7 @@ export function registerOperatorRoutes({
       if (req.method !== "POST") {
         res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = await import("../plugins/openclaw/manifold/auth/bridge.js");
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       let raw = "";

@@ -28,7 +28,7 @@ await mock.module("../../../../telemetry/index.js", {
   },
 });
 
-const { resolveGateContext, resolveFlowIdOnly } = await import("../../../../agent/tools/shared.js");
+const { resolveGateContext, resolveFlowIdOnly } = await import("../../../../plugins/openclaw/manifold/agent/tools/shared.js");
 
 describe("resolveGateContext", () => {
   test("returns null when ctx is missing", async () => {

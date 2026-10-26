@@ -28,7 +28,7 @@ export function registerHealthRoutes({ api }) {
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = await import("../plugins/openclaw/manifold/auth/bridge.js");
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const db = {};

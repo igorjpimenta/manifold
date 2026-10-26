@@ -18,7 +18,7 @@
 // not observed directly against this codebase's actual agent runtime —
 // verify both against a real event log before relying on this.
 
-import { acquireLock, lockNameForFile } from "../locks/lock.js";
+import { acquireLock, lockNameForFile } from "../../../../locks/lock.js";
 import path from "node:path";
 import os from "node:os";
 

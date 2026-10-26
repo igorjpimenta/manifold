@@ -17,7 +17,7 @@ import { serializePipeline } from "./pipeline-graph.js";
 import { computeGlobalStats, computePipelineStats, compareRunToMedian, computeNodeStats, resolveDisplayStep } from "./stats.js";
 import { searchRuns } from "./search.js";
 import { costForRun, costForPipeline, costForAllPipelines } from "./cost.js";
-import { pairDashboardDevice } from "./device.js";
+import { pairDashboardDevice } from "../plugins/openclaw/manifold/dashboard/device.js";
 import { computeViews } from "./views.js";
 import { stepsExecutedFromTree } from "./tree-stats.js";
 import { TERMINAL_STATUS_SET } from "../state/run-store.js";
