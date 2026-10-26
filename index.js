@@ -13,7 +13,7 @@ import { createNodeHealthStore } from "./state/node-health-store.js";
 import { createAdmissionQueueStore } from "./state/admission-queue-store.js";
 import { getNodeExecutionsStore } from "./state/node-executions.js";
 import { createGateResolver } from "./gates/gate-resolver.js";
-import { registerCliCommands } from "./agent/cli.js";
+import { registerCliCommands } from "./bin/cli.js";
 import { invokeElevated } from "./elevation.js";
 
 export {

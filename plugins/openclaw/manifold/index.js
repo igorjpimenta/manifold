@@ -25,7 +25,7 @@ import { createNodeHealthStore } from "../../../state/node-health-store.js";
 import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
-import { registerCliCommands } from "../../../agent/cli.js";
+import { registerCliCommands } from "../../../bin/cli.js";
 import {
   registerGraphFlowTool,
   registerProposeDraftTool,
