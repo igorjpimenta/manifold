@@ -73,6 +73,31 @@
       "profileEditResultsDir": {
         "type": "string",
         "description": "Directory the edit lock writes one <runId>.json outcome marker per guarded PROFILE.md edit into (hooks/profile-write-lock.js). Default: ~/.openclaw/locks/profile-edit-results"
+      },
+      "pushUrls": {
+        "type": "object"
+      },
+      "pushUrl": {
+        "type": "string"
+      },
+      "pushBearer": {
+        "type": "string"
+      },
+      "pushTimeoutMs": {
+        "type": "integer",
+        "minimum": 1
+      },
+      "webhookBearer": {
+        "type": "string"
+      },
+      "webhookPublicBaseUrl": {
+        "type": "string"
+      },
+      "webhookHarness": {
+        "type": "string"
+      },
+      "webhookAutoregister": {
+        "type": "boolean"
       }
     }
   }
