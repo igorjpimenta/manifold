@@ -5,11 +5,11 @@ import { test, mock, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
 // ─── mock node:fs and node:os before importing the module ────────────────────
-// paused-flows.js reads STATE_FILE at module load time using path.join(os.homedir(), ...)
+// paused-flows.js resolves its state file at call time from the core-owned store home
 // We intercept fs and os so no real disk I/O happens.
 
 const FAKE_HOME = "/fake-home";
-const FAKE_STATE_FILE = `${FAKE_HOME}/.openclaw/state/manifold-paused.json`;
+const FAKE_STATE_FILE = `${FAKE_HOME}/.manifold/state/manifold-paused.json`;
 
 // In-memory filesystem stub — keyed by absolute path.
 const _files = new Map();
@@ -254,7 +254,7 @@ describe("write side-effects (via pause/resume)", () => {
   test("creates the STATE_FILE parent directory if it does not exist", () => {
     _mkdirCalls.length = 0;
     pause("flow-dir-create");
-    const call = _mkdirCalls.find((c) => c.dirPath === `${FAKE_HOME}/.openclaw/state`);
+    const call = _mkdirCalls.find((c) => c.dirPath === `${FAKE_HOME}/.manifold/state`);
     assert.ok(call, "mkdirSync should be called with the state directory path");
     assert.deepEqual(call.opts, { recursive: true });
   });

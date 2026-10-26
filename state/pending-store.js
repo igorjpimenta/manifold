@@ -20,9 +20,11 @@
 
 import { mkdirSync, readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths } from "./db.js";
 
-const DEFAULT_PENDING_DIR = path.join(os.homedir(), ".openclaw", "discuss-pending");
+function defaultPendingDir() {
+  return resolveStorePaths().pendingDir;
+}
 
 export function createPendingStore(pendingDir) {
   function ensureDir() {
@@ -98,6 +100,14 @@ export function createPendingStore(pendingDir) {
   return { readPending, setPendingText, mergePendingFields, clearPending, _dir: pendingDir };
 }
 
-// Default singleton backed by ~/.openclaw/discuss-pending
-const _default = createPendingStore(DEFAULT_PENDING_DIR);
-export const { readPending, setPendingText, mergePendingFields, clearPending } = _default;
+// Default singleton over the core-owned pending dir, resolved lazily at
+// first call (not import) so MANIFOLD_* env set after import still applies.
+let _default = null;
+function _store() {
+  if (!_default) _default = createPendingStore(defaultPendingDir());
+  return _default;
+}
+export function readPending(...args) { return _store().readPending(...args); }
+export function setPendingText(...args) { return _store().setPendingText(...args); }
+export function mergePendingFields(...args) { return _store().mergePendingFields(...args); }
+export function clearPending(...args) { return _store().clearPending(...args); }

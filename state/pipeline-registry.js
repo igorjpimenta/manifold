@@ -62,10 +62,12 @@ import { randomUUID, createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+function defaultDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
 function hashOf(obj) {
   return createHash("sha256").update(JSON.stringify(obj)).digest("hex");
@@ -104,7 +106,7 @@ function _makeStoreProxy(_p) {
   } });
 }
 
-export function getPipelineRegistryStore(dbPath = DEFAULT_DB_PATH) {
+export function getPipelineRegistryStore(dbPath = defaultDbPath()) {
   if (!_singleton) {
     _singleton = _makeStoreProxy(_createStore(dbPath));
   }
