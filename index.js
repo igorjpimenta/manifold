@@ -20,6 +20,7 @@ import { getNodeExecutionsStore } from "./state/node-executions.js";
 import { createAdmissionQueueStore } from "./state/admission-queue-store.js";
 import { createExecutor } from "./engine/executor.js";
 import { createOpenClawHarness } from "./harness/openclaw.js";
+import { resolveStorePaths } from "./state/db.js";
 import { configureGlobalConcurrency, getGlobalConcurrencyLimit } from "./engine/global-concurrency.js";
 import { createFailureStore } from "./state/failure-store.js";
 import { createNodeHealthStore } from "./state/node-health-store.js";
@@ -188,10 +189,18 @@ export default definePluginEntry({
 
     const pipelinesRef = { value: new Map() };
 
-    const runtimeDbPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
+    const openClawHarness = createOpenClawHarness({
+      api,
+      getWorkingSubagent: () => moduleState.workingSubagent,
+      whenGatewayReady: () => gatewayReadiness.whenReady(),
+      emit: emitCanonical,
+    });
+    const { runtimeDb: runtimeDbPath, opsDb: opsDbPath } = resolveStorePaths({ harness: openClawHarness, env: process.env });
+    api.logger.info(`manifold: store backing runtime=${runtimeDbPath} ops=${opsDbPath}`);
 
-    const runStore    = createRunStore({ logger: api.logger });
-    const nodeExecutionsStore = getNodeExecutionsStore();
+    const runStore    = createRunStore({ logger: api.logger, dbPath: runtimeDbPath });
+    const nodeExecutionsStore = getNodeExecutionsStore(runtimeDbPath);
     // Locks taken on behalf of a node invocation (executor-nodes.js's
     // executeNode, and browser tool leases of the sessions it dispatches)
     // stay held until the invocation resolves.
@@ -216,8 +225,7 @@ export default definePluginEntry({
     // triggerParentResume hook needs failureStore to
     // record a real failure_events row when a subflow's mode isn't
     // satisfied, not just flip flow_runs.status.
-    const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
-    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore, emit: emitCanonical });
+    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore, emit: emitCanonical, dbPath: runtimeDbPath });
     // SCD2 history of node kind/agent/mode (see state/pipeline-registry.js's
     // own header) — separate from failureStore and unrelated to it;
     // constructed here only because runtimeDbPath is already in scope.
@@ -236,7 +244,7 @@ export default definePluginEntry({
     // register() must be synchronous. Same lazy Promise-proxy pattern as
     // sessionIndex below — callers await individual methods without an
     // await here.
-    const _nodeHealthPromise = createNodeHealthStore({ logger: api.logger });
+    const _nodeHealthPromise = createNodeHealthStore({ logger: api.logger, dbPath: runtimeDbPath });
     const nodeHealthStore = {
       isBlocked(p, n) { return _nodeHealthPromise.then(s => s.isBlocked(p, n)); },
       markUnhealthy(p, n, info) { return _nodeHealthPromise.then(s => s.markUnhealthy(p, n, info)); },
@@ -244,7 +252,7 @@ export default definePluginEntry({
       list(p, opts) { return _nodeHealthPromise.then(s => s.list(p, opts)); },
       close() { _nodeHealthPromise.then(s => s.close?.()).catch(() => {}); },
     };
-    const discussStore = createDiscussStore({ logger: api.logger });
+    const discussStore = createDiscussStore({ logger: api.logger, dbPath: runtimeDbPath });
     // createSessionIndex is async (opens sqlite + runs migrations) but
     // register() must be synchronous. Wrap the Promise in a thin proxy so
     // callers can await individual methods without an await here — every
@@ -252,7 +260,7 @@ export default definePluginEntry({
     // always correctly held until the DB is actually open, regardless of
     // how soon after boot it calls in (e.g. flow-revival's orphan
     // classification, which runs while the gateway is still starting).
-    const _sessionIndexPromise = createSessionIndex({ logger: api.logger });
+    const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
       record(data) { return _sessionIndexPromise.then(si => si.record(data)); },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
@@ -273,13 +281,6 @@ export default definePluginEntry({
       getDashboardBroadcast: () => (dashboardBusRef ? (e) => dashboardBusRef.broadcast(e) : null),
     });
 
-    const openClawHarness = createOpenClawHarness({
-      api,
-      getWorkingSubagent: () => moduleState.workingSubagent,
-      whenGatewayReady: () => gatewayReadiness.whenReady(),
-      sessionIndex,
-      emit: emitCanonical,
-    });
     const executor = createExecutor({
       api,
       store,
@@ -734,7 +735,7 @@ export default definePluginEntry({
     // must stay synchronous, and better-sqlite3 is already a dependency.
     for (const dbPath of [
       runtimeDbPath,
-      path.join(os.homedir(), ".openclaw", "ops.sqlite"),
+      opsDbPath,
     ]) {
       const check = checkDb(dbPath);
       if (!check.ok) {

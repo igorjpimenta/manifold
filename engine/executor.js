@@ -175,6 +175,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
+    harness,
   });
 
   /**

@@ -118,3 +118,30 @@ export function withSharedWrite(dbPath, fn, { maxAttempts = 200 } = {}) {
   _writeQueues.set(dbPath, result.then(() => {}, () => {}));
   return result;
 }
+
+import path from "node:path";
+import os from "node:os";
+
+// Default backing files: explicit env override wins, else the
+// ~/.openclaw files every store historically opened on its own.
+export function defaultRuntimeDbPath(env = process.env) {
+  return env?.MANIFOLD_RUNTIME_DB || path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+}
+
+export function defaultOpsDbPath(env = process.env) {
+  return env?.MANIFOLD_OPS_DB || path.join(os.homedir(), ".openclaw", "ops.sqlite");
+}
+
+// Single path-resolution point for all stores: a present harness's
+// storePaths() wins, else env, else the ~/.openclaw defaults. Throws
+// on an incomplete harness answer rather than silently mixing backends.
+export function resolveStorePaths({ harness, env = process.env } = {}) {
+  if (harness && typeof harness.storePaths === "function") {
+    const p = harness.storePaths();
+    if (!p?.runtimeDb || !p?.opsDb) {
+      throw new Error("manifold store: harness.storePaths() must return { runtimeDb, opsDb }");
+    }
+    return { runtimeDb: p.runtimeDb, opsDb: p.opsDb };
+  }
+  return { runtimeDb: defaultRuntimeDbPath(env), opsDb: defaultOpsDbPath(env) };
+}

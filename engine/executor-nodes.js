@@ -33,6 +33,19 @@ function invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId })
  * in executor.js after start/runFlow). It reads the binding at call time so it's
  * safe to construct this factory before nodeCtx is assigned.
  */
+// Default subagent session mint: through harness.sessionKey() when a
+// harness is present (fail-loud on missing agent via stampCallMeta),
+// else the bare defaultAgentSessionKey shape. Both adapters seed from
+// defaultAgentSessionKey, so the :subagent:gf-<8hex>- marker
+// isManifoldOwnedSessionKey matches on survives either path. Explicit
+// entry.sessionKey/sessionKeyBuilder overrides bypass this entirely.
+export function mintAgentSessionKey({ harness, agent, flowId, nodeId, itemKey } = {}) {
+  if (harness && typeof harness.sessionKey === "function") {
+    return harness.sessionKey({ agent, flowId, nodeId, itemKey });
+  }
+  return defaultAgentSessionKey(agent, flowId, nodeId, itemKey);
+}
+
 export function createNodeRunner({
   maybeBudgetGate,
   dispatchAgentWithRetry,
@@ -45,6 +58,7 @@ export function createNodeRunner({
   nodeExecutionsStore,
   nodeHealthStore,
   pipelinesRef,
+  harness,
 }) {
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
@@ -144,7 +158,7 @@ export function createNodeRunner({
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
     const sessionKey = entry.sessionKey
       ?? entry.sessionKeyBuilder?.(state, flowId)
-      ?? defaultAgentSessionKey(entry.agent, flowId, nodeId);
+      ?? mintAgentSessionKey({ harness, agent: entry.agent, flowId, nodeId });
     api.runtime?.lineage?.recordSpawn?.({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
