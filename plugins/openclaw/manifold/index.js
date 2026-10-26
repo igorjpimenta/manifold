@@ -82,8 +82,15 @@ import { registerGatewayReadiness } from "../../../engine/gateway-readiness.js";
 import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
 import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
+import { registerPushWebhook } from "./webhook.js";
+import { autoregisterPushTarget } from "./autoregister.js";
+import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
+import { setLocksDir } from "../../../locks/lock.js";
+import { setStateFile } from "../../../gates/paused-flows.js";
+import { createPushTargetsStore } from "../../../state/push-targets.js";
+import { resolvePushTarget, pushPayload, notifyPush } from "../../../events/push.js";
+import { createEventStream } from "../../../events/stream.js";
 
-const DEFAULT_PIPELINES_DIR = path.join(os.homedir(), ".openclaw", "workspace", ".pipelines");
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 const DEFAULT_DASHBOARD_PORT = 7430;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
@@ -110,7 +117,7 @@ export default definePluginEntry({
     properties: {
       pipelinesDir: {
         type: "string",
-        description: "Directory to scan for pipeline definition files. Default: ~/.openclaw/workspace/.pipelines",
+        description: "Directory to scan for pipeline definition files. Default: <dataDir>/workspace/.pipelines (MANIFOLD_DATA_DIR or ~/.manifold).",
       },
       ownerSessionKey: {
         type: "string",
@@ -154,6 +161,39 @@ export default definePluginEntry({
         minimum: 1,
         description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8.",
       },
+      pushUrls: {
+        type: "object",
+        description: "Per-harness push targets core POSTs dispatch/gate events to (each: {url, bearer?, timeoutMs?}). DB-registered targets win over this map.",
+      },
+      pushUrl: {
+        type: "string",
+        description: "Single fallback push URL for all harnesses when pushUrls has no entry.",
+      },
+      pushBearer: {
+        type: "string",
+        description: "Bearer core sends as Authorization on fallback pushUrl POSTs.",
+      },
+      pushTimeoutMs: {
+        type: "integer",
+        minimum: 1,
+        description: "Bounded push POST timeout. Default: 3000.",
+      },
+      webhookBearer: {
+        type: "string",
+        description: "Shared secret core must send as Authorization: Bearer on POST /api/manifold/pushed. Must match the registered push target bearer. Route stays disarmed (503) until set.",
+      },
+      webhookPublicBaseUrl: {
+        type: "string",
+        description: "Gateway address core can reach, e.g. http://127.0.0.1:18789. Used by self-registration to build the route URL.",
+      },
+      webhookHarness: {
+        type: "string",
+        description: "Harness name registered for push delivery. Default: openclaw.",
+      },
+      webhookAutoregister: {
+        type: "boolean",
+        description: "Register the route URL as this harness's push target on boot (upsert + test ping). Default true when webhookBearer is set.",
+      },
       profilePath: {
         type: "string",
         description: "Absolute path of the PROFILE.md file guarded by the before_tool_call read gate and edit lock (hooks/profile-read-gate.js, hooks/profile-write-lock.js). Default: ~/.openclaw/workspace/.shared/freelance/profile/PROFILE.md",
@@ -166,7 +206,15 @@ export default definePluginEntry({
   }),
   register: (api) => {
     const userCfg = api.pluginConfig ?? {};
-    const pipelinesDir = userCfg.pipelinesDir || DEFAULT_PIPELINES_DIR;
+    // Core owns its store home (state/paths.js): one MANIFOLD_DATA_DIR
+    // move relocates every DB, lock, and pending file. Legacy
+    // ~/.openclaw/{runtime.sqlite,ops.sqlite} are copied in once, never
+    // moved, and never read again afterwards.
+    const storePaths = resolveStorePaths();
+    ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
+    setLocksDir(storePaths.locksDir);
+    setStateFile(stateFile(storePaths.dataDir));
+    const pipelinesDir = userCfg.pipelinesDir || storePaths.pipelinesDir;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
     const discussDefaultAgent = typeof userCfg.manifoldParrot?.defaultAgent === "string" ? userCfg.manifoldParrot.defaultAgent : null;
     const dashboardEnabled = userCfg.dashboardEnabled !== false;
@@ -192,10 +240,10 @@ export default definePluginEntry({
 
     const pipelinesRef = { value: new Map() };
 
-    const runtimeDbPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+    const runtimeDbPath = storePaths.runtimeDb;
 
-    const runStore    = createRunStore({ logger: api.logger });
-    const nodeExecutionsStore = getNodeExecutionsStore();
+    const runStore    = createRunStore({ logger: api.logger, dbPath: runtimeDbPath });
+    const nodeExecutionsStore = getNodeExecutionsStore(runtimeDbPath);
     // Locks taken on behalf of a node invocation (executor-nodes.js's
     // executeNode, and browser tool leases of the sessions it dispatches)
     // stay held until the invocation resolves.
@@ -221,7 +269,7 @@ export default definePluginEntry({
     // record a real failure_events row when a subflow's mode isn't
     // satisfied, not just flip flow_runs.status.
     const emitCanonical = createEmitter({ getBroadcast: () => _gatewayBroadcast, logger: api.logger }).emit;
-    const failureStore = createFailureStore({ logger: api.logger, nodeExecutionsStore, emit: emitCanonical });
+    const failureStore = createFailureStore({ logger: api.logger, dbPath: runtimeDbPath, nodeExecutionsStore, emit: emitCanonical });
     // SCD2 history of node kind/agent/mode (see state/pipeline-registry.js's
     // own header) — separate from failureStore and unrelated to it;
     // constructed here only because runtimeDbPath is already in scope.
@@ -240,7 +288,7 @@ export default definePluginEntry({
     // register() must be synchronous. Same lazy Promise-proxy pattern as
     // sessionIndex below — callers await individual methods without an
     // await here.
-    const _nodeHealthPromise = createNodeHealthStore({ logger: api.logger });
+    const _nodeHealthPromise = createNodeHealthStore({ logger: api.logger, dbPath: runtimeDbPath });
     const nodeHealthStore = {
       isBlocked(p, n) { return _nodeHealthPromise.then(s => s.isBlocked(p, n)); },
       markUnhealthy(p, n, info) { return _nodeHealthPromise.then(s => s.markUnhealthy(p, n, info)); },
@@ -248,7 +296,7 @@ export default definePluginEntry({
       list(p, opts) { return _nodeHealthPromise.then(s => s.list(p, opts)); },
       close() { _nodeHealthPromise.then(s => s.close?.()).catch(() => {}); },
     };
-    const discussStore = createDiscussStore({ logger: api.logger });
+    const discussStore = createDiscussStore({ logger: api.logger, dbPath: runtimeDbPath });
     // createSessionIndex is async (opens sqlite + runs migrations) but
     // register() must be synchronous. Wrap the Promise in a thin proxy so
     // callers can await individual methods without an await here — every
@@ -256,7 +304,7 @@ export default definePluginEntry({
     // always correctly held until the DB is actually open, regardless of
     // how soon after boot it calls in (e.g. flow-revival's orphan
     // classification, which runs while the gateway is still starting).
-    const _sessionIndexPromise = createSessionIndex({ logger: api.logger });
+    const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
       record(data) { return _sessionIndexPromise.then(si => si.record(data)); },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
@@ -277,8 +325,38 @@ export default definePluginEntry({
       getDashboardBroadcast: () => (dashboardBusRef ? (e) => dashboardBusRef.broadcast(e) : null),
     });
 
+    // Push delivery (events/push.js): dispatch/gate events POST to the
+    // harness's registered target so it can wake the receiver. The store
+    // is async-opened but register() is sync — same lazy Promise-proxy
+    // shape as nodeHealthStore/sessionIndex above. Best-effort and
+    // guarded: a failed lookup or POST never breaks the run.
+    const _pushTargetsPromise = createPushTargetsStore({ logger: api.logger, dbPath: runtimeDbPath });
+    const pushHarness = userCfg.webhookHarness ?? "openclaw";
+    const pushConfig = {
+      pushUrls: userCfg.pushUrls,
+      pushUrl: userCfg.pushUrl,
+      pushBearer: userCfg.pushBearer,
+      pushTimeoutMs: userCfg.pushTimeoutMs,
+    };
+    const pushStream = createEventStream();
+    async function notifyPushEvent({ event, flowId = null, nodeId = null, pipelineId = null, sessionKey = null, agent = null }) {
+      const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey, agent, harnessId: pushHarness });
+      pushStream.append(payload);
+      let dbEntry = null;
+      try {
+        const row = await _pushTargetsPromise.then((ps) => ps.get(pushHarness));
+        if (row) dbEntry = { url: row.url, bearer: row.bearer, timeoutMs: row.timeoutMs };
+      } catch {}
+      const target = resolvePushTarget({ pushTargets: dbEntry, harnessId: pushHarness, config: pushConfig });
+      if (!target) return { ok: false, reason: "disabled" };
+      return notifyPush({ target, payload, logger: api.logger });
+    }
+
     const executor = createExecutor({
       api,
+      config: api.config,
+      pipelinesDir,
+      notifyPush: notifyPushEvent,
       store,
       pipelinesRef,
       ensurePipelinesLoaded,
@@ -718,6 +796,20 @@ export default definePluginEntry({
 
     // ── Runtime-capture service ──────────────────────────────────────────────
 
+    // Push wake route + boot-time self-registration (best-effort).
+    registerPushWebhook({ api, logger: api.logger, getSubagent: () => moduleState.workingSubagent ?? api.runtime?.subagent });
+    api.registerService({
+      id: "manifold-push-autoregister",
+      start: async () => {
+        try {
+          const ps = await _pushTargetsPromise;
+          await autoregisterPushTarget({ pushTargetsStore: ps, pluginConfig: userCfg, apiConfig: api.config, logger: api.logger });
+        } catch (err) {
+          api.logger.warn(`manifold: push autoregister failed: ${err?.message ?? err}`);
+        }
+      },
+    });
+
     api.registerService({
       id: "manifold-runtime-capture",
       start: async () => {
@@ -736,7 +828,7 @@ export default definePluginEntry({
     // must stay synchronous, and better-sqlite3 is already a dependency.
     for (const dbPath of [
       runtimeDbPath,
-      path.join(os.homedir(), ".openclaw", "ops.sqlite"),
+      storePaths.opsDb,
     ]) {
       const check = checkDb(dbPath);
       if (!check.ok) {
