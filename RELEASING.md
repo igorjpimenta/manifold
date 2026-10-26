@@ -10,7 +10,9 @@ never npm-published; a git tag is the only distribution channel.
 
 ## Version
 
-`YYYY.M.D` in `package.json`, carrying the merge date. A release that takes
+`YYYY.M.D` in `package.json`, carrying the merge date in UTC — a 23:30
+-0300 merge is already tomorrow, and the release workflow fails a tag
+whose date is not UTC today. A release that takes
 three weeks still gets the day it landed, because the tag is cut on the merge
 commit and that is the version anyone installs.
 
@@ -36,8 +38,9 @@ uninstallable by contract.
 5. The tag push fires the release workflow (`.github/workflows/release.yml`),
    which verifies the tag matches `package.json` verbatim, rejects `beta.0`,
    runs the unit suite, and publishes the GitHub release with generated
-   notes. Edit the notes afterward to the hand-written shape below; the
-   `gh release create` line stays as the manual fallback.
+   notes. Edit the notes afterward to the hand-written shape below. Manual
+   fallback (workflow down or re-publish after a notes edit):
+   `gh release create <version> --title <version> --notes <notes>`.
 
 Publish at the moment the tag ships. A backfilled release makes the releases
 page claim versions appeared on the day they were written up.

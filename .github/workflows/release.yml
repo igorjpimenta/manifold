@@ -43,7 +43,7 @@ jobs:
           node-version: '25'
           cache: npm
 
-      - name: Tag matches package.json verbatim, beta starts at 1
+      - name: Tag matches package.json verbatim, beta starts at 1, date is UTC today
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
@@ -54,6 +54,16 @@ jobs:
           fi
           if [[ "$TAG" =~ -beta\.0$ ]]; then
             echo "::error::tag $TAG uses beta.0 — numbering starts at beta.1, beta.0 is rejected by installers"
+            exit 1
+          fi
+          # CalVer dates are UTC: a 23:30 -0300 merge is already tomorrow.
+          # A tag pushed on the wrong UTC date fails here instead of
+          # shipping a misdated install contract — cut a new tag with
+          # today's date (tags are never rewritten).
+          TAG_DATE="${TAG%%-*}"
+          TODAY_UTC="$(date -u +%Y.%m.%d)"
+          if [[ "$TAG_DATE" != "$TODAY_UTC" ]]; then
+            echo "::error::tag date $TAG_DATE is not UTC today ($TODAY_UTC) — re-cut with today's date"
             exit 1
           fi
           echo "version contract holds: $TAG"
