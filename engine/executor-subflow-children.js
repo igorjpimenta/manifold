@@ -80,7 +80,8 @@ function buildChildInitialState(state, item, itemIndex) {
   return { item, itemIndex, parentItem };
 }
 
-export async function dispatchSubflowChildren({ node, nodeId, flowId, state, store, runStore, nodeExecutionsStore, maybeBudgetGate, runFlow, logger, api, pipelinesRef, admissionQueueStore }) {
+export async function dispatchSubflowChildren({ node, nodeId, flowId, state, store, runStore, nodeExecutionsStore, maybeBudgetGate, runFlow, logger, api, lineage, pipelinesRef, admissionQueueStore }) {
+  const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   // "needs:" resolution — a subflow node's own selector can declare .needs and call
   // ctx.needs(varName) to reach an ancestor flow, same lazy/opt-in
   // mechanism code and agent nodes get. A rejected/not-ready need throws
@@ -215,7 +216,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
     // scheduling further down is setImmediate, which fires on the next tick
     // and would otherwise let the child's first node resolve lineage before
     // this edge lands.
-    await api?.runtime?.lineage?.recordTrigger?.({
+    await _lineage?.recordTrigger?.({
       flowId: c.childFlowId,
       pipelineId: childPipelineId,
       parentSessionKey: `flow:${flowId}`,

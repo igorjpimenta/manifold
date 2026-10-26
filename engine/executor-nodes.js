@@ -40,12 +40,21 @@ export function createNodeRunner({
   withCrossProcessLockMaybe,
   getNodeCtx,
   api,
+  config,
+  lineage,
+  pipelinesDir,
+  notifyPush,
   logger,
   runStore,
   nodeExecutionsStore,
   nodeHealthStore,
   pipelinesRef,
 }) {
+  // Explicit params win; api is the legacy fallback the adapter still
+  // supplies during cutover (tests construct with api only).
+  const _lineage = lineage ?? api?.runtime?.lineage ?? null;
+  const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
+  const _notifyPush = typeof notifyPush === "function" ? notifyPush : null;
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
   // "agent" branches in executeNodeBody — this function has no fallback-
@@ -54,8 +63,8 @@ export function createNodeRunner({
   // caller's job.
   async function dispatchCodeEntry(entry, { state, flowId, nodeId }) {
     const flowId8 = flowId.slice(0, 8);
-    const artifactDir = state.runId && state.pipelineId
-      ? path.join(os.homedir(), ".openclaw", "workspace", ".pipelines", state.pipelineId, "runs", state.runId)
+    const artifactDir = state.runId && state.pipelineId && _pipelinesDir
+      ? path.join(_pipelinesDir, state.pipelineId, "runs", state.runId)
       : null;
     // Same pattern as executeSubflowNode's selector call in executor.js:
     // assembleState(baseState: state). Every kind:"code" node's run() goes
@@ -112,6 +121,11 @@ export function createNodeRunner({
   // inlined here, so the rule sits beside the error classes it inspects.
   async function dispatchAgentEntry(entry, nodeId, { state, flowId, reviveMessage, invocationId }) {
     const pipelineId = state?.pipelineId ?? null;
+    // Anonymous dispatch is refused loudly: every agent turn is keyed to
+    // its agent for session attribution and push wake. No default, ever.
+    if (!entry.agent) {
+      throw new Error(`manifold: refusing anonymous dispatch of node "${nodeId}" (no entry.agent)`);
+    }
     if (entry.circuitBreaker && await nodeHealthStore?.isBlocked(pipelineId, nodeId)) {
       throw new Error(
         `unhealthy agent dispatch: "${nodeId}" is blocked after a prior failure — reset via "openclaw manifold node-health reset ${pipelineId} ${nodeId}" once the underlying issue is confirmed fixed`
@@ -145,7 +159,7 @@ export function createNodeRunner({
     const sessionKey = entry.sessionKey
       ?? entry.sessionKeyBuilder?.(state, flowId)
       ?? defaultAgentSessionKey(entry.agent, flowId, nodeId);
-    api.runtime?.lineage?.recordSpawn?.({
+    _lineage?.recordSpawn?.({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
     });
@@ -281,6 +295,11 @@ export function createNodeRunner({
         lastOpenedAt: now,
       };
       await nodeExecutionsStore.writeGateRecord(flowId, nodeId, gateRecord);
+      if (_notifyPush) {
+        try {
+          await _notifyPush({ event: "gate.opened", flowId, nodeId, pipelineId: state?.pipelineId ?? null, sessionKey: null, agent: null });
+        } catch {}
+      }
       const waitJson = {
         kind: "human-gate",
         nodeId,

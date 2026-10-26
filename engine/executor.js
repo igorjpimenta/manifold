@@ -21,6 +21,7 @@ import os from "node:os";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { nodeEmitter } from "../events.js";
 import { withLock as withCrossProcessLock } from "../locks/lock.js";
+import { resolveStorePaths } from "../state/paths.js";
 
 import {
   isTerminal, isBlocked, isQueued, shortSummary, deepClone, resolveEdge,
@@ -36,13 +37,18 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, notifyPush, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+  // Explicit params win; api is the legacy fallback the adapter still
+  // supplies during cutover (tests construct with api only).
+  const _config = config ?? api?.config ?? null;
+  const _lineage = api?.runtime?.lineage ?? null;
+  const _pipelinesDir = pipelinesDir ?? _config?.pipelinesDir ?? resolveStorePaths().pipelinesDir;
   // Every agent dispatch resolves its subagent here, so gating here covers
   // revival, cron-started flows at boot and gate continuations alike — see
   // engine/gateway-subagent.js.
   const gateSubagent = createGatewaySubagentGate({ whenGatewayReady });
   function resolveSubagent() {
-    return gateSubagent(getWorkingSubagent?.() ?? api.runtime?.subagent);
+    return gateSubagent(getWorkingSubagent?.() ?? api?.runtime?.subagent);
   }
 
   // Injectable for tests (defaults to the real singleton in production).
@@ -70,7 +76,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
   }
 
   const { maybeBudgetGate } = createBudgetGate({
-    getApprovalQueue: () => api?.runtime?.approvalQueue,
+    getApprovalQueue: () => approvalQueue ?? api?.runtime?.approvalQueue,
     logger,
   });
 
@@ -83,6 +89,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     sessionIndex,
     logger,
     emit,
+    notifyPush,
   });
 
   // Direct store.setQueued/setRunning, not the CAS-retry-wrapped
@@ -166,13 +173,13 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
     return dispatchSubflowChildren({
       node, nodeId, flowId, state: enrichedState, store, runStore, nodeExecutionsStore: nodeExecutions,
-      maybeBudgetGate, runFlow, logger, api, pipelinesRef, admissionQueueStore,
+      maybeBudgetGate, runFlow, logger, lineage: _lineage, pipelinesRef, admissionQueueStore,
     });
   }
 
   const { executeNode } = createNodeRunner({
     maybeBudgetGate, dispatchAgentWithRetry, executeSubflowNode,
-    withCrossProcessLockMaybe, api, logger,
+    withCrossProcessLockMaybe, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, notifyPush, logger,
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
@@ -858,7 +865,7 @@ export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded
       stateJson: flow.stateJson ?? {},
       lastStep: flow.lastStep,
       revision: flow.revision,
-      cfg: api.config,
+      cfg: _config,
       logger,
       runStore,
       nodeExecutionsStore: nodeExecutions,
