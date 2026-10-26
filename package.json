@@ -28,11 +28,16 @@
   "dependencies": {
     "@igorjpimenta/oc-contracts": "git+https://github.com/igorjpimenta/oc-contracts.git#v1.0.1",
     "@libsql/client": "^0.17.4",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.2",
-    "graphql": "^16.14.2"
+    "graphql": "^16.14.2",
+    "zod": "^3.25 || ^4.0"
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"
+  },
+  "bin": {
+    "manifold": "bin/manifold.js"
   }
 }
