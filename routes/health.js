@@ -9,12 +9,13 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { checkDb } from "../state/db-health.js";
 import { noteDbFailure } from "../state/db-guard.js";
+import { defaultRuntimeDbPath, defaultOpsDbPath } from "../state/db.js";
 
 const require = createRequire(import.meta.url);
 const MANIFOLD_VERSION = require("../package.json").version;
 
-const RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
+const RUNTIME_DB = () => defaultRuntimeDbPath();
+const OPS_DB = () => defaultOpsDbPath();
 
 export function registerHealthRoutes({ api }) {
   api.registerHttpRoute({

@@ -10,7 +10,7 @@
 // from leaf to root.
 
 import path from "node:path";
-import { getSharedDb } from "../state/db.js";
+import { getSharedDb, defaultRuntimeDbPath } from "../state/db.js";
 import os from "node:os";
 import fs from "node:fs";
 import { classify, agentIdOf } from "./grammar.js";
@@ -19,7 +19,7 @@ import { execAll } from "./http-helpers.js";
 // runtime.sqlite, not flows/registry.sqlite — manifold no longer writes
 // flow_runs rows to the latter; runtime.sqlite is the live store (same
 // table shape) everywhere else in manifold.
-const FLOWS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const FLOWS_DB_PATH = defaultRuntimeDbPath();
 const CRON_JSON_PATH = path.join(os.homedir(), ".openclaw", "cron", "jobs.json");
 
 // ─── External joins (lazy-loaded, cached per resolver instance) ──────────────

@@ -42,9 +42,22 @@
 // from the CLI's own ~/.openclaw/identity/device.json, so pairing the
 // dashboard never disturbs the CLI's identity or cached token.
 
-import { listDevicePairing } from "openclaw/plugin-sdk/device-bootstrap";
-import { GatewayClient } from "openclaw/plugin-sdk/gateway-runtime";
 import { createHash, generateKeyPairSync, createPublicKey } from "node:crypto";
+// Harness SDK (pairing store, gateway WS client) is gateway-resident.
+// Standalone (sidecar/tests) these degrade: no paired devices listed,
+// pairing attempts report failure — both already handled by callers.
+let listDevicePairing = async () => ({ paired: [], pending: [] });
+let GatewayClient = class {
+  constructor() {
+    throw new Error("GatewayClient unavailable outside the harness");
+  }
+};
+try {
+  ({ listDevicePairing } = await import("openclaw/plugin-sdk/device-bootstrap"));
+} catch {}
+try {
+  ({ GatewayClient } = await import("openclaw/plugin-sdk/gateway-runtime"));
+} catch {}
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";

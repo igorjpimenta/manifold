@@ -1,6 +1,20 @@
 import { createClient } from '@libsql/client';
 import { drizzle } from 'drizzle-orm/libsql';
 import * as schema from './schema.js';
+import os from "node:os";
+import path from "node:path";
+
+// Package-owned database locations with harness-managed fallbacks.
+// MANIFOLD_RUNTIME_DB / MANIFOLD_OPS_DB redirect every store at once (the
+// sidecar sets them to its data dir); unset, every default is exactly the
+// historical ~/.openclaw path, so gateway-hosted behavior is unchanged.
+export function defaultRuntimeDbPath(env = process.env) {
+  return env.MANIFOLD_RUNTIME_DB || path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+}
+
+export function defaultOpsDbPath(env = process.env) {
+  return env.MANIFOLD_OPS_DB || path.join(os.homedir(), ".openclaw", "ops.sqlite");
+}
 
 // Returns { db, client } where:
 //   db     — Drizzle ORM instance; use for typed queries

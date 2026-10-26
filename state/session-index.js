@@ -15,14 +15,14 @@
 
 import { mkdirSync } from "node:fs";
 import { eq, and } from "drizzle-orm";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, defaultRuntimeDbPath } from "./db.js";
 import { flowSessions } from "./schema.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_DB_PATH = defaultRuntimeDbPath();
 
 export async function createSessionIndex({ dbPath = DEFAULT_DB_PATH, logger } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });

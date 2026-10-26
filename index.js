@@ -8,9 +8,15 @@
 //   - `human-gate`  : flow.status='blocked' + wait_json; resumed by CLI approve
 //   - `parallel`    : fixed set of named `.tasks`, all dispatched concurrently
 
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import path from "node:path";
 import os from "node:os";
+// Resolved in the gateway (plugin loader provides openclaw/*); absent in
+// the sidecar, where the entry runs standalone and the wrapper is identity.
+// Same specifier both places, so gateway behavior is unchanged.
+let definePluginEntry = (entry) => entry;
+try {
+  ({ definePluginEntry } = await import("openclaw/plugin-sdk/plugin-entry"));
+} catch {}
 import { createPipelinesLoader } from "./engine/loader.js";
 import { createStateStore } from "./state/state-store.js";
 import { createRunStore } from "./state/run-store.js";
@@ -37,6 +43,7 @@ import {
 } from "./agent/tools/index.js";
 import { readPending, clearPending, setPendingText, mergePendingFields } from "./state/pending-store.js";
 import { checkDb } from "./state/db-health.js";
+import { defaultRuntimeDbPath, defaultOpsDbPath } from "./state/db.js";
 import { writeCorruptionAlert } from "./state/db-guard.js";
 import { createGateResolver } from "./gates/gate-resolver.js";
 import { createEventBus } from "./dashboard/event-log.js";
@@ -45,7 +52,8 @@ import { costForAllPipelines } from "./dashboard/cost.js";
 import { createPipelinesWatcher } from "./engine/pipelines-watcher.js";
 import { flushAll as flushBatchWriter } from "./state/batch-writer.js";
 import { invokeElevated } from "./elevation.js";
-import { createManifoldParrotChannelEntry } from "./channels/manifold-parrot-channel.js";
+// Parrot channel entry is imported lazily at registration (gateway-only);
+// its static harness imports must never load in the sidecar.
 
 // Route modules extracted from this file.
 import { flowStateEmitter, gateEmitter } from "./events.js";
@@ -161,6 +169,10 @@ export default definePluginEntry({
   }),
   register: (api) => {
     const userCfg = api.pluginConfig ?? {};
+    // The parrot channel is a harness chat surface (gateway channel
+    // plugins); it has no host in the sidecar. Skipped there; the
+    // companion re-hosts discuss surfaces in a later stage.
+    const isSidecar = !!process.env.MANIFOLD_SIDECAR;
     const pipelinesDir = userCfg.pipelinesDir || DEFAULT_PIPELINES_DIR;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
     const discussDefaultAgent = typeof userCfg.manifoldParrot?.defaultAgent === "string" ? userCfg.manifoldParrot.defaultAgent : null;
@@ -187,7 +199,7 @@ export default definePluginEntry({
 
     const pipelinesRef = { value: new Map() };
 
-    const runtimeDbPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+    const runtimeDbPath = defaultRuntimeDbPath();
 
     const runStore    = createRunStore({ logger: api.logger });
     const nodeExecutionsStore = getNodeExecutionsStore();
@@ -607,13 +619,23 @@ export default definePluginEntry({
 
     // ── Parrot channel (takes the shared emitter directly) ────────────────────
 
-    createManifoldParrotChannelEntry({
-      readStore,
-      discussStore,
-      resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
-      stampDiscussSession:  discussHandlers.stampDiscussSession,
-      emit: emitCanonical,
-    }).register(api);
+    if (!isSidecar) {
+      // Deferred import (never awaited): register() must stay synchronous
+      // — the boot gate below has to run before this returns.
+      import("./channels/manifold-parrot-channel.js").then(({ createManifoldParrotChannelEntry }) => {
+        createManifoldParrotChannelEntry({
+          readStore,
+          discussStore,
+          resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
+          stampDiscussSession: discussHandlers.stampDiscussSession,
+          emit: emitCanonical,
+        }).register(api);
+      }).catch((err) => {
+        api.logger.warn(`manifold: parrot channel registration failed: ${err?.message ?? err}`);
+      });
+    } else {
+      api.logger.info("manifold: parrot channel skipped in sidecar (harness surface)");
+    }
 
     // ── Dashboard ────────────────────────────────────────────────────────────
 
@@ -725,7 +747,7 @@ export default definePluginEntry({
     // must stay synchronous, and better-sqlite3 is already a dependency.
     for (const dbPath of [
       runtimeDbPath,
-      path.join(os.homedir(), ".openclaw", "ops.sqlite"),
+      defaultOpsDbPath(),
     ]) {
       const check = checkDb(dbPath);
       if (!check.ok) {

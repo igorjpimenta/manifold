@@ -25,7 +25,7 @@
 // falls back to SQL when the in-memory buffer is empty (cold read after restart).
 
 import { mkdirSync } from "node:fs";
-import { openDb } from "../state/db.js";
+import { openDb, defaultRuntimeDbPath } from "../state/db.js";
 import { enqueueRaw } from "../state/batch-writer.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -33,7 +33,7 @@ import os from "node:os";
 import { flowStateEmitter } from "../events.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
-const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_EVENTS_DB_PATH = defaultRuntimeDbPath();
 
 async function openEventsDb(dbPath, logger) {
   try {

@@ -10,11 +10,11 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { resolveCost } from "./pricer.js";
-import { getSharedDb } from "../state/db.js";
+import { getSharedDb, defaultRuntimeDbPath } from "../state/db.js";
 import { execAll } from "./http-helpers.js";
 
 const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
-const RUNTIME_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const RUNTIME_DB_PATH = defaultRuntimeDbPath();
 
 export async function runBackfill({ store, resolver, logger, includeCost = false, force = false } = {}) {
   const t0 = Date.now();

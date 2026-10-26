@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ai.manifold.sidecar: the manifold sidecar (own process, package-owned
+     store). Independent of the gateway: gateway restarts/crashes never
+     disturb it, and it never opens harness databases. Adjust MANIFOLD_HOME
+     if the checkout moves. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>ai.manifold.sidecar</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/opt/node@24/bin/node</string>
+    <string>/Users/herculano/.dev/job/igorpimenta/manifold/bin/manifold-sidecar.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/herculano/.dev/job/igorpimenta/manifold</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>MANIFOLD_DATA_DIR</key>
+    <string>/Users/herculano/.manifold</string>
+    <key>MANIFOLD_PORT</key>
+    <string>7431</string>
+    <key>MANIFOLD_HOST</key>
+    <string>127.0.0.1</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/herculano/Library/Logs/manifold/sidecar.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/herculano/Library/Logs/manifold/sidecar.log</string>
+</dict>
+</plist>
