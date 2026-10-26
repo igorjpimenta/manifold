@@ -1,12 +1,12 @@
-// session-index.js — durable flowId→sessionKey index.
-//
-// Written once per subagent spawn so post-mortem queries can answer
-// "which agent sessions did flow X touch?" without walking the full
-// ~/.openclaw/agents/ directory tree. NOTE: the dashboard's transcript
-// endpoint (routes/runs.js's sendTranscriptsList) does NOT read this
-// table — it still walks ~/.openclaw/agents/*/sessions/sessions.json
-// on disk directly. This index is written but currently has no reader
-// in production code.
+// session-index.js — durable flowId→sessionKey index. Adapter-facing state:
+// it stores GATEWAY keys (`agent:<agent>:subagent:mf-…`), never core's opaque
+// `mf-…` handles — NO schema migration was needed because the stored shape
+// is unchanged, only the prefix core mints changed. Core's dispatch path
+// reaches this store through the adapter's conversion proxy (which maps the
+// opaque dispatch handle to its gateway key via the `agent` param on
+// record()); direct record() calls must already carry gateway keys.
+// Reads (flowIdForSessionKey) take gateway keys verbatim — callers holding
+// task_runs rows already have that shape, no conversion needed.
 //
 // Storage: ~/.openclaw/runtime.sqlite (see defaultDbPath()).
 //
@@ -38,7 +38,10 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, close() {} };
   }
 
-  async function record({ flowId, sessionKey, nodeId = null, branchItemId = null } = {}) {
+  // `agent` is accepted and ignored: the adapter proxy consumes it to map
+  // the opaque handle to its gateway key before delegating here.
+  async function record({ flowId, sessionKey, nodeId = null, branchItemId = null, agent = null } = {}) {
+    void agent;
     if (!flowId || !sessionKey) return;
     try {
       await withSharedWrite(dbPath, () =>

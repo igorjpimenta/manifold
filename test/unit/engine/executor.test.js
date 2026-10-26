@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createExecutor } from "../../../engine/executor.js";
 import { NodeFailure } from "../../../engine/executor-errors.js";
-import { defaultAgentSessionKey, assembleState } from "../../../engine/executor-helpers.js";
+import { mintAgentSessionKey, assembleState } from "../../../engine/executor-helpers.js";
 import { REVIVAL_MSG } from "../../../engine/revival-messages.js";
 import { nodeEmitter } from "../../../events.js";
 import { getGlobalConcurrencyLimit, _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
@@ -1589,7 +1589,7 @@ describe("reviveAgentKindOrphan", () => {
     await executor.reviveAgentKindOrphan(flow);
 
     assert.equal(capturedMessage, REVIVAL_MSG, "must send the continuation prompt, not promptBuilder's output");
-    assert.equal(capturedSessionKey, defaultAgentSessionKey("scout", flow.flowId, "AGENT"), "must resume the SAME session the original dispatch used");
+    assert.equal(capturedSessionKey, mintAgentSessionKey(flow.flowId, "AGENT"), "must resume the SAME session the original dispatch used");
     const final = store.get(flow.flowId);
     assert.equal(final.status, "succeeded", "flow continues past AGENT to __end__");
     // B4: state_json is entry-only — agentReply (AGENT's own apply() output)

@@ -15,25 +15,26 @@
     "directory": "plugins/openclaw/manifold"
   },
   "files": [
-    "index.js",
-    "openclaw.plugin.json",
     "README.md",
-    "channels/manifold-parrot-channel.js",
-    "hooks/profile-read-gate.js",
-    "hooks/profile-write-lock.js",
-    "hooks/score-tool-wake.js",
-    "meta.js",
     "agent/tools/index.js",
     "agent/tools/manifold-start.js",
-    "agent/tools/propose-draft.js",
     "agent/tools/propose-draft-meta.js",
-    "agent/tools/submit-draft.js",
-    "agent/tools/submit-score.js",
+    "agent/tools/propose-draft.js",
     "agent/tools/report-draft-blocked.js",
     "agent/tools/report-draft-skip.js",
     "agent/tools/shared.js",
+    "agent/tools/submit-draft.js",
+    "agent/tools/submit-score.js",
     "auth/bridge.js",
-    "dashboard/device.js"
+    "channels/manifold-parrot-channel.js",
+    "dashboard/device.js",
+    "hooks/profile-read-gate.js",
+    "hooks/profile-write-lock.js",
+    "hooks/score-tool-wake.js",
+    "index.js",
+    "meta.js",
+    "openclaw.plugin.json",
+    "session-keys.js"
   ],
   "openclaw": {
     "extensions": [

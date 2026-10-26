@@ -30,8 +30,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIST_DIR = path.join(HERE, "dist");
 // Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/. The
 // manifold executor uses the sessionKey pattern
-// `agent:<agentId>:subagent:gf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`
-// (see executor.js `defaultAgentSessionKey`) so we can find every session a
+// `agent:<agentId>:subagent:mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`
+// (gateway shape of core's opaque handle — see session-keys.js) so we can
+// find every session a
 // flow spawned by scanning each agent's sessions.json for matching keys.
 const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
 
@@ -647,9 +648,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
     const flowShort = flowId.slice(0, 8);
-    // sessionKey pattern from executor.js `defaultAgentSessionKey`:
-    //   agent:<agent>:subagent:gf-<flowShort>-<nodeId>[-<itemKey>]
-    const keyPattern = new RegExp(`^agent:([^:]+):subagent:gf-${flowShort}-(.+)$`);
+    // sessionKey pattern (gateway shape of core's opaque `mf-` handle):
+    //   agent:<agent>:subagent:mf-<flowShort>-<nodeId>[-<itemKey>]
+    const keyPattern = new RegExp(`^agent:([^:]+):subagent:mf-${flowShort}-(.+)$`);
 
     let agentDirs = [];
     try { agentDirs = await readdir(AGENTS_DIR, { withFileTypes: true }); }

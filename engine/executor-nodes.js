@@ -2,7 +2,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
-import { detectBlockedSentinel, detectSkippedSentinel, defaultAgentSessionKey, assembleState } from "./executor-helpers.js";
+import { detectBlockedSentinel, detectSkippedSentinel, mintAgentSessionKey, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
 import { registerDispatch, clearDispatch } from "../state/tool-handoff.js";
 import { registerSessionOwner, clearSessionOwner, runWithLockOwner } from "../locks/lock.js";
@@ -156,9 +156,12 @@ export function createNodeRunner({
     // NodeBlocked into blockedInfo.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
+    // Core-namespace handle only (`mf-<flow8>-<node>`); explicit
+    // entry.sessionKey / sessionKeyBuilder overrides pass through verbatim.
+    // Gateway shaping happens at the adapter edge, never here.
     const sessionKey = entry.sessionKey
       ?? entry.sessionKeyBuilder?.(state, flowId)
-      ?? defaultAgentSessionKey(entry.agent, flowId, nodeId);
+      ?? mintAgentSessionKey(flowId, nodeId);
     _lineage?.recordSpawn?.({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,

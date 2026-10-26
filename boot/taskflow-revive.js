@@ -154,8 +154,9 @@ export async function scanAndCleanup(api, dbPath, startupDelayMs, logger, { sess
   const toRevive = [];
   const toDelegate = [];
   for (const row of rows) {
-    // A manifold flow node's session (engine/executor-helpers.js's
-    // defaultAgentSessionKey) is owned by engine/executor.js's
+    // A manifold flow node's session (gateway shape of core's opaque
+    // `mf-` handle — see engine/executor-helpers.js) is owned by
+    // engine/executor.js's
     // reviveAgentKindOrphan() — the one function that actually knows how
     // to resolve the flow's pipeline/node and feed a reply back into flow
     // state. This scan must not cancel that session (see
