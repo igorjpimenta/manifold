@@ -39,9 +39,9 @@ import { resolveStorePaths } from "../state/paths.js";
 
 const PIPELINES_DIR = path.join(os.homedir(), ".openclaw", "workspace", ".pipelines");
 
-async function ensurePipelinesLoaded(pipelinesRef, logger) {
+async function ensurePipelinesLoaded(pipelinesRef, logger, dir = null) {
   if (pipelinesRef.value && pipelinesRef.value.size > 0) return;
-  const loaded = await loadPipelines(PIPELINES_DIR, logger);
+  const loaded = await loadPipelines(dir ?? PIPELINES_DIR, logger);
   pipelinesRef.value = loaded;
 }
 
@@ -72,7 +72,16 @@ function withExit(action) {
   };
 }
 
-export function registerCliCommands({ program, executor, store, pipelinesRef, logger, dashboardUrl, api, nodeHealthStore, ownerSessionKey, runStore, nodeExecutionsStore, admissionQueueStore }) {
+export function registerCliCommands({ program, executor, store, pipelinesRef, logger, dashboardUrl, api, nodeHealthStore, ownerSessionKey, runStore, nodeExecutionsStore, admissionQueueStore, pipelineDirsStore = null, resolvePipelinesDir = null }) {
+  // Adapter-resolved pipelines dir for every CLI load below (table →
+  // env → config → default); standalone one-shot use keeps PIPELINES_DIR.
+  const cliPipelinesDir = (() => {
+    try { return resolvePipelinesDir?.()?.dir ?? PIPELINES_DIR; }
+    catch { return PIPELINES_DIR; }
+  })();
+  async function ensureCliLoaded() {
+    await ensurePipelinesLoaded(pipelinesRef, logger, cliPipelinesDir);
+  }
   const root = program.command("manifold");
   root.description("Run state-graph pipelines defined in workspace/.pipelines/");
   const failureStore = createFailureStore({ logger, nodeExecutionsStore });
@@ -82,7 +91,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .command("list")
     .description("List loaded pipelines (from workspace/.pipelines/)")
     .action(withExit(async () => {
-      await ensurePipelinesLoaded(pipelinesRef, logger);
+      await ensureCliLoaded();
       const all = [...pipelinesRef.value.values()];
       if (all.length === 0) {
         console.log("manifold: no pipelines loaded.");
@@ -95,13 +104,58 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       }
     }));
 
+  // manifold pipelines register --harness <h> --path <dir> — upsert a
+  // per-harness override (dir must exist). Takes effect on next gateway
+  // boot; `list` shows the currently effective dir.
+  // manifold pipelines list [--harness <h>] — table rows + effective dir.
+  const pipelinesCmd = root
+    .command("pipelines")
+    .description("Inspect or override per-harness pipeline directories.");
+  pipelinesCmd
+    .command("register")
+    .description("Register a per-harness pipeline directory override (upsert; dir must exist).")
+    .requiredOption("--harness <h>", "Harness this override applies to")
+    .requiredOption("--path <dir>", "Pipeline directory (must exist)")
+    .action(withExit(async (options) => {
+      if (!pipelineDirsStore) {
+        console.error("manifold: pipeline dir store unavailable in this process.");
+        process.exit(1);
+      }
+      try {
+        const reg = pipelineDirsStore.register({ harness: options.harness, dirPath: options.path });
+        console.log(`manifold: registered pipelines dir for harness "${reg.harness}": ${reg.path}`);
+      } catch (err) {
+        console.error(`manifold: ${err?.message ?? err}`);
+        process.exit(1);
+      }
+    }));
+  pipelinesCmd
+    .command("list")
+    .description("List registered per-harness pipeline dirs and the effective dir.")
+    .option("--harness <h>", "Harness to resolve the effective dir for")
+    .action(withExit(async (options) => {
+      if (!pipelineDirsStore) {
+        console.error("manifold: pipeline dir store unavailable in this process.");
+        process.exit(1);
+      }
+      const rows = pipelineDirsStore.list();
+      if (rows.length === 0) {
+        console.log("manifold: no per-harness pipeline dirs registered.");
+      } else {
+        for (const r of rows) console.log(`  ${r.harness}  ${r.path}`);
+      }
+      const h = options.harness ?? null;
+      const resolved = resolvePipelinesDir ? resolvePipelinesDir(h) : { dir: cliPipelinesDir, source: "default" };
+      console.log(`manifold: effective dir${h ? ` for harness "${h}"` : ""}: ${resolved.dir} (source: ${resolved.source})`);
+    }));
+
   // manifold start <pipelineId>
   root
     .command("start <pipelineId>")
     .description("Start a new run of a pipeline. Blocks until the flow reaches terminal or human-gate.")
     .option("--args <json>", "JSON-encoded args to merge into initial state", "")
     .action(withExit(async (pipelineId, options) => {
-      await ensurePipelinesLoaded(pipelinesRef, logger);
+      await ensureCliLoaded();
       const args = options.args ? safeParseJson(options.args) : {};
       if (args === null) {
         console.error(`manifold: --args must be valid JSON`);
@@ -222,7 +276,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .command("retry <flowId>")
     .description("Retry a flow's most recent open failure (root-level or a childFlows subflow item). Blocks until the retried flow(s) reach terminal or blocked.")
     .action(withExit(async (flowId) => {
-      await ensurePipelinesLoaded(pipelinesRef, logger);
+      await ensureCliLoaded();
       const openFailures = (await failureStore.list({ resolved: false, limit: 1000 }))
         .filter((f) => f.flow_id === flowId);
       if (openFailures.length === 0) {
@@ -352,7 +406,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
       });
       // executor.resume (fired from inside applyResolutionsAndResume) needs
       // the pipeline definition loaded in this CLI process's pipelinesRef.
-      await ensurePipelinesLoaded(pipelinesRef, logger);
+      await ensureCliLoaded();
 
       const result = await gateResolver.recordItemDecision({
         flowId,
@@ -387,7 +441,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .description("Start a fresh run of the source flow's pipeline (new flowId, fresh state)")
     .option("--args <json>", "JSON-encoded args; overrides the source flow's args", "")
     .action(withExit(async (sourceFlowId, options) => {
-      await ensurePipelinesLoaded(pipelinesRef, logger);
+      await ensureCliLoaded();
       const argsOverride = options.args ? safeParseJson(options.args) : undefined;
       if (options.args && argsOverride === null) {
         console.error(`manifold: --args must be valid JSON`);

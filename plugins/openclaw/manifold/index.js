@@ -25,6 +25,7 @@ import { createNodeHealthStore } from "../../../state/node-health-store.js";
 import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
+import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
 import { wrapSubagentKeys, toGatewaySessionKey, toGatewayKey } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
 import {
@@ -215,7 +216,18 @@ export default definePluginEntry({
     ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
     setLocksDir(storePaths.locksDir);
     setStateFile(stateFile(storePaths.dataDir));
-    const pipelinesDir = userCfg.pipelinesDir || storePaths.pipelinesDir;
+    // Pipeline dir resolution (table[harness] → MANIFOLD_PIPELINES_DIR env →
+    // config `pipelinesDir` → <dataDir>/workspace/.pipelines). The table lets
+    // an operator relocate one harness without touching env or config; sync
+    // open-per-op store, so this resolves before any service starts.
+    const pushHarness = userCfg.webhookHarness ?? "openclaw";
+    const pipelineDirsStore = createPipelineDirsStore({ dbPath: runtimeDbPath, logger: api.logger });
+    const pipelinesDir = pipelineDirsStore.resolveDir({
+      harness: pushHarness,
+      env: process.env,
+      dataDir: storePaths.dataDir,
+      configDir: userCfg.pipelinesDir || null,
+    }).dir;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
     const discussDefaultAgent = typeof userCfg.manifoldParrot?.defaultAgent === "string" ? userCfg.manifoldParrot.defaultAgent : null;
     const dashboardEnabled = userCfg.dashboardEnabled !== false;
@@ -341,7 +353,6 @@ export default definePluginEntry({
     // shape as nodeHealthStore/sessionIndex above. Best-effort and
     // guarded: a failed lookup or POST never breaks the run.
     const _pushTargetsPromise = createPushTargetsStore({ logger: api.logger, dbPath: runtimeDbPath });
-    const pushHarness = userCfg.webhookHarness ?? "openclaw";
     const pushConfig = {
       pushUrls: userCfg.pushUrls,
       pushUrl: userCfg.pushUrl,
@@ -533,6 +544,13 @@ export default definePluginEntry({
         runStore,
         nodeExecutionsStore,
         admissionQueueStore,
+        pipelineDirsStore,
+        resolvePipelinesDir: (harness) => pipelineDirsStore.resolveDir({
+          harness: harness ?? pushHarness,
+          env: process.env,
+          dataDir: storePaths.dataDir,
+          configDir: userCfg.pipelinesDir || null,
+        }),
       }),
       {
         commands: ["manifold"],

@@ -29,6 +29,17 @@ revival re-attaches by session key, never by runId. The session index
 stores gateway keys (adapter-facing state, written through conversion);
 non-`mf-` keys pass through verbatim in both directions.
 
+## Pipeline directories
+
+Resolution order: `pipeline_dirs` table[harness] → `MANIFOLD_PIPELINES_DIR`
+env → config `pipelinesDir` → `<dataDir>/workspace/.pipelines` default. No
+new plugin config keys (env + table only, like push).
+
+- `openclaw manifold pipelines register --harness <h> --path <dir>`
+  upserts the override (dir must exist); effective on next gateway boot.
+- `openclaw manifold pipelines list [--harness <h>]` shows registered
+  rows plus the currently effective dir and which tier won.
+
 ## openclaw
 
 1. Install the adapter package (its own release line, pulls
