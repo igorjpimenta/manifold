@@ -1,6 +1,6 @@
 /**
  * Unit tests for engine/wait-for-flow-settlement.js — the fix for the
- * one-shot CLI's childFlows-orphaning bug (agent/cli.js's start/rerun/
+ * one-shot CLI's childFlows-orphaning bug (bin/cli.js's start/rerun/
  * retry/approve commands each await exactly one runFlow()/resume() call
  * for the flow they were given, which resolves before any childFlows
  * children that flow spawns along the way ever get a chance to run).
@@ -118,7 +118,7 @@ describe("waitForFlowSettlement", () => {
   // The core bug this module fixes, proven against a real executor: a
   // childFlows:true subflow fires its children via a bare setImmediate
   // that a single `await executor.runFlow(flowId, "fresh")` never waits
-  // on. This test dispatches the SAME way agent/cli.js's start command
+  // on. This test dispatches the SAME way bin/cli.js's start command
   // does (one initial runFlow call, nothing more), then confirms
   // waitForFlowSettlement is what actually catches every child up to a
   // real terminal state — not the initial runFlow call itself.
@@ -171,7 +171,7 @@ describe("waitForFlowSettlement", () => {
       stateJson: { ...flow.stateJson, items: [{ id: "a" }, { id: "b" }, { id: "c" }] },
     });
 
-    // Exactly what agent/cli.js's start command does today — the bug.
+    // Exactly what bin/cli.js's start command does today — the bug.
     await executor.runFlow(record.flowId, "fresh");
     const rightAfterInitialDispatch = await store.get(record.flowId);
     assert.equal(rightAfterInitialDispatch.status, "blocked", "the single runFlow() call must NOT have waited for children — this is the bug being characterized");

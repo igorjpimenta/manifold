@@ -4,7 +4,7 @@
  * decide routing → resume-or-skip → log" helper that replaced 7 independent
  * hand-rolled copies of the same glue across state-store.js, child-resume-
  * trigger.js (x2), executor-nodes.js, boot/flow-revival.js (x2), and
- * agent/cli.js (x2). Each of those call sites still has its own thin wiring
+ * bin/cli.js (x2). Each of those call sites still has its own thin wiring
  * test (or indirect coverage via state-store.test.js's promotion-routing
  * block) — this file is the one place that tests wakePromotedRelease's own
  * contract directly, independent of any one call site.
