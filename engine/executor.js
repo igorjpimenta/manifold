@@ -36,13 +36,12 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
-  // Every agent dispatch resolves its subagent here, so gating here covers
-  // revival, cron-started flows at boot and gate continuations alike — see
-  // engine/gateway-subagent.js.
+export function createExecutor({ api, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit, harness }) {
   const gateSubagent = createGatewaySubagentGate({ whenGatewayReady });
+  const harnessSubagent = harness && typeof harness.getSubagent === "function" ? harness.getSubagent() : null;
   function resolveSubagent() {
-    return gateSubagent(getWorkingSubagent?.() ?? api.runtime?.subagent);
+    if (harnessSubagent) return gateSubagent(harnessSubagent);
+    return gateSubagent(getWorkingSubagent?.() ?? api?.runtime?.subagent);
   }
 
   // Injectable for tests (defaults to the real singleton in production).

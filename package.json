@@ -16,7 +16,8 @@
     "./state/db": "./state/db.js",
     "./state/batch-writer": "./state/batch-writer.js",
     "./state/schema": "./state/schema.js",
-    "./bridge-auth": "./auth/bridge.js"
+    "./bridge-auth": "./auth/bridge.js",
+    "./harness": "./harness/index.js"
   },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",
