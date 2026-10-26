@@ -1,6 +1,5 @@
-// manifold — neutral core entry: pipeline runtime factories with no openclaw
-// dependency. Git-dependency consumers import this via the "." subpath; the
-// gateway plugin entry that wires these factories to a live api lives in
+// manifold — neutral core entry: pipeline runtime factories. The gateway
+// plugin entry that wires these factories to a live api lives in
 // plugins/openclaw/manifold/index.js.
 
 import { createExecutor } from "./engine/executor.js";

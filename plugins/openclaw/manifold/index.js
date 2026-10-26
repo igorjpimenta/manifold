@@ -63,7 +63,7 @@ import { registerHealthRoutes } from "../../../routes/health.js";
 import { registerPipelineRoutes } from "../../../routes/pipelines.js";
 // Adapter-owned modules injected into core: the bridge guards every
 // plugin-auth route and the device-pairing helper authenticates the
-// dashboard. Core never imports these itself.
+// dashboard.
 import { authorizeBridgeRequest, sendUnauthorized } from "./auth/bridge.js";
 import { pairDashboardDevice } from "./dashboard/device.js";
 import { registerBudgetRoutes } from "../../../budget/index.js";
