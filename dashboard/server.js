@@ -20,6 +20,9 @@ import { costForRun, costForPipeline, costForAllPipelines } from "./cost.js";
 import { computeViews } from "./views.js";
 import { stepsExecutedFromTree } from "./tree-stats.js";
 import { TERMINAL_STATUS_SET } from "../state/run-store.js";
+import { assembleState } from "../engine/executor-helpers.js";
+import { getAllSubflowGroups } from "../state/subflow-state.js";
+import { getNodeExecutionsStore } from "../state/node-executions.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Static assets come from vite's build output under `dist/`. Run `npm run
@@ -47,36 +50,25 @@ const MIME = {
   ".ico":  "image/x-icon",
 };
 
-export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision, pairDevice = null }) {
+export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
   let server = null;
   // Track open SSE responses so we can drain them on stop().
   const sseClients = new Set();
   let unsubscribe = null;
 
-  // ── Gateway API client ────────────────────────────────────────────────────
-  // All data reads go through the gateway's /manifold/* API using a paired
-  // device token from the injected pairDevice (same auth mechanism as the iOS app).
+  // ── Direct store reads ────────────────────────────────────────────────────
+  // Every read below hits manifold's own stores with the same query logic
+  // the gateway's /manifold/* routes use — no gateway hop. Payload shapes
+  // match the old gateway responses field-for-field so the React app is untouched.
 
-  const GATEWAY_BASE = `http://127.0.0.1:${Number(process.env.OPENCLAW_GATEWAY_PORT) || 18789}`;
-  let _gwToken = null;
-
-  async function gatewayFetch(path, options = {}) {
-    if (!_gwToken) throw new Error("dashboard not paired with gateway");
-    const r = await fetch(`${GATEWAY_BASE}${path}`, {
-      ...options,
-      headers: { ...options.headers, Authorization: `Bearer ${_gwToken}` },
-    });
-    if (!r.ok) {
-      const text = await r.text().catch(() => "");
-      const err = new Error(`gateway ${options.method ?? "GET"} ${path} → ${r.status}: ${text.slice(0, 200)}`);
-      if (r.status === 404) err.notFound = true;
-      throw err;
-    }
-    return r.json();
+  // Adapter-injected in production; process singleton otherwise (the same
+  // binding the gateway routes read through).
+  function nx() {
+    return nodeExecutionsStore ?? getNodeExecutionsStore();
   }
 
-  // Normalize run shape: listRunsPage uses *Ms suffix timestamps; list() uses bare names.
-  // Also ensure stateJson is present so stats functions that access stateJson.pipelineId work.
+  // Normalize a listRunsPage row: *Ms suffix timestamps + synthesized
+  // stateJson so stats functions that access stateJson.pipelineId work.
   function adaptRun(r) {
     return {
       ...r,
@@ -87,55 +79,207 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
     };
   }
 
-  // Fetch all top-level runs (unpaginated; limit=9999 covers realistic deployments).
+  // All top-level runs, trimmed to the same 500-row window the gateway's
+  // list endpoint served (limit=min(500, 9999), limit+1 fetch, pop).
   async function fetchAllRuns({ pipelineId, status } = {}) {
-    const p = new URLSearchParams({ limit: "9999" });
-    if (pipelineId) p.set("pipelineId", pipelineId);
-    if (status) p.set("status", status);
-    const { runs } = await gatewayFetch(`/manifold/runs?${p}`);
+    const page = await readStore.listRunsPage({
+      pipelineId: pipelineId || null,
+      status: status || null,
+      limit: 501,
+    });
+    const rows = page.slice(0, 500);
+    const childSummaryMap = await nx().summarizeChildrenByFlowIds(rows.map((r) => r.flowId));
+    const EMPTY_SUBFLOWS = { total: 0, pending: 0, failed: 0, skipped: 0, succeeded: 0 };
+    const discussSummaries = discussStore ? await discussStore.getBulkSummaries(rows.map((r) => r.flowId)) : {};
+    const runs = rows.map((r) => {
+      const discuss = discussSummaries[r.flowId] ?? null;
+      const subflows = childSummaryMap.get(r.flowId) ?? EMPTY_SUBFLOWS;
+      return {
+        ...r,
+        subflowTotal: subflows.total,
+        subflowPending: subflows.pending,
+        subflowFailed: subflows.failed,
+        subflowSkipped: subflows.skipped,
+        subflowSucceeded: subflows.succeeded,
+        pendingDraftItemIds: discuss?.pendingItemIds ?? [],
+      };
+    });
     return runs.map(adaptRun);
   }
 
-  // Fetch a single run by flowId; returns null if 404.
+  // Full run payload — same shape as the gateway's sendFullRun
+  // (routes/runs.js): assembleState-enriched stateJson, gate_records gates,
+  // failure_events errorEntries, *Ms timestamps, parent linkage. Returns
+  // null when the flow does not exist.
   async function fetchFlow(flowId) {
-    try { return await gatewayFetch(`/manifold/runs/${flowId}`); }
-    catch (err) { if (err.notFound) return null; throw err; }
+    const flow = await readStore.get(flowId);
+    if (!flow) return null;
+    return readFullRun(flow);
   }
 
-  // Fetch errors for a set of flowIds → Map<flowId, ErrorEntry[]>.
+  async function readFullRun(flow) {
+    const store = nx();
+    const enrichedState = await assembleState(flow.flowId, {
+      runStore: readStore, nodeExecutionsStore: store, baseState: flow.stateJson ?? {},
+    });
+    const gates = await store.listGateRecordsForFlow(flow.flowId);
+    const { loop: _loop, errors: _errors, gates: _staleGates, ...stateWithoutLegacy } = enrichedState;
+    let parentFlowId = null, parentNodeId = null, parentSubflowKey = null;
+    let resolvedPipelineId = flow.stateJson?.pipelineId ?? null;
+    if (flow.parentInvocationId) {
+      const invocation = await store.getInvocation(flow.parentInvocationId);
+      if (invocation) {
+        parentFlowId = invocation.flowId;
+        parentNodeId = invocation.nodeId;
+        parentSubflowKey = invocation.subflowKey;
+        const parentFlow = await readStore.get(parentFlowId);
+        if (parentFlow) resolvedPipelineId = parentFlow.pipelineId ?? resolvedPipelineId;
+      }
+    }
+    return {
+      flowId: flow.flowId,
+      pipelineId: resolvedPipelineId,
+      runId: flow.stateJson?.runId ?? null,
+      status: flow.status,
+      currentStep: flow.currentStep ?? null,
+      lastStep: flow.lastStep,
+      revision: flow.revision,
+      statusReason: flow.statusReason ?? null,
+      stateJson: { ...stateWithoutLegacy, gates },
+      waitJson: flow.waitJson ?? null,
+      errorEntries: failureStore ? await failureStore.queryErrorsByFlow(flow.flowId) : [],
+      createdAtMs: flow.createdAt ?? null,
+      updatedAtMs: flow.updatedAt ?? null,
+      endedAtMs: flow.endedAt ?? null,
+      parentFlowId,
+      nodeId: parentNodeId,
+      subflowKey: parentSubflowKey,
+    };
+  }
+
+  // Errors for a set of flowIds → Map<flowId, ErrorEntry[]> (same source as
+  // the gateway's /manifold/errors: failureStore.queryErrorsByFlowIds).
   async function fetchErrors(flowIds) {
     if (!flowIds.length) return new Map();
-    const { errors } = await gatewayFetch(`/manifold/errors?flowIds=${flowIds.join(",")}`);
-    return new Map(Object.entries(errors ?? {}));
+    if (!failureStore) return new Map();
+    return failureStore.queryErrorsByFlowIds(flowIds);
   }
 
   // Batched "which top-level nodes did each flow visit" → Map<flowId,
-  // Set<nodeId>>, backing dashboard/stats.js's auto-funnel visit check
-  // without one round-trip per run. Empty Map on error — the funnel then
-  // reports 0 for every stage, same as "no runs visited yet", rather than
-  // throwing.
+  // Set<nodeId>>, backing the auto-funnel visit check without one round-trip
+  // per run. Empty Map on error — the funnel then reports 0 for every
+  // stage, same as "no runs visited yet", rather than throwing.
   async function fetchTreeSummary(flowIds) {
     if (!flowIds.length) return new Map();
     try {
-      const { summaries } = await gatewayFetch(`/manifold/tree-summary?flowIds=${flowIds.join(",")}`);
-      return new Map(Object.entries(summaries ?? {}).map(([flowId, s]) => [flowId, new Set(s.nodeIds ?? [])]));
+      const visitedMap = await nx().listVisitedNodeIdsByFlow(flowIds);
+      return new Map([...visitedMap.entries()].map(([flowId, nodeIds]) => [flowId, new Set(nodeIds ?? [])]));
     } catch { return new Map(); }
   }
 
-  // Fetch subflow groups for a flow → grouped object (or {} on error).
+  // Subflow rows for a flow — same { subflows: [...] } envelope the
+  // gateway's sendSubflowsList serves (legacy errors column stripped).
   async function fetchSubflows(flowId) {
-    try { return await gatewayFetch(`/manifold/runs/${flowId}/subflows`); }
-    catch { return {}; }
+    try {
+      const grouped = await getAllSubflowGroups({
+        flowId, runStore: readStore, nodeExecutionsStore: nx(),
+      });
+      const subflows = Object.values(grouped).flatMap((group) =>
+        Object.values(group).map(({ errors: _errors, ...rest }) => rest)
+      );
+      return { subflows };
+    } catch { return {}; }
   }
 
-  // Fetch a flow's node-invocation tree (same endpoint iOS's node tree uses,
-  // routes/runs.js's buildTreeNodeRows) → array of {nodeId, executionCount,
-  // ...} rows, one per top-level (subflow_key IS NULL) invocation, ordered
-  // by invokedAt. Empty array on error rather than throwing — callers treat
-  // "no tree data" the same as "flow has no history yet".
+  // This flow's own top-level node list — the same row shape the gateway's
+  // /tree root serves (one row per invocation, ordered by invokedAt).
+  // Empty array on error rather than throwing — callers treat "no tree
+  // data" the same as "flow has no history yet".
   async function fetchTree(flowId) {
-    try { const { items } = await gatewayFetch(`/manifold/runs/${flowId}/tree`); return items ?? []; }
-    catch { return []; }
+    try {
+      const flow = await readStore.get(flowId);
+      if (!flow) return [];
+      return await buildTreeNodeRows(flow);
+    } catch { return []; }
+  }
+
+  // Ports routes/runs.js's buildTreeNodeRows (same flow-status fallback and
+  // point-in-time kind/agent reads, same shallow immediate-children rollup).
+  async function buildTreeNodeRows(flow) {
+    const store = nx();
+    const pipelineId = flow.stateJson?.pipelineId;
+    const invocations = await store.listInvocationsForFlow(flow.flowId);
+    const failedExecutionIds = new Set(
+      ((failureStore ? await failureStore.queryErrorsByFlow(flow.flowId) : []) ?? [])
+        .map((e) => e.executionId).filter(Boolean)
+    );
+    const versionRequests = invocations.map((inv) => ({ pipelineId, nodeName: inv.nodeId, atMs: inv.invokedAt }));
+    const versions = await pipelineRegistryStore.getNodeVersionsBatch(versionRequests);
+    const versionByInvocationId = new Map(invocations.map((inv, i) => [inv.invocationId, versions[i]]));
+    const subflowNodeIds = [
+      ...new Set(invocations.filter((inv) => versionByInvocationId.get(inv.invocationId)?.kind === "subflow").map((inv) => inv.nodeId)),
+    ];
+    const childrenByNodeId = new Map();
+    if (subflowNodeIds.length > 0) {
+      const invIdsByNodeId = await store.listInvocationIdsForNodes(flow.flowId, subflowNodeIds);
+      const allInvIds = [...invIdsByNodeId.values()].flat();
+      const allChildren = await readStore.listForParentInvocations(allInvIds);
+      const nodeIdByInvId = new Map();
+      for (const [nodeId, ids] of invIdsByNodeId) {
+        for (const id of ids) nodeIdByInvId.set(id, nodeId);
+      }
+      for (const child of allChildren) {
+        const nodeId = nodeIdByInvId.get(child.parentInvocationId);
+        if (!nodeId) continue;
+        if (!childrenByNodeId.has(nodeId)) childrenByNodeId.set(nodeId, []);
+        childrenByNodeId.get(nodeId).push(child);
+      }
+    }
+    const lastIdx = invocations.length - 1;
+    return invocations.map((inv, idx) => {
+      const version = versionByInvocationId.get(inv.invocationId);
+      const kind = version?.kind ?? null;
+      const isSubflowNode = kind === "subflow";
+      const kids = isSubflowNode ? (childrenByNodeId.get(inv.nodeId) ?? []) : [];
+      let status;
+      if (inv.latestExecutionId && failedExecutionIds.has(inv.latestExecutionId)) {
+        status = "failed";
+      } else if (idx === lastIdx) {
+        status = flow.status;
+      } else {
+        status = "succeeded";
+      }
+      const row = {
+        type: "node",
+        invocationId: inv.invocationId,
+        nodeId: inv.nodeId,
+        kind,
+        agent: version?.agent ?? null,
+        status,
+        enteredAt: inv.enteredAt,
+        exitedAt: inv.exitedAt,
+        execKind: inv.kind,
+        executionCount: inv.executionCount,
+        everRetriedOrRevived: inv.everRetriedOrRevived,
+        hasChildren: isSubflowNode && kids.length > 0,
+      };
+      if (isSubflowNode) row.rollup = bucketChildFlowsByStatus(kids);
+      return row;
+    });
+  }
+
+  // Shallow rollup (immediate children only) — same status-bucket shape
+  // summarizeChildrenByFlowIds uses.
+  function bucketChildFlowsByStatus(childFlowRows) {
+    const rollup = { succeeded: 0, failed: 0, pending: 0, skipped: 0, cancelled: 0 };
+    for (const c of childFlowRows) {
+      if (c.status === "succeeded") rollup.succeeded++;
+      else if (c.status === "failed") rollup.failed++;
+      else if (c.status === "skipped") rollup.skipped++;
+      else if (c.status === "cancelled") rollup.cancelled++;
+      else rollup.pending++;
+    }
+    return rollup;
   }
 
   // TTL cache for stats endpoints — these are polled by the SPA on a timer
@@ -881,45 +1025,6 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
     async start() {
       if (server) return;
 
-      // Authenticate to the gateway as a genuinely paired device — same
-      // model the iOS app/CLI use (individually revocable/scopable, unlike
-      // the shared master token). pairDevice is injected by the adapter,
-      // which owns the device-pairing module; null here means core is
-      // running without the adapter, so fall back to the shared token.
-      // First run: pairDevice() opens a real WS connect attempt
-      // authenticated with OPENCLAW_GATEWAY_TOKEN. Since that's a loopback
-      // connection vouched for by the real shared secret, it's silently
-      // paired with its own persisted device token — no separate approval
-      // step in the common case. Only a non-local gatewayUrl (or a missing
-      // OPENCLAW_GATEWAY_TOKEN) lands as a genuine pending request, falling
-      // back to the shared token meanwhile and logging the requestId so
-      // the operator can `openclaw devices approve <requestId>`.
-      if (!pairDevice) {
-        logger?.warn?.("manifold dashboard: pairDevice unavailable — createDashboardServer was not given pairDevice; using OPENCLAW_GATEWAY_TOKEN fallback");
-      }
-      const pairing = pairDevice ? await pairDevice({ logger }) : null;
-      if (pairing?.alreadyPaired) {
-        _gwToken = pairing.token;
-        logger?.info?.("manifold dashboard: authenticated to gateway via paired device token");
-      } else {
-        _gwToken = process.env.OPENCLAW_GATEWAY_TOKEN || null;
-        if (pairing?.requestId) {
-          logger?.warn?.(
-            `manifold dashboard: not yet paired as a device — run: ` +
-            `openclaw devices approve ${pairing.requestId} then restart the dashboard ` +
-            `to switch from the shared OPENCLAW_GATEWAY_TOKEN to a real per-device token.` +
-            (_gwToken ? "" : " Using OPENCLAW_GATEWAY_TOKEN in the meantime, but it isn't set — API routes will return 503.")
-          );
-        } else if (_gwToken) {
-          logger?.info?.("manifold dashboard: authenticated to gateway via OPENCLAW_GATEWAY_TOKEN (device pairing attempt failed — see prior warning if any)");
-        } else {
-          logger?.warn?.(
-            "manifold dashboard: not authenticated — device pairing attempt failed and " +
-            "OPENCLAW_GATEWAY_TOKEN isn't set. API routes will return 503."
-          );
-        }
-      }
-
       server = http.createServer((req, res) => { handle(req, res); });
       await new Promise((resolve, reject) => {
         const onErr = (err) => { server = null; reject(err); };
@@ -963,16 +1068,14 @@ async function summariseRun(r, runErrors = []) {
     updatedAt: r.updatedAt ?? null,
     endedAt: r.endedAt ?? null,
     errorsCount: runErrors.length,
-    // Derive compact subflow summary from the gateway's pre-computed counts.
-    subflows: summariseFromGatewayRun(r),
+    // Derive compact subflow summary from the pre-aggregated child counts.
+    subflows: summariseSubflowRollup(r),
   };
 }
 
-// Compact subflow summary from the gateway run list's pre-aggregated fields.
-// The gateway already computes {subflowTotal, subflowPending, subflowFailed,
-// subflowSkipped, subflowSucceeded} via summarizeChildrenByFlowIds — use
-// those directly instead of N+1 subflow queries.
-function summariseFromGatewayRun(r) {
+// Compact subflow summary from the pre-aggregated child counts merged onto
+// each list row (summarizeChildrenByFlowIds) — avoids N+1 subflow queries.
+function summariseSubflowRollup(r) {
   const total = r.subflowTotal ?? 0;
   if (total === 0) return null;
   const failed   = r.subflowFailed   ?? 0;
@@ -985,7 +1088,7 @@ function summariseFromGatewayRun(r) {
 function fullRun(r, runErrors = []) {
   // Strip `errors` — failure_events is now the sole store for error history
   // ("Eradicate soft errors" Phase 1.5); errorEntries below (runErrors,
-  // fetched from the gateway) is the normalized replacement. Only historical rows persisted before that
+  // read from failureStore) is the normalized replacement. Only historical rows persisted before that
   // redirect still carry a baked-in errors[] in their stored stateJson.
   const { errors: _errors, ...stateWithoutLegacy } = r.stateJson ?? {};
   return {
