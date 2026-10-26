@@ -30,7 +30,7 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `…/tool-handoff` | run/tool handoff helpers (`notifyToolFired`, `registerDispatch`, …) | oc-config |
 | `…/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` | oc-config |
 | `…/bridge-auth` | `authorizeBridgeRequest`, `sendUnauthorized` | oc-config |
-| `…/harness` | port, identity triple, openclaw/opencode adapters | any harness |
+| `…/harness` | port, openclaw/opencode adapters | any harness |
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
 | `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |

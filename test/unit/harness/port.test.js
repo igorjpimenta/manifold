@@ -1,7 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createHarnessPort, assertHarnessShape } from "../../../harness/Harness.js";
-import { formatIdentity, parseIdentity, stampCallMeta } from "../../../harness/identity.js";
 import { createExecutor } from "../../../engine/executor.js";
 
 function makeStubHarness({ id = "stub" } = {}) {
@@ -53,11 +52,9 @@ describe("harness port", () => {
     assert.throws(() => assertHarnessShape({ id: "x" }), /harness\.\w+\(\) missing/);
   });
 
-  it("identity triple round-trips, unstamped calls fail", () => {
-    const key = formatIdentity({ harness: "openclaw", agent: "a1", session: "s1" });
-    assert.equal(key, "openclaw:a1:s1");
-    assert.deepEqual(parseIdentity(key), { harness: "openclaw", agent: "a1", session: "s1" });
-    assert.throws(() => stampCallMeta({}, { harness: "openclaw", agent: "a1" }), /unstamped/);
+  it("stub sessionKey refuses unstamped agent", () => {
+    const harness = makeStubHarness({ id: "stub" });
+    assert.throws(() => harness.sessionKey({ flowId: "f", nodeId: "N" }), /unstamped/);
   });
 
   it("inline stub harness spawns and reads back", async () => {

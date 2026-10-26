@@ -76,9 +76,6 @@ const PUBLIC_API = {
     exports: [
       "createHarnessPort",
       "assertHarnessShape",
-      "formatIdentity",
-      "parseIdentity",
-      "stampCallMeta",
     ],
   },
   "./state/db": {
