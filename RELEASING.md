@@ -33,7 +33,11 @@ uninstallable by contract.
 3. Merge the release PR.
 4. On the merge commit: `git tag <version> -m "<version> — <summary>"`,
    then push the tag.
-5. `gh release create <version> --title <version> --notes <notes>`.
+5. The tag push fires the release workflow (`.github/workflows/release.yml`),
+   which verifies the tag matches `package.json` verbatim, rejects `beta.0`,
+   runs the unit suite, and publishes the GitHub release with generated
+   notes. Edit the notes afterward to the hand-written shape below; the
+   `gh release create` line stays as the manual fallback.
 
 Publish at the moment the tag ships. A backfilled release makes the releases
 page claim versions appeared on the day they were written up.
