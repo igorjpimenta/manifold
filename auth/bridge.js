@@ -16,8 +16,25 @@
 // token == today's security baseline. Add per-route scope checks once the
 // first reduced-scope device (e.g. operator.read only) actually exists.
 
-import { listDevicePairing } from "openclaw/plugin-sdk/device-bootstrap";
 import { timingSafeEqual } from "node:crypto";
+
+// Device-pairing SDK lives in the harness (gateway). Lazily imported so
+// this module also loads in the sidecar, where the device path is skipped
+// and only token auth applies.
+let _listDevicePairing = null;
+let _deviceSdkMissing = false;
+async function listPairedDevices() {
+  if (_deviceSdkMissing) return { paired: [] };
+  if (!_listDevicePairing) {
+    try {
+      ({ listDevicePairing: _listDevicePairing } = await import("openclaw/plugin-sdk/device-bootstrap"));
+    } catch {
+      _deviceSdkMissing = true;
+      return { paired: [] };
+    }
+  }
+  return _listDevicePairing();
+}
 
 // Paired-device list is on-disk — cache the parse for one TTL window so every incoming
 // bridge request (each of these routes is auth-checked per-call, including
@@ -30,7 +47,7 @@ let pairedCache = { ts: 0, devices: [] };
 async function refreshPairedDevicesIfStale() {
   if (Date.now() - pairedCache.ts < PAIRED_CACHE_TTL_MS) return;
   try {
-    const list = await listDevicePairing();
+    const list = await listPairedDevices();
     pairedCache = { ts: Date.now(), devices: list?.paired ?? [] };
   } catch {
     // Leave the previous snapshot in place; the existing devices will
@@ -65,12 +82,18 @@ export async function authorizeBridgeRequest(req) {
   if (!token) return { ok: false, reason: "empty-token" };
 
   // Env-var path. Compared in constant time. Skipped silently if unset.
+  // MANIFOLD_API_TOKEN is the sidecar's service token (same acceptance
+  // rule, no harness dependency).
   const envToken = process.env.OPENCLAW_GATEWAY_TOKEN || "";
   if (envToken && tokensEqual(token, envToken)) {
     return { ok: true, via: "env-var" };
   }
+  const serviceToken = process.env.MANIFOLD_API_TOKEN || "";
+  if (serviceToken && tokensEqual(token, serviceToken)) {
+    return { ok: true, via: "service-token" };
+  }
 
-  // Device-token path. Iterate every paired-device + role pair.
+  // Device-token path. Unavailable without the harness SDK (sidecar).
   await refreshPairedDevicesIfStale();
   for (const dev of pairedCache.devices) {
     const tokens = dev?.tokens ?? {};

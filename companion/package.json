@@ -1,0 +1,16 @@
+{
+  "name": "@igorjpimenta/manifold-companion",
+  "version": "0.1.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "description": "Thin gateway harness for the manifold sidecar: HTTP proxy, dispatch runner, broadcast relay. Opens no database.",
+  "type": "module",
+  "openclaw": {
+    "extensions": [
+      "./index.js"
+    ],
+    "compat": {
+      "openclawMin": "2026.4.5"
+    }
+  }
+}

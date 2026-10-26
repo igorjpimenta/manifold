@@ -1,0 +1,23 @@
+{
+  "id": "manifold",
+  "name": "Manifold Companion",
+  "description": "Thin gateway harness for the manifold sidecar (own process, package-owned store at ~/.manifold). Proxies /manifold/* to the sidecar, runs agent dispatches on its behalf, relays canonical events to gateway broadcast. Opens no database. Requires a running sidecar (bin/manifold-sidecar.js, launchd ai.manifold.sidecar).",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "sidecarUrl": {
+        "type": "string",
+        "description": "Sidecar base URL. Default: http://127.0.0.1:7431."
+      },
+      "sidecarToken": {
+        "type": "string",
+        "description": "Sidecar service token. Default: read from the sidecar's own token file (~/.manifold/.api-token)."
+      }
+    }
+  }
+}

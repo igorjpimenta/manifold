@@ -16,14 +16,14 @@
 
 import { randomUUID } from "node:crypto";
 import { eq, and, inArray, isNotNull } from "drizzle-orm";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, defaultRuntimeDbPath } from "./db.js";
 import { discussState } from "./schema.js";
 import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_DB_PATH = defaultRuntimeDbPath();
 
 function tryParse(s, fallback) {
   if (s == null) return fallback;

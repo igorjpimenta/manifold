@@ -35,10 +35,10 @@ import path from "node:path";
 import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, defaultRuntimeDbPath } from "./db.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_DB_PATH = defaultRuntimeDbPath();
 
 // Same Proxy-wrapped async-ready factory idiom as run-store.js/state-
 // store.js — every method call transparently awaits store construction

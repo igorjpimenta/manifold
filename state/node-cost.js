@@ -4,10 +4,10 @@
 // return historically-grounded low/high bounds instead of a static range.
 
 import path from "node:path";
-import { getSharedDb } from "./db.js";
+import { getSharedDb, defaultOpsDbPath } from "./db.js";
 import os from "node:os";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+const DEFAULT_DB_PATH = defaultOpsDbPath();
 
 const COST_SQL = `
   SELECT cost_total FROM cost_by_call

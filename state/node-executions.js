@@ -23,12 +23,12 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { eq, and, inArray, isNull, isNotNull, desc, asc } from "drizzle-orm";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, defaultRuntimeDbPath } from "./db.js";
 import { flowNodeInvocations, flowNodeExecutions } from "./schema.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_DB_PATH = defaultRuntimeDbPath();
 
 // No size cap on resultJson: no cap width is both safe for real payloads
 // and small enough to matter, so writeResult() always stores the full

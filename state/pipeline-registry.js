@@ -62,10 +62,10 @@ import { randomUUID, createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, defaultRuntimeDbPath } from "./db.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_DB_PATH = defaultRuntimeDbPath();
 
 function hashOf(obj) {
   return createHash("sha256").update(JSON.stringify(obj)).digest("hex");

@@ -28,12 +28,12 @@ import {
 } from "graphql";
 import { failureEvents, flowRuns } from "../state/schema.js";
 import { queueItems, gateState } from "../state/schema.ops.js";
-import { getSharedDb } from "../state/db.js";
+import { getSharedDb, defaultRuntimeDbPath, defaultOpsDbPath } from "../state/db.js";
 import { objectType } from "./columns.js";
 import { noteDbFailure } from "../state/db-guard.js";
 
-export const DEFAULT_RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-export const DEFAULT_OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
+export const DEFAULT_RUNTIME_DB = () => defaultRuntimeDbPath();
+export const DEFAULT_OPS_DB = () => defaultOpsDbPath();
 
 // Public leaf subsets: one word to publish a new column, internals
 // (state_json, tokens, handles) stay out by default. Joined extras

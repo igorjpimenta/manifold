@@ -10,7 +10,7 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { displayRootLabel } from "./labels.js";
 import { execGet } from "./http-helpers.js";
-import { getSharedDb, withSharedWrite } from "../state/db.js";
+import { getSharedDb, withSharedWrite, defaultOpsDbPath } from "../state/db.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
 const DEFAULT_CAP_USD = 3.0;
@@ -28,7 +28,7 @@ const THRESHOLDS = [0.1, 0.5, 0.8, 1.0];
 const STATE_FILE = path.join(os.homedir(), ".openclaw", "lineage", ".alerted-thresholds.json");
 // Same physical file budget/index.js's gate_state lives in — each module
 // owns its own tables there.
-const DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+const DB_PATH = defaultOpsDbPath();
 
 let state = readState();           // { day: "YYYY-MM-DD", fired: [0.5, 0.8, 1.0] }
 let lastObservedTotal = 0;

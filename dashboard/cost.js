@@ -15,10 +15,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { getSharedDb } from "../state/db.js";
+import { getSharedDb, defaultOpsDbPath } from "../state/db.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 
-const OPS_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+const OPS_DB_PATH = defaultOpsDbPath();
 
 function getClient(dbPath) {
   return getSharedDb(dbPath, { readonly: true });

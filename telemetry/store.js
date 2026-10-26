@@ -3,13 +3,13 @@
 // MIGRATIONS entry is one applied step; never edit a past entry in place.
 
 import path from "node:path";
-import { getSharedDb, withSharedWrite } from "../state/db.js";
+import { getSharedDb, withSharedWrite, defaultOpsDbPath, defaultRuntimeDbPath } from "../state/db.js";
 import os from "node:os";
 import fs from "node:fs";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+const DEFAULT_DB_PATH = defaultOpsDbPath();
 
 const UPSERT_LINEAGE_SQL = `
   INSERT INTO session_lineage
@@ -57,7 +57,7 @@ export async function openStore({ dbPath = DEFAULT_DB_PATH } = {}) {
  *  Attached read-only so ROI queries (status × cost) work in a single hop.
  *  Silent if absent — installations without manifold keep working. */
 async function attachFlowsDb(client) {
-  const flowsPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+  const flowsPath = defaultRuntimeDbPath();
   if (!fs.existsSync(flowsPath)) return;
   try {
     await client.execute(`ATTACH DATABASE '${flowsPath.replace(/'/g, "''")}' AS flows`);

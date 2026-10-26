@@ -38,7 +38,7 @@
 
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, defaultRuntimeDbPath } from "./db.js";
 import { flowRuns } from "./schema.js";
 import path from "node:path";
 import os from "node:os";
@@ -47,7 +47,7 @@ import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { failureEmitter } from "../events.js";
 import { getNodeExecutionsStore } from "./node-executions.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_DB_PATH = defaultRuntimeDbPath();
 
 // Maps a failure's (error_type, summary) to the operator action the iOS
 // Inbox should surface for this row:
