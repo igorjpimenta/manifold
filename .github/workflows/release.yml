@@ -1,0 +1,106 @@
+name: Release
+
+# Tag pushes are the install contract (RELEASING.md): a tag named
+# YYYY.M.D[-beta.N] ships the version in package.json, verbatim.
+# This workflow verifies that contract and publishes the GitHub
+# release. It never touches npm (UNLICENSED, git tags only) and never
+# moves branches — a tag push is not a branch push.
+#
+# Beta numbering starts at 1: the installer's strict CalVer parser
+# requires the sequence above zero, so a -beta.0 tag fails closed here
+# instead of shipping an uninstallable release.
+
+on:
+  push:
+    tags:
+      - "2[0-9][0-9][0-9].[0-9]*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)publish, e.g. 2026.10.25-beta.3 (must already exist)"
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false  # never interrupt a publish mid-flight
+
+jobs:
+  release:
+    name: Verify + publish GitHub release
+    runs-on: self-hosted
+    timeout-minutes: 20
+    permissions:
+      contents: write  # create the GitHub release
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.ref_name }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '25'
+          cache: npm
+
+      - name: Tag matches package.json verbatim, beta starts at 1, date is UTC today
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$PKG_VERSION" != "$TAG" ]]; then
+            echo "::error::tag $TAG != package.json $PKG_VERSION — the tag is the version, verbatim (RELEASING.md)"
+            exit 1
+          fi
+          if [[ "$TAG" =~ -beta\.0$ ]]; then
+            echo "::error::tag $TAG uses beta.0 — numbering starts at beta.1, beta.0 is rejected by installers"
+            exit 1
+          fi
+          # CalVer dates are UTC: a 23:30 -0300 merge is already tomorrow.
+          # A tag pushed on the wrong UTC date fails here instead of
+          # shipping a misdated install contract — cut a new tag with
+          # today's date (tags are never rewritten).
+          TAG_DATE="${TAG%%-*}"
+          TODAY_UTC="$(date -u +%Y.%m.%d)"
+          if [[ "$TAG_DATE" != "$TODAY_UTC" ]]; then
+            echo "::error::tag date $TAG_DATE is not UTC today ($TODAY_UTC) — re-cut with today's date"
+            exit 1
+          fi
+          echo "version contract holds: $TAG"
+
+      - name: Authenticate private package resolution
+        env:
+          OC_CONTRACTS_TOKEN: ${{ secrets.OC_CONTRACTS_TOKEN }}
+        run: |
+          if [[ -z "$OC_CONTRACTS_TOKEN" ]]; then
+            echo "::error::OC_CONTRACTS_TOKEN is not set — cannot resolve the private oc-contracts package"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        env:
+          OC_CONTRACTS_TOKEN: ${{ secrets.OC_CONTRACTS_TOKEN }}
+          GIT_CONFIG_COUNT: "3"
+          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_0: https://github.com/
+          GIT_CONFIG_KEY_1: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_1: ssh://git@github.com/
+          GIT_CONFIG_KEY_2: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
+          GIT_CONFIG_VALUE_2: "git@github.com:"
+        run: npm ci --no-audit --no-fund
+
+      - name: unit tests
+        if: '!cancelled()'
+        run: npm run test:unit
+
+      - name: Publish GitHub release
+        if: '!cancelled()'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists — leaving it untouched (releases are never rewritten)"
+          else
+            gh release create "$TAG" --title "$TAG" --generate-notes
+          fi
