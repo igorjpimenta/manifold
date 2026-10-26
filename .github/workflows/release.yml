@@ -98,9 +98,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
+        # No `gh` on self-hosted runners — the releases API directly.
+        # generate_release_notes keeps the auto-notes; humans edit after.
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
+          if curl -sf -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >/dev/null; then
             echo "release $TAG already exists — leaving it untouched (releases are never rewritten)"
           else
-            gh release create "$TAG" --title "$TAG" --generate-notes
+            curl -sf -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Content-Type: application/json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases" \
+              -d "{\"tag_name\":\"$TAG\",\"name\":\"$TAG\",\"generate_release_notes\":true}"
           fi
