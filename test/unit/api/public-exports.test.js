@@ -71,6 +71,17 @@ const PUBLIC_API = {
     file: "./auth/bridge.js",
     exports: ["authorizeBridgeRequest", "sendUnauthorized"],
   },
+  "./harness": {
+    file: "./harness/index.js",
+    exports: [
+      "createHarnessPort",
+      "assertHarnessShape",
+      "formatIdentity",
+      "parseIdentity",
+      "stampCallMeta",
+      "createFakeHarness",
+    ],
+  },
   "./state/db": {
     file: "./state/db.js",
     exports: ["openDb", "getSharedDb", "isSqliteBusy", "withSharedWrite"],
