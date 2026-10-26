@@ -79,7 +79,6 @@ const PUBLIC_API = {
       "formatIdentity",
       "parseIdentity",
       "stampCallMeta",
-      "createFakeHarness",
     ],
   },
   "./state/db": {
