@@ -8,7 +8,6 @@
 //   - `human-gate`  : flow.status='blocked' + wait_json; resumed by CLI approve
 //   - `parallel`    : fixed set of named `.tasks`, all dispatched concurrently
 
-import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import path from "node:path";
 import os from "node:os";
 import { createPipelinesLoader } from "./engine/loader.js";
@@ -80,6 +79,14 @@ import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
 
 const DEFAULT_PIPELINES_DIR = path.join(os.homedir(), ".openclaw", "workspace", ".pipelines");
+// plugin-entry resolves via guarded dynamic import so core (and packaging
+// probes) load without an installed openclaw runtime. Absent SDK degrades to
+// the identity wrapper; register() below only runs inside the gateway.
+let definePluginEntry = (entry) => entry;
+try {
+  ({ definePluginEntry } = await import("openclaw/plugin-sdk/plugin-entry"));
+} catch { /* keep identity fallback */ }
+
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 const DEFAULT_DASHBOARD_PORT = 7430;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";

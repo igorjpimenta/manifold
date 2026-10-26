@@ -42,8 +42,6 @@
 // from the CLI's own ~/.openclaw/identity/device.json, so pairing the
 // dashboard never disturbs the CLI's identity or cached token.
 
-import { listDevicePairing } from "openclaw/plugin-sdk/device-bootstrap";
-import { GatewayClient } from "openclaw/plugin-sdk/gateway-runtime";
 import { createHash, generateKeyPairSync, createPublicKey } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -93,8 +91,11 @@ function loadOrCreateDeviceIdentity(filePath = IDENTITY_PATH) {
   return identity;
 }
 
+// device-bootstrap resolves per call via guarded dynamic import: a static
+// import makes dashboard unimportable without an installed openclaw runtime.
 export async function loadDashboardToken() {
   try {
+    const { listDevicePairing } = await import("openclaw/plugin-sdk/device-bootstrap");
     const identity = loadOrCreateDeviceIdentity();
     const list = await listDevicePairing();
     const device = (list?.paired ?? []).find((d) => d.deviceId === identity.deviceId);
@@ -123,6 +124,18 @@ export async function loadDashboardToken() {
 export async function pairDashboardDevice({ logger, gatewayUrl } = {}) {
   const already = await loadDashboardToken();
   if (already) return { alreadyPaired: true, token: already };
+
+  // Both SDK handles resolve here (async context) with a graceful downgrade
+  // to the documented attempt-failed shape when the SDK is absent.
+  let listDevicePairing;
+  let GatewayClient;
+  try {
+    ({ listDevicePairing } = await import("openclaw/plugin-sdk/device-bootstrap"));
+    ({ GatewayClient } = await import("openclaw/plugin-sdk/gateway-runtime"));
+  } catch (err) {
+    logger?.warn?.(`manifold dashboard: device pairing SDK unavailable: ${err?.message ?? err}`);
+    return { alreadyPaired: false, requestId: null };
+  }
 
   const identity = loadOrCreateDeviceIdentity();
 

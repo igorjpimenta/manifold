@@ -8,11 +8,32 @@
 // Entry point: call createManifoldParrotChannelEntry(deps).register(api) from
 // inside manifold's registerFull.
 
-import { createChatChannelPlugin, defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
-import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-inbound";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
+
+// openclaw SDK handles resolve here, never via static import: static imports
+// make core unimportable (and unpackagable) without an installed openclaw
+// runtime. Each handle is read once at module evaluation via guarded dynamic
+// import, so factory construction below stays synchronous and existing
+// callers (index.js register, unit tests with mock.module) are unaffected.
+// Absent SDK (packaging probes, SDK-less hosts) falls back to structural
+// pass-throughs; dispatch failure then surfaces on the runner error path.
+let defaultChannelCore = null;
+let defaultChannelInbound = null;
+try {
+  defaultChannelCore = await import("openclaw/plugin-sdk/channel-core");
+} catch { defaultChannelCore = null; }
+try {
+  defaultChannelInbound = await import("openclaw/plugin-sdk/channel-inbound");
+} catch { defaultChannelInbound = null; }
+const passthroughChannelCore = {
+  createChatChannelPlugin: (spec) => spec,
+  defineChannelPluginEntry: (entry) => entry,
+  dispatchInboundDirectDmWithRuntime: async () => {
+    throw new Error("openclaw SDK unavailable: channel-inbound not loaded");
+  },
+};
 
 export function createManifoldParrotChannelEntry({
   readStore,
@@ -20,7 +41,17 @@ export function createManifoldParrotChannelEntry({
   resolveDiscussTarget,
   stampDiscussSession,
   emit,
+  channelCore = null,
 }) {
+  // Injected seam wins (unit tests), then the module-evaluation dynamic
+  // import, then the pass-through. Namespace spread over null is a no-op.
+  const sdk = {
+    ...passthroughChannelCore,
+    ...defaultChannelCore,
+    ...defaultChannelInbound,
+    ...channelCore,
+  };
+  const { createChatChannelPlugin, defineChannelPluginEntry, dispatchInboundDirectDmWithRuntime } = sdk;
   // Captured once during startAccount; used by the HTTP handler.
   let channelRuntimeRef = null;
   let cfgRef = null;

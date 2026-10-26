@@ -16,7 +16,6 @@
 // token == today's security baseline. Add per-route scope checks once the
 // first reduced-scope device (e.g. operator.read only) actually exists.
 
-import { listDevicePairing } from "openclaw/plugin-sdk/device-bootstrap";
 import { timingSafeEqual } from "node:crypto";
 
 // Paired-device list is on-disk — cache the parse for one TTL window so every incoming
@@ -30,6 +29,9 @@ let pairedCache = { ts: 0, devices: [] };
 async function refreshPairedDevicesIfStale() {
   if (Date.now() - pairedCache.ts < PAIRED_CACHE_TTL_MS) return;
   try {
+    // Dynamic import keeps bridge importable without an installed openclaw
+    // runtime; failure keeps the previous snapshot (existing catch below).
+    const { listDevicePairing } = await import("openclaw/plugin-sdk/device-bootstrap");
     const list = await listDevicePairing();
     pairedCache = { ts: Date.now(), devices: list?.paired ?? [] };
   } catch {
