@@ -197,10 +197,10 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
       // gate.closed tells it to drop the surface. Delivery is the
       // consumer's business — manifold only states what happened.
       _gateOpenedListener = (payload) => {
-        try { broadcast("manifold.gate.opened", payload); } catch {}
+        try { gatewayBroadcastRef.current?.("manifold.gate.opened", payload); } catch {}
       };
       _gateClosedListener = (payload) => {
-        try { broadcast("manifold.gate.closed", payload); } catch {}
+        try { gatewayBroadcastRef.current?.("manifold.gate.closed", payload); } catch {}
       };
       gateEmitter.on("gate.opened", _gateOpenedListener);
       gateEmitter.on("gate.closed", _gateClosedListener);
