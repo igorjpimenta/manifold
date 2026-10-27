@@ -152,6 +152,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       parentFlowId,
       nodeId: parentNodeId,
       subflowKey: parentSubflowKey,
+      claim: await fetchClaim(flow.waitJson),
     };
   }
 
@@ -161,6 +162,31 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     if (!flowIds.length) return new Map();
     if (!failureStore) return new Map();
     return failureStore.queryErrorsByFlowIds(flowIds);
+  }
+
+  // Pull-claim visibility: a flow parked on agent-claim carries only its
+  // ticket in waitJson. The live ticket row (claimant binding + lease
+  // expiry) is read here so run payloads show who holds the ticket
+  // without a second lookup. Observability-only: a failing store read
+  // yields null, never a failed run payload.
+  function shapeClaim(c) {
+    if (!c) return null;
+    return {
+      ticket: c.ticket,
+      state: c.claimState,
+      harness: c.harness ?? null,
+      agent: c.agent ?? null,
+      session: c.session ?? null,
+      claimedAt: c.claimedAt ?? null,
+      leaseExpiresAt: c.leaseExpiresAt ?? null,
+    };
+  }
+
+  async function fetchClaim(waitJson) {
+    if (waitJson?.kind !== "agent-claim" || typeof waitJson?.ticket !== "string") return null;
+    try {
+      return shapeClaim(await nx().getClaim?.(waitJson.ticket));
+    } catch { return null; }
   }
 
   // Batched "which top-level nodes did each flow visit" → Map<flowId,
@@ -516,6 +542,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         if (untilMs != null) rows = rows.filter((r) => (r.createdAt ?? 0) < untilMs);
         rows.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
         rows = rows.slice(0, limit);
+        // Surface live ticket state for parked agent-claim rows (one point
+        // read per parked row only — every other row short-circuits).
+        await Promise.all(rows.map(async (r) => { r.claim = await fetchClaim(r.waitJson); }));
         const errorsByFlow = await fetchErrors(rows.map((r) => r.flowId));
         rows = await Promise.all(rows.map((r) => summariseRun(r, errorsByFlow.get(r.flowId) ?? [])));
         return sendJson(res, 200, rows);
@@ -1062,6 +1091,7 @@ async function summariseRun(r, runErrors = []) {
     revision: r.revision,
     statusReason: r.statusReason ?? null,
     waitKind: r.waitJson?.kind ?? null,
+    claim: r.claim ?? null,
     createdAt: r.createdAt ?? null,
     updatedAt: r.updatedAt ?? null,
     endedAt: r.endedAt ?? null,
@@ -1099,6 +1129,7 @@ function fullRun(r, runErrors = []) {
     statusReason: r.statusReason ?? null,
     stateJson: stateWithoutLegacy,
     waitJson: r.waitJson ?? null,
+    claim: r.claim ?? null,
     // Normalized error history sourced from flow_node_executions — sibling
     // to stateJson (not nested inside it) so flow-level and subflow-level
     // shapes stay symmetric.

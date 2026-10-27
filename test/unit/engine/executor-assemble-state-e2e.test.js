@@ -69,7 +69,6 @@ async function makeHarness(pipelineDef) {
     pipelinesRef,
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: null,
     failureStore: null,
     nodeHealthStore: null,
     notifyFlowEnteredWaiting: null,

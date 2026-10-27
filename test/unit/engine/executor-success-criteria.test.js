@@ -132,7 +132,6 @@ function makeExecutor(pipelineMap) {
     pipelinesRef: { value: new Map(Object.entries(pipelineMap)) },
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: null,
     failureStore: null,
     notifyFlowEnteredWaiting: null,
     sessionIndex: null,

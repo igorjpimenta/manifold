@@ -1,8 +1,9 @@
 // Pull-claim park → claim → report → resume E2E (PULL-1) on a real
 // executor with an agent node: real sqlite run/node-execution
 // stores on isolated tmp files, real state-store, always-admit admission.
-// The push-dispatch path is untouched: with no working subagent wired, any
-// push dispatch would fail the flow — success proves the pull branch skipped it.
+// No dispatch runtime is wired anywhere in this harness: reaching `blocked`
+// on agent-claim proves the pull branch parked, and claim → report → resume
+// completes the run.
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -58,7 +59,6 @@ async function makeHarness() {
     pipelinesRef,
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: null,
     failureStore: null,
     nodeHealthStore: null,
     notifyFlowEnteredWaiting: null,
