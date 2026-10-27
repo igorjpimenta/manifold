@@ -183,6 +183,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
+    emit,
   });
 
   /**

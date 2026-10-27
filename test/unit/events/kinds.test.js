@@ -2,7 +2,7 @@
  * Unit tests for events/kinds.js
  *
  * Verifies:
- *   - Registry shape: 19 wire kinds (frozen, unique), 1 reserved.
+ *   - Registry shape: 20 wire kinds (frozen, unique), 1 reserved.
  *   - Unknown/reserved kinds rejected everywhere.
  *   - Payload contracts enforced (required fields, session scope + ids).
  *   - Routing: dashboard-only kinds.
@@ -21,10 +21,10 @@ import {
 // ── registry shape ───────────────────────────────────────────────────────────
 
 describe("kinds — registry", () => {
-  test("19 wire kinds, frozen, unique", () => {
-    assert.equal(WIRE_KINDS.length, 19);
+  test("20 wire kinds, frozen, unique", () => {
+    assert.equal(WIRE_KINDS.length, 20);
     assert.ok(Object.isFrozen(WIRE_KINDS));
-    assert.equal(new Set(WIRE_KINDS).size, 19);
+    assert.equal(new Set(WIRE_KINDS).size, 20);
   });
 
   test("reserved holds gate.dissolved only", () => {
@@ -104,6 +104,14 @@ describe("kinds — assertPayload", () => {
     assert.throws(() => assertPayload("failure.recorded", { failureId: "x" }), /flowId/);
     assert.doesNotThrow(() =>
       assertPayload("failure.recorded", { failureId: "x", flowId: "f" }),
+    );
+  });
+
+  test("agent.claim.parked requires flowId + ticket + nodeId", async () => {
+    assert.throws(() => assertPayload("agent.claim.parked", { flowId: "f", ticket: "t" }), /nodeId/);
+    assert.throws(() => assertPayload("agent.claim.parked", { flowId: "f" }), /ticket/);
+    assert.doesNotThrow(() =>
+      assertPayload("agent.claim.parked", { flowId: "f", ticket: "t", nodeId: "n" }),
     );
   });
 

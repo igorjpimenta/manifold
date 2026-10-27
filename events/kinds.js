@@ -32,6 +32,7 @@ export const WIRE_KINDS = Object.freeze([
   "cost.record.added",
   "failure.recorded",
   "approval.requested",
+  "agent.claim.parked",
 ]);
 
 // Named but producer-less: emitting one is a typo or a Phase-2 leak.
@@ -61,6 +62,7 @@ const REQUIRED_FIELDS = {
   "cost.record.added": ["costTotal"],
   "failure.recorded": ["failureId", "flowId"],
   "approval.requested": ["id"],
+  "agent.claim.parked": ["flowId", "ticket", "nodeId"],
 };
 
 export const SESSION_SCOPES = Object.freeze(["node", "discuss"]);

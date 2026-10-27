@@ -43,6 +43,17 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   resultJson:          text('result_json'),
   resultWrittenAt:     integer('result_written_at'),
   resultTooLargeBytes: integer('result_too_large_bytes'),
+  // Pull-claim tickets: an agent node with `pull: true` parks its
+  // invocation here instead of push-dispatching. claimState is NULL for
+  // every non-pull row; pull rows move ready -> claimed -> reported ->
+  // applied, with the claimant binding and lease deadline alongside.
+  // Ticket identity is the invocation row id itself.
+  claimState:      text('claim_state'),
+  claimedHarness:  text('claimed_harness'),
+  claimedAgent:    text('claimed_agent'),
+  claimedSession:  text('claimed_session'),
+  claimedAt:       integer('claimed_at'),
+  leaseExpiresAt:  integer('lease_expires_at'),
 }, (table) => [
   // NOTE: idx_invocations_identity (UNIQUE on flow_id, node_id,
   // COALESCE(subflow_key, ''), visit_seq) is intentionally absent here —
@@ -52,6 +63,8 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   index('idx_invocations_flow').on(table.flowId),
   index('idx_invocations_node_subflow').on(table.nodeId, table.subflowKey),
   index('idx_invocations_pipe_node').on(table.pipelineId, table.nodeId),
+  // Oldest-ready scan for claimNext() — equality on claimState only.
+  index('idx_invocations_claim').on(table.claimState),
 ]);
 
 // error/error_type intentionally NOT here — Phase 1.5 ("Eradicate soft

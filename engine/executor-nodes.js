@@ -49,12 +49,17 @@ export function createNodeRunner({
   nodeExecutionsStore,
   nodeHealthStore,
   pipelinesRef,
+  emit,
 }) {
   // Explicit params win; api is the legacy fallback the adapter still
   // supplies during cutover (tests construct with api only).
   const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
   const _notifyPush = typeof notifyPush === "function" ? notifyPush : null;
+  // Canonical event sink for agent-claim park events (events/emit.js's
+  // emitCanonical in production, a capturing stub in tests). Optional —
+  // the pull branch skips emission without one, never fails for it.
+  const _emit = typeof emit === "function" ? emit : null;
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
   // "agent" branches in executeNodeBody — this function has no fallback-
@@ -221,6 +226,50 @@ export function createNodeRunner({
   // for an "agent" node — boot revival's continuation prompt to an existing
   // session (see engine/revival-messages.js), never a fresh re-dispatch of
   // the original task.
+  // A pull agent node (`pull: true`) never push-dispatches: its invocation
+  // parks as a claim ticket and an external agent reports the result back
+  // (engine/pull-claims.js), which resumes through the gate resume path. A
+  // resumed dispatch whose ticket is already reported consumes the stored
+  // result instead of parking again.
+  async function executePullNode({ nodeId, flowId, invocationId }) {
+    const claim = invocationId
+      ? await nodeExecutionsStore.getClaim?.(invocationId).catch(() => null)
+      : null;
+    // Reported tickets carry their result in resultJson (written by the
+    // report before resume) — consume it here so the resumed dispatch
+    // completes without re-parking. assembleState() replays the same row
+    // for edge functions; this is the dispatch-side read.
+    if (claim && (claim.claimState === "reported" || claim.claimState === "applied")) {
+      const recorded = await nodeExecutionsStore.getResultForNode?.(flowId, nodeId).catch(() => null) ?? null;
+      if (recorded?.resultWrittenAt == null || recorded.resultJson == null) {
+        throw new Error(`pull-claim: ticket ${invocationId} is ${claim.claimState} but has no stored result (flow=${flowId} node=${nodeId})`);
+      }
+      let stateUpdate;
+      try {
+        stateUpdate = JSON.parse(recorded.resultJson) ?? {};
+      } catch {
+        throw new Error(`pull-claim: ticket ${invocationId} has a corrupt stored result (flow=${flowId} node=${nodeId})`);
+      }
+      await nodeExecutionsStore.markApplied?.(invocationId).catch(() => null);
+      return { stateUpdate };
+    }
+    // Park: mint the ticket in ready state, then return waitJson so runFlow
+    // persists it through the human-gate waitJson path (reentrant —
+    // lastStep stays put so resume re-enters this same node).
+    const parked = await nodeExecutionsStore.markPullReady?.(invocationId) ?? { ok: true };
+    if (!parked?.ok) {
+      throw new Error(`pull-claim: could not park ticket ${invocationId} (${parked?.reason ?? "store without claim support"})`);
+    }
+    if (_emit) {
+      await _emit("agent.claim.parked", { flowId, ticket: invocationId, nodeId });
+    }
+    return {
+      stateUpdate: {},
+      waitJson: { kind: "agent-claim", ticket: invocationId, nodeId, renderedAt: Date.now() },
+      reentrant: true,
+    };
+  }
+
   async function executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
     if (node.kind === "code") {
       const update = await dispatchCodeEntry(node, { state, flowId, nodeId });
@@ -232,6 +281,9 @@ export function createNodeRunner({
     }
 
     if (node.kind === "agent") {
+      if (node.pull === true) {
+        return executePullNode({ nodeId, flowId, invocationId });
+      }
       let update;
       try {
         update = await dispatchAgentEntry(node, nodeId, { state, flowId, reviveMessage, invocationId });
