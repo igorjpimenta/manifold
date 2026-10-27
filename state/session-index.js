@@ -1,12 +1,10 @@
 // session-index.js — durable flowId→sessionKey index. Adapter-facing state:
 // it stores GATEWAY keys (`agent:<agent>:subagent:mf-…`), never core's opaque
-// `mf-…` handles — NO schema migration was needed because the stored shape
-// is unchanged, only the prefix core mints changed. Core's dispatch path
-// reaches this store through the adapter's conversion proxy (which maps the
-// opaque dispatch handle to its gateway key via the `agent` param on
-// record()); direct record() calls must already carry gateway keys.
-// Reads (flowIdForSessionKey) take gateway keys verbatim — callers holding
-// task_runs rows already have that shape, no conversion needed.
+// `mf-…` handles. Nothing in the pull world writes new rows — record() is
+// kept for interface compatibility; reads (hasSessionForNode,
+// flowIdForSessionKey) answer from history for boot revival and taskflow
+// delegation. Reads take gateway keys verbatim — callers holding task_runs
+// rows already have that shape, no conversion needed.
 //
 // Storage: defaultDbPath() below (resolveStorePaths().runtimeDb —
 // package-owned, see state/paths.js).
@@ -39,8 +37,8 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, close() {} };
   }
 
-  // `agent` is accepted and ignored: the adapter proxy consumes it to map
-  // the opaque handle to its gateway key before delegating here.
+  // `agent` is accepted and ignored: retained so older callers passing it
+  // keep working.
   async function record({ flowId, sessionKey, nodeId = null, branchItemId = null, agent = null } = {}) {
     void agent;
     if (!flowId || !sessionKey) return;
@@ -57,14 +55,10 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Was a subagent dispatch ever actually ATTEMPTED for this (flowId, nodeId)?
-  // record() (above) is called at the top of dispatchAgentWithRetry, always
-  // before subagent.run() is awaited. This answers "did dispatch
-  // start" independent of whether it finished, blocked, or is still in
-  // flight. Used by boot/flow-revival.js to distinguish a flow that crashed
-  // mid-turn (revive via continuation prompt) from one that was merely queued
-  // waiting for a slot and never actually started (revive via a fresh
-  // dispatch instead).
+  // Was a session ever recorded for this (flowId, nodeId)? Answers from
+  // history only — nothing in the pull world writes new rows. Used by
+  // boot/taskflow-revive.js to resolve a task_runs session key back to its
+  // flow.
   async function hasSessionForNode(flowId, nodeId) {
     if (!flowId || !nodeId) return false;
     try {

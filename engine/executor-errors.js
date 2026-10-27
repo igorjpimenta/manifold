@@ -81,8 +81,8 @@ export function isRequestScopedSubagentError(err) {
   // shaped error than the ones above but the exact same underlying cause
   // (no live gateway-request context). Scoped to "operator.write"
   // specifically, not a bare "missing scope:" match — this function is
-  // only ever consulted on errors from the three subagent.run/waitForRun/
-  // getSessionMessages calls a dispatched turn once made, never on unrelated
+  // only ever consulted on errors from subagent.run/waitForRun/
+  // getSessionMessages calls, never on unrelated
   // RPC scope failures (operator.pairing, operator.admin, etc.) from
   // elsewhere in the gateway, so a narrower-than-it-looks match is safe.
   if (msg.includes("missing scope: operator.write")) return true;

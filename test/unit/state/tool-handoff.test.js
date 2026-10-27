@@ -1,21 +1,19 @@
-// Unit tests for state/tool-handoff.js — registerDispatch, resolveInvocationId,
-// clearDispatch, writePendingResult, readPendingResult, clearPendingResult.
-// Covers the single in-memory bridge a dispatched subagent's tool call uses
-// to hand data back to the node that spawned it — see the module's own
-// header comment for why this is in-memory, not persisted.
+// Unit tests for state/tool-handoff.js — registerTicket, resolveInvocationId,
+// clearTicket, writePendingResult, readPendingResult, clearPendingResult.
+// Covers the single in-memory bridge a claiming agent's tool call uses
+// to hand data back to the parked invocation it claimed — see the module's
+// own header comment for why this is in-memory, not persisted.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  registerDispatch,
+  registerTicket,
   resolveInvocationId,
-  clearDispatch,
+  clearTicket,
   writePendingResult,
   readPendingResult,
   clearPendingResult,
-  notifyToolFired,
-  waitForToolSignal,
 } from "../../../state/tool-handoff.js";
 
 function basePayload(overrides = {}) {
@@ -27,52 +25,52 @@ function basePayload(overrides = {}) {
   };
 }
 
-describe("registerDispatch / resolveInvocationId / clearDispatch", () => {
-  test("resolveInvocationId returns null for an unregistered sessionKey", () => {
+describe("registerTicket / resolveInvocationId / clearTicket", () => {
+  test("resolveInvocationId returns null for an unregistered ticket", () => {
     assert.strictEqual(resolveInvocationId(`unknown-${randomUUID()}`), null);
   });
 
-  test("resolveInvocationId returns null for a falsy sessionKey", () => {
+  test("resolveInvocationId returns null for a falsy ticket", () => {
     assert.strictEqual(resolveInvocationId(null), null);
     assert.strictEqual(resolveInvocationId(""), null);
   });
 
-  test("registerDispatch then resolveInvocationId returns the registered invocationId", () => {
-    const sessionKey = `session-${randomUUID()}`;
+  test("registerTicket then resolveInvocationId returns the registered invocationId", () => {
+    const ticket = `tick-${randomUUID()}`;
     const invocationId = `inv-${randomUUID()}`;
-    registerDispatch(sessionKey, invocationId);
-    assert.strictEqual(resolveInvocationId(sessionKey), invocationId);
-    clearDispatch(sessionKey);
+    registerTicket(ticket, invocationId);
+    assert.strictEqual(resolveInvocationId(ticket), invocationId);
+    clearTicket(ticket);
   });
 
-  test("registerDispatch does nothing when sessionKey or invocationId is falsy", () => {
-    assert.doesNotThrow(() => registerDispatch(null, "inv-1"));
-    assert.doesNotThrow(() => registerDispatch("session-1", null));
-    assert.strictEqual(resolveInvocationId("session-1"), null);
+  test("registerTicket does nothing when ticket or invocationId is falsy", () => {
+    assert.doesNotThrow(() => registerTicket(null, "inv-1"));
+    assert.doesNotThrow(() => registerTicket("tick-1", null));
+    assert.strictEqual(resolveInvocationId("tick-1"), null);
   });
 
-  test("clearDispatch removes the mapping", () => {
-    const sessionKey = `session-${randomUUID()}`;
-    registerDispatch(sessionKey, `inv-${randomUUID()}`);
-    clearDispatch(sessionKey);
-    assert.strictEqual(resolveInvocationId(sessionKey), null);
+  test("clearTicket removes the mapping", () => {
+    const ticket = `tick-${randomUUID()}`;
+    registerTicket(ticket, `inv-${randomUUID()}`);
+    clearTicket(ticket);
+    assert.strictEqual(resolveInvocationId(ticket), null);
   });
 
-  test("clearDispatch does not throw when the sessionKey was never registered", () => {
-    assert.doesNotThrow(() => clearDispatch(`never-${randomUUID()}`));
+  test("clearTicket does not throw when the ticket was never registered", () => {
+    assert.doesNotThrow(() => clearTicket(`never-${randomUUID()}`));
   });
 
-  test("two different sessionKeys resolve independently", () => {
-    const s1 = `session-${randomUUID()}`;
-    const s2 = `session-${randomUUID()}`;
+  test("two different tickets resolve independently", () => {
+    const t1 = `tick-${randomUUID()}`;
+    const t2 = `tick-${randomUUID()}`;
     const i1 = `inv-${randomUUID()}`;
     const i2 = `inv-${randomUUID()}`;
-    registerDispatch(s1, i1);
-    registerDispatch(s2, i2);
-    assert.strictEqual(resolveInvocationId(s1), i1);
-    assert.strictEqual(resolveInvocationId(s2), i2);
-    clearDispatch(s1);
-    clearDispatch(s2);
+    registerTicket(t1, i1);
+    registerTicket(t2, i2);
+    assert.strictEqual(resolveInvocationId(t1), i1);
+    assert.strictEqual(resolveInvocationId(t2), i2);
+    clearTicket(t1);
+    clearTicket(t2);
   });
 });
 
@@ -182,104 +180,15 @@ describe("state survives being loaded as a distinct module instance (regression:
     assert.strictEqual(readPendingResult(invocationId), null, "clear via the second instance must be visible via the first");
   });
 
-  test("registerDispatch/resolveInvocationId also share state across independently-imported instances", async () => {
+  test("registerTicket/resolveInvocationId also share state across independently-imported instances", async () => {
     const secondInstanceUrl = `${new URL("../../../state/tool-handoff.js", import.meta.url).href}?instance=${randomUUID()}`;
     const second = await import(secondInstanceUrl);
-    const sessionKey = `session-${randomUUID()}`;
+    const ticket = `tick-${randomUUID()}`;
     const invocationId = `inv-${randomUUID()}`;
 
-    second.registerDispatch(sessionKey, invocationId);
-    assert.strictEqual(resolveInvocationId(sessionKey), invocationId);
-    clearDispatch(sessionKey);
-    assert.strictEqual(second.resolveInvocationId(sessionKey), null);
-  });
-
-  test("notifyToolFired/waitForToolSignal also share state across independently-imported instances", async () => {
-    const secondInstanceUrl = `${new URL("../../../state/tool-handoff.js", import.meta.url).href}?instance=${randomUUID()}`;
-    const second = await import(secondInstanceUrl);
-    const runId = `run-${randomUUID()}`;
-
-    const signal = waitForToolSignal(runId);
-    second.notifyToolFired(runId);
-    await signal.promise; // would hang (test timeout) if the two instances didn't share state
-  });
-});
-
-describe("notifyToolFired / waitForToolSignal", () => {
-  test("waitForToolSignal's promise resolves once notifyToolFired is called for the same runId", async () => {
-    const runId = `run-${randomUUID()}`;
-    const signal = waitForToolSignal(runId);
-    let resolved = false;
-    signal.promise.then(() => { resolved = true; });
-    assert.equal(resolved, false, "must not resolve before notifyToolFired fires");
-    notifyToolFired(runId);
-    await signal.promise;
-    assert.equal(resolved, true);
-  });
-
-  test("notifyToolFired for an unrelated runId does not resolve a different waiter", async () => {
-    const runId = `run-${randomUUID()}`;
-    const otherRunId = `run-${randomUUID()}`;
-    const signal = waitForToolSignal(runId);
-    let resolved = false;
-    signal.promise.then(() => { resolved = true; });
-    notifyToolFired(otherRunId);
-    await Promise.resolve(); // let microtasks settle
-    assert.equal(resolved, false);
-    signal.cancel();
-  });
-
-  test("notifyToolFired for a runId with no waiters does not throw", () => {
-    assert.doesNotThrow(() => notifyToolFired(`run-${randomUUID()}`));
-  });
-
-  test("notifyToolFired does nothing when runId is falsy", () => {
-    assert.doesNotThrow(() => notifyToolFired(null));
-    assert.doesNotThrow(() => notifyToolFired(""));
-  });
-
-  test("waitForToolSignal with a falsy runId returns a promise that never resolves and a no-op cancel", async () => {
-    const signal = waitForToolSignal(null);
-    let resolved = false;
-    signal.promise.then(() => { resolved = true; });
-    await Promise.resolve();
-    assert.equal(resolved, false);
-    assert.doesNotThrow(() => signal.cancel());
-  });
-
-  test("cancel() removes the waiter so a later notifyToolFired for that runId no longer resolves it", async () => {
-    const runId = `run-${randomUUID()}`;
-    const signal = waitForToolSignal(runId);
-    let resolved = false;
-    signal.promise.then(() => { resolved = true; });
-    signal.cancel();
-    notifyToolFired(runId);
-    await Promise.resolve();
-    assert.equal(resolved, false, "a cancelled waiter must not be woken by a later notify");
-  });
-
-  test("two independent waiters on the same runId both resolve on one notifyToolFired call", async () => {
-    const runId = `run-${randomUUID()}`;
-    const signalA = waitForToolSignal(runId);
-    const signalB = waitForToolSignal(runId);
-    notifyToolFired(runId);
-    await Promise.all([signalA.promise, signalB.promise]);
-  });
-
-  test("cancelling one of two waiters on the same runId leaves the other one resolvable", async () => {
-    const runId = `run-${randomUUID()}`;
-    const signalA = waitForToolSignal(runId);
-    const signalB = waitForToolSignal(runId);
-    signalA.cancel();
-    notifyToolFired(runId);
-    await signalB.promise; // would hang (test timeout) if notify no longer reached signalB
-  });
-
-  test("notifyToolFired only fires once — a second call for the same runId is a no-op (no pending waiters left)", () => {
-    const runId = `run-${randomUUID()}`;
-    const signal = waitForToolSignal(runId);
-    notifyToolFired(runId);
-    signal.cancel(); // already resolved; cancel after the fact must not throw
-    assert.doesNotThrow(() => notifyToolFired(runId));
+    second.registerTicket(ticket, invocationId);
+    assert.strictEqual(resolveInvocationId(ticket), invocationId);
+    clearTicket(ticket);
+    assert.strictEqual(second.resolveInvocationId(ticket), null);
   });
 });

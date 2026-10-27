@@ -160,14 +160,13 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
     start: async (ctx) => {
       const logger = ctx?.logger ?? api.logger;
       logger.info(`taskflow-revive: service started (startupDelay=${taskflowStartupDelayMs}ms)`);
-      // Not awaited, same as manifold-flow-revival: its dispatches go
-      // through the executor's subagent and wait for gateway readiness,
-      // which can't come until this start() returns.
+      // Not awaited, same as manifold-flow-revival: revival re-enters
+      // through the executor, which must not block this start() from
+      // returning.
       taskflowScanAndCleanup(api, TASKFLOW_RUNS_DB, taskflowStartupDelayMs, logger, {
         // Lets a manifold-owned orphan be delegated to the flow's own
-        // revival function (engine/executor.js's reviveAgentKindOrphan,
-        // via reviveViaFlowRevival) instead of only being skipped —
-        // see boot/taskflow-revive.js's own header for why.
+        // resume path (via reviveViaFlowRevival) instead of only being
+        // skipped — see boot/taskflow-revive.js's own header for why.
         sessionIndex, runStore, executor,
       }).catch((err) => {
         logger.warn(`taskflow-revive[boot]: scan failed: ${err?.message ?? String(err)}`);

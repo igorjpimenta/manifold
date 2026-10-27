@@ -188,8 +188,7 @@ export async function resolveOneConfig({ flowId, hops, config, runStore, nodeExe
 // layer, direct read" convention every other store accessor already
 // follows). A not-ready/not-found result throws NodeBlocked with `_kind:
 // "needs-not-ready"` explicitly stamped onto `_blocked` — mirroring the
-// established pattern the budget-gate pause already uses
-// (executor-nodes.js's dispatchAgentEntry) — a bare NodeBlocked with no
+// established pattern the budget-gate pause already uses — a bare NodeBlocked with no
 // `_kind` is treated as a hard FAILURE by executor.js's blockedInfo
 // handling, not a wait, so this must never be omitted.
 export function makeNeedsCtx({ node, flowId, runStore, nodeExecutionsStore, pipelinesRef }) {

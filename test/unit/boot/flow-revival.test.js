@@ -8,20 +8,6 @@ import { _resetForTests as resetGlobalConcurrency } from "../../../engine/global
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { drainDetachedResumes } from "../../../engine/admission-promotion-resume.js";
 
-// Polls until `check()` returns a truthy value — used by the real-store
-// regression tests below, where reviveAgentKindOrphan's release runs in a
-// fire-and-forget .finally() (matching production's own fire-and-forget
-// dispatch), so a fixed delay would be either flaky or needlessly slow.
-async function waitUntil(check, { timeout = 2000, interval = 10 } = {}) {
-  const deadline = Date.now() + timeout;
-  for (;;) {
-    const result = await check();
-    if (result) return result;
-    if (Date.now() > deadline) throw new Error("waitUntil: timed out");
-    await new Promise((r) => setTimeout(r, interval));
-  }
-}
-
 // The pipeline fixtures below set no per-pipeline limit, so the only number
 // bounding revival here is the shared one — set per test via
 // resetGlobalConcurrency(n) and restored to the module default after every
@@ -81,29 +67,17 @@ function makeStore() {
 
 function makeExecutor() {
   const revived = [];
-  const revivedAgent = [];
   const resumed = [];
   return {
     revived,
-    revivedAgent,
     resumed,
     runFlow(flowId) { revived.push(flowId); return Promise.resolve(); },
-    reviveAgentKindOrphan(flow) { revivedAgent.push(flow.flowId); return Promise.resolve(); },
     resume(flowId) { resumed.push(flowId); return Promise.resolve(); },
   };
 }
 
 function makeLogger() {
   return { info: () => {}, warn: () => {} };
-}
-
-// Mocks state/session-index.js's hasSessionForNode() query — the signal
-// orphan classification falls back to for a 'queued' orphan (whose targetNodeId came from
-// waitJson.nodeId, not a race-free nodeExecutionsStore currentStep) to tell
-// "a dispatch attempt genuinely started" from "still waiting for a slot,
-// never dispatched".
-function makeSessionIndex(hasSession = true) {
-  return { hasSessionForNode: () => hasSession };
 }
 
 // ── children-pending reconciliation test doubles ────────────────────────────
@@ -173,8 +147,8 @@ describe("reviveOrphanFlows", () => {
     // orphans" below.
   });
 
-  describe("agent-kind orphans → revived via continuation", () => {
-    it("revives a flow whose lastStep.kind is 'agent' via reviveAgentKindOrphan, not runFlow", async () => {
+  describe("agent-kind orphans → re-entered via runFlow", () => {
+    it("revives a flow whose lastStep.kind is 'agent' via runFlow", async () => {
       const flow = makeFlow({ lastStep: "AGENT_NODE" });
       const pipelines = makePipelines({
         p1: { nodes: { AGENT_NODE: { kind: "agent" } } },
@@ -189,23 +163,16 @@ describe("reviveOrphanFlows", () => {
 
       assert.equal(result.revived, 1);
       assert.equal(result.revivedAgent, 1);
-      assert.equal(executor.revivedAgent[0], flow.flowId);
-      assert.equal(executor.revived.length, 0, "agent-kind orphans go through reviveAgentKindOrphan, not runFlow");
+      assert.deepEqual(executor.revived, [flow.flowId]);
       assert.equal(store.failed.length, 0, "no longer auto-failed");
     });
 
-    it("revives a 'running' agent-kind orphan via reviveAgentKindOrphan even with no session record yet", async () => {
-      // Regression test for run 9672224c/flow 5ca6e078:
-      // nodeExecutionsStore.findCurrentStep() already gives a race-free
-      // answer for a 'running' orphan — the dispatch path's invocation row is
-      // written before dispatchAgentWithRetry ever gets to recording a
-      // flow_sessions entry, so a crash in that narrow window left a
-      // genuinely in-flight agent dispatch looking like "no session yet".
-      // reviveAgentKindOrphan() itself already tolerates a missing session
-      // (it just starts one), so classification must not additionally gate
-      // on session-index state — doing so routes this case through
-      // resolveEdge()/runFlow(), which has no output to route on, and it
-      // fails immediately with "edge <NODE> returned no next node".
+    it("revives a 'running' agent-kind orphan via runFlow even with no session record yet", async () => {
+      // Regression test for run 9672224c/flow 5ca6e078: a crash in the
+      // window between the invocation row write and any session record
+      // left a genuinely in-flight agent node looking like "no session
+      // yet". Revival re-enters through runFlow, which needs no session
+      // record at all — the agent node simply re-parks its ticket.
       const flow = makeFlow({ lastStep: "AGENT_NODE" });
       const pipelines = makePipelines({
         p1: { nodes: { AGENT_NODE: { kind: "agent" } } },
@@ -220,27 +187,26 @@ describe("reviveOrphanFlows", () => {
 
       assert.equal(result.revived, 1);
       assert.equal(result.revivedAgent, 1);
-      assert.equal(executor.revivedAgent[0], flow.flowId);
-      assert.equal(executor.revived.length, 0);
+      assert.deepEqual(executor.revived, [flow.flowId]);
     });
 
-    it("treats a missing sessionIndex the same as no session found, for a target resolved via resolveEdge (defensive default)", async () => {
-      // No nodeExecutionsStore here, so currentStep never resolves — unlike
-      // the regression test above, this exercises the OTHER fallback branch
-      // (resolveEdge), which still needs a sessionIndex-shaped signal.
-      const flow = makeFlow({ lastStep: "AGENT_NODE" });
+    it("revives without any node executions store — the target resolves via resolveEdge", async () => {
+      const flow = makeFlow({ lastStep: "PREV" });
       const pipelines = makePipelines({
-        p1: { nodes: { AGENT_NODE: { kind: "agent" } } },
+        p1: {
+          nodes: { PREV: { kind: "code" }, AGENT_NODE: { kind: "agent" } },
+          edges: { __start__: "PREV", PREV: "AGENT_NODE", AGENT_NODE: "__end__" },
+        },
       });
       const executor = makeExecutor();
 
       const result = await reviveOrphanFlows({
         all: [flow], pipelines, store: makeStore(), logger: makeLogger(), executor,
-        // sessionIndex intentionally omitted
       });
 
-      assert.equal(result.revivedAgent, 0);
-      assert.equal(executor.revived[0], flow.flowId);
+      assert.equal(result.revived, 1);
+      assert.equal(result.revivedAgent, 1);
+      assert.deepEqual(executor.revived, [flow.flowId]);
     });
 
     it("revives all agent-kind orphans when the shared limit covers both", async () => {
@@ -288,7 +254,7 @@ describe("reviveOrphanFlows", () => {
       await drainDetachedResumes();
 
       assert.equal(result.revivedAgent, 1);
-      assert.deepEqual(executor.revivedAgent, [flow.flowId]);
+      assert.deepEqual(executor.revived, [flow.flowId]);
       assert.equal((await admissionQueueStore.get(runSlot.id)).status, "admitted", "the run keeps its own slot while its agent node is revived");
       assert.equal((await admissionQueueStore.get(waiting.id)).status, "queued", "nothing was released, so nothing was promoted");
       assert.deepEqual(executor.resumed, []);
@@ -1069,13 +1035,10 @@ describe("reviveOrphanFlows", () => {
       assert.equal(result.revivedAgent, 0, "resource-lock node is code-kind, not agent");
     });
 
-    it("with no admission pool wired in, a legacy agent-dispatch-queued orphan is re-entered via plain runFlow, not the continuation path", async () => {
-      // Never actually dispatched — no session exists, so it must NOT go
-      // through reviveAgentKindOrphan (which sends REVIVAL_MSG
-      // unconditionally) even though AGENT_NODE is agent-kind: there's no
-      // prior turn for a continuation prompt to continue. With no admission
-      // store there's no pool to re-admit into, so re-entering directly is
-      // the only option.
+    it("with no admission pool wired in, a legacy agent-dispatch-queued orphan is re-entered via plain runFlow", async () => {
+      // With no admission store there's no pool to re-admit into, so
+      // re-entering directly is the only option — the agent node re-parks
+      // its ticket there.
       const flow = makeFlow({
         status: "queued", lastStep: "AGENT_NODE",
         waitJson: { kind: "agent-dispatch", nodeId: "AGENT_NODE" },
@@ -1085,13 +1048,11 @@ describe("reviveOrphanFlows", () => {
 
       const result = await reviveOrphanFlows({
         all: [flow], pipelines, store: makeStore(), logger: makeLogger(), executor,
-        sessionIndex: makeSessionIndex(false),
       });
 
       assert.equal(result.revived, 1);
-      assert.equal(result.revivedAgent, 0);
+      assert.equal(result.revivedAgent, 1);
       assert.deepEqual(executor.revived, [flow.flowId]);
-      assert.equal(executor.revivedAgent.length, 0);
     });
 
     it("re-submits a queued orphan with no waitJson at all", async () => {

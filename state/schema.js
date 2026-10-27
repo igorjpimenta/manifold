@@ -43,7 +43,7 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   resultJson:          text('result_json'),
   resultWrittenAt:     integer('result_written_at'),
   resultTooLargeBytes: integer('result_too_large_bytes'),
-  // Pull-claim tickets: an agent node with `pull: true` parks its
+  // Pull-claim tickets: every agent node parks its
   // invocation here instead of push-dispatching. claimState is NULL for
   // every non-pull row; pull rows move ready -> claimed -> reported ->
   // applied, with the claimant binding and lease deadline alongside.
