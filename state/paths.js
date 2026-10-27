@@ -42,6 +42,13 @@ export function pipelinesDir(dataDir) {
   return path.join(dataDir, "workspace", ".pipelines");
 }
 
+// Agent session transcripts a harness exposes for dashboard reads. Empty by
+// default: a standalone core has no harness sessions, and transcript reads
+// degrade to empty lists — the adapter passes its harness's agents dir.
+export function agentsDir(dataDir) {
+  return path.join(dataDir, "agents");
+}
+
 export function stateFile(dataDir) {
   return path.join(dataDir, "state", "manifold-paused.json");
 }
@@ -169,5 +176,6 @@ export function resolveStorePaths({ paths = null, dataDir = null, env = process.
     pendingDir: paths?.pendingDir ?? env.MANIFOLD_PENDING_DIR ?? pendingDir(dir),
     locksDir: paths?.locksDir ?? env.MANIFOLD_LOCKS_DIR ?? locksDir(dir),
     pipelinesDir: paths?.pipelinesDir ?? env.MANIFOLD_PIPELINES_DIR ?? pipelinesDir(dir),
+    agentsDir: paths?.agentsDir ?? env.MANIFOLD_AGENTS_DIR ?? agentsDir(dir),
   };
 }

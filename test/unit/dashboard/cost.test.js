@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { createClient } from "@libsql/client";
 
 // ─── redirect OPS_DB away from ~/.openclaw ────────────────────────────────────
@@ -707,5 +707,23 @@ describe("costForAllPipelines — active-in-window gate (sinceMs)", () => {
     const runs = [makeRunRaw({ flowId, pipelineId: "all_gate_created", createdAt: sinceMs + 1_000 })];
     const p = (await costForAllPipelines(runs, { sinceMs, _dbPath: LINEAGE_DB_PATH })).pipelines.find((x) => x.pipelineId === "all_gate_created");
     assert.ok(p, "run created in window should be included even with zero DB cost");
+  });
+});
+
+describe("self-sufficient defaults (no injected dbPath)", () => {
+  // With MANIFOLD_DATA_DIR pointed at an empty tmp dir, the resolved
+  // default DB is absent — cost calls degrade to empty results instead
+  // of touching any harness home.
+  test("costForRun without _dbPath resolves under MANIFOLD_DATA_DIR", async () => {
+    const saved = process.env.MANIFOLD_DATA_DIR;
+    const emptyHome = mkdtempSync(path.join(os.tmpdir(), "manifold-cost-default-"));
+    process.env.MANIFOLD_DATA_DIR = emptyHome;
+    try {
+      const r = await costForRun(randomUUID());
+      assert.equal(r.total, 0);
+    } finally {
+      if (saved === undefined) delete process.env.MANIFOLD_DATA_DIR;
+      else process.env.MANIFOLD_DATA_DIR = saved;
+    }
   });
 });

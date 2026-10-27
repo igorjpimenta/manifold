@@ -13,12 +13,12 @@
 // telemetry ever moves its file, update both.
 
 import { existsSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
-import { getSharedDb } from "../state/db.js";
+import { getSharedDb, resolveStorePaths } from "../state/db.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 
-const OPS_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+function defaultOpsDbPath() {
+  return resolveStorePaths().opsDb;
+}
 
 function getClient(dbPath) {
   return getSharedDb(dbPath, { readonly: true });
@@ -44,7 +44,7 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
     bySession: {},
   };
 
-  const dbPath = _dbPath ?? OPS_DB_PATH;
+  const dbPath = _dbPath ?? defaultOpsDbPath();
   if (!existsSync(dbPath)) return result;
 
   const { client } = await getClient(dbPath);
@@ -165,7 +165,7 @@ export async function costForPipeline(runs, pipelineId, { sinceMs = null, untilM
   const flowIds = mine.map((r) => r.flowId).filter(Boolean);
   if (flowIds.length === 0) return empty;
 
-  const dbPath = _dbPath ?? OPS_DB_PATH;
+  const dbPath = _dbPath ?? defaultOpsDbPath();
   if (!existsSync(dbPath)) return empty;
 
   const { client } = await getClient(dbPath);
@@ -410,7 +410,7 @@ export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null
   const flowIds = [...flowToPipeline.keys()];
   if (flowIds.length === 0) return empty;
 
-  const dbPath = _dbPath ?? OPS_DB_PATH;
+  const dbPath = _dbPath ?? defaultOpsDbPath();
   if (!existsSync(dbPath)) {
     // DB absent: still return pipeline entries derived purely from the runs list,
     // all with zero cost (active-in-window gate still applies for run counts).

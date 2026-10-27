@@ -19,6 +19,7 @@ import { costForRun, costForPipeline, costForAllPipelines } from "./cost.js";
 import { computeViews } from "./views.js";
 import { stepsExecutedFromTree } from "./tree-stats.js";
 import { TERMINAL_STATUS_SET } from "../state/run-store.js";
+import { resolveStorePaths } from "../state/db.js";
 import { assembleState } from "../engine/executor-helpers.js";
 import { getAllSubflowGroups } from "../state/subflow-state.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
@@ -27,10 +28,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Static assets come from vite's build output under `dist/`. Run `npm run
 // build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
-// Agent session JSONLs live under the injected agentsDir (the harness's
-// sessions root — the adapter supplies it, core hardcodes no harness home).
-// Transcripts match on the gateway key shape the executor mints
-// (agent:<agent>:subagent:mf-<flowId8>-<nodeId>[-<itemKey>]).
+// Agent session JSONLs live under agentsDir: the harness sessions root for
+// transcript reads. Defaults to the core-owned data dir (usually empty
+// standalone — transcript reads degrade to empty lists); the adapter passes
+// its harness's agents dir explicitly.
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -47,8 +48,7 @@ const MIME = {
   ".ico":  "image/x-icon",
 };
 
-export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision, agentsDir }) {
-  if (!agentsDir) throw new Error("createDashboardServer: agentsDir is required");
+export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port = 7430, host = "127.0.0.1", logger, recordItemDecision, agentsDir = resolveStorePaths().agentsDir }) {
   let server = null;
   // Track open SSE responses so we can drain them on stop().
   const sseClients = new Set();

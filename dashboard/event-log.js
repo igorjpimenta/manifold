@@ -25,15 +25,16 @@
 // falls back to SQL when the in-memory buffer is empty (cold read after restart).
 
 import { mkdirSync } from "node:fs";
-import { openDb } from "../state/db.js";
+import { openDb, resolveStorePaths } from "../state/db.js";
 import { enqueueRaw } from "../state/batch-writer.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import os from "node:os";
 import { flowStateEmitter } from "../events.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
-const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+function defaultEventsDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
 async function openEventsDb(dbPath, logger) {
   try {
@@ -51,7 +52,7 @@ const RING_CAP = 256;
 
 const INSERT_SQL = `INSERT OR IGNORE INTO flow_events (id, flow_id, event_type, prev_step, curr_step, prev_status, curr_status, wait_kind, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DEFAULT_EVENTS_DB_PATH }) {
+export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = defaultEventsDbPath() }) {
   let _client = null;
   if (dbPath) openEventsDb(dbPath, logger).then(c => { _client = c; });
   // Map<flowId, { revision, status, lastStep, stateKeys: Set<string>, terminal: boolean }>
