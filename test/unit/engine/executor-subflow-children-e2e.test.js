@@ -122,7 +122,6 @@ async function makeHarness({ sendMode = "ok" } = {}) {
     pipelinesRef,
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: null,
     failureStore: null,
     nodeHealthStore: null,
     notifyFlowEnteredWaiting: null,

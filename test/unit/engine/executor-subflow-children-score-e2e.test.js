@@ -111,7 +111,6 @@ async function makeHarness(concurrency) {
     pipelinesRef,
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: null,
     failureStore: null,
     nodeHealthStore: null,
     notifyFlowEnteredWaiting: null,

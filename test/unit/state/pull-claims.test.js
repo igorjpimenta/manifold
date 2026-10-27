@@ -185,6 +185,30 @@ describe("pull-claim — report", () => {
   });
 });
 
+describe("pull-claim — prompt rides the ticket", () => {
+  test("markPullReady stores the prompt; claimNext and getClaim return it", async () => {
+    const store = await createNodeExecutionsStore(tmpDb());
+    const flowId = `flow-${randomUUID()}`;
+    const { invocationId } = await store.enter({ flowId, nodeId: "WORK", kind: "fresh" });
+    assert.deepEqual(await store.markPullReady(invocationId, { prompt: "do the thing" }), { ok: true });
+    assert.equal((await store.getClaim(invocationId)).prompt, "do the thing");
+    const claimed = await store.claimNext({ ...TRIPLE });
+    assert.equal(claimed.ticket, invocationId);
+    assert.equal(claimed.prompt, "do the thing");
+    assert.equal(claimed.flowId, flowId);
+    assert.equal(claimed.nodeId, "WORK");
+    store.close();
+  });
+
+  test("tickets parked without a prompt claim with a null prompt", async () => {
+    const store = await createNodeExecutionsStore(tmpDb());
+    const { ticket } = await mintReady(store);
+    assert.equal((await store.claimNext({ ...TRIPLE })).prompt, null);
+    assert.equal((await store.getClaim(ticket)).prompt, null);
+    store.close();
+  });
+});
+
 describe("pull-claim — park and settle bookkeeping", () => {
   test("markPullReady is idempotent; unknown and missing rows fail loud", async () => {
     const store = await createNodeExecutionsStore(tmpDb());

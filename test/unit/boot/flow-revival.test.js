@@ -147,6 +147,34 @@ describe("reviveOrphanFlows", () => {
     // orphans" below.
   });
 
+  describe("blocked agent-claim flows need no revival at boot", () => {
+    // A parked ticket survives the crash in the claim store: an unclaimed
+    // ticket is still claimable, and an expired lease is requeued by the
+    // periodic sweepExpiredClaims tick — never by re-entering the flow.
+    // Re-running a blocked flow would be a no-op (runFlow returns on
+    // blocked), so revival leaves it strictly alone.
+    it("leaves a flow parked on agent-claim untouched", async () => {
+      const flow = makeFlow({
+        status: "blocked", lastStep: "CACHE_CHECK",
+        waitJson: { kind: "agent-claim", ticket: "ticket-1", nodeId: "SCORE_LLM" },
+      });
+      const pipelines = makePipelines({ p1: { nodes: { SCORE_LLM: { kind: "agent" } } } });
+      const store = makeStore();
+      const executor = makeExecutor();
+
+      const result = await reviveOrphanFlows({
+        all: [flow], pipelines, store, logger: makeLogger(), executor,
+        nodeExecutionsStore: makeNodeExecutionsStoreFromFlows([flow]),
+      });
+
+      assert.equal(result.revived, 0);
+      assert.equal(result.revivedAgent, 0);
+      assert.deepEqual(executor.revived, []);
+      assert.deepEqual(executor.resumed, []);
+      assert.equal(store.failed.length, 0);
+    });
+  });
+
   describe("agent-kind orphans → re-entered via runFlow", () => {
     it("revives a flow whose lastStep.kind is 'agent' via runFlow", async () => {
       const flow = makeFlow({ lastStep: "AGENT_NODE" });

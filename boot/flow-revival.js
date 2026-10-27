@@ -21,7 +21,7 @@ import { TERMINAL_STATUS_SET } from "../state/run-store.js";
 // minAgeMs guards against a false positive on a promotion that's
 // genuinely still in flight (the continuation hasn't had a chance to run
 // yet) — skip anything admitted more recently than that window. Exported
-// (not folded into reviveOrphanFlows) so index.js can also run it on a
+// (not folded into reviveOrphanFlows) so the flow-revival service can also run it on a
 // periodic timer: reviveOrphanFlows only runs once, at boot, so a leak
 // occurring hours into uptime would otherwise go undetected until the next
 // restart.
@@ -143,7 +143,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
  * mid-flight) or status='queued' (waiting on a resource-lock, or on a
  * shared admission-pool slot — flow-start or child-dispatch — when the
  * process died) after a gateway crash. Called by the manifold-flow-revival
- * service in index.js.
+ * service at boot.
  *
  * Returns a summary object for observability and testing:
  *   { revived: number, revivedAgent: number, queuedForAdmission: number, readmitted: number, recancelled: number, childrenReconciled: number, gatesReconciled: number, admissionLeaksReleased: number, freeSlotsFilled: number }

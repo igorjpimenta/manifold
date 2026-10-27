@@ -99,6 +99,14 @@ export function withEditableTextDefault(payload, branchData) {
 }
 
 
+// Core-namespace handle for one agent invocation; the adapter maps it
+// to a gateway key at the edge. Explicit entry.sessionKey /
+// sessionKeyBuilder overrides pass through verbatim, never minted here.
+export function mintAgentSessionKey(flowId, nodeId, itemKey) {
+  const seed = itemKey ? `${nodeId.toLowerCase()}-${itemKey}` : nodeId.toLowerCase();
+  return `mf-${flowId.slice(0, 8)}-${seed}`;
+}
+
 // Opaque core handle shape (`mf-<flow8>-<node>[-<item>]`), verbatim.
 const OPAQUE_SESSION_KEY_RE = /^mf-[0-9a-f]{8}-/;
 // Gateway shape the adapter produces for an opaque handle:

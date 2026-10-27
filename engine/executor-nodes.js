@@ -2,7 +2,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { NodeBlocked } from "./executor-errors.js";
-import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
+import { detectBlockedSentinel, detectSkippedSentinel, assembleState, usesNamedParams, mintAgentSessionKey } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
 import { registerTicket } from "../state/tool-handoff.js";
 import { runWithLockOwner } from "../locks/lock.js";
@@ -111,38 +111,73 @@ export function createNodeRunner({
     }));
   }
 
-  // Every agent node parks: its invocation becomes a claim ticket and an
-  // external agent reports the result back (engine/pull-claims.js), which
-  // resumes through the gate resume path. A resumed dispatch whose ticket
-  // is already reported consumes the stored result instead of parking again.
-  async function executePullNode({ nodeId, flowId, invocationId }) {
+  // Every agent node parks: core builds the prompt at park (stored with
+  // the ticket, handed to the claimant on claim), the claimant executes
+  // externally, and core runs node.apply on resume. A resumed dispatch
+  // whose ticket is already reported consumes the stored result instead
+  // of parking again.
+  //
+  // Prompt and apply mirror the deleted push-world dispatchAgentEntry:
+  // promptBuilder reads assembleState(baseState: state) with the lazy
+  // ctx.needs accessor, and apply runs with the same ctx shape the push
+  // dispatch used. A throwing apply propagates uncaught, the same failure
+  // path a throwing code node takes.
+  async function executePullNode({ node, nodeId, state, flowId, invocationId }) {
+    // Anonymous dispatch is refused: every agent turn is keyed to its
+    // agent for session attribution and push wake. No default, ever.
+    if (!node?.agent) {
+      throw new Error(`manifold: refusing anonymous dispatch of node "${nodeId}" (no entry.agent)`);
+    }
     const claim = invocationId
       ? await nodeExecutionsStore.getClaim?.(invocationId).catch(() => null)
       : null;
-    // Reported tickets carry their result in resultJson (written by the
-    // report before resume) — consume it here so the resumed dispatch
-    // completes without re-parking. assembleState() replays the same row
-    // for edge functions; this is the dispatch-side read.
+    // Reported tickets carry the claimant's output in resultJson (written
+    // by the report before resume) — run it through node.apply here so
+    // pipeline-author logic shapes the state update, never raw JSON trust.
+    // assembleState() replays the same row for edge functions; this is the
+    // dispatch-side read.
     if (claim && (claim.claimState === "reported" || claim.claimState === "applied")) {
       const recorded = await nodeExecutionsStore.getResultForNode?.(flowId, nodeId).catch(() => null) ?? null;
       if (recorded?.resultWrittenAt == null || recorded.resultJson == null) {
         throw new Error(`pull-claim: ticket ${invocationId} is ${claim.claimState} but has no stored result (flow=${flowId} node=${nodeId})`);
       }
-      let stateUpdate;
+      let reportedOutput;
       try {
-        stateUpdate = JSON.parse(recorded.resultJson) ?? {};
+        reportedOutput = JSON.parse(recorded.resultJson);
       } catch {
         throw new Error(`pull-claim: ticket ${invocationId} has a corrupt stored result (flow=${flowId} node=${nodeId})`);
       }
+      const applyMeta = { flowId, nodeId, invocationId };
+      const stateUpdate = typeof node.apply === "function"
+        ? (usesNamedParams(node.apply)
+          ? await node.apply({ state, output: reportedOutput, item: undefined, meta: applyMeta, needs: makeNeedsCtx({ node, flowId, runStore, nodeExecutionsStore, pipelinesRef }) })
+          : await node.apply(state, reportedOutput, undefined, applyMeta, makeNeedsCtx({ node, flowId, runStore, nodeExecutionsStore, pipelinesRef })))
+        : (reportedOutput ?? {});
       await nodeExecutionsStore.markApplied?.(invocationId).catch(() => null);
-      return { stateUpdate };
+      const blocked = detectBlockedSentinel(stateUpdate);
+      if (blocked) return { blockedInfo: blocked };
+      const skipped = detectSkippedSentinel(stateUpdate);
+      if (skipped) return { skippedInfo: skipped };
+      return { stateUpdate: stateUpdate ?? {} };
     }
-    // Park: mint the ticket in ready state, then return waitJson so runFlow
-    // persists it through the human-gate waitJson path (reentrant —
-    // lastStep stays put so resume re-enters this same node). Register the
-    // ticket so tools the claiming agent calls (e.g. submit_score) resolve
-    // this invocation from the ticket the claim instructions carry.
-    const parked = await nodeExecutionsStore.markPullReady?.(invocationId) ?? { ok: true };
+    // Park: build the prompt over the assembled state (what makes
+    // _subflowGroups visible to promptBuilder, same as the push dispatch),
+    // persist it with the ticket, then return waitJson so runFlow persists
+    // it through the human-gate waitJson path (reentrant — lastStep stays
+    // put so resume re-enters this same node). Register the ticket so
+    // tools the claiming agent calls (e.g. submit_score) resolve this
+    // invocation from the ticket the claim instructions carry.
+    const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
+    const needsCtx = makeNeedsCtx({ node, flowId, runStore, nodeExecutionsStore, pipelinesRef });
+    const prompt = typeof node.promptBuilder === "function"
+      ? await node.promptBuilder(enrichedState, { needs: needsCtx })
+      : null;
+    // Core-namespace handle only (`mf-<flow8>-<node>`); explicit
+    // entry.sessionKey / sessionKeyBuilder overrides pass through verbatim.
+    const sessionKey = node.sessionKey
+      ?? node.sessionKeyBuilder?.(state, flowId)
+      ?? mintAgentSessionKey(flowId, nodeId);
+    const parked = await nodeExecutionsStore.markPullReady?.(invocationId, { prompt }) ?? { ok: true };
     registerTicket(invocationId, invocationId);
     if (!parked?.ok) {
       throw new Error(`pull-claim: could not park ticket ${invocationId} (${parked?.reason ?? "store without claim support"})`);
@@ -152,7 +187,7 @@ export function createNodeRunner({
     }
     return {
       stateUpdate: {},
-      waitJson: { kind: "agent-claim", ticket: invocationId, nodeId, renderedAt: Date.now() },
+      waitJson: { kind: "agent-claim", ticket: invocationId, nodeId, sessionKey, renderedAt: Date.now() },
       reentrant: true,
     };
   }
@@ -168,7 +203,7 @@ export function createNodeRunner({
     }
 
     if (node.kind === "agent") {
-      return executePullNode({ nodeId, flowId, invocationId });
+      return executePullNode({ node, nodeId, state, flowId, invocationId });
     }
 
     if (node.kind === "subflow") {

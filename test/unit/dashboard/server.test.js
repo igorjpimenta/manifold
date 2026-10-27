@@ -226,3 +226,94 @@ describe("dashboard/server.js — direct store reads (no gateway)", () => {
     assert.equal(body.length, 1);
   });
 });
+// A parked agent-claim flow surfaces its live ticket state (claimant
+// binding + lease expiry) on both the runs list and the run detail —
+// additive `claim` field, null when not parked.
+describe("dashboard/server.js — agent-claim visibility", () => {
+  const PARKED_ID = "22222222-2222-4222-8222-222222222222";
+  const TICKET = "ticket-abc-123";
+  const CLAIM_ROW = {
+    ticket: TICKET,
+    flowId: PARKED_ID,
+    nodeId: "WORK",
+    claimState: "claimed",
+    harness: "openclaw",
+    agent: "scout",
+    session: "sess-1",
+    claimedAt: 1_700_000_002_000,
+    leaseExpiresAt: 1_700_000_302_000,
+  };
+  const PARKED_FLOW = {
+    ...STORED_FLOW,
+    flowId: PARKED_ID,
+    status: "blocked",
+    waitJson: { kind: "agent-claim", ticket: TICKET, nodeId: "WORK", renderedAt: 1_700_000_002_000 },
+  };
+  const PARKED_LIST_ROW = {
+    ...LIST_ROW,
+    flowId: PARKED_ID,
+    status: "blocked",
+    waitJson: { kind: "agent-claim", ticket: TICKET, nodeId: "WORK", renderedAt: 1_700_000_002_000 },
+  };
+
+  let claimBase;
+  let claimServer;
+  before(async () => {
+    const PORT = await freePort();
+    claimBase = `http://127.0.0.1:${PORT}`;
+    const parkedReadStore = {
+      ...readStore,
+      get: async (id) => (id === PARKED_ID ? structuredClone(PARKED_FLOW) : null),
+      listRunsPage: async () => [{ ...LIST_ROW }, { ...PARKED_LIST_ROW }],
+    };
+    const claimNx = { ...nodeExecutionsStore, getClaim: async (t) => (t === TICKET ? { ...CLAIM_ROW } : null) };
+    claimServer = createDashboardServer({
+      writeStore: {},
+      readStore: parkedReadStore,
+      failureStore,
+      discussStore,
+      nodeExecutionsStore: claimNx,
+      pipelinesRef: { value: new Map() },
+      pipelineRegistryStore,
+      ensurePipelinesLoaded: async () => {},
+      executor: {},
+      eventBus,
+      port: PORT,
+      host: "127.0.0.1",
+      logger: {},
+      recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }),
+      agentsDir: AGENTS_FIXTURE_DIR,
+    });
+    await claimServer.start();
+  });
+  after(async () => { await claimServer?.stop(); });
+
+  test("runs list carries claim state for parked rows, null otherwise", async () => {
+    const r = await fetch(`${claimBase}/api/runs`);
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    const parked = body.find((x) => x.flowId === PARKED_ID);
+    assert.equal(parked.waitKind, "agent-claim");
+    assert.deepEqual(parked.claim, {
+      ticket: TICKET,
+      state: "claimed",
+      harness: "openclaw",
+      agent: "scout",
+      session: "sess-1",
+      claimedAt: 1_700_000_002_000,
+      leaseExpiresAt: 1_700_000_302_000,
+    });
+    const plain = body.find((x) => x.flowId === FLOW_ID);
+    assert.equal(plain.claim, null);
+  });
+
+  test("run detail carries claim state for a parked flow", async () => {
+    const r = await fetch(`${claimBase}/api/runs/${PARKED_ID}`);
+    assert.equal(r.status, 200);
+    const body = await r.json();
+    assert.equal(body.waitJson?.kind, "agent-claim");
+    assert.equal(body.claim?.state, "claimed");
+    assert.equal(body.claim?.ticket, TICKET);
+    assert.equal(body.claim?.leaseExpiresAt, 1_700_000_302_000);
+  });
+});

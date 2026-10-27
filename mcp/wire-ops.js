@@ -5,10 +5,10 @@
 // start/approve, and the node-executions store for claim/report/heartbeat.
 // Everything is store-backed — no stubs, no fakes.
 //
-// Standalone note: `serve --mcp` runs outside the gateway, so there is no
-// subagent runtime. Code/manual/subflow nodes drive fine; an agent-node
-// dispatch refuses loudly at dispatch time (getWorkingSubagent throws),
-// naming the missing runtime instead of hanging. Status/runs/cancel always
+// Standalone note: `serve --mcp` runs outside the gateway. Agent nodes
+// park as claim tickets (claimed via manifold_claim, completed via
+// manifold_report, lease renewed via manifold_heartbeat) — parking needs
+// no dispatch runtime, only the ticket store. Status/runs/cancel always
 // work — they are pure store reads/writes.
 
 import { createRunStore } from "../state/run-store.js";
@@ -40,16 +40,7 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
   const sessionIndex = await createSessionIndex({ logger }).catch(() => null);
   const pushTargetsStore = await createPushTargetsStore({ logger, dbPath: runtimeDb }).catch(() => null);
 
-  const api = {
-    logger: logger ?? console,
-    runtime: {
-      subagent: {
-        run: async () => {
-          throw new Error("manifold standalone serve: agent dispatch needs a gateway subagent runtime");
-        },
-      },
-    },
-  };
+  const api = { logger: logger ?? console };
   const pipelinesRef = { value: new Map() };
   const ensurePipelinesLoaded = async () => {
     if (pipelinesRef.value && pipelinesRef.value.size > 0) return;
@@ -83,10 +74,6 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     pipelinesRef,
     ensurePipelinesLoaded,
     logger: logger ?? console,
-    getWorkingSubagent: () => {
-      throw new Error("manifold standalone serve: agent dispatch needs a gateway subagent runtime");
-    },
-    whenGatewayReady: async () => {},
     failureStore,
     nodeHealthStore,
     notifyFlowEnteredWaiting: async () => {},

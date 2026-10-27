@@ -79,17 +79,18 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
     start: async (ctx) => {
       const logger = ctx?.logger ?? api.logger;
       logger.info("manifold revival: start");
-      // Not awaited: revival dispatches agents once the gateway is ready,
-      // and the gateway isn't ready until this start() returns.
+      // Not awaited so this start() returns promptly: revival re-enters
+      // orphan flows through runFlow, where agent nodes re-park their
+      // claim tickets for the normal claim path.
       runBootRevival(logger);
 
       // Steady-state counterpart to the boot-time revival — same
       // reconciliation, run on a timer for the rest of this process's
-      // uptime instead of once. Resuming a flow can dispatch subagent
-      // calls, which wait for gateway readiness in the executor's gate;
-      // safe to call repeatedly since it only acts on rows already
-      // 'admitted' and non-terminal, which the previous run either
-      // already fixed or genuinely couldn't.
+      // uptime instead of once. Resuming a flow re-runs its current
+      // node (agent nodes re-park as claim tickets there); safe to call
+      // repeatedly since it only acts on rows already 'admitted' and
+      // non-terminal, which the previous run either already fixed or
+      // genuinely couldn't.
       setInterval(() => {
         reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, api, logger })
           .catch((err) => logger.warn(`manifold revival: periodic stuck-admission reconcile failed: ${err?.message ?? err}`));
@@ -135,7 +136,6 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
         }),
         runStore,
         nodeExecutionsStore,
-        sessionIndex,
         admissionQueueStore,
         // gateResolver is declared further below in this same closure —
         // safe to reference here since this callback only runs once

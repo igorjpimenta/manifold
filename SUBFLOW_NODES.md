@@ -224,13 +224,13 @@ dashboard without those clients needing to know the item's own shape.
   `getAllSubflowGroups`/dashboards see them right away) but held at
   `status:'queued'` until a slot frees, auto-woken the moment ANY flow
   anywhere goes terminal — no polling, no manual retry needed.
-- The process-wide `agentDispatchConcurrency` config (default 8) bounds
-  concurrent `kind:"agent"` dispatch across the whole gateway process, root
-  and subflow alike — a separate, older mechanism from the child-fanout
-  budget above. The two compose: an agent-kind child still has to clear
-  both this dispatch semaphore for its own turn AND (unless its subflow
-  opted out) the child-fanout budget just to be dispatched as a child at
-  all.
+- Agent turns are pull-claimed, not dispatched: an agent-kind child
+  parks a ticket and waits for a harness to claim it (see the root
+  `README.md`'s *Claim flow* section), so no per-agent dispatch semaphore
+  gates it. The only throttle left on this path is the shared
+  `globalConcurrency` pool (which replaced both `agentDispatchConcurrency`
+  and `childFanoutConcurrency`) plus, for subflow children, the
+  child-fanout budget above.
 
 ## Retrying, resuming, and gating one item
 
