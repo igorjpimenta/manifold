@@ -110,9 +110,8 @@ export function mintAgentSessionKey(flowId, nodeId, itemKey) {
 const OPAQUE_SESSION_KEY_RE = /^mf-[0-9a-f]{8}-/;
 // Gateway shape the adapter produces for an opaque handle:
 // `agent:<agent>:subagent:mf-<flow8>-<node>[-<item>]`. Matched so boot-time
-// orphan classification (which only ever sees gateway-shaped keys from
-// task_runs rows) keeps working; the legacy `gf-` shape core used to mint
-// is deliberately NOT matched anymore.
+// orphan classification keeps working — it only ever sees gateway-shaped
+// keys from task_runs rows.
 const GATEWAY_SESSION_KEY_RE = /:subagent:mf-[0-9a-f]{8}-/;
 
 // Convention-based check, same fallback role as before — see
