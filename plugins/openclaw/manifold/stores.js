@@ -28,6 +28,7 @@ export function createStores(api, cfg, pipelinesRef, resumeParentRef) {
   // ~/.openclaw/{runtime.sqlite,ops.sqlite} are copied in once, never
   // moved, and never read again afterwards.
   const storePaths = resolveStorePaths();
+  const runtimeDbPath = storePaths.runtimeDb;
   ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
   setLocksDir(storePaths.locksDir);
   setStateFile(stateFile(storePaths.dataDir));
@@ -54,7 +55,6 @@ export function createStores(api, cfg, pipelinesRef, resumeParentRef) {
   // childFanoutConcurrency were two independent config keys for what are
   // now the same number; globalConcurrency replaces both.
   configureGlobalConcurrency({ maxConcurrent: cfg.globalConcurrency });
-  const runtimeDbPath = storePaths.runtimeDb;
 
   const runStore    = createRunStore({ logger: api.logger, dbPath: runtimeDbPath });
   const nodeExecutionsStore = getNodeExecutionsStore(runtimeDbPath);
