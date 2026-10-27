@@ -3,7 +3,7 @@
 // Invariant: the set of tools registered via api.registerTool(...) in tracked
 // .js files (excluding test/ and dashboard/) is exactly contracts.tools, and
 // the set of config-schema property paths in the manifest's configSchema is
-// exactly the set in index.js's inline configSchema. Either direction of
+// exactly the set in config.js's exported configSchema. Either direction of
 // drift — a tool registered but undeclared, or declared but never registered —
 // fails here with the offending name.
 
@@ -42,9 +42,9 @@ function registeredToolNames() {
 }
 
 // ── string/comment/template-aware brace matching ────────────────────────────
-// index.js's configSchema is an inline object literal containing template
-// literals and nested objects; it cannot be imported (the openclaw/plugin-sdk
-// specifier is bare), so the test slices and parses the literal statically.
+// config.js's configSchema is a module-level arrow function returning an object
+// literal with template literals and nested objects; the test slices and parses
+// the literal statically so the manifest can never drift from code.
 
 function skipStringLiteral(src, i) {
   const quote = src[i];
@@ -165,10 +165,10 @@ function collectSchemaPropertyPaths(schemaObjInner, prefix = "") {
   return paths;
 }
 
-function inlineIndexConfigSchemaPaths() {
-  const src = readFileSync(path.join(REPO_ROOT, "plugins/openclaw/manifold/index.js"), "utf8");
-  const anchor = src.indexOf("configSchema: () => ({");
-  assert.notEqual(anchor, -1, "index.js: inline `configSchema: () => ({` anchor not found");
+function exportedConfigSchemaPaths() {
+  const src = readFileSync(path.join(REPO_ROOT, "plugins/openclaw/manifold/config.js"), "utf8");
+  const anchor = src.indexOf("configSchema = () => ({");
+  assert.notEqual(anchor, -1, "config.js: exported `configSchema = () => ({` anchor not found");
   const openBrace = src.indexOf("({", anchor) + 1;
   return collectSchemaPropertyPaths(src.slice(openBrace + 1, matchBrace(src, openBrace)));
 }
@@ -213,8 +213,8 @@ describe("openclaw.plugin.json contract parity", () => {
 
   test("manifest configSchema property paths equal index.js inline configSchema", () => {
     const manifestPaths = new Set(manifestConfigSchemaPaths(readManifest()));
-    const codePaths = new Set(inlineIndexConfigSchemaPaths());
-    assert.ok(codePaths.size > 0, "index.js inline configSchema yielded no property paths");
+    const codePaths = new Set(exportedConfigSchemaPaths());
+    assert.ok(codePaths.size > 0, "config.js exported configSchema yielded no property paths");
 
     const onlyInManifest = [...manifestPaths].filter((p) => !codePaths.has(p)).sort();
     const onlyInCode = [...codePaths].filter((p) => !manifestPaths.has(p)).sort();
@@ -222,12 +222,12 @@ describe("openclaw.plugin.json contract parity", () => {
     assert.deepEqual(
       onlyInManifest,
       [],
-      `configSchema paths in the manifest but not in index.js: ${onlyInManifest.join(", ")}`,
+      `configSchema paths in the manifest but not in config.js: ${onlyInManifest.join(", ")}`,
     );
     assert.deepEqual(
       onlyInCode,
       [],
-      `configSchema paths in index.js but not in the manifest: ${onlyInCode.join(", ")}`,
+      `configSchema paths in config.js but not in the manifest: ${onlyInCode.join(", ")}`,
     );
   });
 });
