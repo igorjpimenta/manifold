@@ -8,24 +8,20 @@
 // process-wide (see db.js) and reused across calls instead of opened+closed
 // on every invocation, and shared with any other reader of the same file
 // (e.g. state/node-cost.js's ops.sqlite reader) instead of each keeping its
-// own redundant connection. The path mirrors telemetry/store.js's
-// DEFAULT_DB_PATH so cost.js stays in sync with where telemetry writes — if
-// telemetry ever moves its file, update both.
+// own redundant connection. The ops DB path is injected (dbPath, required)
+// by the caller — dashboard/server.js threads its construction-time path
+// through; there is no default here.
 
 import { existsSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { getSharedDb } from "../state/db.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
-
-const OPS_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
 
 function getClient(dbPath) {
   return getSharedDb(dbPath, { readonly: true });
 }
 
 // costForRun — sum all cost_by_call rows for a given flow_id.
-// opts: { sinceMs?, untilMs?, _dbPath? }
+// opts: { sinceMs?, untilMs?, dbPath } — dbPath is required.
 // _sessionIndex: legacy param, accepted and ignored.
 //
 // Returns:
@@ -34,7 +30,7 @@ function getClient(dbPath) {
 // byModel: { [model]: { total, calls, inputTokens, outputTokens } }
 // byNode:  { [nodeId]: { total, calls, items: { [itemKey]: { total, calls } } } }
 // bySession: { [sessionId]: { total, calls, inputTokens, outputTokens, model, agentId } }
-export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPath = null } = {}, _sessionIndex = null) {
+export async function costForRun(flowId, { sinceMs = null, untilMs = null, dbPath = null } = {}, _sessionIndex = null) {
   const result = {
     flowId,
     total: 0,
@@ -44,7 +40,7 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
     bySession: {},
   };
 
-  const dbPath = _dbPath ?? OPS_DB_PATH;
+  if (!dbPath) throw new Error("costForRun: dbPath is required");
   if (!existsSync(dbPath)) return result;
 
   const { client } = await getClient(dbPath);
@@ -118,7 +114,7 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
 
 // costForPipeline — aggregate cost for one pipeline across all its runs.
 // runs: full flow_run list from the state store (filtered to this pipeline here or by caller).
-// opts: { sinceMs?, untilMs?, sinceDays?, priorWindowMs?, _dbPath? }
+// opts: { sinceMs?, untilMs?, sinceDays?, priorWindowMs?, dbPath } — dbPath is required.
 //
 // Returns a PipelineCost:
 //   { pipelineId, runs, succeeded, total, mean, p50, p95, costPerSuccess,
@@ -140,7 +136,7 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
 // costForAllPipelines: createdAt in window OR cost > 0 in window. A plain
 // updatedAt filter inflates the count after any mass-touch event (see
 // project memory reference_cost_window_gate).
-export async function costForPipeline(runs, pipelineId, { sinceMs = null, untilMs = null, sinceDays = null, priorWindowMs = null, _dbPath = null } = {}) {
+export async function costForPipeline(runs, pipelineId, { sinceMs = null, untilMs = null, sinceDays = null, priorWindowMs = null, dbPath = null } = {}) {
   // Resolve window bounds.
   let resolvedSince = sinceMs;
   if (resolvedSince == null && sinceDays != null && Number.isFinite(sinceDays) && sinceDays > 0) {
@@ -165,7 +161,7 @@ export async function costForPipeline(runs, pipelineId, { sinceMs = null, untilM
   const flowIds = mine.map((r) => r.flowId).filter(Boolean);
   if (flowIds.length === 0) return empty;
 
-  const dbPath = _dbPath ?? OPS_DB_PATH;
+  if (!dbPath) throw new Error("costForPipeline: dbPath is required");
   if (!existsSync(dbPath)) return empty;
 
   const { client } = await getClient(dbPath);
@@ -385,14 +381,14 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
 
 // costForAllPipelines — home-page overview across every pipeline.
 // runs: full flow_run list from the state store.
-// opts: { sinceMs?, _dbPath? }
+// opts: { sinceMs?, dbPath } — dbPath is required.
 //
 // Returns:
 //   { sinceMs, untilMs, total, pipelines }
 //
 // pipeline entry: { pipelineId, total, runCount, succeededToday, failedToday, costToday }
 // total: cross-pipeline aggregate { spend, runs, succeeded, costPerSuccess }
-export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null } = {}) {
+export async function costForAllPipelines(runs, { sinceMs = null, dbPath = null } = {}) {
   const untilMs = sinceMs ? Date.now() : null;
 
   const empty = { sinceMs, untilMs, pipelines: [], total: { spend: 0, runs: 0, succeeded: 0, costPerSuccess: null } };
@@ -410,7 +406,7 @@ export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null
   const flowIds = [...flowToPipeline.keys()];
   if (flowIds.length === 0) return empty;
 
-  const dbPath = _dbPath ?? OPS_DB_PATH;
+  if (!dbPath) throw new Error("costForAllPipelines: dbPath is required");
   if (!existsSync(dbPath)) {
     // DB absent: still return pipeline entries derived purely from the runs list,
     // all with zero cost (active-in-window gate still applies for run counts).

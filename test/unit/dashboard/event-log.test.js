@@ -3,12 +3,18 @@
  * (2026-08-17): stateKeysAdded/stateKeysRemoved now come from
  * nodeExecutionsStore.listVisitedNodeIdsByFlow(), not Object.keys(stateJson)
  * — prep for Option B/B4, where state_json stops growing a key per node.
- * dbPath: null throughout so no real sqlite file is touched.
+ * Each bus gets an isolated tmp sqlite file for its required dbPath.
  */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { createEventBus } from "../../../dashboard/event-log.js";
 import { flowStateEmitter } from "../../../events.js";
+
+// Isolated persistence file per bus — createEventBus requires dbPath.
+const tmpDb = () => path.join(os.tmpdir(), `manifold-event-log-${randomUUID()}.sqlite`);
 
 function makeStore(rows) {
   const byId = new Map(rows.map((r) => [r.flowId, r]));
@@ -61,7 +67,7 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     const row = { flowId, revision: 1, status: "running", lastStep: "SCAN", stateJson: { pipelineId: "p", args: {} } };
     const store = makeStore([row]);
     const nodeExecutionsStore = makeNodeExecutionsStore({ [flowId]: ["SCAN"] });
-    bus = createEventBus({ store, nodeExecutionsStore, logger: null, dbPath: null });
+    bus = createEventBus({ store, nodeExecutionsStore, logger: null, dbPath: tmpDb() });
     await bus.start();
 
     // Simulate SCAN completing and DRAFT being newly invoked — state_json
@@ -89,7 +95,7 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     const realList = nodeExecutionsStore.listVisitedNodeIdsByFlow.bind(nodeExecutionsStore);
     nodeExecutionsStore.listVisitedNodeIdsByFlow = async (flowIds) => { callCount++; return realList(flowIds); };
 
-    bus = createEventBus({ store, nodeExecutionsStore, logger: null, dbPath: null });
+    bus = createEventBus({ store, nodeExecutionsStore, logger: null, dbPath: tmpDb() });
     await bus.start();
 
     assert.equal(callCount, 1, "priming must batch all flowIds into a single call, not one per row");
@@ -99,7 +105,7 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     const flowId = "no-node-execs-flow";
     const row = { flowId, revision: 1, status: "running", lastStep: "A", stateJson: {} };
     const store = makeStore([row]);
-    bus = createEventBus({ store, logger: null, dbPath: null }); // no nodeExecutionsStore at all
+    bus = createEventBus({ store, logger: null, dbPath: tmpDb() }); // no nodeExecutionsStore at all
     await bus.start();
 
     store._set({ ...row, revision: 2, lastStep: "B" });

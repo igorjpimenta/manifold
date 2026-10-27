@@ -20,20 +20,17 @@
 // ring buffer (cap 256 events) so the run-detail page can replay history on
 // first load.
 //
-// When `dbPath` is supplied (wired from index.js), events are also written to a
-// `flow_events` SQLite table so history survives gateway restarts. getEventsFor()
-// falls back to SQL when the in-memory buffer is empty (cold read after restart).
+// `dbPath` (required, wired from index.js) persists events to a `flow_events`
+// SQLite table so history survives gateway restarts. getEventsFor() falls back
+// to SQL when the in-memory buffer is empty (cold read after restart).
 
 import { mkdirSync } from "node:fs";
 import { openDb } from "../state/db.js";
 import { enqueueRaw } from "../state/batch-writer.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import os from "node:os";
 import { flowStateEmitter } from "../events.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
-
-const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 
 async function openEventsDb(dbPath, logger) {
   try {
@@ -51,9 +48,10 @@ const RING_CAP = 256;
 
 const INSERT_SQL = `INSERT OR IGNORE INTO flow_events (id, flow_id, event_type, prev_step, curr_step, prev_status, curr_status, wait_kind, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DEFAULT_EVENTS_DB_PATH }) {
+export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = null }) {
+  if (!dbPath) throw new Error("createEventBus: dbPath is required");
   let _client = null;
-  if (dbPath) openEventsDb(dbPath, logger).then(c => { _client = c; });
+  openEventsDb(dbPath, logger).then(c => { _client = c; });
   // Map<flowId, { revision, status, lastStep, stateKeys: Set<string>, terminal: boolean }>
   const last = new Map();
 
@@ -84,7 +82,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     // connection via dbPath independently of this bus's own `_client` (used
     // only for reads/close below), so this needs no dependency on `_client`
     // having resolved yet either.
-    if (dbPath && event.flowId && event.kind) {
+    if (event.flowId && event.kind) {
       enqueueRaw(dbPath, INSERT_SQL, [randomUUID(), event.flowId, event.kind, event.prevStep ?? null, event.currStep ?? null, event.prevStatus ?? null, event.currStatus ?? null, event.waitKind ?? null, event.at ?? Date.now()]);
     }
     for (const cb of subscribers) {
