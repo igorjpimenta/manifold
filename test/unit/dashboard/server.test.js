@@ -226,3 +226,42 @@ describe("dashboard/server.js — direct store reads (no gateway)", () => {
     assert.equal(body.length, 1);
   });
 });
+
+describe("dashboard/server.js — self-sufficient defaults (no injected paths)", () => {
+  // agentsDir defaults to resolveStorePaths().agentsDir: with
+  // MANIFOLD_DATA_DIR pointed at an empty tmp dir, transcript reads find
+  // no agents and degrade to [] — no throw, no harness home touched.
+  test("constructs without agentsDir; transcripts degrade to []", async () => {
+    const saved = process.env.MANIFOLD_DATA_DIR;
+    const emptyHome = mkdtempSync(path.join(os.tmpdir(), "manifold-agents-default-"));
+    process.env.MANIFOLD_DATA_DIR = emptyHome;
+    const PORT = await freePort();
+    let fallback;
+    try {
+      fallback = createDashboardServer({
+        writeStore: {},
+        readStore,
+        failureStore,
+        discussStore,
+        nodeExecutionsStore,
+        pipelinesRef: { value: new Map() },
+        pipelineRegistryStore,
+        ensurePipelinesLoaded: async () => {},
+        executor: {},
+        eventBus,
+        port: PORT,
+        host: "127.0.0.1",
+        logger: {},
+        recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }),
+      });
+      await fallback.start();
+      const r = await fetch(`http://127.0.0.1:${PORT}/api/runs/${FLOW_ID}/transcripts`);
+      assert.equal(r.status, 200);
+      assert.deepEqual(await r.json(), []);
+    } finally {
+      await fallback?.stop?.().catch(() => {});
+      if (saved === undefined) delete process.env.MANIFOLD_DATA_DIR;
+      else process.env.MANIFOLD_DATA_DIR = saved;
+    }
+  });
+});

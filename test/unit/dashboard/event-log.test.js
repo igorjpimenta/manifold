@@ -111,3 +111,30 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     assert.deepEqual(evt.stateKeysRemoved, []);
   });
 });
+
+describe("self-sufficient defaults (no injected dbPath)", () => {
+  // Without dbPath the bus resolves resolveStorePaths().runtimeDb — under a
+  // tmp MANIFOLD_DATA_DIR that means fresh local files, never a harness home.
+  test("createEventBus without dbPath boots against resolved default", async () => {
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const { mkdtempSync } = await import("node:fs");
+    const saved = process.env.MANIFOLD_DATA_DIR;
+    process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-events-default-"));
+    try {
+      const row = { flowId: "flow-default-1", revision: 1, status: "running", lastStep: "A", stateJson: {} };
+      const store = makeStore([row]);
+      const bus = createEventBus({ store, logger: null });
+      await bus.start();
+      store._set({ ...row, revision: 2, lastStep: "B" });
+      const evtPromise = waitForEvent(bus, (e) => e.kind === "run.updated" && e.flowId === "flow-default-1");
+      flowStateEmitter.emit("change", "flow-default-1");
+      const evt = await evtPromise;
+      assert.equal(evt.flowId, "flow-default-1");
+      await bus.stop();
+    } finally {
+      if (saved === undefined) delete process.env.MANIFOLD_DATA_DIR;
+      else process.env.MANIFOLD_DATA_DIR = saved;
+    }
+  });
+});
