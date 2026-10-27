@@ -11,6 +11,7 @@
 
 import path from "node:path";
 import { getSharedDb } from "../state/db.js";
+import { resolveStorePaths } from "../state/paths.js";
 import os from "node:os";
 import fs from "node:fs";
 import { classify, agentIdOf } from "./grammar.js";
@@ -19,12 +20,17 @@ import { execAll } from "./http-helpers.js";
 // runtime.sqlite, not flows/registry.sqlite — manifold no longer writes
 // flow_runs rows to the latter; runtime.sqlite is the live store (same
 // table shape) everywhere else in manifold.
-const FLOWS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+// Core-owned runtime.sqlite: resolved per call so one MANIFOLD_DATA_DIR
+// move relocates it. The cron jobs.json stays a gateway path, injectable
+// per resolver instance.
+function defaultFlowsDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 const CRON_JSON_PATH = path.join(os.homedir(), ".openclaw", "cron", "jobs.json");
 
 // ─── External joins (lazy-loaded, cached per resolver instance) ──────────────
 
-export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath = CRON_JSON_PATH } = {}) {
+export function makeResolver({ store, flowsDbPath = defaultFlowsDbPath(), cronJsonPath = CRON_JSON_PATH } = {}) {
   let flowsByPrefix = null;     // flow8 → [{ flow_id, owner_key, pipeline_id, status, created_at }]
   let cronJobs = null;          // cronId → { name, sessionKey, agentId, ... }
   let lastFlowsLoadTs = 0;

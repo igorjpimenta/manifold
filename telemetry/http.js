@@ -21,7 +21,7 @@ import { registerTreeRoutes }    from "./http-tree.js";
 import { registerBudgetRoutes }  from "./http-budget.js";
 import { registerSessionRoutes } from "./http-sessions.js";
 
-export function registerHttpRoutes({ api, getStore, logger, getBroadcast }) {
+export function registerHttpRoutes({ api, getStore, logger, getBroadcast, sources, lcmDbPath } = {}) {
   const json = (res, body, status = 200) => {
     res.statusCode = status;
     res.setHeader("content-type", "application/json");
@@ -42,5 +42,5 @@ export function registerHttpRoutes({ api, getStore, logger, getBroadcast }) {
   registerCostRoutes({ api, getStore, logger, json, bad, parseRange });
   registerTreeRoutes({ api, getStore, logger, json, bad, parseRange });
   registerBudgetRoutes({ api, getStore, logger, json, bad, getBroadcast });
-  registerSessionRoutes({ api, logger, json, bad });
+  registerSessionRoutes({ api, logger, json, bad, sources, lcmDbPath });
 }
