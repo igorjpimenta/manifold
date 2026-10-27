@@ -101,6 +101,14 @@ MANIFOLD_HARNESS=generic manifold serve --mcp stdio
 claude mcp add manifold --env MANIFOLD_HARNESS=generic -- manifold serve --mcp stdio
 ```
 
+### Ports (all loopback by default; no two defaults collide)
+
+| surface | default | override |
+| --- | --- | --- |
+| dashboard | `127.0.0.1:7430` | `dashboardPort` plugin config |
+| MCP streamable HTTP | `127.0.0.1:38293` | `manifold serve --mcp http --port N` |
+| WS event stream | `127.0.0.1:38294` | `manifold serve --ws --port N` |
+
 ## WS event stream
 
 `manifold serve --ws [--port N]` (default 38294) broadcasts the in-process

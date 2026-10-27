@@ -3,7 +3,8 @@
 // the "Apply as draft" stripe for a proposal Cyrano made before the
 // app was opened (or before the gateway last bounced).
 //
-// One file per (flowId, itemId) under `~/.openclaw/discuss-pending/`.
+// One file per (flowId, itemId) under resolveStorePaths().pendingDir
+// (package-owned; see state/paths.js).
 // File shape:
 //   { flowId, itemId, text?: string, fields?: {...}, updatedAt: ms }
 //

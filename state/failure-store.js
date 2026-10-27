@@ -1,7 +1,8 @@
 // failure-store.js — durable record of flow / branch failures, for
 // operator triage via a consumer's Failures surface + deep links.
 //
-// Storage:  ~/.openclaw/runtime.sqlite (see defaultDbPath()).
+// Storage:  defaultDbPath() below (resolveStorePaths().runtimeDb —
+// package-owned, see state/paths.js).
 //
 // Why a separate db file rather than another table in registry.sqlite:
 // schema isolation. failure_events is queried independently from
