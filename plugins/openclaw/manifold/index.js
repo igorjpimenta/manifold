@@ -58,6 +58,7 @@ import { registerDiscussHandlers } from "../../../routes/discuss.js";
 import { createComponentEmitter } from "../../../routes/discuss-component.js";
 import { registerRunRoutes } from "../../../routes/runs.js";
 import { registerOperatorRoutes } from "../../../routes/operator.js";
+import * as sessions from "./sessions.js";
 import { resumeFlowFromGate } from "../../../routes/operator-resume.js";
 import { registerFailureRoutes } from "../../../routes/failures.js";
 import { registerGraphqlRoutes } from "../../../routes/graphql.js";
@@ -660,6 +661,7 @@ export default definePluginEntry({
       setPendingText,
       componentEmitter,
       getBroadcast: () => _gatewayBroadcast,
+      sessions,
     });
 
     registerFailureRoutes({
