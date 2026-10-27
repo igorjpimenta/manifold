@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { eq, and, inArray, isNull, isNotNull, desc, asc } from "drizzle-orm";
+import { eq, and, inArray, isNull, isNotNull, desc, asc, lte } from "drizzle-orm";
 import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
 import { flowNodeInvocations, flowNodeExecutions } from "./schema.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
@@ -39,6 +39,24 @@ function defaultDbPath() {
 // pre-existing rows whose capped result cannot be recovered.
 
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
+
+// Default claim lease: an un-renewed claim returns to ready via
+// sweepExpiredClaims() after this long. Overridable per call (tests use
+// millisecond leases with real short sleeps, never fake timers).
+export const PULL_CLAIM_LEASE_MS = 5 * 60 * 1000;
+// Bounded CAS retries inside claimNext()'s select-then-conditional-update.
+const CLAIM_RACE_ATTEMPTS = 10;
+
+// Every claim entry point binds (harness, agent, session) — all three
+// required, fail loudly on missing. No defaults, ever: an unattributed
+// claim could never be verified on report/renew.
+function requireClaimTriple({ harness, agent, session } = {}, op) {
+  for (const [name, value] of [["harness", harness], ["agent", agent], ["session", session]]) {
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(`pull-claim: ${op} requires a non-empty ${name} (no defaults, never anonymous)`);
+    }
+  }
+}
 
 // Normalizes flow_branches.errors' confirmed mixed shape (bare strings vs
 // {node, itemId, message, at} objects) — only the last entry is taken.
@@ -105,6 +123,47 @@ async function _createStore(dbPath) {
       return rows[0] ?? null;
     }
 
+    // Point-read of one ticket's claim columns. Returns null when the
+    // row is missing; throws on DB failure (report paths must fail loud).
+    async function _readClaim(ticket) {
+      const rows = await db.select({
+        id: flowNodeInvocations.id,
+        flowId: flowNodeInvocations.flowId,
+        nodeId: flowNodeInvocations.nodeId,
+        claimState: flowNodeInvocations.claimState,
+        harness: flowNodeInvocations.claimedHarness,
+        agent: flowNodeInvocations.claimedAgent,
+        session: flowNodeInvocations.claimedSession,
+        claimedAt: flowNodeInvocations.claimedAt,
+        leaseExpiresAt: flowNodeInvocations.leaseExpiresAt,
+      }).from(flowNodeInvocations).where(eq(flowNodeInvocations.id, ticket));
+      const row = rows[0] ?? null;
+      if (!row) return null;
+      return {
+        ticket: row.id,
+        flowId: row.flowId,
+        nodeId: row.nodeId,
+        claimState: row.claimState ?? null,
+        harness: row.harness ?? null,
+        agent: row.agent ?? null,
+        session: row.session ?? null,
+        claimedAt: row.claimedAt != null ? Number(row.claimedAt) : null,
+        leaseExpiresAt: row.leaseExpiresAt != null ? Number(row.leaseExpiresAt) : null,
+      };
+    }
+
+    // Loud-refusal classifier for claim mutations that land on 0 rows —
+    // every one explains exactly why instead of a silent { ok: false }.
+    async function _claimRefusal(ticket, op) {
+      const current = await _readClaim(ticket);
+      if (!current) return new Error(`pull-claim: ${op} refused — no such ticket ${ticket}`);
+      const state = current.claimState;
+      if (state == null) return new Error(`pull-claim: ${op} refused — ticket ${ticket} is not a pull ticket`);
+      if (state === 'ready') return new Error(`pull-claim: ${op} refused — ticket ${ticket} is unclaimed (ready)`);
+      if (state === 'reported' || state === 'applied') return new Error(`pull-claim: ${op} refused — ticket ${ticket} is already ${state}`);
+      return new Error(`pull-claim: ${op} refused — claimant binding mismatch on ticket ${ticket}`);
+    }
+
     // Find-or-create the invocation for a logical node dispatch.
     // forceNew=true (kind="fresh") creates a new visit_seq row;
     // forceNew=false reuses the latest. Race-safe via INSERT OR IGNORE +
@@ -145,7 +204,7 @@ async function _createStore(dbPath) {
 
     // ── store API ──────────────────────────────────────────────────────────
 
-    return {
+    const api = {
       _db: client,
 
       // write() defers its INSERT through batch-writer (see there) instead
@@ -199,6 +258,12 @@ async function _createStore(dbPath) {
             visitSeq: Number(row.visitSeq),
             invokedAt: Number(row.invokedAt),
             resultWrittenAt: row.resultWrittenAt != null ? Number(row.resultWrittenAt) : null,
+            claimState: row.claimState ?? null,
+            harness: row.claimedHarness ?? null,
+            agent: row.claimedAgent ?? null,
+            session: row.claimedSession ?? null,
+            claimedAt: row.claimedAt != null ? Number(row.claimedAt) : null,
+            leaseExpiresAt: row.leaseExpiresAt != null ? Number(row.leaseExpiresAt) : null,
           };
         } catch { return null; }
       },
@@ -752,6 +817,174 @@ async function _createStore(dbPath) {
 
       close() { try { client.close(); } catch { /* ignore */ } },
     };
+    // ── pull-claim tickets ─────────────────────────────────────────────
+    // Ready → claimed → reported → applied, bound to (harness, agent,
+    // session); ticket identity is the invocation row id. Park (NULL →
+    // ready) runs inside the dispatch loop (engine/executor-nodes.js);
+    // report stores the result here while resume itself goes through the
+    // gate resume path (engine/pull-claims.js), never through this store.
+
+    async function getClaim(ticket) {
+      if (!ticket) return null;
+      try {
+        return await _readClaim(ticket);
+      } catch { return null; }
+    }
+
+    async function markPullReady(invocationId) {
+      if (!invocationId) return { ok: false, reason: "no-invocation-id" };
+      try {
+        return await withSharedWrite(dbPath, async () => {
+          const r = await db.update(flowNodeInvocations)
+            .set({ claimState: "ready" })
+            .where(and(eq(flowNodeInvocations.id, invocationId), isNull(flowNodeInvocations.claimState)));
+          if (r.rowsAffected > 0) return { ok: true };
+          const current = await _readClaim(invocationId);
+          if (!current) return { ok: false, reason: "no-such-invocation" };
+          return { ok: true, alreadyTracked: current.claimState };
+        });
+      } catch {
+        return { ok: false, reason: "db-error" };
+      }
+    }
+
+    async function claimNext({ harness, agent, session, leaseMs = PULL_CLAIM_LEASE_MS } = {}) {
+      requireClaimTriple({ harness, agent, session }, "claimNext");
+      if (!Number.isFinite(leaseMs) || leaseMs <= 0) {
+        throw new Error(`pull-claim: claimNext requires a positive leaseMs, got ${JSON.stringify(leaseMs)}`);
+      }
+      for (let attempt = 0; attempt < CLAIM_RACE_ATTEMPTS; attempt++) {
+        const won = await withSharedWrite(dbPath, async () => {
+          const { rows } = await client.execute({
+            sql: `SELECT id, flow_id, node_id FROM flow_node_invocations WHERE claim_state = 'ready' ORDER BY invoked_at ASC, rowid ASC LIMIT 1`,
+            args: [],
+          });
+          const row = rows[0] ?? null;
+          if (!row) return null;
+          const now = Date.now();
+          const r = await db.update(flowNodeInvocations).set({
+            claimState: "claimed",
+            claimedHarness: harness, claimedAgent: agent, claimedSession: session,
+            claimedAt: now, leaseExpiresAt: now + leaseMs,
+          }).where(and(eq(flowNodeInvocations.id, row.id), eq(flowNodeInvocations.claimState, "ready")));
+          if (r.rowsAffected === 0) return { raced: true };
+          return { ticket: row.id, flowId: row.flow_id, nodeId: row.node_id, claimedAt: now, leaseExpiresAt: now + leaseMs };
+        });
+        if (!won) return null;
+        if (!won.raced) return won;
+      }
+      return null;
+    }
+
+    async function renewClaim({ ticket, harness, agent, session, leaseMs = PULL_CLAIM_LEASE_MS } = {}) {
+      requireClaimTriple({ harness, agent, session }, "renewClaim");
+      if (!ticket) throw new Error("pull-claim: renewClaim requires a ticket");
+      if (!Number.isFinite(leaseMs) || leaseMs <= 0) {
+        throw new Error(`pull-claim: renewClaim requires a positive leaseMs, got ${JSON.stringify(leaseMs)}`);
+      }
+      return withSharedWrite(dbPath, async () => {
+        const now = Date.now();
+        const r = await db.update(flowNodeInvocations)
+          .set({ leaseExpiresAt: now + leaseMs })
+          .where(and(
+            eq(flowNodeInvocations.id, ticket),
+            eq(flowNodeInvocations.claimState, "claimed"),
+            eq(flowNodeInvocations.claimedHarness, harness),
+            eq(flowNodeInvocations.claimedAgent, agent),
+            eq(flowNodeInvocations.claimedSession, session),
+          ));
+        if (r.rowsAffected > 0) return { ok: true, ticket, leaseExpiresAt: now + leaseMs };
+        throw await _claimRefusal(ticket, "renewClaim");
+      });
+    }
+
+    async function sweepExpiredClaims({ now = Date.now() } = {}) {
+      return withSharedWrite(dbPath, async () => {
+        const { rows } = await client.execute({
+          sql: `SELECT id FROM flow_node_invocations WHERE claim_state = 'claimed' AND lease_expires_at <= ?`,
+          args: [now],
+        });
+        const tickets = [];
+        for (const row of rows) {
+          const r = await db.update(flowNodeInvocations).set({
+            claimState: "ready",
+            claimedHarness: null, claimedAgent: null, claimedSession: null,
+            claimedAt: null, leaseExpiresAt: null,
+          }).where(and(
+            eq(flowNodeInvocations.id, row.id),
+            eq(flowNodeInvocations.claimState, "claimed"),
+            lte(flowNodeInvocations.leaseExpiresAt, now),
+          ));
+          if (r.rowsAffected > 0) tickets.push(row.id);
+        }
+        return { requeued: tickets.length, tickets };
+      });
+    }
+
+    async function markReported({ ticket, harness, agent, session } = {}) {
+      requireClaimTriple({ harness, agent, session }, "markReported");
+      if (!ticket) throw new Error("pull-claim: markReported requires a ticket");
+      return withSharedWrite(dbPath, async () => {
+        const r = await db.update(flowNodeInvocations)
+          .set({ claimState: "reported" })
+          .where(and(
+            eq(flowNodeInvocations.id, ticket),
+            eq(flowNodeInvocations.claimState, "claimed"),
+            eq(flowNodeInvocations.claimedHarness, harness),
+            eq(flowNodeInvocations.claimedAgent, agent),
+            eq(flowNodeInvocations.claimedSession, session),
+          ));
+        if (r.rowsAffected > 0) return { ok: true, ticket };
+        const current = await _readClaim(ticket);
+        if (current && (current.claimState === "reported" || current.claimState === "applied")
+            && current.harness === harness && current.agent === agent && current.session === session) {
+          return { ok: true, ticket, alreadyReported: true };
+        }
+        throw await _claimRefusal(ticket, "markReported");
+      });
+    }
+
+    async function markApplied(invocationId) {
+      if (!invocationId) return { ok: false, reason: "no-invocation-id" };
+      try {
+        return await withSharedWrite(dbPath, async () => {
+          const r = await db.update(flowNodeInvocations)
+            .set({ claimState: "applied" })
+            .where(and(eq(flowNodeInvocations.id, invocationId), eq(flowNodeInvocations.claimState, "reported")));
+          if (r.rowsAffected > 0) return { ok: true };
+          const current = await _readClaim(invocationId);
+          if (current?.claimState === "applied") return { ok: true, alreadyApplied: true };
+          return { ok: false, reason: current ? `unexpected-state-${current.claimState ?? "null"}` : "no-such-invocation" };
+        });
+      } catch {
+        return { ok: false, reason: "db-error" };
+      }
+    }
+
+    async function reportClaim({ ticket, harness, agent, session, result } = {}) {
+      requireClaimTriple({ harness, agent, session }, "reportClaim");
+      if (!ticket) throw new Error("pull-claim: reportClaim requires a ticket");
+      const current = await _readClaim(ticket);
+      if (!current) throw new Error(`pull-claim: reportClaim refused — no such ticket ${ticket}`);
+      if (current.claimState === "reported" || current.claimState === "applied") {
+        if (current.harness === harness && current.agent === agent && current.session === session) {
+          return { ok: true, ticket, flowId: current.flowId, nodeId: current.nodeId, alreadyReported: true };
+        }
+        throw await _claimRefusal(ticket, "reportClaim");
+      }
+      if (current.claimState !== "claimed"
+          || current.harness !== harness || current.agent !== agent || current.session !== session) {
+        throw await _claimRefusal(ticket, "reportClaim");
+      }
+      const written = await api.writeResult(ticket, result);
+      if (!written?.ok && written?.reason !== "race") {
+        throw new Error(`pull-claim: reportClaim refused — result store failed (${written?.reason ?? "threw"}) on ticket ${ticket}`);
+      }
+      await markReported({ ticket, harness, agent, session });
+      return { ok: true, ticket, flowId: current.flowId, nodeId: current.nodeId };
+    }
+    Object.assign(api, { getClaim, markPullReady, claimNext, renewClaim, sweepExpiredClaims, markReported, markApplied, reportClaim });
+    return api;
   } catch (err) {
     // If the DB can't open, return a no-op store so callers don't need try/catch.
     const noop = () => {};
@@ -762,6 +995,14 @@ async function _createStore(dbPath) {
       writeResult: async () => ({ ok: false, reason: "db-error" }),
       listResultsForFlow: async () => [],
       getResultForNode: async () => null,
+      getClaim: async () => null,
+      markPullReady: async () => ({ ok: false, reason: "db-error" }),
+      claimNext: async () => null,
+      renewClaim: async () => { throw new Error("node-executions store unavailable"); },
+      sweepExpiredClaims: async () => ({ requeued: 0, tickets: [] }),
+      markReported: async () => { throw new Error("node-executions store unavailable"); },
+      markApplied: async () => ({ ok: false, reason: "db-error" }),
+      reportClaim: async () => { throw new Error("node-executions store unavailable"); },
       writeGateRecord: async () => ({ ok: false, reason: "db-error" }),
       getGateRecord: async () => null,
       listGateRecordsForFlow: async () => ({}),

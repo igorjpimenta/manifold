@@ -1037,6 +1037,8 @@ describe("getInvocation()", () => {
     assert.deepEqual(row, {
       id, flowId, pipelineId: "p", nodeId: "SUBMIT", subflowKey: "item-1",
       visitSeq: 1, invokedAt: row.invokedAt, resultWrittenAt: null,
+      claimState: null, harness: null, agent: null, session: null,
+      claimedAt: null, leaseExpiresAt: null,
     });
     store.close();
   });
