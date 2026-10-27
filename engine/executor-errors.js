@@ -65,7 +65,7 @@ export class NodeFailure extends Error {
 
 // The gateway's startup refusal ("<method> unavailable during gateway
 // startup") is deliberately NOT matched below: it is transient, and
-// engine/gateway-subagent.js holds every call until the gateway is ready.
+// nothing in the pull world blocks on it.
 // Matching it would park flows in needs-gateway-handoff, which nothing ever
 // resumes.
 export function isRequestScopedSubagentError(err) {
@@ -82,7 +82,7 @@ export function isRequestScopedSubagentError(err) {
   // (no live gateway-request context). Scoped to "operator.write"
   // specifically, not a bare "missing scope:" match — this function is
   // only ever consulted on errors from the three subagent.run/waitForRun/
-  // getSessionMessages calls in executor-subagent.js, never on unrelated
+  // getSessionMessages calls a dispatched turn once made, never on unrelated
   // RPC scope failures (operator.pairing, operator.admin, etc.) from
   // elsewhere in the gateway, so a narrower-than-it-looks match is safe.
   if (msg.includes("missing scope: operator.write")) return true;

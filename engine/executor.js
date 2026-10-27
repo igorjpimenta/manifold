@@ -27,30 +27,19 @@ import {
   isTerminal, isBlocked, isQueued, shortSummary, deepClone, resolveEdge,
   validateGateLayout, isFreshNodeEntry, describeWaitFallback, assembleState,
 } from "./executor-helpers.js";
-import { NodeBlocked, GatewayHandoffNeeded } from "./executor-errors.js";
-import { REVIVAL_MSG } from "./revival-messages.js";
+import { NodeBlocked } from "./executor-errors.js";
 import { createBudgetGate } from "./executor-budget.js";
 import { createPersist } from "./executor-persist.js";
-import { createSubagentDispatch } from "./executor-subagent.js";
-import { createGatewaySubagentGate } from "./gateway-subagent.js";
 import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, notifyPush, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, failureStore, notifyFlowEnteredWaiting, notifyPush, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
   // Explicit params win; api is the legacy fallback the adapter still
   // supplies during cutover (tests construct with api only).
   const _config = config ?? api?.config ?? null;
   const _lineage = api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? _config?.pipelinesDir ?? resolveStorePaths().pipelinesDir;
-  // Every agent dispatch resolves its subagent here, so gating here covers
-  // revival, cron-started flows at boot and gate continuations alike — see
-  // engine/gateway-subagent.js.
-  const gateSubagent = createGatewaySubagentGate({ whenGatewayReady });
-  function resolveSubagent() {
-    return gateSubagent(getWorkingSubagent?.() ?? api?.runtime?.subagent);
-  }
-
   // Injectable for tests (defaults to the real singleton in production).
   // A test constructing a real createExecutor() without this override would
   // write its fixture rows into the real ~/.openclaw/runtime.sqlite; store/
@@ -82,14 +71,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
 
   const { persistRunningRetrying, persistWaitingRetrying, persistSkipRetrying, persistFinishRetrying, persistFailRetrying } = createPersist({
     store, failureStore, notifyFlowEnteredWaiting, logger,
-  });
-
-  const { dispatchAgentWithRetry } = createSubagentDispatch({
-    getSubagent: () => resolveSubagent(),
-    sessionIndex,
-    logger,
-    emit,
-    notifyPush,
   });
 
   // Direct store.setQueued/setRunning, not the CAS-retry-wrapped
@@ -178,11 +159,11 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   }
 
   const { executeNode } = createNodeRunner({
-    maybeBudgetGate, dispatchAgentWithRetry, executeSubflowNode,
+    executeSubflowNode,
     withCrossProcessLockMaybe, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, notifyPush, logger,
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
-    nodeHealthStore, pipelinesRef,
+    pipelinesRef,
     emit,
   });
 
@@ -490,11 +471,11 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         // inside executeNode() propagate to the catch block below exactly
         // like any other NodeBlocked (the budget-gate pause already relies
         // on this same path). Known gap, deliberately deferred (needs: is
-        // dormant, zero pipelines declare it yet): reviveAgentKindOrphan's
-        // own dispatch path does not pass a needs ctx at all, so an agent-
-        // kind node that crashes mid-flight can't call ctx.needs() on
-        // revival — worth fixing before any pipeline adopts needs: on an
-        // agent-kind node, not before.
+        // dormant, zero pipelines declare it yet): the boot-revival path
+        // re-enters through runFlow, which does not pass a needs ctx at
+        // all, so an agent-kind node that crashes mid-flight can't call
+        // ctx.needs() on revival — worth fixing before any pipeline adopts
+        // needs: on an agent-kind node, not before.
         const result = await executeNode({ node, nodeId: nextNodeId, state, flowId, invocationId });
         exitedAt = Date.now();
         stateUpdate = result.stateUpdate ?? {};
@@ -506,14 +487,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         exitedAt ??= Date.now();
         if (err instanceof NodeBlocked) {
           blockedInfo = err._blocked;
-        } else if (err instanceof GatewayHandoffNeeded) {
-          blockedInfo = {
-            reason: `node ${nextNodeId} needs gateway context: ${err.message}`,
-            needed: [],
-            hint: "No automatic resume — requires a scope-gap fix at the call site or manual task-revival.",
-            _kind: "needs-gateway-handoff",
-          };
-          logger.info(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} → needs-gateway-handoff: ${err.message}`);
         } else {
           const msg = err?.message ?? String(err);
           // Duck-typed, not `instanceof NodeFailure` — pipeline/shared code
@@ -744,9 +717,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         // move the flow past this node with its output never durably
         // written: the next runFlow() iteration's assembleState() reads
         // nothing for this node, and resolveEdge() dead-ends with "no next
-        // node" — the SCORE_LLM "edge returned no next node" shape, and the
-        // boot-revival gap it left uncovered (see reviveAgentKindOrphan
-        // below). Fail the flow outright for any non-race reason instead of
+        // node" — the SCORE_LLM "edge returned no next node" shape. Fail
+        // the flow outright for any non-race reason instead of
         // silently continuing, so the operator sees the true cause.
         if (reason !== "race") {
           const msg = `resultJson write failed (${reason})`;
@@ -874,185 +846,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     });
   }
 
-  /**
-   * Revive an "agent"-kind orphan left mid-flight by a crashed process.
-   *
-   * Unlike a code-kind orphan (safe to just re-enter via runFlow — the
-   * node hadn't produced any side effect yet), an agent-kind node may have
-   * already dispatched an agent turn that completed (or partially acted)
-   * before the crash. Re-running node.promptBuilder(state) fresh would give
-   * the agent no way to know it already tried this once, risking a
-   * duplicate side effect. Instead this sends REVIVAL_MSG to the SAME
-   * deterministic session key the original dispatch used, so the agent can
-   * check its own history and decide whether to finish or resume — the same
-   * pattern boot/taskflow-revive.js already uses for task-run orphans.
-   */
-  // nodeId is the crashed/in-flight node — the caller (boot/flow-revival.js)
-  // resolves it from f.currentStep/waitJson.nodeId, since flow.lastStep is
-  // the last COMPLETED node, not this one. Falls back to flow.lastStep only
-  // for callers that don't pass it explicitly (defensive, not the expected path).
-  async function reviveAgentKindOrphan(flow, nodeId = flow.lastStep) {
-    const flowId = flow.flowId;
-    const flowId8 = flowId.slice(0, 8);
-    const state = flow.stateJson ?? {};
-    const pipeline = pipelinesRef.value.get(state.pipelineId);
-    const node = pipeline?.nodes?.[nodeId];
-    if (!node || node.kind !== "agent") {
-      logger.warn(`manifold revival [${flowId8}]: reviveAgentKindOrphan called for non-agent node "${nodeId}"`);
-      return;
-    }
+  return { start, runFlow, resume, cancel, rerun, rerunFromSource };
 
-    logger.info(`manifold revival [${flowId8}]: reviving interrupted agent-node "${nodeId}"`);
-    const enteredAt = Date.now();
-    // Resolved up front (not after executeNode returns) so a tool call made
-    // during this revived dispatch can register itself under the SAME
-    // invocationId the original, interrupted attempt already created — see
-    // tool-handoff.js. No fresh nodeExecutions.enter() call here; the
-    // invocation row already exists from the original attempt.
-    const invocation = await nodeExecutions.getLatestInvocationForNode(flowId, nodeId, null);
-    const invocationId = invocation?.id ?? null;
-    let result;
-    try {
-      result = await executeNode({ node, nodeId, state, flowId, reviveMessage: REVIVAL_MSG, invocationId });
-    } catch (err) {
-      if (err instanceof GatewayHandoffNeeded) {
-        // A request-scope gap in the revived dispatch: block rather than
-        // failing the flow outright. No automatic resume exists for this
-        // wait kind (see executor-errors.js's GatewayHandoffNeeded
-        // docstring) — recovery
-        // is either a scope-gap fix at the actual call site or manual
-        // task-revival.
-        await persistWaitingRetrying({
-          flowId, revision: flow.revision, lastStep: nodeId, blockingNodeId: nodeId,
-          state,
-          waitJson: {
-            kind: "needs-gateway-handoff", nodeId, reason: err.message, needed: [],
-            hint: "No automatic resume — requires a scope-gap fix at the call site or manual task-revival.",
-            renderedAt: Date.now(), retry: true,
-          },
-          statusReason: shortSummary(`${nodeId}: needs gateway context: ${err.message}`),
-        });
-        return;
-      }
-      const msg = err?.message ?? String(err);
-      // Duck-typed — see the main loop's identical check above for why
-      // `instanceof NodeFailure` isn't reliable across this codebase's
-      // module-loading boundaries.
-      const errorType = err?.errorType ?? null;
-      logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" revival failed: ${msg}`);
-      // Revival always continues the exact node that crashed — there's no
-      // fresh dispatch decision here (unlike runFlow's loop,
-      // which resolves an edge to decide nextNodeId), so kind is hardcoded
-      // "revival" rather than derived from isFreshNodeEntry.
-      const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId, enteredAt, exitedAt: Date.now(), kind: "revival" });
-      await persistFailRetrying({
-        flowId, revision: flow.revision, state,
-        message: `${nodeId}: revival failed: ${msg}`, failureNode: nodeId,
-        invocationId: written.invocationId ?? null, executionId: written.executionId ?? null, errorType,
-      });
-      return;
-    }
-
-    const { stateUpdate = {}, blockedInfo, skippedInfo } = result;
-
-    if (blockedInfo) {
-      if (!blockedInfo._kind) {
-        const msg = blockedInfo.reason ?? `${nodeId} blocked without declaring a wait kind`;
-        logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);
-        // Same reasoning as above — revival is always a continuation.
-        const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId, enteredAt, exitedAt: Date.now(), kind: "revival" });
-        await persistFailRetrying({
-          flowId, revision: flow.revision, state,
-          message: `${nodeId}: ${msg}`, failureNode: nodeId,
-          invocationId: written.invocationId ?? null, executionId: written.executionId ?? null,
-        });
-        return;
-      }
-      const waitJsonForBlock = {
-        kind: blockedInfo._kind, nodeId,
-        reason: blockedInfo.reason ?? "node blocked", needed: blockedInfo.needed ?? [],
-        hint: blockedInfo.hint ?? "", renderedAt: Date.now(), retry: true,
-      };
-      await persistWaitingRetrying({
-        flowId, revision: flow.revision, lastStep: nodeId, blockingNodeId: nodeId,
-        state,
-        waitJson: waitJsonForBlock,
-        statusReason: shortSummary(`${nodeId}: ${waitJsonForBlock.reason}`),
-      });
-      return;
-    }
-
-    if (skippedInfo) {
-      await persistSkipRetrying({
-        flowId, revision: flow.revision,
-        state,
-        reason: skippedInfo.reason ?? "skipped",
-      });
-      return;
-    }
-
-    // No wide stateUpdate merge before persisting — `state` here is
-    // already entry-only (freshly read via store.get() upstream), and
-    // stateUpdate's own node-output content reaches
-    // result_json separately via writeResult(), not through this. See the
-    // main dispatch loop's identical cleanup above for the full reasoning.
-    let entryState = state;
-    // Same staleness clear as the main loop's success path above — an
-    // agent-kind cascade leg (e.g. SUBMIT_AGENT) revived and now succeeding
-    // shouldn't carry a leftover _cascadeError from its earlier crashed
-    // attempt into its own next edge-function call.
-    if (entryState._cascadeError?.nodeId === nodeId) {
-      const { _cascadeError, ...rest } = entryState;
-      entryState = rest;
-    }
-    // A gap surfaced live (SCORE_LLM "edge returned no next node" during a
-    // gateway restart storm): the main loop's fix writes a
-    // node's result BEFORE advancing last_step so a crash-then-revival never
-    // reads a stale/empty result for the node it just resumed. This revival
-    // path resumes the SAME crashed dispatch (no fresh nodeExecutions.enter()
-    // call here — the invocation row already exists from the original,
-    // interrupted attempt) but was never given the matching writeResult()
-    // call, so last_step advanced to `nodeId` while its result_json stayed
-    // empty from the pre-crash attempt. The very next runFlow() iteration's
-    // assembleState() then read nothing for this node, and resolveEdge()
-    // dead-ended with "no next node" — deterministic on every revived
-    // agent-node whose outbound edge depends on its own output, not a race.
-    const resultWrite = await nodeExecutions.writeResult(invocationId, stateUpdate).catch(() => null);
-    if (!resultWrite || !resultWrite.ok) {
-      const reason = resultWrite?.reason ?? "threw";
-      // "race" means a CONCURRENT writer already committed real content for
-      // this exact invocation — advancing is correct, the data genuinely is
-      // there, just not from this call. Every other reason (db-error,
-      // no-such-invocation, no-invocation-id, unserializable, threw) means
-      // NO ONE wrote anything: advancing here would move last_step past
-      // this node with its output never durably written. The next runFlow()
-      // iteration's assembleState() then reads nothing for this node, and
-      // resolveEdge() dead-ends with "no next node" — deterministic given
-      // the failure, not a race, and completely swallowing the REAL reason
-      // behind a generic edge-resolution message. Fail the flow outright
-      // instead — same shape as persistRunningRetrying's own CAS-failure
-      // branch just below — so the operator sees the true cause and can
-      // retry this one node, rather than a downstream "no next node" that
-      // hides it.
-      if (reason !== "race") {
-        const msg = `resultJson write failed (${reason})`;
-        logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);
-        const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId, enteredAt, exitedAt: Date.now(), kind: "revival" });
-        await persistFailRetrying({
-          flowId, revision: flow.revision, state,
-          message: `${nodeId}: ${msg}`, failureNode: nodeId,
-          invocationId: written.invocationId ?? invocationId, executionId: written.executionId ?? null,
-        });
-        return;
-      }
-      logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" resultJson write failed (race) — another writer already completed this invocation`);
-    }
-    await persistRunningRetrying({ flowId, revision: flow.revision, lastStep: nodeId, state: entryState });
-    logger.info(`manifold revival [${flowId8}]: agent-node "${nodeId}" revived — continuing`);
-    return runFlow(flowId, "revival");
-  }
-
-  return { start, runFlow, resume, cancel, rerun, rerunFromSource, reviveAgentKindOrphan, getSubagent: resolveSubagent };
 }
 
 // ── audit ─────────────────────────────────────────────────────────────────────

@@ -23,12 +23,10 @@
 // next flow inline in turn, nesting every flow in the queue inside the
 // first releaser's call.
 //
-// Gateway readiness: a flow/child woken here may not have run at all since
-// the gateway restarted (a queued admission survives a crash same as any
-// other flow_runs row), so it can reach an agent-kind node inside the
-// gateway's startup window. Nothing to wait for here: resume() is the
-// executor's, and every subagent call it makes goes through the executor's
-// readiness gate (engine/gateway-subagent.js).
+// A flow/child woken here may not have run at all since the gateway
+// restarted (a queued admission survives a crash same as any other
+// flow_runs row). Nothing to wait for here: resume() is the executor's,
+// and agent-kind nodes park as claim tickets rather than calling out.
 
 import { flipToRunningAndResume } from "./child-resume-trigger.js";
 

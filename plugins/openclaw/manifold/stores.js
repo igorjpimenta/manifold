@@ -11,10 +11,8 @@ import { createNodeHealthStore } from "../../../state/node-health-store.js";
 import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
-import { toGatewaySessionKey, toGatewayKey } from "./session-keys.js";
 import { createEmitter } from "../../../events/emit.js";
 import { createCatalogPublisher } from "../../../events/catalog.js";
-import { registerGatewayReadiness } from "../../../engine/gateway-readiness.js";
 import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
 import { setLocksDir } from "../../../locks/lock.js";
 import { setStateFile } from "../../../gates/paused-flows.js";
@@ -116,22 +114,12 @@ export function createStores(api, cfg, pipelinesRef, resumeParentRef) {
   const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
   const sessionIndex = {
     record(data) {
-      return _sessionIndexPromise.then((si) => si.record({
-        ...data,
-        sessionKey: typeof data?.sessionKey === "string" && data.sessionKey.startsWith("mf-") && data?.agent
-          ? toGatewayKey({ opaque: data.sessionKey, agent: data.agent })
-          : data?.sessionKey,
-      }));
+      return _sessionIndexPromise.then((si) => si.record(data));
     },
     hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
     flowIdForSessionKey(sessionKey) { return _sessionIndexPromise.then(si => si.flowIdForSessionKey(sessionKey)); },
     close() { _sessionIndexPromise.then(si => si.close?.()).catch(() => {}); },
   };
-  // Process-wide gateway readiness (engine/gateway-readiness.js): settled
-  // by gateway_start; resolves at once in a process that never starts
-  // manifold's services (the CLI). Awaited only by the executor's subagent
-  // gate (engine/gateway-subagent.js), which every agent dispatch passes.
-  const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
   // Assigned in the dashboard section below; the catalog publisher reads
   // it lazily so watcher reloads before dashboard boot stay WS-only.
   let dashboardBusRef = null;
@@ -147,7 +135,7 @@ export function createStores(api, cfg, pipelinesRef, resumeParentRef) {
   const _pushTargetsPromise = createPushTargetsStore({ logger: api.logger, dbPath: runtimeDbPath });
   const pushStream = createEventStream();
   async function notifyPushEvent({ event, flowId = null, nodeId = null, pipelineId = null, sessionKey = null, agent = null }) {
-    const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey: toGatewaySessionKey(sessionKey, agent), agent, harnessId: cfg.pushHarness });
+    const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey, agent, harnessId: cfg.pushHarness });
     pushStream.append(payload);
     let dbEntry = null;
     try {
@@ -162,7 +150,7 @@ export function createStores(api, cfg, pipelinesRef, resumeParentRef) {
     storePaths, runtimeDbPath, pipelineDirsStore, pipelinesDir, resolvePipelinesDir,
     runStore, readStore, nodeExecutionsStore, admissionQueueStore, failureStore,
     pipelineRegistryStore, store, ensurePipelinesLoaded, nodeHealthStore, discussStore,
-    sessionIndex, gatewayReadiness, gatewayBroadcastRef, emitCanonical,
+    sessionIndex, gatewayBroadcastRef, emitCanonical,
     publishCatalogChanged, setDashboardBus: (bus) => { dashboardBusRef = bus; },
     pushStream, notifyPushEvent, pushTargetsPromise: _pushTargetsPromise,
   };

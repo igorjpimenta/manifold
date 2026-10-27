@@ -15,10 +15,9 @@ const REGEX = {
   CRON_OWN:  /^agent:([^:]+):cron-(.+)$/,
   BARE_SUB:  /^agent:([^:]+):subagent:([0-9a-f-]{36})$/,
   // Manifold dispatch sessions, gateway shape of core's opaque handle
-  // (`mf-<flow8>-<node>[-<item>]` — see engine/executor-helpers.js's
-  // mintAgentSessionKey and the adapter edge mapping in
-  // plugins/openclaw/manifold/session-keys.js). The embedded flow8 resolves
-  // via the "flow" parentHint branch, same as GF_DISCUSS.
+  // (`mf-<flow8>-<node>[-<item>]`, shaped at the adapter edge). The
+  // embedded flow8 resolves via the "flow" parentHint branch, same as
+  // GF_DISCUSS.
   MF_SUB:    /^agent:([^:]+):subagent:(mf-[0-9a-f]{8}-.+)$/,
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,

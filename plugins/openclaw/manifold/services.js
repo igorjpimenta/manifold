@@ -8,7 +8,6 @@ import { scanAndCleanup as taskflowScanAndCleanup } from "../../../boot/taskflow
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-revival.js";
 import { registerPushWebhook } from "./webhook.js";
 import { autoregisterPushTarget } from "./autoregister.js";
-import { wrapSubagentKeys } from "./session-keys.js";
 import { TASKFLOW_RUNS_DB } from "./config.js";
 
 // reviveOrphanFlows only runs once, at service startup — a stuck-promotion
@@ -19,14 +18,20 @@ import { TASKFLOW_RUNS_DB } from "./config.js";
 // probe).
 const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 
+// Expired claim leases (engine/pull-claims.js) requeue on their own only
+// when something looks: same 5-minute cadence family as the stuck-
+// admission reconcile above, separate const so the two ticks stay
+// independently tunable.
+const EXPIRED_CLAIM_SWEEP_INTERVAL_MS = 5 * 60_000;
+
 export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resumeParentRef }) {
   const { userCfg, taskflowStartupDelayMs } = cfg;
   const {
-    gatewayReadiness, ensurePipelinesLoaded, pipelineRegistryStore, admissionQueueStore,
+    ensurePipelinesLoaded, pipelineRegistryStore, admissionQueueStore,
     runStore, store, sessionIndex, nodeExecutionsStore, pushTargetsPromise, storePaths,
     runtimeDbPath, readStore, failureStore, gatewayBroadcastRef, emitCanonical,
   } = stores;
-  const { pipelinesWatcher, executor, gateResolver, getWorkingSubagent, moduleState } = runtime;
+  const { pipelinesWatcher, executor, gateResolver } = runtime;
   // ── Services ────────────────────────────────────────────────────────────
   //
   // openclaw starts these one by one as part of the gateway's own startup
@@ -35,13 +40,6 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
   // readiness or an agent dispatch — work that dispatches is started
   // without awaiting it, and its dispatches wait at the executor's gate.
 
-  // Registered first so it starts first: only the gateway starts plugin
-  // services, so this is what tells readiness this process is the gateway
-  // (the CLI never gets here, and never waits).
-  api.registerService({
-    id: "manifold-gateway-readiness",
-    start: () => gatewayReadiness.markGatewayProcess(),
-  });
   api.registerService({
     id: "manifold-loader",
     start: async (ctx) => {
@@ -96,6 +94,13 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
         reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, api, logger })
           .catch((err) => logger.warn(`manifold revival: periodic stuck-admission reconcile failed: ${err?.message ?? err}`));
       }, STUCK_ADMISSION_RECONCILE_INTERVAL_MS);
+      setInterval(() => {
+        nodeExecutionsStore.sweepExpiredClaims()
+          .then((swept) => {
+            if (swept?.requeued > 0) logger.info(`manifold: expired-claim sweep requeued ${swept.requeued} ticket(s)`);
+          })
+          .catch((err) => logger.warn(`manifold: periodic expired-claim sweep failed: ${err?.message ?? err}`));
+      }, EXPIRED_CLAIM_SWEEP_INTERVAL_MS);
     },
   });
   async function runBootRevival(logger) {
@@ -224,7 +229,7 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
   // ── Runtime-capture service ──────────────────────────────────────────────
 
   // Push wake route + boot-time self-registration (best-effort).
-  registerPushWebhook({ api, logger: api.logger, getSubagent: getWorkingSubagent });
+  registerPushWebhook({ api, logger: api.logger });
   api.registerService({
     id: "manifold-push-autoregister",
     start: async () => {
@@ -235,18 +240,6 @@ export function registerServices(api, { cfg, stores, runtime, pipelinesRef, resu
         api.logger.warn(`manifold: push autoregister failed: ${err?.message ?? err}`);
       }
     },
-  });
-  api.registerService({
-    id: "manifold-runtime-capture",
-    start: async () => {
-      if (!moduleState.workingSubagent && api.runtime?.subagent) {
-        // Wrapped ONCE here: every core dispatch below resolves through
-        // this reference, so opaque handles map at exactly one edge.
-        moduleState.workingSubagent = wrapSubagentKeys(api.runtime.subagent);
-        api.logger.info("manifold: captured working subagent runtime for executor use");
-      }
-    },
-    stop: async () => {},
   });
   // ── Boot gate: refuse to finish loading on unreadable primaries ──────────
   // A blind manifold mints wrong gate decisions and drops pushes. Fail

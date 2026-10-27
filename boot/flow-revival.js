@@ -151,7 +151,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
 
 export async function reviveOrphanFlows({
   all, pipelines, store, logger, executor, createCancelStore,
-  runStore, nodeExecutionsStore, maybeResolveFlow, sessionIndex, admissionQueueStore, api,
+  runStore, nodeExecutionsStore, maybeResolveFlow, admissionQueueStore, api,
   // Threaded through to the stuck-promotion reconciliation call below —
   // exists mainly so tests can exercise that pass without waiting out its
   // real-world grace window (a genuine boot's admission rows all predate
@@ -210,42 +210,10 @@ export async function reviveOrphanFlows({
   // below and the revive-survivors step's dispatch don't need to know *why*
   // a row was queued, only whether it wants to run.
   //
-  // isAgent decides HOW to revive an agent-kind node: reviveAgentKindOrphan()
-  // resumes the SAME deterministic session with REVIVAL_MSG, a continuation
-  // prompt, instead of re-running promptBuilder fresh (see engine/
-  // revival-messages.js) — and it sends that continuation prompt
-  // UNCONDITIONALLY, even to a session with zero prior turns (executor-
-  // nodes.js's dispatch: `reviveMessage ?? promptBuilder(...)`, with no
-  // branch on whether a prior invocation/session actually exists). So
-  // isAgent is only correct when a dispatch attempt genuinely started —
-  // sending REVIVAL_MSG as literally the first message to a node that was
-  // only ever queued, never dispatched, would be a "continue where you left
-  // off" prompt with nothing to continue.
-  //
-  // For a 'running' orphan, targetNodeId comes from
-  // nodeExecutionsStore.findCurrentStep() below, which IS race-free proof a
-  // dispatch attempt genuinely entered this node: the nodeExecutions.enter()
-  // call creates the invocation row BEFORE executeNode() runs, well before
-  // dispatchAgentWithRetry gets to recording a flow_sessions entry
-  // (session-index.js) or calling subagent.run() — so currentStep alone is
-  // sufficient there, without consulting sessionIndex.hasSessionForNode().
-  //
-  // The 'running' case must not REQUIRE a session record. The flow_sessions
-  // record is written well after enter() (past several awaits — budget gate,
-  // assembleState, promptBuilder, dispatch-semaphore acquisition), so a crash
-  // in that narrow window leaves a genuinely in-flight agent dispatch with a
-  // correct targetNodeId but hasSessionForNode()===false, and requiring it
-  // misroutes that dispatch into the generic resolveEdge()/runFlow() path
-  // below, which has no node output to route on and fails with "edge <NODE>
-  // returned no next node". A running flow with no invocation row yet
-  // (findCurrentStep() -> null) is the other case, and there falling through
-  // to resolveEdge() IS correct; hasSessionForNode() is what still decides
-  // isAgent for it, via the !dispatchGenuinelyEntered branch below.
-  //
-  // For a 'queued' orphan, targetNodeId instead comes from waitJson.nodeId
-  // — set by the resource-lock wait BEFORE it acquires the lock, which only
-  // proves the node was ABOUT to be dispatched, not that dispatch began.
-  // hasSessionForNode() still gates isAgent there.
+  // Every orphan re-enters through runFlow, agent-kind nodes included: an
+  // agent node parks as a claim ticket on re-entry (or consumes an already-
+  // reported result), so there is no separate session-continuation path and
+  // no session record to consult.
   //
   // f.lastStep is the last COMPLETED node, not the one in flight — using it
   // directly as the crashed node's id is wrong. The real target node is:
@@ -269,12 +237,7 @@ export async function reviveOrphanFlows({
       ?? currentStep
       ?? resolveEdge(pipeline?.edges ?? {}, f.lastStep, f.stateJson, { logger, flowId: f.flowId });
     const nodeKind = pipeline?.nodes?.[targetNodeId]?.kind;
-    const dispatchGenuinelyEntered = currentStep != null && targetNodeId === currentStep;
-    const hasSession = nodeKind === "agent" && !dispatchGenuinelyEntered && sessionIndex != null
-      ? !!(await sessionIndex.hasSessionForNode(f.flowId, targetNodeId))
-      : false;
-    const isAgent = nodeKind === "agent" && (dispatchGenuinelyEntered || hasSession);
-    orphans.push({ flow: f, isAgent, targetNodeId, nodeKind });
+    orphans.push({ flow: f, isAgent: nodeKind === "agent", targetNodeId, nodeKind });
   }
 
   // ── Skip direct dispatch for orphans queued on the shared admission
@@ -342,22 +305,16 @@ export async function reviveOrphanFlows({
       const flow = o.flow;
       const pipelineId = flow.stateJson?.pipelineId ?? "?";
       logger.info(`manifold revival: [${flow.flowId.slice(0, 8)}] pipeline=${pipelineId} step=${o.targetNodeId}`);
-      if (o.isAgent) {
-        revivedAgent++;
-        // Resumes the SAME session with a continuation prompt. No admission
-        // work: the flow's own run slot (flow-start/child-dispatch) is
-        // durable across the crash and still held, and the agent call runs
-        // inside it like any other node — it's released through the flow's
-        // normal lifecycle once the run blocks or finishes.
-        executor.reviveAgentKindOrphan(flow, o.targetNodeId)
-          .catch((err) => {
-            logger.warn(`manifold revival: reviveAgentKindOrphan [${flow.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
-          });
-      } else {
-        executor.runFlow(flow.flowId, "revival").catch((err) => {
-          logger.warn(`manifold revival: runFlow [${flow.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
-        });
-      }
+      // No admission work: the flow's own run slot (flow-start/
+      // child-dispatch) is durable across the crash and still held, and
+      // the node runs inside it like any other — released through the
+      // flow's normal lifecycle once the run blocks or finishes. An
+      // agent-kind node re-parks its ticket here (or consumes a report
+      // that landed before the crash).
+      if (o.isAgent) revivedAgent++;
+      executor.runFlow(flow.flowId, "revival").catch((err) => {
+        logger.warn(`manifold revival: runFlow [${flow.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+      });
     }
   }
 

@@ -99,26 +99,25 @@ export async function reviveSession(subagent, sessionKey) {
 
 // A manifold-owned orphan doesn't get this scan's own generic revival
 // (a bare subagent.run() with no flow awareness) — it gets routed through
-// the SAME function manifold's own boot-time flow revival uses,
-// engine/executor.js's reviveAgentKindOrphan(). That function resolves the
-// pipeline/node, dispatches a continuation prompt, and writes the result
-// back into the flow's own state; a bare reviveSession() call here would
-// know nothing about any of that and would leave the flow itself stuck
-// even if the session technically got a reply. Sharing the one real
-// revival path also means either boot service can correctly revive a
-// manifold-owned orphan on its own, rather than depending on both
-// services having started successfully.
+// the flow's own resume path (executor.resume → runFlow), which re-enters
+// the interrupted node: an agent-kind node re-parks its claim ticket there
+// (or consumes an already-reported result). A bare reviveSession() call
+// here would know nothing about any of that and would leave the flow
+// itself stuck even if the session technically got a reply. Sharing the
+// one real revival path also means either boot service can correctly
+// revive a manifold-owned orphan on its own, rather than depending on
+// both services having started successfully.
 //
 // Requires sessionIndex (state/session-index.js, to resolve the session
 // key back to a flowId) and runStore + executor (to fetch the flow row and
-// call its own revival function) — all optional constructor args on
-// scanAndCleanup. Any of them missing, or the flow not resolvable/already
-// terminal, returns {ok:false} rather than throwing; the caller's fallback
-// for a failed delegation is to skip the row entirely, never to fall
-// through to the generic cancel+reviveSession path this exists to replace
-// for manifold-owned sessions.
+// resume it) — all optional constructor args on scanAndCleanup. Any of
+// them missing, or the flow not resolvable/already terminal, returns
+// {ok:false} rather than throwing; the caller's fallback for a failed
+// delegation is to skip the row entirely, never to fall through to the
+// generic cancel+reviveSession path this exists to replace for
+// manifold-owned sessions.
 export async function reviveViaFlowRevival(row, { sessionIndex, runStore, executor } = {}) {
-  if (!sessionIndex || !runStore || typeof executor?.reviveAgentKindOrphan !== "function") {
+  if (!sessionIndex || !runStore || typeof executor?.resume !== "function") {
     return { ok: false, reason: "flow_revival_deps_unavailable" };
   }
   const flowId = await sessionIndex.flowIdForSessionKey(row.child_session_key);
@@ -126,7 +125,7 @@ export async function reviveViaFlowRevival(row, { sessionIndex, runStore, execut
   const flow = await runStore.get(flowId);
   if (!flow) return { ok: false, reason: "flow_not_found" };
   if (TERMINAL_STATUS_SET.has(flow.status)) return { ok: false, reason: "flow_terminal" };
-  await executor.reviveAgentKindOrphan(flow, flow.waitJson?.nodeId);
+  await executor.resume(flowId);
   return { ok: true, flowId };
 }
 
@@ -157,12 +156,10 @@ export async function scanAndCleanup(api, dbPath, startupDelayMs, logger, { sess
     // A manifold flow node's session (gateway shape of core's opaque
     // `mf-` handle — see engine/executor-helpers.js) is owned by
     // engine/executor.js's
-    // reviveAgentKindOrphan() — the one function that actually knows how
+    // the flow's own resume path — the one path that actually knows how
     // to resolve the flow's pipeline/node and feed a reply back into flow
     // state. This scan must not cancel that session (see
-    // reviveViaFlowRevival's own header for why: cancelling by session key
-    // can tear down a fresh dispatch the flow-revival service already
-    // started under this exact deterministic key) or dispatch its own
+    // reviveViaFlowRevival's own header for why) or dispatch its own
     // flow-unaware reviveSession() against it — it delegates instead.
     if (row.child_session_key && isManifoldOwnedSession({ agentId: row.agent_id, sessionKey: row.child_session_key }, { cache: ownerCache })) {
       toDelegate.push(row);
@@ -186,9 +183,7 @@ export async function scanAndCleanup(api, dbPath, startupDelayMs, logger, { sess
   let revived = 0;
   let delegated = 0;
   if (toRevive.length > 0 || toDelegate.length > 0) {
-    // The executor's subagent is gated (engine/gateway-subagent.js): a
-    // revival dispatched before the gateway is ready waits for it there.
-    const subagent = executor?.getSubagent?.() ?? api?.runtime?.subagent;
+    const subagent = api?.runtime?.subagent;
     for (const row of toRevive) {
       const reviveResult = await reviveSession(subagent, row.child_session_key);
       if (reviveResult.ok) {

@@ -10,7 +10,6 @@ import {
 } from "./agent/tools/index.js";
 import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
 import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
-import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
 import { registerManifoldMetaHook } from "./meta.js";
 
 export function registerTools(api, { cfg, stores, runtime, pipelinesRef, componentEmitter }) {
@@ -31,7 +30,6 @@ export function registerTools(api, { cfg, stores, runtime, pipelinesRef, compone
   // writers (gap-answers.js, prime-nodes.js) it shares that lock with.
   registerProfileReadGate(api, { profilePath });
   registerProfileWriteLock(api, { profilePath, resultsDir: profileEditResultsDir });
-  registerScoreToolWakeHook(api);
   registerManifoldMetaHook(api);
   // ── CLI + tools ─────────────────────────────────────────────────────────
 
