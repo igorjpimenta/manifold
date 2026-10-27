@@ -1,8 +1,9 @@
 // wire-ops.js — real core ops for the MCP servers.
 //
-// createRealOps builds the five tool ops from live core pieces: the
-// run-store for status/runs/cancel, and the executor + gate-resolver for
-// start/approve. Everything is store-backed — no stubs, no fakes.
+// createRealOps builds the eight tool ops from live core pieces: the
+// run-store for status/runs/cancel, the executor + gate-resolver for
+// start/approve, and the node-executions store for claim/report/heartbeat.
+// Everything is store-backed — no stubs, no fakes.
 //
 // Standalone note: `serve --mcp` runs outside the gateway, so there is no
 // subagent runtime. Code/manual/subflow nodes drive fine; an agent-node
@@ -157,6 +158,15 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     },
     async cancelFlow({ flowId, reason }) {
       return runStore.cancelFlow(flowId, reason);
+    },
+    async claimNext({ harness, agent, session }) {
+      return nodeExecutionsStore.claimNext({ harness, agent, session });
+    },
+    async reportClaim({ ticket, harness, agent, session, result }) {
+      return nodeExecutionsStore.reportClaim({ ticket, harness, agent, session, result });
+    },
+    async renewClaim({ ticket, harness, agent, session }) {
+      return nodeExecutionsStore.renewClaim({ ticket, harness, agent, session });
     },
     logger,
   };

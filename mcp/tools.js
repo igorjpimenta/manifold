@@ -1,5 +1,6 @@
 // tools.js — agent-facing pipeline tools: manifold_start / _status /
-// _runs / _approve / _cancel.
+// _runs / _approve / _cancel plus pull-claim tools manifold_claim /
+// _report / _heartbeat.
 //
 // `createManifoldToolHandlers(ops)` returns static TOOL_DEFS (name,
 // description, JSON-schema inputSchema) plus a `handle(name, args,
@@ -11,6 +12,9 @@
 //   listRuns({ pipelineId, status, limit })     -> flow record[]
 //   approveGate({ flowId, itemId, decision, text }) -> { ok, ... }
 //   cancelFlow({ flowId, reason })              -> { cancelled, ... }
+//   claimNext({ harness, agent, session })      -> ticket | null
+//   reportClaim({ ticket, harness, agent, session, result }) -> { ok, ... }
+//   renewClaim({ ticket, harness, agent, session }) -> { ok, ... }
 //   logger                                       -> { info, warn, error } (optional)
 //
 // The caller identity is the resolved `identity` — never a tool param —
@@ -101,10 +105,50 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    name: "manifold_claim",
+    description:
+      "Claim the highest-priority ready pull ticket for the caller. Empty hands " +
+      "is an ok empty response, never an error — poll again later.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {},
+    },
+  },
+  {
+    name: "manifold_report",
+    description:
+      "Report a claimed ticket's result. The ticket must be claimed by the " +
+      "caller — tickets claimed by another caller are refused.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["ticket", "result"],
+      properties: {
+        ticket: { type: "string", description: "Ticket id returned by manifold_claim." },
+        result: { type: "object", description: "JSON result stored for the node." },
+      },
+    },
+  },
+  {
+    name: "manifold_heartbeat",
+    description:
+      "Renew a claimed ticket's lease. The ticket must be claimed by the " +
+      "caller — tickets claimed by another caller are refused.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["ticket"],
+      properties: {
+        ticket: { type: "string", description: "Ticket id returned by manifold_claim." },
+      },
+    },
+  },
 ];
 
 export function createManifoldToolHandlers(ops = {}) {
-  const { startRun, runStatus, listRuns, approveGate, cancelFlow, logger } = ops;
+  const { startRun, runStatus, listRuns, approveGate, cancelFlow, claimNext, reportClaim, renewClaim, logger } = ops;
 
   function need(fn, name) {
     if (typeof fn !== "function") throw new Error(`manifold: op ${name} is not wired (no ${name} in injected ops)`);
@@ -178,6 +222,53 @@ export function createManifoldToolHandlers(ops = {}) {
         return ok(JSON.stringify(r), { status: "ok", flowId, itemId, decision });
       } catch (e) {
         return err(`manifold_approve failed: ${e?.message ?? e}`, "error");
+      }
+    },
+
+    async manifold_claim(args, identity) {
+      void args;
+      try {
+        const won = await need(claimNext, "claimNext")({
+          harness: identity.harness, agent: identity.agent, session: identity.session,
+        });
+        if (!won) return ok("manifold_claim: no work ready", { status: "empty" });
+        logger?.info?.(`manifold: ${identitySessionKey(identity)} claimed ${won.ticket}`);
+        return ok(JSON.stringify(won), { status: "ok", ticket: won.ticket, flowId: won.flowId, nodeId: won.nodeId, leaseExpiresAt: won.leaseExpiresAt ?? null });
+      } catch (e) {
+        return err(`manifold_claim failed: ${e?.message ?? e}`, "error");
+      }
+    },
+
+    async manifold_report(args, identity) {
+      const ticket = args?.ticket;
+      if (typeof ticket !== "string" || !ticket) return err("manifold_report: ticket is required", "rejected");
+      if (args?.result === undefined || args?.result === null || typeof args.result !== "object") {
+        return err("manifold_report: result is required", "rejected");
+      }
+      try {
+        const r = await need(reportClaim, "reportClaim")({
+          ticket,
+          harness: identity.harness, agent: identity.agent, session: identity.session,
+          result: args.result,
+        });
+        logger?.info?.(`manifold: ${identitySessionKey(identity)} reported ${ticket}`);
+        return ok(JSON.stringify(r), { status: "ok", ticket, flowId: r?.flowId ?? null, nodeId: r?.nodeId ?? null });
+      } catch (e) {
+        return err(`manifold_report refused: ${e?.message ?? e}`, "refused", { ticket });
+      }
+    },
+
+    async manifold_heartbeat(args, identity) {
+      const ticket = args?.ticket;
+      if (typeof ticket !== "string" || !ticket) return err("manifold_heartbeat: ticket is required", "rejected");
+      try {
+        const r = await need(renewClaim, "renewClaim")({
+          ticket,
+          harness: identity.harness, agent: identity.agent, session: identity.session,
+        });
+        return ok(JSON.stringify(r), { status: "ok", ticket, leaseExpiresAt: r?.leaseExpiresAt ?? null });
+      } catch (e) {
+        return err(`manifold_heartbeat refused: ${e?.message ?? e}`, "refused", { ticket });
       }
     },
 
