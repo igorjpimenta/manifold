@@ -14,12 +14,14 @@ import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { eq, and, notInArray, inArray, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
 import { flowRuns, flowNodeInvocations } from "./schema.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+function defaultDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
 // Exported so callers deciding "is this flow cancellable / already done"
 // (e.g. the CLI's and dashboard's own cancel handlers) check against the
@@ -42,7 +44,7 @@ export function createRunStore(opts = {}) {
   } });
 }
 
-async function _createRunStoreImpl({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
+async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);

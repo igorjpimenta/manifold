@@ -67,6 +67,22 @@ const PUBLIC_API = {
     file: "./state/db.js",
     exports: ["openDb", "getSharedDb", "isSqliteBusy", "withSharedWrite"],
   },
+  "./state/paths": {
+    file: "./state/paths.js",
+    exports: [
+      "resolveStorePaths",
+      "resolveDataDir",
+      "defaultDataDir",
+      "runtimeDbPath",
+      "opsDbPath",
+      "pendingDir",
+      "locksDir",
+      "pipelinesDir",
+      "stateFile",
+      "ensureMigrated",
+      "readMigrationMarker",
+    ],
+  },
   "./state/batch-writer": {
     file: "./state/batch-writer.js",
     exports: ["enqueue", "enqueueRaw", "flush", "flushAll"],

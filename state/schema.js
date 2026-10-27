@@ -236,3 +236,15 @@ export const modelHealth = sqliteTable('model_health', {
   updatedAt:      integer('updated_at').notNull(),
 });
 
+
+// Push delivery targets, one row per harness. Written by deliberate admin
+// acts (adapter autoregister, operator tooling); read on every dispatch
+// and gate-open. No expiry: a removed target is a delete, not a flag.
+export const pushTargets = sqliteTable('push_targets', {
+  harness:   text('harness').primaryKey(),
+  url:       text('url').notNull(),
+  bearer:    text('bearer'),
+  timeoutMs: integer('timeout_ms'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});

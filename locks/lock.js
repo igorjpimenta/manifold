@@ -86,6 +86,7 @@
 // disconnected module instances within one process, and both must see the
 // same registrations.
 
+import { resolveStorePaths } from "../state/paths.js";
 import { open, readFile, mkdir } from "node:fs/promises";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -94,7 +95,19 @@ import os from "node:os";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { wrapBrowserTabLifecycle } from "./browser-tabs.js";
 
-const LOCKS_DIR = path.join(os.homedir(), ".openclaw", "locks");
+function defaultLocksDir() {
+  return resolveStorePaths().locksDir;
+}
+// Adapter-owned override: the openclaw adapter calls setLocksDir once with
+// its resolved store paths. Falls back to the core-owned default so the
+// CLI and tests acquire the same locks without any harness.
+let _locksDirOverride = null;
+export function setLocksDir(dir) {
+  _locksDirOverride = dir ?? null;
+}
+function locksDir() {
+  return _locksDirOverride ?? defaultLocksDir();
+}
 
 // Tracks lock names held by the CURRENT async call chain (not the whole
 // process) — see withLock() below for why this exists.
@@ -167,7 +180,7 @@ function safeName(name) {
 }
 
 export function lockPathFor(name) {
-  return path.join(LOCKS_DIR, `${safeName(name)}.lock`);
+  return path.join(locksDir(), `${safeName(name)}.lock`);
 }
 
 // Lock name for a file-keyed mutex. The `file:` prefix plus
@@ -255,7 +268,7 @@ function unlinkIfSameSync(lockPath, expected) {
 // pass it see no behavior change (best-effort: a missing/unreadable
 // sentinel just means "no known cooldown to honor").
 function cooldownPath(name) {
-  return path.join(LOCKS_DIR, `${safeName(name)}.cooldown.json`);
+  return path.join(locksDir(), `${safeName(name)}.cooldown.json`);
 }
 
 async function readLastReleasedAt(name) {
@@ -326,7 +339,7 @@ export async function acquireLock(name, opts = {}) {
   // — see file header on "Stale recovery".
   const { timeoutMs = Infinity, staleMs = 6 * 60 * 60_000, pollMs = 1000, onWouldBlock, cooldownMs = 0, cooldownJitterMs = 0, logger, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = opts;
   const owner = opts.owner ?? currentLockOwner();
-  await mkdir(LOCKS_DIR, { recursive: true });
+  await mkdir(locksDir(), { recursive: true });
   const lockPath = lockPathFor(name);
   const deadline = Number.isFinite(timeoutMs) ? now() + timeoutMs : Infinity;
   const token = randomUUID();

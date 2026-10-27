@@ -10,12 +10,14 @@ import { EventEmitter } from "node:events";
 
 // ─── global test fixtures ────────────────────────────────────────────────────
 
-// A single temp home dir is used for the whole file. LOCKS_DIR is computed at
-// module load time from os.homedir(), so the mock must be in place BEFORE the
-// first import of lock.js — mock.module() hoists at the describe/test level.
+// A single temp home dir is used for the whole file. The locks dir is
+// resolved at call time from the core-owned store home (~/.manifold),
+// so the mock must be in place BEFORE the first import of lock.js —
+// mock.module() hoists at the describe/test level.
 const TEST_HOME = mkdtempSync(join(os.tmpdir(), "gf-lock-test-"));
-const LOCKS_DIR = join(TEST_HOME, ".openclaw", "locks");
+const LOCKS_DIR = join(TEST_HOME, ".manifold", "locks");
 mkdirSync(LOCKS_DIR, { recursive: true });
+mkdirSync(join(TEST_HOME, ".openclaw"), { recursive: true });
 
 // browser-tabs.js (imported by lock.js) reads openclaw.json's
 // browser.profiles map, via the same mocked os.homedir() below, to decide

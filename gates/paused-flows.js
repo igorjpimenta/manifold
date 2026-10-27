@@ -2,19 +2,30 @@
 // is temporarily disabled, letting the operator talk to the main agent
 // without the priming hook intercepting every message.
 //
-// State lives at ~/.openclaw/state/manifold-paused.json so it survives
-// gateway restarts and is visible to both the hook (gateway process) and
-// the CLI (separate process).
+// State lives under the core-owned data dir so it survives gateway
+// restarts and is visible to both the hook (gateway process) and the CLI
+// (separate process).
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths, stateFile } from "../state/paths.js";
 
-const STATE_FILE = path.join(os.homedir(), ".openclaw", "state", "manifold-paused.json");
+function defaultStateFile() {
+  return stateFile(resolveStorePaths().dataDir);
+}
+// Adapter-owned override: the openclaw adapter calls setStateFile once
+// with its resolved store paths.
+let _stateFileOverride = null;
+export function setStateFile(file) {
+  _stateFileOverride = file ?? null;
+}
+function stateFilePath() {
+  return _stateFileOverride ?? defaultStateFile();
+}
 
 export function listPaused() {
   try {
-    const raw = fs.readFileSync(STATE_FILE, "utf8");
+    const raw = fs.readFileSync(stateFilePath(), "utf8");
     const parsed = JSON.parse(raw);
     return new Set(Array.isArray(parsed) ? parsed : []);
   } catch {
@@ -39,6 +50,6 @@ export function resume(flowId) {
 }
 
 function write(set) {
-  fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-  fs.writeFileSync(STATE_FILE, JSON.stringify([...set]), "utf8");
+  fs.mkdirSync(path.dirname(stateFilePath()), { recursive: true });
+  fs.writeFileSync(stateFilePath(), JSON.stringify([...set]), "utf8");
 }

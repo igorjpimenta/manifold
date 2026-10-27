@@ -4,10 +4,12 @@
 // return historically-grounded low/high bounds instead of a static range.
 
 import path from "node:path";
-import { getSharedDb } from "./db.js";
+import { getSharedDb, resolveStorePaths } from "./db.js";
 import os from "node:os";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+function defaultDbPath() {
+  return resolveStorePaths().opsDb;
+}
 
 const COST_SQL = `
   SELECT cost_total FROM cost_by_call
@@ -22,7 +24,7 @@ function percentile(sorted, p) {
   return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (idx - lo);
 }
 
-export function createNodeCostReader({ dbPath = DEFAULT_DB_PATH } = {}) {
+export function createNodeCostReader({ dbPath = defaultDbPath() } = {}) {
   let _client = null;
 
   async function getClient() {
