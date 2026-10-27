@@ -25,10 +25,9 @@
 // `{text, runId}` (see report-draft-blocked.js's header for why every
 // agent-side signal in this codebase flows through a file side-channel,
 // never direct tool-call introspection). output.runId and this hook's
-// event.runId are the same identifier for a given agent dispatch: the
-// in-repo half is executor-subagent.js's dispatchAgentWithRetry
-// (output.runId = runResult.runId from subagent.run()); the other half is
-// the gateway's embedded-run harness, outside this tree.
+// event.runId are the same identifier for a given agent turn: the in-repo
+// half is the runId the claiming agent's session produces; the other half
+// is the gateway's embedded-run harness, outside this tree.
 
 import { acquireLock, lockNameForFile } from "../../../../locks/lock.js";
 import { writeFile, mkdir } from "node:fs/promises";

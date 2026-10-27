@@ -100,8 +100,8 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
   // agent leg — e.g. a cached login), so gating here, before that code leg
   // even runs, produces a false-positive hold on the common case. Real
   // spend stays fully covered: the agent leg (e.g. ENSURE_LOGIN_AGENT), if
-  // and when the cascade actually reaches it, is independently gated by
-  // dispatchAgentEntry's own maybeBudgetGate call. A real multi-item
+  // and when the cascade actually reaches it, parks as a claim ticket
+  // instead of dispatching. A real multi-item
   // childFlows fan-out (e.g. SCORE, buildScoreLoopNode) has no flow.kind at
   // all, so it's unaffected by this guard and keeps its existing
   // subflow-entry gate.

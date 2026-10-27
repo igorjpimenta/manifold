@@ -1,8 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createNodeRunner } from "../../../engine/executor-nodes.js";
-import { NodeBlocked, GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
-import { currentLockOwner, sessionOwner } from "../../../locks/lock.js";
+import { NodeBlocked } from "../../../engine/executor-errors.js";
+import { currentLockOwner } from "../../../locks/lock.js";
+import { resolveInvocationId, clearTicket } from "../../../state/tool-handoff.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -26,36 +27,15 @@ function makeNodeExecutionsStore(overrides = {}) {
 
 function makeRunner(opts = {}) {
   return createNodeRunner({
-    maybeBudgetGate: opts.maybeBudgetGate ?? (() => ({ proceed: true })),
-    dispatchAgentWithRetry: opts.dispatchAgentWithRetry ?? (async ({ node, applyCtx }) => node.apply(applyCtx, { text: "mock" })),
     executeSubflowNode: opts.executeSubflowNode ?? (async () => ({ stateUpdate: {} })),
     withCrossProcessLockMaybe: (_lock, fn) => fn(),
     getNodeCtx: () => ({ invokePipeline: () => ({ invoked: false }) }),
     api,
     logger,
-    nodeHealthStore: opts.nodeHealthStore,
+    emit: opts.emit,
     runStore: opts.runStore,
     nodeExecutionsStore: opts.nodeExecutionsStore ?? makeNodeExecutionsStore(),
   });
-}
-
-// Records isBlocked/markUnhealthy calls so tests can assert exactly what
-// dispatchAgentEntry threaded through, without a real sqlite-backed store.
-// Methods return Promises (not plain values) — the real store is async, and
-// a sync mock here would let a missing `await` at the call site pass green
-// (an un-awaited Promise from a sync mock is falsy-truthy-wrong in ways an
-// un-awaited Promise from a real async call is not caught by).
-function makeFakeNodeHealthStore(overrides = {}) {
-  const marked = [];
-  const isBlockedImpl = overrides.isBlocked ?? (() => false);
-  return {
-    isBlocked: async (...args) => isBlockedImpl(...args),
-    markUnhealthy: async (pipelineId, nodeId, info) => {
-      marked.push({ pipelineId, nodeId, ...info });
-      return { marked: true };
-    },
-    marked,
-  };
 }
 
 // ── code kind ─────────────────────────────────────────────────────────────────
@@ -97,164 +77,57 @@ describe("executeNode — code kind", () => {
   });
 });
 
-// ── agent kind ───────────────────────────────────────────────────────────────
+// ── agent kind (pull-first: every agent node parks) ────────────────────────────
 
 describe("executeNode — agent kind", () => {
-  it("returns stateUpdate from apply", async () => {
-    const { executeNode } = makeRunner({
-      dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "output" }),
+  it("parks as a claim ticket and returns a reentrant agent-claim wait", async () => {
+    const parked = [];
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      markPullReady: async (invocationId) => { parked.push(invocationId); return { ok: true }; },
     });
-    const node = {
-      kind: "agent",
-      agent: "cyrano",
-      promptBuilder: () => "write a proposal",
-      apply: (_state, output) => ({ draft: output.text }),
-    };
-    const result = await executeNode({ node, nodeId: "DRAFT", state: { pipelineId: "p" }, flowId: "flow-00000005" });
-    assert.deepEqual(result.stateUpdate, { draft: "output" });
+    const emitted = [];
+    const { executeNode } = makeRunner({
+      nodeExecutionsStore,
+      emit: async (kind, payload) => { emitted.push({ kind, payload }); },
+    });
+    const node = { kind: "agent", agent: "cyrano" };
+    const result = await executeNode({ node, nodeId: "DRAFT", state: { pipelineId: "p" }, flowId: "flow-00000005", invocationId: "inv-park-1" });
+    assert.deepEqual(parked, ["inv-park-1"]);
+    assert.equal(result.waitJson?.kind, "agent-claim");
+    assert.equal(result.waitJson?.ticket, "inv-park-1");
+    assert.equal(result.waitJson?.nodeId, "DRAFT");
+    assert.equal(result.reentrant, true);
+    assert.deepEqual(result.stateUpdate, {});
+    assert.equal(resolveInvocationId("inv-park-1"), "inv-park-1", "park registers the ticket for claiming-agent tools");
+    clearTicket("inv-park-1");
+    assert.deepEqual(emitted.map((e) => e.kind), ["agent.claim.parked"]);
   });
 
-  it("skips when budget gate returns skip", async () => {
-    const { executeNode } = makeRunner({ maybeBudgetGate: () => ({ skip: true }) });
-    const node = { kind: "agent", agent: "a", promptBuilder: () => "x", apply: () => ({ x: 1 }) };
-    const result = await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f" });
-    assert.deepEqual(result, { stateUpdate: {} });
+  it("a reported ticket consumes the stored result instead of parking again", async () => {
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      getClaim: async () => ({ claimState: "reported" }),
+      getResultForNode: async () => ({ resultWrittenAt: 1, resultJson: JSON.stringify({ draft: "done" }) }),
+      markApplied: async () => ({ ok: true }),
+    });
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    const node = { kind: "agent", agent: "cyrano" };
+    const result = await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f", invocationId: "inv-rep-1" });
+    assert.deepEqual(result, { stateUpdate: { draft: "done" } });
   });
 
-  it("returns blockedInfo when budget gate returns pause", async () => {
-    const { executeNode } = makeRunner({
-      maybeBudgetGate: () => ({ pause: true, blockedInfo: { _kind: "budget-gate-approval", reason: "cap reached", hint: "" } }),
+  it("a reported ticket with no stored result fails loudly", async () => {
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      getClaim: async () => ({ claimState: "reported" }),
+      getResultForNode: async () => null,
     });
-    const node = { kind: "agent", agent: "a", promptBuilder: () => "x", apply: () => ({}) };
-    const result = await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f" });
-    assert.ok(result.blockedInfo);
-    assert.equal(result.blockedInfo._kind, "budget-gate-approval");
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    const node = { kind: "agent", agent: "cyrano" };
+    await assert.rejects(
+      () => executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f", invocationId: "inv-rep-2" }),
+      /has no stored result/,
+    );
   });
 });
-
-// ── agent kind — circuit breaker ──
-// node.circuitBreaker: true is a generalist opt-in on any "agent" node,
-// independent of which kind of flow it's running inside — separate from
-// (and additive to) the OLD kind:"fallback" node's own circuit-breaker
-// check in executor-fallback.js's runFallbackList, which never sets this
-// flag on its own entries, so the two never double-apply for one dispatch.
-
-describe("executeNode — agent kind: circuit breaker", () => {
-  it("fails fast without dispatching when already blocked", async () => {
-    let dispatched = false;
-    const nodeHealthStore = makeFakeNodeHealthStore({ isBlocked: () => true });
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      dispatchAgentWithRetry: async () => { dispatched = true; return {}; },
-    });
-    const node = { kind: "agent", agent: "a", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
-    await assert.rejects(
-      () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
-      /unhealthy agent dispatch/,
-    );
-    assert.equal(dispatched, false, "a blocked entry must never reach dispatchAgentWithRetry");
-  });
-
-  it("marks unhealthy on a genuine dispatch failure, error still propagates", async () => {
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      dispatchAgentWithRetry: async () => { throw new Error("provider timeout"); },
-    });
-    const node = { kind: "agent", agent: "a", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
-    await assert.rejects(
-      () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
-      /provider timeout/,
-    );
-    assert.equal(nodeHealthStore.marked.length, 1);
-    assert.equal(nodeHealthStore.marked[0].pipelineId, "p");
-    assert.equal(nodeHealthStore.marked[0].nodeId, "SCAN_AGENT");
-    assert.equal(nodeHealthStore.marked[0].reason, "provider timeout");
-  });
-
-  it("does not mark unhealthy on success", async () => {
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "ok" }),
-    });
-    const node = { kind: "agent", agent: "a", circuitBreaker: true, promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
-    const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
-    assert.deepEqual(result.stateUpdate, { text: "ok" });
-    assert.equal(nodeHealthStore.marked.length, 0);
-  });
-
-  it("ignores isBlocked/markUnhealthy entirely when circuitBreaker is not declared", async () => {
-    const nodeHealthStore = makeFakeNodeHealthStore({ isBlocked: () => true });
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "ok" }),
-    });
-    // No circuitBreaker flag — isBlocked() returning true must not matter.
-    const node = { kind: "agent", agent: "a", promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
-    const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
-    assert.deepEqual(result.stateUpdate, { text: "ok" });
-    assert.equal(nodeHealthStore.marked.length, 0);
-  });
-
-  it("a budget-gate pause (NodeBlocked) does not mark unhealthy", async () => {
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      maybeBudgetGate: () => ({ pause: true, blockedInfo: { _kind: "budget-gate-approval", reason: "cap reached", hint: "" } }),
-    });
-    const node = { kind: "agent", agent: "a", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
-    const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
-    assert.ok(result.blockedInfo, "a budget-gate pause is a wait, not a failure");
-    assert.equal(nodeHealthStore.marked.length, 0);
-  });
-
-  it("a missing tool scope does NOT mark unhealthy — an operator grants that, not a retry", async () => {
-    // A block has no TTL, so a configuration fault would park the node
-    // forever behind something only a human can fix.
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      dispatchAgentWithRetry: async () => { throw new Error("missing scope: operator.write"); },
-    });
-    const node = { kind: "agent", agent: "a", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
-    await assert.rejects(
-      () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
-      /missing scope/,
-    );
-    assert.equal(nodeHealthStore.marked.length, 0, "the error still propagates, but must not park the node");
-  });
-
-  it("a gateway-context mismatch does NOT mark unhealthy — structural, not a symptom", async () => {
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      dispatchAgentWithRetry: async () => { throw new Error("subagent call requires gateway context: missing api"); },
-    });
-    const node = { kind: "agent", agent: "a", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
-    await assert.rejects(
-      () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
-      /requires gateway context/,
-    );
-    assert.equal(nodeHealthStore.marked.length, 0);
-  });
-
-  it("a GatewayHandoffNeeded (subagent runtime unavailable in this context) does not mark unhealthy", async () => {
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const { executeNode } = makeRunner({
-      nodeHealthStore,
-      dispatchAgentWithRetry: async () => { throw new GatewayHandoffNeeded("subagent runtime unavailable on this api instance"); },
-    });
-    const node = { kind: "agent", agent: "a", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
-    await assert.rejects(
-      () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
-      (err) => err instanceof GatewayHandoffNeeded,
-    );
-    assert.equal(nodeHealthStore.marked.length, 0, "a context limitation isn't evidence the agent itself is unhealthy");
-  });
-});
-
-// ── loop kind ─────────────────────────────────────────────────────────────────
 
 describe("executeNode — loop kind", () => {
   it("delegates to executeSubflowNode", async () => {
@@ -356,8 +229,6 @@ describe("executeNode — lock wiring", () => {
   it("calls withCrossProcessLockMaybe with the node's declared crossProcessLock", async () => {
     let lockNameSeen;
     const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (lockName, fn) => { lockNameSeen = lockName; return fn(); },
       getNodeCtx: () => ({}),
@@ -376,8 +247,6 @@ describe("executeNode — lock wiring", () => {
   it("passes {flowId, nodeId} as the 3rd arg — the crossProcessLock queued-status hook needs both to persist a blocked-acquire transition", async () => {
     let contextSeen;
     const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn, ctx) => { contextSeen = ctx; return fn(); },
       getNodeCtx: () => ({}),
@@ -404,8 +273,6 @@ describe("executeNode — lock wiring", () => {
   it("forwards the node's crossProcessLockCooldownMs/crossProcessLockCooldownJitterMs as cooldownMs/cooldownJitterMs on the 3rd arg", async () => {
     let contextSeen;
     const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn, ctx) => { contextSeen = ctx; return fn(); },
       getNodeCtx: () => ({}),
@@ -436,8 +303,6 @@ describe("executeNode — invocation lock owner", () => {
     let ownerInWrapper;
     let ownerInRun;
     const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async () => ({}),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn) => { ownerInWrapper = currentLockOwner(); return fn(); },
       getNodeCtx: () => ({}),
@@ -456,8 +321,6 @@ describe("executeNode — invocation lock owner", () => {
   it("no invocationId → no lock owner (the lock stays unowned, as before)", async () => {
     let ownerInWrapper = "unset";
     const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async () => ({}),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn) => { ownerInWrapper = currentLockOwner(); return fn(); },
       getNodeCtx: () => ({}),
@@ -469,30 +332,5 @@ describe("executeNode — invocation lock owner", () => {
     assert.equal(ownerInWrapper, null);
   });
 
-  it("an agent dispatch registers the invocation (with the node's lease cooldown) as its session's lock owner, cleared afterwards", async () => {
-    let ownerDuringDispatch;
-    const { executeNode } = makeRunner({
-      dispatchAgentWithRetry: async ({ sessionKey }) => { ownerDuringDispatch = sessionOwner(sessionKey); return {}; },
-    });
-    const node = {
-      kind: "agent", agent: "proposal-sender", sessionKey: "agent:proposal-sender:test-owner",
-      browserLeaseCooldownMs: 60_000, browserLeaseCooldownJitterMs: 5_000,
-      promptBuilder: () => "go", apply: () => ({}),
-    };
-    await executeNode({ node, nodeId: "SUBMIT", state: { pipelineId: "p2" }, flowId: "flow-2", invocationId: "inv-2" });
-    assert.deepEqual(ownerDuringDispatch, {
-      kind: "invocation", id: "inv-2", flowId: "flow-2", nodeId: "SUBMIT", pipelineId: "p2",
-      cooldownMs: 60_000, cooldownJitterMs: 5_000,
-    });
-    assert.equal(sessionOwner("agent:proposal-sender:test-owner"), null);
-  });
-
-  it("the session owner is cleared even when the dispatch throws", async () => {
-    const { executeNode } = makeRunner({
-      dispatchAgentWithRetry: async () => { throw new Error("boom"); },
-    });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:throws", promptBuilder: () => "go", apply: () => ({}) };
-    await assert.rejects(() => executeNode({ node, nodeId: "X", state: {}, flowId: "flow-3", invocationId: "inv-3" }));
-    assert.equal(sessionOwner("agent:a:throws"), null);
-  });
+;
 });

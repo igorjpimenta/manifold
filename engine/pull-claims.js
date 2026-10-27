@@ -7,6 +7,7 @@
 // resumeFlowFromGate — the same admitAndSetRunning + executor.resume every
 // gate decision uses, not a fork of it).
 import { resumeFlowFromGate } from "../routes/operator-resume.js";
+import { clearTicket } from "../state/tool-handoff.js";
 
 export async function reportPullClaim(
   { nodeExecutionsStore, store, admissionQueueStore, runStore, executor, logger, api },
@@ -18,6 +19,7 @@ export async function reportPullClaim(
   // Binding check + result store + reported mark commit inside the store;
   // resume only fires after all three succeed, never on a refusal.
   const recorded = await nodeExecutionsStore.reportClaim({ ticket, harness, agent, session, result });
+  clearTicket(ticket);
   const resumed = await resumeFlowFromGate({
     store, admissionQueueStore, runStore, executor, logger, api,
     flowId: recorded.flowId, nodeId: recorded.nodeId, decision: "reported",

@@ -8,7 +8,7 @@
 // multi-line replies, a legitimate mention of "blocked" in draft prose
 // could false-positive, no real structure for more than one question) and
 // the platform doesn't expose structured tool-call arguments to a pipeline
-// node's apply() — only { text, runId } (see executor-subagent.js). This
+// node's apply() — only { text, runId }. This
 // tool sidesteps both problems the same way submit_draft already does:
 // write a structured file as the tool's side effect, let the calling
 // pipeline's apply() infer what happened from that file's existence and

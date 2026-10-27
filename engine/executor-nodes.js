@@ -1,11 +1,11 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
-import { detectBlockedSentinel, detectSkippedSentinel, mintAgentSessionKey, assembleState } from "./executor-helpers.js";
+import { NodeBlocked } from "./executor-errors.js";
+import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
-import { registerDispatch, clearDispatch } from "../state/tool-handoff.js";
-import { registerSessionOwner, clearSessionOwner, runWithLockOwner } from "../locks/lock.js";
+import { registerTicket } from "../state/tool-handoff.js";
+import { runWithLockOwner } from "../locks/lock.js";
 
 // The lock owner for work done on behalf of one node invocation: held locks
 // stay held until the invocation resolves (see locks/invocation-owner.js), not
@@ -34,8 +34,6 @@ function invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId })
  * safe to construct this factory before nodeCtx is assigned.
  */
 export function createNodeRunner({
-  maybeBudgetGate,
-  dispatchAgentWithRetry,
   executeSubflowNode,
   withCrossProcessLockMaybe,
   getNodeCtx,
@@ -47,7 +45,6 @@ export function createNodeRunner({
   logger,
   runStore,
   nodeExecutionsStore,
-  nodeHealthStore,
   pipelinesRef,
   emit,
 }) {
@@ -104,116 +101,8 @@ export function createNodeRunner({
     });
   }
 
-  // Shared by the plain "agent" branch below and by cascade sub-nodes of
-  // kind "agent". `nodeId` is the id used for session-key derivation,
-  // lineage, and budget-gate scoping.
-  //
-  // No admission here: the admission pool governs flow runs, and the run
-  // executing this node already holds its own slot (flow-start/child-
-  // dispatch) for as long as it's running. A run executes one node at a
-  // time, so the run cap already bounds concurrent agent dispatches — a
-  // second slot taken mid-node from the same pool is what made hold-and-
-  // wait deadlock (keeping the run slot) or churn (giving it back) possible.
-  //
-  // Circuit breaker: an agent node opts in via `entry.circuitBreaker: true`,
-  // checked here regardless of which kind of flow it's running inside —
-  // generalist, not flow-kind-aware. Fails fast before doing any work (no
-  // prompt build, no session spawn) when already blocked, naming the reset
-  // command because a block has no expiry.
-  //
-  // Which failures are allowed to trip it is decided by
-  // isBreakerTrippingFailure (engine/executor-errors.js) rather than
-  // inlined here, so the rule sits beside the error classes it inspects.
-  async function dispatchAgentEntry(entry, nodeId, { state, flowId, reviveMessage, invocationId }) {
-    const pipelineId = state?.pipelineId ?? null;
-    // Anonymous dispatch is refused loudly: every agent turn is keyed to
-    // its agent for session attribution and push wake. No default, ever.
-    if (!entry.agent) {
-      throw new Error(`manifold: refusing anonymous dispatch of node "${nodeId}" (no entry.agent)`);
-    }
-    if (entry.circuitBreaker && await nodeHealthStore?.isBlocked(pipelineId, nodeId)) {
-      throw new Error(
-        `unhealthy agent dispatch: "${nodeId}" is blocked after a prior failure — reset via "openclaw manifold node-health reset ${pipelineId} ${nodeId}" once the underlying issue is confirmed fixed`
-      );
-    }
-    const gate = await maybeBudgetGate({
-      flowId, nodeId, node: entry,
-      pipelineId, pipelineName: pipelineId,
-      itemCount: 1,
-    });
-    if (gate.skip) return {};
-    if (gate.pause) {
-      // NodeBlocked's constructor only keeps {reason, needed, hint} — budget
-      // gate pauses carry a _kind ("budget-gate-approval") that downstream
-      // wait_json routing depends on, so preserve the full object on top.
-      const err = new NodeBlocked(gate.blockedInfo ?? {});
-      err._blocked = { ...(gate.blockedInfo ?? {}) };
-      throw err;
-    }
-    // promptBuilder reads via assembleState(baseState: state) rather than
-    // raw state — that's what makes _subflowGroups visible to an agent
-    // node's promptBuilder. Same lazy ctx.needs(varName) accessor code
-    // nodes get, passed as promptBuilder's 2nd arg (a single-arg
-    // promptBuilder ignores it). A thrown NodeBlocked here propagates out
-    // of dispatchAgentEntry uncaught (this call is deliberately outside the
-    // try/catch below, same as the gate.pause throw above) to
-    // executeNodeBody's own "agent" branch catch, which converts
-    // NodeBlocked into blockedInfo.
-    const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
-    const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
-    // Core-namespace handle only (`mf-<flow8>-<node>`); explicit
-    // entry.sessionKey / sessionKeyBuilder overrides pass through verbatim.
-    // Gateway shaping happens at the adapter edge, never here.
-    const sessionKey = entry.sessionKey
-      ?? entry.sessionKeyBuilder?.(state, flowId)
-      ?? mintAgentSessionKey(flowId, nodeId);
-    _lineage?.recordSpawn?.({
-      childSessionKey: sessionKey, flowId, nodeId,
-      pipelineId, agentId: entry.agent ?? null,
-    });
-    // tool-handoff.js: lets a tool this session calls mid-turn (e.g.
-    // submit_score) resolve its own invocationId from ctx.sessionKey and
-    // hand structured data back to this node's apply() — see that module's
-    // header comment. Cleared in the finally below once the dispatch
-    // settles, so the sessionKey -> invocationId map doesn't grow
-    // unbounded over gateway uptime.
-    registerDispatch(sessionKey, invocationId);
-    // Browser tool calls this session makes lock as this invocation
-    // (extensions/browser-lease), the same owner the node-level
-    // crossProcessLock uses — so the node's own lock and its agent's tool
-    // leases re-enter instead of blocking each other.
-    const lockOwner = invocationLockOwner(entry, { invocationId, flowId, nodeId, pipelineId });
-    if (lockOwner) registerSessionOwner(sessionKey, lockOwner);
-    try {
-      return await dispatchAgentWithRetry({
-        node: entry, nodeId, sessionKey, initialMessage: message,
-        applyCtx: state, applyExtraArg: undefined, flowId,
-        applyMeta: { flowId, nodeId, invocationId },
-        // apply() gets the same lazy ctx.needs() accessor every other
-        // call site gets.
-        needsCtx: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }),
-      });
-    } catch (err) {
-      // Which failures may park a node, and why the excluded ones must not,
-      // is documented once on isBreakerTrippingFailure — not restated here.
-      if (entry.circuitBreaker && isBreakerTrippingFailure(err)) {
-        await nodeHealthStore?.markUnhealthy(pipelineId, nodeId, { reason: err?.message ?? String(err), flowId });
-      }
-      throw err;
-    } finally {
-      clearDispatch(sessionKey);
-      clearSessionOwner(sessionKey);
-    }
-  }
-
-  /**
-   * Acquire the node's declared crossProcessLock (if any) before running the
-   * node body, release after it returns or throws. Runs under the
-   * invocation's lock owner, so that lock and any withLock the node's own
-   * code takes belong to the invocation rather than to no one.
-   */
-  async function executeNode({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
-    const body = () => executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId });
+  async function executeNode({ node, nodeId, state, flowId, invocationId }) {
+    const body = () => executeNodeBody({ node, nodeId, state, flowId, invocationId });
     const owner = invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId: state?.pipelineId });
     return runWithLockOwner(owner, () => withCrossProcessLockMaybe(node.crossProcessLock, body, {
       flowId, nodeId,
@@ -222,15 +111,10 @@ export function createNodeRunner({
     }));
   }
 
-  // `reviveMessage`, when set, is used in place of node.promptBuilder(state)
-  // for an "agent" node — boot revival's continuation prompt to an existing
-  // session (see engine/revival-messages.js), never a fresh re-dispatch of
-  // the original task.
-  // A pull agent node (`pull: true`) never push-dispatches: its invocation
-  // parks as a claim ticket and an external agent reports the result back
-  // (engine/pull-claims.js), which resumes through the gate resume path. A
-  // resumed dispatch whose ticket is already reported consumes the stored
-  // result instead of parking again.
+  // Every agent node parks: its invocation becomes a claim ticket and an
+  // external agent reports the result back (engine/pull-claims.js), which
+  // resumes through the gate resume path. A resumed dispatch whose ticket
+  // is already reported consumes the stored result instead of parking again.
   async function executePullNode({ nodeId, flowId, invocationId }) {
     const claim = invocationId
       ? await nodeExecutionsStore.getClaim?.(invocationId).catch(() => null)
@@ -255,8 +139,11 @@ export function createNodeRunner({
     }
     // Park: mint the ticket in ready state, then return waitJson so runFlow
     // persists it through the human-gate waitJson path (reentrant —
-    // lastStep stays put so resume re-enters this same node).
+    // lastStep stays put so resume re-enters this same node). Register the
+    // ticket so tools the claiming agent calls (e.g. submit_score) resolve
+    // this invocation from the ticket the claim instructions carry.
     const parked = await nodeExecutionsStore.markPullReady?.(invocationId) ?? { ok: true };
+    registerTicket(invocationId, invocationId);
     if (!parked?.ok) {
       throw new Error(`pull-claim: could not park ticket ${invocationId} (${parked?.reason ?? "store without claim support"})`);
     }
@@ -270,7 +157,7 @@ export function createNodeRunner({
     };
   }
 
-  async function executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
+  async function executeNodeBody({ node, nodeId, state, flowId, invocationId }) {
     if (node.kind === "code") {
       const update = await dispatchCodeEntry(node, { state, flowId, nodeId });
       const blocked = detectBlockedSentinel(update);
@@ -281,21 +168,7 @@ export function createNodeRunner({
     }
 
     if (node.kind === "agent") {
-      if (node.pull === true) {
-        return executePullNode({ nodeId, flowId, invocationId });
-      }
-      let update;
-      try {
-        update = await dispatchAgentEntry(node, nodeId, { state, flowId, reviveMessage, invocationId });
-      } catch (err) {
-        if (err instanceof NodeBlocked) return { blockedInfo: err._blocked };
-        throw err;
-      }
-      const blocked = detectBlockedSentinel(update);
-      if (blocked) return { blockedInfo: blocked };
-      const skipped = detectSkippedSentinel(update);
-      if (skipped) return { skippedInfo: skipped };
-      return { stateUpdate: update ?? {} };
+      return executePullNode({ nodeId, flowId, invocationId });
     }
 
     if (node.kind === "subflow") {

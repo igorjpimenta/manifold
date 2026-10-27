@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createExecutor } from "../../../engine/executor.js";
 import { NodeFailure } from "../../../engine/executor-errors.js";
-import { mintAgentSessionKey, assembleState } from "../../../engine/executor-helpers.js";
+import { assembleState } from "../../../engine/executor-helpers.js";
 import { REVIVAL_MSG } from "../../../engine/revival-messages.js";
 import { nodeEmitter } from "../../../events.js";
 import { getGlobalConcurrencyLimit, _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
@@ -43,9 +43,7 @@ function makeNodeExecutionsStore() {
       latestInvocationByKey.set(`${args.flowId}::${args.nodeId}`, invocationId);
       return { invocationId, isNew: args.kind === "fresh" };
     },
-    // reviveAgentKindOrphan's invocation-lookup gap fix looks up the
-    // crashed node's existing invocation by flowId+nodeId to call
-    // writeResult() on it — mirrors the real store's getLatestInvocationForNode.
+    // Mirrors the real store's getLatestInvocationForNode.
     getLatestInvocationForNode: async (flowId, nodeId) => {
       const id = latestInvocationByKey.get(`${flowId}::${nodeId}`);
       return id ? { id, visitSeq: 1 } : null;
@@ -275,11 +273,8 @@ function makeExecutor(pipelineMap = {}, storeFlows = [], opts = {}) {
       pipelinesRef,
       ensurePipelinesLoaded: opts.ensurePipelinesLoaded ?? null,
       logger,
-      getWorkingSubagent: opts.getWorkingSubagent ?? null,
       failureStore: opts.failureStore ?? null,
-      nodeHealthStore: opts.nodeHealthStore ?? null,
       notifyFlowEnteredWaiting: opts.notifyFlowEnteredWaiting ?? null,
-      sessionIndex: null,
       nodeExecutionsStore: opts.nodeExecutionsStore ?? makeNodeExecutionsStore(),
       admissionQueueStore: opts.admissionQueueStore ?? makeAdmissionQueueStore(),
       runStore: opts.runStore ?? makeRunStore(),
@@ -715,8 +710,8 @@ describe("runFlow — state persist failure on the plain success path", () => {
     const spy = makeSpyNodeExecutionsStore();
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
-      failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
+      ensurePipelinesLoaded: null,
+      failureStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
     });
@@ -740,9 +735,9 @@ describe("runFlow — state persist failure on the plain success path", () => {
     let recorded = null;
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
+      ensurePipelinesLoaded: null,
       failureStore: { recordEngineFailure: (args) => { recorded = args; } },
-      nodeHealthStore: null, notifyFlowEnteredWaiting: null,
+notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
     });
@@ -796,8 +791,8 @@ describe("runFlow — writeResult commits before last_step advances", () => {
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
-      failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
+      ensurePipelinesLoaded: null,
+      failureStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
     });
@@ -841,8 +836,8 @@ describe("runFlow — writeResult commits before last_step advances", () => {
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger: spyLogger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
-      failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
+      ensurePipelinesLoaded: null,
+      failureStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
     });
@@ -878,8 +873,8 @@ describe("runFlow — writeResult commits before last_step advances", () => {
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
-      failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
+      ensurePipelinesLoaded: null,
+      failureStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
     });
@@ -1390,521 +1385,11 @@ describe("runFlow — blocked-wait reason synthesis", () => {
   // unnecessary complexity for testing a pure string-synthesis function.
 });
 
-// ── agent circuit breaker ────────────────────────────────────────────────────
-// node.circuitBreaker:true opt-in, checked by dispatchAgentEntry
-// (executor-nodes.js) for ANY "agent"-kind node regardless of which kind of
-// flow it's running inside — not specific to cascade sub-nodes, though
-// those are exactly the nodes that need this opt-in now that kind:"fallback"
-// (which applied this unconditionally to every agent entry) is gone.
 
-// Methods return Promises — the real store is async, and a sync mock here
-// would let a missing `await` at the call site pass green.
-function makeFakeNodeHealthStore() {
-  const blocked = new Set();
-  const marked = [];
-  return {
-    isBlocked: async (pipelineId, nodeId) => blocked.has(`${pipelineId}/${nodeId}`),
-    markUnhealthy: async (pipelineId, nodeId, info) => {
-      blocked.add(`${pipelineId}/${nodeId}`);
-      marked.push({ pipelineId, nodeId, ...info });
-      return { marked: true };
-    },
-    block: (pipelineId, nodeId) => blocked.add(`${pipelineId}/${nodeId}`), // test setup helper
-    marked,
-  };
+
+function flushNextTick() {
+  return new Promise((resolve) => process.nextTick(resolve));
 }
-
-function makeCircuitBreakerAgentNode(overrides = {}) {
-  return { kind: "agent", agent: "scout", circuitBreaker: true, promptBuilder: () => "hi", apply: (s, o) => ({ reply: o }), ...overrides };
-}
-
-describe("runFlow — agent circuit breaker: check", () => {
-  it("fails immediately without dispatching the agent when it's pre-blocked", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: makeCircuitBreakerAgentNode() },
-      edges: { __start__: "AGENT", AGENT: "__end__" },
-    });
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    nodeHealthStore.block("p", "AGENT");
-    // No getWorkingSubagent provided — if the short-circuit didn't fire,
-    // dispatch would throw GatewayHandoffNeeded ("subagent runtime
-    // unavailable") instead of the "failed" status asserted below,
-    // proving the agent was never actually invoked.
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore });
-    const r = await executor.start("p");
-    await executor.runFlow(r.flowId);
-    const final = store.get(r.flowId);
-    assert.equal(final?.status, "failed");
-    assert.match(final?.statusReason ?? "", /unhealthy agent dispatch/);
-  });
-
-  it("dispatches normally when the blocked key does not match this node's id", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: makeCircuitBreakerAgentNode() },
-      edges: { __start__: "AGENT", AGENT: "__end__" },
-    });
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    nodeHealthStore.block("p", "OTHER_NODE");
-    const fakeSubagent = { run: async () => ({ runId: "run-1" }), waitForRun: async () => ({ status: "ok" }), getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }) };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore, getWorkingSubagent: () => fakeSubagent });
-    const r = await executor.start("p");
-    await executor.runFlow(r.flowId);
-    assert.equal(store.get(r.flowId)?.status, "succeeded");
-  });
-
-  it("does not gate a plain agent node without circuitBreaker:true, even if the store has an entry under its id", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
-      edges: { __start__: "AGENT", AGENT: "__end__" },
-    });
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    nodeHealthStore.block("p", "AGENT");
-    const fakeSubagent = { run: async () => ({ runId: "run-1" }), waitForRun: async () => ({ status: "ok" }), getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }) };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore, getWorkingSubagent: () => fakeSubagent });
-    const r = await executor.start("p");
-    await executor.runFlow(r.flowId);
-    assert.equal(store.get(r.flowId)?.status, "succeeded", "the breaker only gates nodes that opt in via circuitBreaker:true");
-  });
-});
-
-describe("runFlow — agent circuit breaker: mark", () => {
-  it("marks the node unhealthy, keyed by its own nodeId, when its dispatch throws", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: makeCircuitBreakerAgentNode() },
-      edges: { __start__: "AGENT", AGENT: "__end__" },
-    });
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], {
-      nodeHealthStore,
-      getWorkingSubagent: () => fakeSubagent,
-    });
-    const r = await executor.start("p");
-    await executor.runFlow(r.flowId);
-    assert.equal(store.get(r.flowId)?.status, "failed");
-    assert.equal(nodeHealthStore.marked.length, 1);
-    assert.equal(nodeHealthStore.marked[0].pipelineId, "p");
-    assert.equal(nodeHealthStore.marked[0].nodeId, "AGENT");
-  });
-
-  it("does not mark unhealthy for a plain agent node without circuitBreaker:true", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
-      edges: { __start__: "AGENT", AGENT: "__end__" },
-    });
-    const nodeHealthStore = makeFakeNodeHealthStore();
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], {
-      nodeHealthStore,
-      getWorkingSubagent: () => fakeSubagent,
-    });
-    const r = await executor.start("p");
-    await executor.runFlow(r.flowId);
-    assert.equal(store.get(r.flowId)?.status, "failed");
-    assert.equal(nodeHealthStore.marked.length, 0);
-  });
-});
-
-
-// ── rerun / rerunFromSource ───────────────────────────────────────────────────
-
-describe("rerun", () => {
-  it("throws when source flow is not found", async () => {
-    const { executor } = makeExecutor({ p: makePipeline() });
-    await assert.rejects(() => executor.rerun("no-such-flow"), /source flow not found/);
-  });
-
-  it("creates a new flow from source", async () => {
-    const { executor, store } = makeExecutor({ p: makePipeline() });
-    const r1 = await executor.start("p");
-    // Manually set status to succeeded so singleton doesn't block
-    const f = store._map.get(r1.flowId);
-    store._map.set(r1.flowId, { ...f, status: "succeeded" });
-    const r2 = await executor.rerun(r1.flowId);
-    assert.notEqual(r1.flowId, r2.flowId);
-    assert.equal(store.get(r2.flowId)?.status, "running");
-  });
-});
-
-describe("rerunFromSource", () => {
-  it("throws when sourceFlow has no pipelineId", async () => {
-    const { executor } = makeExecutor({ p: makePipeline() });
-    await assert.rejects(
-      () => executor.rerunFromSource({ flowId: "src", stateJson: {} }),
-      /pipelineId/
-    );
-  });
-});
-
-// ── cancel ────────────────────────────────────────────────────────────────────
-
-describe("cancel", () => {
-  it("cancels an active flow", async () => {
-    const { executor, store } = makeExecutor({ p: makePipeline() });
-    const r = await executor.start("p");
-    const result = await executor.cancel(r.flowId);
-    assert.equal(result.cancelled, true);
-    assert.equal(store.get(r.flowId)?.status, "cancelled");
-  });
-
-  it("returns cancelled=false for unknown flow", async () => {
-    const { executor } = makeExecutor({ p: makePipeline() });
-    const result = await executor.cancel("no-such-flow");
-    assert.equal(result.cancelled, false);
-  });
-});
-
-// ── reviveAgentKindOrphan ──────────────────────────────────────────────────────
-
-describe("reviveAgentKindOrphan", () => {
-  function makeOrphanFlow({ flowId = "orphan-1", revision = 5, lastStep = "AGENT", pipelineId = "p" } = {}) {
-    return { flowId, revision, lastStep, status: "running", stateJson: { pipelineId }, waitJson: null };
-  }
-
-  it("sends REVIVAL_MSG to the same deterministic session key, applies the reply, and continues the flow", async () => {
-    const pipeline = makePipeline({
-      nodes: {
-        AGENT: {
-          kind: "agent", agent: "scout",
-          promptBuilder: () => "original prompt — must NOT be sent on revival",
-          apply: (state, output) => ({ agentReply: output.text }),
-        },
-      },
-      edges: { __start__: "AGENT", AGENT: "__end__" },
-    });
-    let capturedSessionKey, capturedMessage;
-    const fakeSubagent = {
-      run: async ({ sessionKey, message }) => {
-        capturedSessionKey = sessionKey;
-        capturedMessage = message;
-        return { runId: "run-1" };
-      },
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
-    };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent });
-    const flow = makeOrphanFlow();
-    store._map.set(flow.flowId, flow);
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    assert.equal(capturedMessage, REVIVAL_MSG, "must send the continuation prompt, not promptBuilder's output");
-    assert.equal(capturedSessionKey, mintAgentSessionKey(flow.flowId, "AGENT"), "must resume the SAME session the original dispatch used");
-    const final = store.get(flow.flowId);
-    assert.equal(final.status, "succeeded", "flow continues past AGENT to __end__");
-    // B4: state_json is entry-only — agentReply (AGENT's own apply() output)
-    // never lands there anymore. Reconstruction via assembleState() is
-    // covered by executor-assemble-state-e2e.test.js; this test's own job
-    // is the revival/session-key behavior above, not resultJson replay.
-    assert.equal(final.stateJson.agentReply, undefined, "state_json must not carry node output post-B4");
-  });
-
-  it("does nothing for a node that is not kind:agent", async () => {
-    const pipeline = makePipeline({ nodes: { CODE_STEP: { kind: "code", run: () => ({}) } } });
-    const { executor, store } = makeExecutor({ p: pipeline }, []);
-    const flow = makeOrphanFlow({ lastStep: "CODE_STEP" });
-    store._map.set(flow.flowId, flow);
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    assert.equal(store.get(flow.flowId).status, "running", "left untouched — no dispatch, no persist");
-  });
-
-  it("fails the flow when the revival dispatch throws", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
-    });
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent });
-    const flow = makeOrphanFlow();
-    store._map.set(flow.flowId, flow);
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    const final = store.get(flow.flowId);
-    assert.equal(final.status, "failed");
-    assert.ok(final.statusReason.includes("revival failed"));
-  });
-
-  it("passes kind:revival to nodeExecutions.write() on revival failure, even with no matching prior invocation", async () => {
-    // makeOrphanFlow's flow has no prior dispatch for this node at all — if
-    // kind were derived the same way runFlow's loop derives it
-    // (isFreshNodeEntry against findCurrentStep → "fresh"), a null
-    // lastNodeId would incorrectly resolve to "fresh".
-    // reviveAgentKindOrphan hardcodes kind:"revival" instead, since revival
-    // is always a continuation of the exact node that crashed, not a fresh
-    // dispatch decision — this proves the hardcode is actually load-bearing.
-    const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
-    });
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
-    const spy = makeSpyNodeExecutionsStore();
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent, nodeExecutionsStore: spy });
-    const flow = makeOrphanFlow();
-    store._map.set(flow.flowId, flow);
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    assert.equal(spy.calls.length, 1);
-    assert.equal(spy.calls[0].nodeId, "AGENT");
-    assert.equal(spy.calls[0].kind, "revival");
-  });
-
-  it("thrown revival dispatch: threads write()'s returned ids into recordEngineFailure", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
-    });
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
-    const spy = makeSpyNodeExecutionsStore();
-    let recorded = null;
-    const failureStore = { recordEngineFailure: (args) => { recorded = args; } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent, nodeExecutionsStore: spy, failureStore });
-    const flow = makeOrphanFlow();
-    store._map.set(flow.flowId, flow);
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    assert.equal(spy.calls.length, 1, "write() must run before persistFailRetrying, not skipped");
-    assert.equal(recorded?.invocationId, "inv-1");
-    assert.equal(recorded?.executionId, "exec-1");
-  });
-
-  it("revival result blocked without declaring a wait kind: fails the flow and threads write()'s returned ids", async () => {
-    const pipeline = makePipeline({
-      nodes: {
-        AGENT: {
-          kind: "agent", agent: "scout", promptBuilder: () => "unused",
-          apply: () => ({ _blocked: { reason: "needs review" } }),
-        },
-      },
-    });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }),
-    };
-    const spy = makeSpyNodeExecutionsStore();
-    let recorded = null;
-    const failureStore = { recordEngineFailure: (args) => { recorded = args; } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent, nodeExecutionsStore: spy, failureStore });
-    const flow = makeOrphanFlow();
-    store._map.set(flow.flowId, flow);
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    const final = store.get(flow.flowId);
-    assert.equal(final.status, "failed");
-    assert.ok(final.statusReason.includes("needs review"));
-    assert.equal(spy.calls.length, 1);
-    assert.equal(recorded?.invocationId, "inv-1");
-    assert.equal(recorded?.executionId, "exec-1");
-  });
-
-  it("blocks with needs-gateway-handoff instead of failing when the dispatch is still request-scoped", async () => {
-    const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
-    });
-    // No getWorkingSubagent and api.runtime.subagent is undefined — runSubagentTurn
-    // throws GatewayHandoffNeeded ("subagent runtime unavailable on this api instance").
-    const { executor, store } = makeExecutor({ p: pipeline }, []);
-    const flow = makeOrphanFlow();
-    store._map.set(flow.flowId, flow);
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    const final = store.get(flow.flowId);
-    assert.equal(final.status, "waiting");
-    assert.equal(final.waitJson.kind, "needs-gateway-handoff");
-  });
-});
-
-// ── reviveAgentKindOrphan — writeResult commits before last_step advances (regression) ──
-// reviveAgentKindOrphan is a separate code path from runFlow's main dispatch
-// loop (above) and only ever got half of the write-order fix: it
-// re-runs apply() before touching state (no stale-read-on-entry), but never
-// calls writeResult() for the node it just revived before persistRunningRetrying
-// advances last_step past it. The immediately-following runFlow(flowId,
-// "revival") call's assembleState() then sees an empty result for that node,
-// so any outbound edge depending on the node's own output dead-ends with
-// "no next node" — same symptom as the bug above, just reached via boot
-// revival after a restart instead of a live crash-restart race. Live
-// incident: freelance_workana-proposal::SCORE (a gateway restart
-// storm interrupted several SCORE_LLM dispatches; boot revival then failed
-// every one of them this exact way).
-describe("reviveAgentKindOrphan — writeResult commits before last_step advances", () => {
-  it("calls nodeExecutionsStore.writeResult() before store.setRunning(), and the revived node's own output is visible to its outbound edge", async () => {
-    const pipeline = makePipeline({
-      nodes: {
-        AGENT: {
-          kind: "agent", agent: "scout",
-          promptBuilder: () => "original prompt — must NOT be sent on revival",
-          apply: (state, output) => ({ agentReply: output.text }),
-        },
-      },
-      edges: {
-        __start__: "AGENT",
-        // A real business-logic edge, same shape as SCORE_LLM's: dead-ends
-        // (returns null → "no next node") if the node's own output isn't
-        // visible yet.
-        AGENT: (state) => (state.agentReply ? "__end__" : null),
-      },
-    });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
-    };
-    const order = [];
-    const baseStore = makeStore([]);
-    const store = {
-      ...baseStore,
-      setRunning: (args) => {
-        order.push("setRunning");
-        return baseStore.setRunning(args);
-      },
-    };
-    const pipelinesRef = { value: new Map([["p", pipeline]]) };
-    const baseSpy = makeSpyNodeExecutionsStore();
-    const spy = {
-      ...baseSpy,
-      writeResult: async (invocationId, result) => {
-        order.push("writeResult");
-        return baseSpy.writeResult(invocationId, result);
-      },
-    };
-    const executor = createExecutor({
-      api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: () => fakeSubagent,
-      failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
-      sessionIndex: null, nodeExecutionsStore: spy,
-      admissionQueueStore: makeAdmissionQueueStore(),
-    });
-    const flow = { flowId: "orphan-1", revision: 5, lastStep: "AGENT", status: "running", stateJson: { pipelineId: "p" }, waitJson: null };
-    store._map.set(flow.flowId, flow);
-    // The crashed dispatch's own enter() call, made BEFORE the crash — this
-    // invocation row already exists by the time revival runs in production
-    // (nodeExecutionsStore.enter() runs before executeNode() in the main
-    // loop). Revival must find and reuse this same row, not skip the
-    // writeResult step because it created none of its own.
-    await spy.enter({ flowId: flow.flowId, pipelineId: "p", nodeId: "AGENT", subflowKey: null, kind: "fresh" });
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    assert.deepEqual(
-      order,
-      ["writeResult", "setRunning"],
-      "the revived node's result must be durably written before last_step advances past it",
-    );
-    const final = store.get(flow.flowId);
-    assert.equal(
-      final.status, "succeeded",
-      "AGENT's own edge must see agentReply and resolve to __end__, not dead-end with 'no next node'",
-    );
-  });
-
-  // Same gap as the main dispatch loop's identical fix above, but more
-  // reachable here: revival's invocationId comes from a pure read
-  // (getLatestInvocationForNode) with no creation fallback, unlike the main
-  // loop's enter(), so "no-such-invocation" is a real case, not just
-  // theoretical — e.g. the crashed dispatch's invocation row was itself
-  // never durably created before the crash.
-  it("fails the flow (not a silent advance) when writeResult fails for a reason other than race", async () => {
-    const pipeline = makePipeline({
-      nodes: {
-        AGENT: {
-          kind: "agent", agent: "scout",
-          promptBuilder: () => "original prompt — must NOT be sent on revival",
-          apply: (state, output) => ({ agentReply: output.text }),
-        },
-      },
-      edges: { __start__: "AGENT", AGENT: (state) => (state.agentReply ? "__end__" : null) },
-    });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
-    };
-    const warnCalls = [];
-    const spyLogger = { info: () => {}, warn: (msg) => warnCalls.push(msg), error: () => {} };
-    const store = makeStore([]);
-    const pipelinesRef = { value: new Map([["p", pipeline]]) };
-    const baseSpy = makeSpyNodeExecutionsStore();
-    const spy = {
-      ...baseSpy,
-      writeResult: async () => ({ ok: false, reason: "no-such-invocation" }),
-    };
-    const executor = createExecutor({
-      api, store, pipelinesRef, logger: spyLogger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: () => fakeSubagent,
-      failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
-      sessionIndex: null, nodeExecutionsStore: spy,
-      admissionQueueStore: makeAdmissionQueueStore(),
-    });
-    const flow = { flowId: "orphan-2", revision: 5, lastStep: "AGENT", status: "running", stateJson: { pipelineId: "p" }, waitJson: null };
-    store._map.set(flow.flowId, flow);
-    await spy.enter({ flowId: flow.flowId, pipelineId: "p", nodeId: "AGENT", subflowKey: null, kind: "fresh" });
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    assert.equal(warnCalls.length, 1);
-    assert.match(warnCalls[0], /resultJson write failed \(no-such-invocation\)/);
-    const final = store.get(flow.flowId);
-    assert.equal(final.status, "failed", "must fail outright, not dead-end downstream with 'no next node'");
-    assert.match(final.statusReason, /resultJson write failed \(no-such-invocation\)/);
-  });
-
-  it("still advances (does not fail) when writeResult reports a race — a concurrent writer already committed real content", async () => {
-    const pipeline = makePipeline({
-      nodes: {
-        AGENT: {
-          kind: "agent", agent: "scout",
-          promptBuilder: () => "unused",
-          apply: (state, output) => ({ agentReply: output.text }),
-        },
-      },
-      edges: { __start__: "AGENT", AGENT: (state) => (state.agentReply ? "__end__" : null) },
-    });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
-    };
-    const store = makeStore([]);
-    const pipelinesRef = { value: new Map([["p", pipeline]]) };
-    const baseSpy = makeSpyNodeExecutionsStore();
-    // Same honest simulation as the main-loop version of this test above —
-    // the loser gets {ok:false, reason:"race"}, but the CONCURRENT writer's
-    // own call actually won and stored the real content.
-    const spy = {
-      ...baseSpy,
-      writeResult: async (invocationId, result) => {
-        await baseSpy.writeResult(invocationId, result);
-        return { ok: false, reason: "race" };
-      },
-    };
-    const executor = createExecutor({
-      api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: () => fakeSubagent,
-      failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
-      sessionIndex: null, nodeExecutionsStore: spy,
-      admissionQueueStore: makeAdmissionQueueStore(),
-    });
-    const flow = { flowId: "orphan-3", revision: 5, lastStep: "AGENT", status: "running", stateJson: { pipelineId: "p" }, waitJson: null };
-    store._map.set(flow.flowId, flow);
-    await spy.enter({ flowId: flow.flowId, pipelineId: "p", nodeId: "AGENT", subflowKey: null, kind: "fresh" });
-
-    await executor.reviveAgentKindOrphan(flow);
-
-    assert.equal(store.get(flow.flowId)?.status, "succeeded", "a race loser must not fail the flow — the winner's write already has real data");
-  });
-});
-
-// ─── nodeEmitter.node.executing ───────────────────────────────────────────────
-
-// process.nextTick inside an async microtask chain fires only after all
-// currently-queued microtasks complete — i.e. after `await runFlow()` resolves.
-// A setImmediate flush ensures those nextTick callbacks drain before asserting.
-const flushNextTick = () => new Promise((r) => setImmediate(r));
 
 describe("runFlow — nodeEmitter.node.executing", () => {
   it("emits node.executing with correct flowId, nodeId, pipelineId when a node is entered", async () => {

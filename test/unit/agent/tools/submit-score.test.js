@@ -4,7 +4,7 @@
  * state/tool-handoff.js is mocked at the module level (via mock.module) so
  * the tool's resolveInvocationId()/writePendingResult() calls never touch
  * the real in-memory registry — we just control what
- * resolveInvocationId(sessionKey) returns and record what
+ * resolveInvocationId(ticket) returns and record what
  * writePendingResult() was called with.
  */
 
@@ -13,12 +13,12 @@ import assert from "node:assert/strict";
 
 const toolHandoffUrl = new URL("../../../../state/tool-handoff.js", import.meta.url).href;
 
-let invocationIdBySessionKey = {};
+let invocationIdByTicket = {};
 let writePendingResultCalls = [];
 
 await mock.module(toolHandoffUrl, {
   exports: {
-    resolveInvocationId: (sessionKey) => invocationIdBySessionKey[sessionKey] ?? null,
+    resolveInvocationId: (ticket) => invocationIdByTicket[ticket] ?? null,
     writePendingResult: (invocationId, payload) => { writePendingResultCalls.push({ invocationId, payload }); },
     readPendingResult: () => null,
     clearPendingResult: () => {},
@@ -56,27 +56,36 @@ function baseParams(overrides = {}) {
     score: 78,
     reasons: ["stack overlap", "budget above floor"],
     fitFlags: { language: true, budget: true, domain: true, time: true },
+    ticket: "tick-1",
     ...overrides,
   };
 }
 
 describe("registerSubmitScoreTool — submit_score", () => {
   beforeEach(() => {
-    invocationIdBySessionKey = {};
+    invocationIdByTicket = {};
     writePendingResultCalls = [];
   });
 
-  test("returns toolErr when the dispatch context cannot be resolved (no ctx/registration)", async () => {
+  test("returns toolErr when no ticket is passed", async () => {
     const toolDef = makeTool();
-    const result = await toolDef.execute("tc", baseParams(), null);
+    const result = await toolDef.execute("tc", baseParams({ ticket: undefined }), null);
     assert.equal(result.isError, true);
-    assert.ok(result.content[0].text.includes("could not resolve"));
+    assert.ok(result.content[0].text.includes("ticket is required"));
     assert.equal(writePendingResultCalls.length, 0);
   });
 
-  test("succeeds and writes to the pending-result map when invocationId resolves", async () => {
-    invocationIdBySessionKey["agent:scorer:flow:fid-1:SCORE_LLM"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "agent:scorer:flow:fid-1:SCORE_LLM" });
+  test("returns toolErr when the ticket names no parked invocation", async () => {
+    const toolDef = makeTool();
+    const result = await toolDef.execute("tc", baseParams(), null);
+    assert.equal(result.isError, true);
+    assert.ok(result.content[0].text.includes("unknown ticket"));
+    assert.equal(writePendingResultCalls.length, 0);
+  });
+
+  test("succeeds and writes to the pending-result map when the ticket resolves", async () => {
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams(), null);
     assert.equal(result.isError, undefined);
     assert.equal(writePendingResultCalls.length, 1);
@@ -87,64 +96,64 @@ describe("registerSubmitScoreTool — submit_score", () => {
   });
 
   test("rejects a non-integer score", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ score: 78.5 }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /score must be an integer 0-100/);
   });
 
   test("rejects a score below 0", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ score: -1 }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /score must be an integer 0-100/);
   });
 
   test("rejects a score above 100", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ score: 101 }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /score must be an integer 0-100/);
   });
 
   test("rejects an empty reasons array", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ reasons: [] }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /reasons must be a non-empty array/);
   });
 
   test("filters out blank/non-string reasons entries and still requires at least one real reason", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ reasons: ["  ", "", 5, null] }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /reasons must be a non-empty array/);
   });
 
   test("rejects missing fitFlags", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ fitFlags: undefined }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /fitFlags is required/);
   });
 
   test("rejects a fitFlags key that isn't a boolean", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ fitFlags: { language: "yes", budget: true, domain: true, time: true } }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /fitFlags\.language must be a boolean/);
   });
 
   test("rejects a hard-gate-failed score above the 30 cap", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ score: 60, fitFlags: { language: true, budget: false, domain: true, time: true } }), null);
     assert.equal(result.isError, true);
     assert.match(result.content[0].text, /score must be ≤30 when a hard gate failed/);
@@ -152,18 +161,18 @@ describe("registerSubmitScoreTool — submit_score", () => {
   });
 
   test("accepts a hard-gate-failed score at or below the 30 cap", async () => {
-    invocationIdBySessionKey["x"] = "inv-1";
-    const toolDef = makeTool({ sessionKey: "x" });
+    invocationIdByTicket["tick-1"] = "inv-1";
+    const toolDef = makeTool();
     const result = await toolDef.execute("tc", baseParams({ score: 20, fitFlags: { language: true, budget: false, domain: true, time: true } }), null);
     assert.equal(result.isError, undefined);
     assert.equal(writePendingResultCalls.length, 1);
     assert.equal(writePendingResultCalls[0].payload.score, 20);
   });
 
-  test("unregistered session (no dispatch registration for this sessionKey) surfaces a clear error, not a crash", async () => {
-    const toolDef = makeTool({ sessionKey: "agent:scorer:some-random-uuid" });
-    const result = await toolDef.execute("tc", baseParams(), null);
+  test("unknown ticket surfaces a clear error, not a crash", async () => {
+    const toolDef = makeTool();
+    const result = await toolDef.execute("tc", baseParams({ ticket: "tick-nope" }), null);
     assert.equal(result.isError, true);
-    assert.ok(result.content[0].text.includes("could not resolve"));
+    assert.ok(result.content[0].text.includes("unknown ticket"));
   });
 });

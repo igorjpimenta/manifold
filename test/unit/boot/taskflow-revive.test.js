@@ -6,7 +6,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { queryRunningOrphans, cancelOrphan, reviveSession, reviveViaFlowRevival, scanAndCleanup, isManifoldOwnedSession, REVIVAL_MSG } from "../../../boot/taskflow-revive.js";
-import { createGatewaySubagentGate } from "../../../engine/gateway-subagent.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -333,10 +332,10 @@ describe("scanAndCleanup", () => {
 
   // Both manifold-flow-revival and manifold-taskflow-revive start at boot
   // with no ordering between them (startupDelayMs defaults to 0). A cancel
-  // issued here by session key can tear down a fresh reviveAgentKindOrphan
-  // dispatch already in flight under that exact deterministic key — the
-  // dispatch then hangs with nothing left to observe or log it. A
-  // manifold-owned session must not be touched at all, not even to cancel it.
+  // issued here by session key can tear down a fresh revival already in
+  // flight for that same flow — the run then hangs with nothing left to
+  // observe or log it. A manifold-owned session must not be touched at
+  // all, not even to cancel it.
   it("skips a manifold-owned session entirely — no cancel call, no revival dispatch", async () => {
     const dbPath = makeTempDb([
       { task_id: "task-manifold-01", status: "running", child_session_key: "agent:scorer:subagent:mf-99d6948f-score_llm", last_event_at: 1000 },
@@ -382,14 +381,12 @@ describe("scanAndCleanup", () => {
     const sessionIndex = { flowIdForSessionKey: async (key) => (key === "agent:scorer:subagent:mf-99d6948f-score_llm" ? flow.flowId : null) };
     const runStore = { get: async (id) => (id === flow.flowId ? flow : null) };
     let delegatedFlow = null;
-    let delegatedNodeId = null;
-    const executor = { reviveAgentKindOrphan: async (f, nodeId) => { delegatedFlow = f; delegatedNodeId = nodeId; } };
+    const executor = { resume: async (flowId) => { delegatedFlow = flowId; } };
     const logger = makeLogger();
     await scanAndCleanup(api, dbPath, 0, logger, { sessionIndex, runStore, executor });
     assert.equal(cancelCalled, false, "delegation handles this session — the generic cancel path must not also run");
     assert.equal(genericRunCalled, false, "must not use the generic flow-unaware reviveSession");
-    assert.equal(delegatedFlow, flow, "the resolved flow row is passed straight to reviveAgentKindOrphan");
-    assert.equal(delegatedNodeId, "SCORE_LLM", "the in-flight node comes from the flow's own waitJson");
+    assert.equal(delegatedFlow, flow.flowId, "the resolved flow id is passed straight to resume");
     assert.ok(logger._lines.info.some((m) => m.includes("delegated") && m.includes("flow revival")));
     assert.ok(logger._lines.info.some((m) => m.includes("scanned=1 cancelled=0 revived=0 delegated=1")));
   });
@@ -414,7 +411,7 @@ describe("scanAndCleanup", () => {
     const flow = { flowId: "flow-terminal", status: "succeeded" };
     const sessionIndex = { flowIdForSessionKey: async () => flow.flowId };
     const runStore = { get: async () => flow };
-    const executor = { reviveAgentKindOrphan: async () => { throw new Error("must not be called for a terminal flow"); } };
+    const executor = { resume: async () => { throw new Error("must not be called for a terminal flow"); } };
     const logger = makeLogger();
     await scanAndCleanup(api, dbPath, 0, logger, { sessionIndex, runStore, executor });
     assert.equal(cancelCalled, false);
@@ -435,7 +432,7 @@ describe("reviveViaFlowRevival", () => {
   it("returns ok:false when the session key doesn't resolve to a flow", async () => {
     const result = await reviveViaFlowRevival(
       { child_session_key: "sk-x" },
-      { sessionIndex: { flowIdForSessionKey: async () => null }, runStore: { get: async () => null }, executor: { reviveAgentKindOrphan: async () => {} } },
+      { sessionIndex: { flowIdForSessionKey: async () => null }, runStore: { get: async () => null }, executor: { resume: async () => {} } },
     );
     assert.equal(result.ok, false);
     assert.equal(result.reason, "flow_id_not_found");
@@ -444,81 +441,35 @@ describe("reviveViaFlowRevival", () => {
   it("returns ok:false when the resolved flow no longer exists", async () => {
     const result = await reviveViaFlowRevival(
       { child_session_key: "sk-x" },
-      { sessionIndex: { flowIdForSessionKey: async () => "flow-gone" }, runStore: { get: async () => null }, executor: { reviveAgentKindOrphan: async () => {} } },
+      { sessionIndex: { flowIdForSessionKey: async () => "flow-gone" }, runStore: { get: async () => null }, executor: { resume: async () => {} } },
     );
     assert.equal(result.ok, false);
     assert.equal(result.reason, "flow_not_found");
   });
 
-  it("returns ok:true and calls reviveAgentKindOrphan with the flow and its waitJson node id", async () => {
-    const flow = { flowId: "flow-1", status: "queued", waitJson: { kind: "agent-dispatch", nodeId: "SCORE_LLM" } };
+  it("returns ok:true and resumes the resolved flow", async () => {
+    const flow = { flowId: "flow-1", status: "queued", waitJson: { kind: "agent-claim", nodeId: "SCORE_LLM" } };
     let called = null;
     const result = await reviveViaFlowRevival(
       { child_session_key: "sk-x" },
       {
         sessionIndex: { flowIdForSessionKey: async () => flow.flowId },
         runStore: { get: async () => flow },
-        executor: { reviveAgentKindOrphan: async (f, nodeId) => { called = { f, nodeId }; } },
+        executor: { resume: async (flowId) => { called = flowId; } },
       },
     );
     assert.equal(result.ok, true);
     assert.equal(result.flowId, flow.flowId);
-    assert.deepEqual(called, { f: flow, nodeId: "SCORE_LLM" });
+    assert.equal(called, flow.flowId);
   });
 });
 
-// ── scanAndCleanup — dispatch through the executor's gated subagent ─────────
+// ── scanAndCleanup — revival uses api.runtime.subagent ───────────────────────
 
-describe("scanAndCleanup — revival dispatch goes through the executor's subagent", () => {
-  it("cancels and classifies while the gate holds the dispatch; dispatches once the gateway is ready", async () => {
-    const dbPath = makeTempDb([
-      { task_id: "task-gated-01", status: "running", child_session_key: "agent:main:x", last_event_at: 1000 },
-    ]);
-    let runCalled = false;
-    const api = {
-      config: {},
-      runtime: {
-        config: { current: () => ({}) },
-        tasks: { runs: { bindSession: () => ({ cancel: async () => ({ cancelled: true }) }) } },
-      },
-    };
-    let resolveReady;
-    const ready = new Promise((r) => { resolveReady = r; });
-    const gate = createGatewaySubagentGate({ whenGatewayReady: () => ready });
-    const raw = { run: async () => { runCalled = true; return { runId: "r" }; } };
-    const executor = { getSubagent: () => gate(raw) };
-    const logger = makeLogger();
-    const donePromise = scanAndCleanup(api, dbPath, 0, logger, { executor });
-    let doneSettled = false;
-    donePromise.then(() => { doneSettled = true; });
-
-    await new Promise((r) => setTimeout(r, 20));
-
-    assert.equal(doneSettled, false, "the dispatch is held at the gate");
-    assert.ok(logger._lines.info.some((m) => m.includes("cancelled task-gat")), "the cancel already happened");
-    assert.equal(runCalled, false);
-
-    resolveReady();
-    await donePromise;
-    assert.equal(runCalled, true);
-    assert.ok(logger._lines.info.some((m) => m.includes("scanned=1 cancelled=1 revived=1")));
-  });
-
-  it("prefers the executor's subagent over api.runtime.subagent", async () => {
+describe("scanAndCleanup — revival uses api.runtime.subagent", () => {
+  it("revives a generic orphan through api.runtime.subagent", async () => {
     const dbPath = makeTempDb([
       { task_id: "task-exec-01", status: "running", child_session_key: "agent:main:x", last_event_at: 1000 },
-    ]);
-    const api = makeApi();
-    let viaExecutor = 0;
-    const executor = { getSubagent: () => ({ run: async () => { viaExecutor += 1; return { runId: "r" }; } }) };
-    const logger = makeLogger();
-    await scanAndCleanup(api, dbPath, 0, logger, { executor });
-    assert.equal(viaExecutor, 1);
-  });
-
-  it("falls back to api.runtime.subagent without an executor", async () => {
-    const dbPath = makeTempDb([
-      { task_id: "task-default-01", status: "running", child_session_key: "agent:main:x", last_event_at: 1000 },
     ]);
     const api = makeApi();
     const logger = makeLogger();

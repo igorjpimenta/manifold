@@ -7,7 +7,6 @@ import {
   isQueued,
   mergeForConflict,
   withEditableTextDefault,
-  mintAgentSessionKey,
   isManifoldOwnedSessionKey,
   shortSummary,
   deepClone,
@@ -208,25 +207,11 @@ describe("withEditableTextDefault", () => {
   });
 });
 
-// ── mintAgentSessionKey ───────────────────────────────────────────────────────
-
-describe("mintAgentSessionKey", () => {
-  it("mints an opaque core handle without gateway namespace", () => {
-    const key = mintAgentSessionKey("12345678-aabb-ccdd-eeff-000000000000", "PROPOSE");
-    assert.equal(key, "mf-12345678-propose");
-  });
-
-  it("appends itemKey", () => {
-    const key = mintAgentSessionKey("12345678-0000-0000-0000-000000000000", "DRAFT", "item-1");
-    assert.ok(key.includes("draft-item-1"), key);
-  });
-});
-
 // ── isManifoldOwnedSessionKey ─────────────────────────────────────────────────
 
 describe("isManifoldOwnedSessionKey", () => {
-  it("returns true for a core-minted opaque handle", () => {
-    assert.equal(isManifoldOwnedSessionKey(mintAgentSessionKey("12345678-aabb-ccdd-eeff-000000000000", "PROPOSE")), true);
+  it("returns true for an opaque handle", () => {
+    assert.equal(isManifoldOwnedSessionKey("mf-12345678-PROPOSE"), true);
   });
 
   it("returns true for the adapter's gateway shape of an opaque handle", () => {

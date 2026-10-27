@@ -98,15 +98,8 @@ export function withEditableTextDefault(payload, branchData) {
   return { ...payload, editableText: candidate };
 }
 
-// Core-minted opaque handle: `mf-<flow8>-<node>[-<item>]`. No agent prefix,
-// no gateway namespace — the adapter maps this to a gateway key at the edge
-// (plugins/openclaw/manifold/session-keys.js) before any subagent call.
-export function mintAgentSessionKey(flowId, nodeId, itemKey) {
-  const seed = itemKey ? `${nodeId.toLowerCase()}-${itemKey}` : nodeId.toLowerCase();
-  return `mf-${flowId.slice(0, 8)}-${seed}`;
-}
 
-// Opaque core handle minted above, verbatim (core-side maps, handoff keys).
+// Opaque core handle shape (`mf-<flow8>-<node>[-<item>]`), verbatim.
 const OPAQUE_SESSION_KEY_RE = /^mf-[0-9a-f]{8}-/;
 // Gateway shape the adapter produces for an opaque handle:
 // `agent:<agent>:subagent:mf-<flow8>-<node>[-<item>]`. Matched so boot-time

@@ -1,21 +1,14 @@
 // submit-score.js — registers the submit_score agent tool.
 //
-// Replaces the "scorer" agent's old contract (reply with a single fenced
-// ```json``` block, parsed free-text via extractJsonBlock in
-// score-llm.js's apply()) — that free-text parsing has been failing at a
-// high rate as the model increasingly emits malformed content instead of
-// clean JSON. Modeled on submit-draft.js's structured-tool-call pattern,
-// but far simpler: no file writing, no frontmatter — just structural
-// validation plus a hand-off write to tool-handoff.js's in-memory pending-
-// result map, keyed by this SCORE_LLM dispatch's own invocationId
-// (resolveInvocationId, tool-handoff.js — resolved from ctx.sessionKey via
-// the registration dispatchAgentEntry makes right before spawning this
-// session; see that module's header comment for why this doesn't need to
-// touch disk or a DB).
+// Gives a scoring agent a structured channel instead of a free-text reply:
+// structural validation plus a hand-off write to tool-handoff.js's
+// in-memory pending-result map, keyed by the parked invocation the
+// explicit `ticket` param names (resolveInvocationId, tool-handoff.js —
+// registered at park time by engine/executor-nodes.js; the ticket arrives
+// in the claim instructions, never via session identity).
 
 import { toolErr } from "./shared.js";
 import { resolveInvocationId, writePendingResult } from "../../../../../state/tool-handoff.js";
-import { toOpaqueKey } from "../../session-keys.js";
 
 export function registerSubmitScoreTool({ api }) {
   api.registerTool((ctx) => ({
@@ -26,7 +19,7 @@ export function registerSubmitScoreTool({ api }) {
     parameters: {
       type: "object",
       additionalProperties: false,
-      required: ["score", "reasons", "fitFlags"],
+      required: ["score", "reasons", "fitFlags", "ticket"],
       properties: {
         score: {
           type: "number",
@@ -47,6 +40,10 @@ export function registerSubmitScoreTool({ api }) {
             domain: { type: "boolean" },
             time: { type: "boolean" },
           },
+        },
+        ticket: {
+          type: "string",
+          description: "Claim ticket from your claim instructions — names the parked invocation this score belongs to. Copy it verbatim.",
         },
       },
     },
@@ -69,13 +66,13 @@ export function registerSubmitScoreTool({ api }) {
         return toolErr(`score must be ≤30 when a hard gate failed (language=${fitFlags.language}, budget=${fitFlags.budget}, domain=${fitFlags.domain}), got ${score}`);
       }
 
-      // ctx.sessionKey arrives gateway-shaped; the dispatch registered
-      // under core's opaque handle (session-keys.js) — map back first,
-      // falling back to the raw key for verbatim explicit overrides.
-      const opaque = toOpaqueKey(ctx?.sessionKey);
-      const invocationId = (opaque != null ? resolveInvocationId(opaque) : null) ?? resolveInvocationId(ctx?.sessionKey);
+      const ticket = typeof params?.ticket === "string" ? params.ticket.trim() : "";
+      if (!ticket) {
+        return toolErr("ticket is required — copy the claim ticket from your claim instructions verbatim");
+      }
+      const invocationId = resolveInvocationId(ticket);
       if (!invocationId) {
-        return toolErr("could not resolve this session's dispatch context — this tool must be called from within a SCORE_LLM node dispatch");
+        return toolErr("unknown ticket — it names no parked invocation (expired, already reported, or mistyped)");
       }
 
       writePendingResult(invocationId, { score, reasons, fitFlags });

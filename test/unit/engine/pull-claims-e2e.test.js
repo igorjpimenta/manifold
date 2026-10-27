@@ -1,5 +1,5 @@
 // Pull-claim park → claim → report → resume E2E (PULL-1) on a real
-// executor with a pull:true agent node: real sqlite run/node-execution
+// executor with an agent node: real sqlite run/node-execution
 // stores on isolated tmp files, real state-store, always-admit admission.
 // The push-dispatch path is untouched: with no working subagent wired, any
 // push dispatch would fail the flow — success proves the pull branch skipped it.
@@ -40,7 +40,7 @@ async function makeHarness() {
         state: {},
         nodes: {
           ENTER: { kind: "code", run: () => ({ ENTER: { ok: true } }) },
-          WORK: { kind: "agent", agent: "test-agent", pull: true },
+          WORK: { kind: "agent", agent: "test-agent" },
           DONE: { kind: "code", run: () => ({ DONE: { ok: true } }) },
         },
         edges: {
@@ -86,7 +86,7 @@ describe("pull-claim park → claim → report → resume E2E", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
-  test("pull:true agent node parks, emits, and resumes to succeeded after a report", async () => {
+  test("agent node parks, emits, and resumes to succeeded after a report", async () => {
     harness = await makeHarness();
     const { executor, runStore, nodeExecutionsStore, store, admissionQueueStore, emitted } = harness;
 
