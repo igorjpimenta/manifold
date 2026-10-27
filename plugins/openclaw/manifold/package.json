@@ -41,7 +41,10 @@
     "index.js",
     "meta.js",
     "openclaw.plugin.json",
-    "session-keys.js"
+    "session-keys.js",
+    "webhook.js",
+    "autoregister.js",
+    "telemetry-sources.js"
   ],
   "openclaw": {
     "extensions": [
