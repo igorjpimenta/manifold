@@ -69,34 +69,6 @@ its wake — unstamped calls fail at the boundary, never as poison
 downstream. Remote daemon instead: `manifold serve --mcp http`
 (`MANIFOLD_BEARER` required) behind TLS, same tools, same stamps.
 
-### opencode
-
-`~/.config/opencode/opencode.jsonc` — MCP entry plus the no-op meta
-companion line, mirroring the existing `file://` entries:
-
-```jsonc
-{
-  "mcp": {
-    "manifold": {
-      "type": "local",
-      "command": ["manifold", "serve", "--mcp", "stdio"],
-      "env": {
-        "MANIFOLD_HARNESS": "opencode"
-      }
-    }
-  },
-  "plugin": [
-    "file://<npm-root-g>/@igorjpimenta/manifold/plugins/opencode/manifold-meta.js"
-  ]
-}
-```
-
-Agent/session on opencode: hooks can only mutate outgoing `args`, and the
-MCP path has no `params._meta` slot, so per-call stamps travel as
-`manifold_agent`/`manifold_session` args (sound over stdio, where the
-spawner is the sole peer). Without stamps the calls fail loudly — the
-signal that the hook side is not wired yet.
-
 ### generic clients
 
 No plugin: declare the harness and stamp agent/session per call yourself:
@@ -163,18 +135,6 @@ Payload shape: `{event, at, flow: {id, pipelineId, nodeId} | null,
 session: {harness, agent, sessionKey}}`. `agent.dispatched` requires
 `session.agent` (400 otherwise); `gate.opened` without an agent is
 report-only (200, `woken:false`).
-
-## opencode
-
-Why a no-op: opencode's `tool.execute.before` can only mutate the outgoing
-call's `args`, but the MCP path builds `callTool({ name, arguments: args })`
-— params carry only name + arguments, there is no `params._meta` slot, and
-every MCP input schema is forced `additionalProperties: false`, so identity
-cannot travel per call. `plugins/opencode/manifold-meta.js` is a registered
-no-op documenting the constraint in place. Manifold mints session keys
-itself, so the only registration an opencode setup needs is the push URL
-core POSTs to: `pushUrls = { "opencode": { "url": "…" } }` (plus `bearer`
-when the receiver checks one).
 
 ## generic clients
 

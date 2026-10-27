@@ -10,7 +10,7 @@ test("assertDeclaration: missing harness refuses; reserved refuses", () => {
 });
 
 test("declaredFromEnv reads MANIFOLD_HARNESS, fails loudly without", () => {
-  assert.deepEqual(declaredFromEnv({ MANIFOLD_HARNESS: "opencode" }), { harness: "opencode" });
+  assert.deepEqual(declaredFromEnv({ MANIFOLD_HARNESS: "my-harness" }), { harness: "my-harness" });
   assert.throws(() => declaredFromEnv({}), /missing: harness/);
 });
 

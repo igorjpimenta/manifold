@@ -25,7 +25,7 @@ import { createNodeHealthStore } from "../../../state/node-health-store.js";
 import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
-import { registerCliCommands } from "../../../agent/cli.js";
+import { registerCliCommands } from "../../../bin/cli.js";
 import {
   registerGraphFlowTool,
   registerProposeDraftTool,
@@ -81,6 +81,7 @@ import { registerGatewayReadiness } from "../../../engine/gateway-readiness.js";
 import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
 import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
+import { registerManifoldMetaHook } from "./meta.js";
 import { registerPushWebhook } from "./webhook.js";
 import { autoregisterPushTarget } from "./autoregister.js";
 import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
@@ -236,6 +237,7 @@ export default definePluginEntry({
     registerProfileReadGate(api, { profilePath: userCfg.profilePath });
     registerProfileWriteLock(api, { profilePath: userCfg.profilePath, resultsDir: userCfg.profileEditResultsDir });
     registerScoreToolWakeHook(api);
+    registerManifoldMetaHook(api);
 
     const pipelinesRef = { value: new Map() };
 

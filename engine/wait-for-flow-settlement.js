@@ -1,14 +1,14 @@
 // wait-for-flow-settlement.js — recursively waits for a flow AND every
 // descendant it spawns via any childFlows:true subflow node, at any depth,
 // to reach a stopping point (genuinely terminal, or a real human-gate
-// wait). Exists specifically for the one-shot CLI (agent/cli.js) — the
+// wait). Exists specifically for the one-shot CLI (bin/cli.js) — the
 // live gateway process never needs this: its own event loop keeps
 // draining pending setImmediate/timer callbacks for as long as it runs,
 // so children spawned by dispatchSubflowChildren settle naturally over
 // time. A one-shot CLI invocation has no such guarantee: `withExit`'s
 // `process.exit(0)` kills any pending setImmediate outright.
 //
-// `agent/cli.js`'s start/rerun/retry/approve commands each `await` exactly
+// `bin/cli.js`'s start/rerun/retry/approve commands each `await` exactly
 // one `executor.runFlow()`/`resume()` call for the ONE flow they were
 // given, documented as "blocks until the flow reaches terminal or
 // human-gate" — but that await resolves the moment THAT flow itself goes
