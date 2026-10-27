@@ -103,7 +103,7 @@ describe("executeNode — agent kind", () => {
     assert.deepEqual(emitted.map((e) => e.kind), ["agent.claim.parked"]);
   });
 
-  it("a reported ticket consumes the stored result instead of parking again", async () => {
+  it("a reported ticket without apply() consumes the stored result as-is (nodes with no author logic keep raw trust)", async () => {
     const nodeExecutionsStore = makeNodeExecutionsStore({
       getClaim: async () => ({ claimState: "reported" }),
       getResultForNode: async () => ({ resultWrittenAt: 1, resultJson: JSON.stringify({ draft: "done" }) }),
@@ -113,6 +113,116 @@ describe("executeNode — agent kind", () => {
     const node = { kind: "agent", agent: "cyrano" };
     const result = await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f", invocationId: "inv-rep-1" });
     assert.deepEqual(result, { stateUpdate: { draft: "done" } });
+  });
+
+  it("resume runs node.apply with the reported output, once, in the push-dispatch ctx shape", async () => {
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      getClaim: async () => ({ claimState: "reported" }),
+      getResultForNode: async () => ({ resultWrittenAt: 1, resultJson: JSON.stringify({ text: "raw" }) }),
+      markApplied: async () => ({ ok: true }),
+    });
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    const seen = [];
+    const node = {
+      kind: "agent", agent: "cyrano",
+      apply: (state, output, item, meta, needs) => {
+        seen.push([state, output, item, meta, typeof needs]);
+        return { shaped: output.text };
+      },
+    };
+    const result = await executeNode({ node, nodeId: "DRAFT", state: { base: 1 }, flowId: "flow-abc", invocationId: "inv-apply-1" });
+    assert.equal(seen.length, 1, "apply runs exactly once");
+    assert.deepEqual(seen[0][0], { base: 1 }, "1st arg is the raw state (applyCtx)");
+    assert.deepEqual(seen[0][1], { text: "raw" }, "2nd arg is the reported output");
+    assert.equal(seen[0][2], undefined, "no subflow item on a top-level node");
+    assert.deepEqual(seen[0][3], { flowId: "flow-abc", nodeId: "DRAFT", invocationId: "inv-apply-1" }, "4th arg is the apply meta");
+    assert.equal(seen[0][4], "function", "5th arg is the lazy needs ctx");
+    assert.deepEqual(result, { stateUpdate: { shaped: "raw" } }, "the apply return becomes the state update, not the raw report");
+  });
+
+  it("resume honors the single-arg named apply convention", async () => {
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      getClaim: async () => ({ claimState: "reported" }),
+      getResultForNode: async () => ({ resultWrittenAt: 1, resultJson: JSON.stringify({ n: 2 }) }),
+      markApplied: async () => ({ ok: true }),
+    });
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    const seen = [];
+    const node = {
+      kind: "agent", agent: "cyrano",
+      apply: ({ state, output, item, meta, needs }) => {
+        seen.push({ state, output, item, meta, hasNeeds: typeof needs === "function" });
+        return { doubled: output.n * 2 };
+      },
+    };
+    const result = await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f", invocationId: "inv-apply-2" });
+    assert.equal(seen.length, 1);
+    assert.deepEqual(seen[0].output, { n: 2 });
+    assert.equal(seen[0].item, undefined);
+    assert.equal(seen[0].meta.nodeId, "DRAFT");
+    assert.equal(seen[0].hasNeeds, true);
+    assert.deepEqual(result, { stateUpdate: { doubled: 4 } });
+  });
+
+  it("a throwing apply fails the node instead of succeeding silently", async () => {
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      getClaim: async () => ({ claimState: "reported" }),
+      getResultForNode: async () => ({ resultWrittenAt: 1, resultJson: JSON.stringify({}) }),
+      markApplied: async () => ({ ok: true }),
+    });
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    const node = {
+      kind: "agent", agent: "cyrano",
+      apply: () => { throw new Error("apply boom"); },
+    };
+    await assert.rejects(
+      () => executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f", invocationId: "inv-apply-3" }),
+      /apply boom/,
+    );
+  });
+
+  it("park builds the prompt through promptBuilder and persists it with the ticket", async () => {
+    let storedPrompt;
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      markPullReady: async (invocationId, { prompt } = {}) => { storedPrompt = prompt; return { ok: true }; },
+    });
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    const node = {
+      kind: "agent", agent: "cyrano",
+      promptBuilder: (state, { needs }) => `summarize ${state.topic} (needs:${typeof needs})`,
+    };
+    const result = await executeNode({ node, nodeId: "DRAFT", state: { topic: "q3" }, flowId: "flow-00000005", invocationId: "inv-park-p" });
+    assert.equal(storedPrompt, "summarize q3 (needs:function)", "the exact promptBuilder output is what the ticket stores");
+    assert.equal(result.waitJson?.kind, "agent-claim");
+    assert.ok(typeof result.waitJson?.sessionKey === "string" && result.waitJson.sessionKey.startsWith("mf-"), "waitJson carries the minted core handle");
+  });
+
+  it("park honors explicit sessionKey and sessionKeyBuilder overrides verbatim", async () => {
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      markPullReady: async () => ({ ok: true }),
+    });
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    const explicit = await executeNode({
+      node: { kind: "agent", agent: "cyrano", sessionKey: "custom-key" },
+      nodeId: "DRAFT", state: {}, flowId: "flow-00000005", invocationId: "inv-p1",
+    });
+    assert.equal(explicit.waitJson.sessionKey, "custom-key");
+    const built = await executeNode({
+      node: { kind: "agent", agent: "cyrano", sessionKeyBuilder: (state, flowId) => `built:${flowId}` },
+      nodeId: "DRAFT", state: {}, flowId: "flow-00000005", invocationId: "inv-p2",
+    });
+    assert.equal(built.waitJson.sessionKey, "built:flow-00000005");
+  });
+
+  it("park refuses an agent node with no entry.agent", async () => {
+    const nodeExecutionsStore = makeNodeExecutionsStore({
+      markPullReady: async () => ({ ok: true }),
+    });
+    const { executeNode } = makeRunner({ nodeExecutionsStore });
+    await assert.rejects(
+      () => executeNode({ node: { kind: "agent" }, nodeId: "DRAFT", state: {}, flowId: "f", invocationId: "inv-anon" }),
+      /refusing anonymous dispatch/,
+    );
   });
 
   it("a reported ticket with no stored result fails loudly", async () => {

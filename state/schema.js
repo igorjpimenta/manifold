@@ -54,6 +54,9 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   claimedSession:  text('claimed_session'),
   claimedAt:       integer('claimed_at'),
   leaseExpiresAt:  integer('lease_expires_at'),
+  // Built at park from node.promptBuilder over the assembled state and
+  // read back on claim so the claimant gets instructions with the ticket.
+  prompt:          text('prompt'),
 }, (table) => [
   // NOTE: idx_invocations_identity (UNIQUE on flow_id, node_id,
   // COALESCE(subflow_key, ''), visit_seq) is intentionally absent here —

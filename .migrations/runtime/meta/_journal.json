@@ -36,6 +36,13 @@
       "when": 1793126730046,
       "tag": "0004_shiny_ultimo",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793129131127,
+      "tag": "0005_lowly_stone_men",
+      "breakpoints": true
     }
   ]
 }

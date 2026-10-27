@@ -130,6 +130,7 @@ async function _createStore(dbPath) {
         id: flowNodeInvocations.id,
         flowId: flowNodeInvocations.flowId,
         nodeId: flowNodeInvocations.nodeId,
+        prompt: flowNodeInvocations.prompt,
         claimState: flowNodeInvocations.claimState,
         harness: flowNodeInvocations.claimedHarness,
         agent: flowNodeInvocations.claimedAgent,
@@ -143,6 +144,7 @@ async function _createStore(dbPath) {
         ticket: row.id,
         flowId: row.flowId,
         nodeId: row.nodeId,
+        prompt: row.prompt ?? null,
         claimState: row.claimState ?? null,
         harness: row.harness ?? null,
         agent: row.agent ?? null,
@@ -831,10 +833,15 @@ async function _createStore(dbPath) {
       } catch { return null; }
     }
 
-    async function markPullReady(invocationId) {
+    async function markPullReady(invocationId, { prompt = null } = {}) {
       if (!invocationId) return { ok: false, reason: "no-invocation-id" };
       try {
         return await withSharedWrite(dbPath, async () => {
+          // Prompt is rewritten on every park; the ready CAS below only
+          // fires on the NULL -> ready transition.
+          await db.update(flowNodeInvocations)
+            .set({ prompt })
+            .where(eq(flowNodeInvocations.id, invocationId));
           const r = await db.update(flowNodeInvocations)
             .set({ claimState: "ready" })
             .where(and(eq(flowNodeInvocations.id, invocationId), isNull(flowNodeInvocations.claimState)));
@@ -856,7 +863,7 @@ async function _createStore(dbPath) {
       for (let attempt = 0; attempt < CLAIM_RACE_ATTEMPTS; attempt++) {
         const won = await withSharedWrite(dbPath, async () => {
           const { rows } = await client.execute({
-            sql: `SELECT id, flow_id, node_id FROM flow_node_invocations WHERE claim_state = 'ready' ORDER BY invoked_at ASC, rowid ASC LIMIT 1`,
+            sql: `SELECT id, flow_id, node_id, prompt FROM flow_node_invocations WHERE claim_state = 'ready' ORDER BY invoked_at ASC, rowid ASC LIMIT 1`,
             args: [],
           });
           const row = rows[0] ?? null;
@@ -868,7 +875,7 @@ async function _createStore(dbPath) {
             claimedAt: now, leaseExpiresAt: now + leaseMs,
           }).where(and(eq(flowNodeInvocations.id, row.id), eq(flowNodeInvocations.claimState, "ready")));
           if (r.rowsAffected === 0) return { raced: true };
-          return { ticket: row.id, flowId: row.flow_id, nodeId: row.node_id, claimedAt: now, leaseExpiresAt: now + leaseMs };
+          return { ticket: row.id, flowId: row.flow_id, nodeId: row.node_id, prompt: row.prompt ?? null, claimedAt: now, leaseExpiresAt: now + leaseMs };
         });
         if (!won) return null;
         if (!won.raced) return won;

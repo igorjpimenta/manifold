@@ -20,7 +20,9 @@ node; the harness wakes its own receiver and the receiver pulls the work.
 
 1. **Park.** An agent node parks its invocation as a `ready` ticket and
    blocks with `waitJson: { kind: "agent-claim", ticket, nodeId }`,
-   emitting `agent.claim.parked` on the event bus.
+   emitting `agent.claim.parked` on the event bus. Core builds the prompt
+   at park (`node.promptBuilder` over the assembled state) and stores it
+   with the ticket; the claim response carries that prompt to the claimant.
 2. **Push `agent.ready`.** A harness that learns of the ticket (WS event
    stream, `manifold_claim` polling) POSTs `{event:"agent.ready", flow,
    session, claim}` to its webhook to wake a receiver. `claim.ticket` is
@@ -30,7 +32,8 @@ node; the harness wakes its own receiver and the receiver pulls the work.
    a lease (default 5 min). Empty hands means someone else holds
    everything — stop, do not execute.
 4. **Execute**, then **report** via `manifold_report` with the ticket and
-   the result object.
+   the result object. Core runs `node.apply(reportedOutput, ctx)` on
+   resume, so pipeline-author logic shapes the state update.
 
 Binding rules: the triple is stamped from request identity, never from a
 tool param. A heartbeat (`manifold_heartbeat`) or report from any other

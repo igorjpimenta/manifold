@@ -1,0 +1,1 @@
+ALTER TABLE `flow_node_invocations` ADD `prompt` text;
