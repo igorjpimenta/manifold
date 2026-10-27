@@ -23,10 +23,18 @@ node is actually doing.
 
 ## The gap
 
-If a `kind:"agent"` node is mid-dispatch (an actual outbound LLM/Claude call,
-via `dispatchAgentEntry` → `dispatchAgentWithRetry` → `runSubagentTurn` in
-`engine/executor-subagent.js`/`executor-nodes.js`) when its flow — root or
-subflow, doesn't matter — gets cancelled:
+> Pull-first note: the dispatch chain named here (`dispatchAgentEntry` →
+> `dispatchAgentWithRetry` → `runSubagentTurn` in the deleted
+> `engine/executor-subagent.js`) is gone with push dispatch. The analogous
+> pull-world case is a claimed-but-unreported ticket at cancel time: the
+> claimant keeps working until its lease lapses, then the sweeper requeues
+> the ticket — but the flow is already terminal, so the work lands
+> nowhere. Same shape of gap (in-flight work outlives the cancel), no
+> session to kill either way.
+
+If a `kind:"agent"` node is mid-turn (an actual outbound LLM/Claude call
+placed by the claiming harness, outside core's reach) when its flow —
+root or subflow, doesn't matter — gets cancelled:
 
 - The LLM call is never interrupted. It keeps running to natural completion,
   unaware anything happened.

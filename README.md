@@ -55,6 +55,7 @@ it focused on orientation and quick reference:
 - [Pipeline schema (canonical)](#pipeline-schema-canonical)
 - [Common author mistakes](#common-author-mistakes-read-this-before-writing-a-pipeline)
 - [Node kinds](#node-kinds)
+- [Claim flow (pull-first agent turns)](#claim-flow-pull-first-agent-turns)
 - [Subflow nodes (childFlows)](#subflow-nodes-childflows)
 - [Node authoring reference](#node-authoring-reference)
 - [Groups (compound parents in the dashboard)](#groups-compound-parents-in-the-dashboard)
@@ -117,14 +118,16 @@ it focused on orientation and quick reference:
 
 A flow is created `running` at `__start__` (`store.create`). The executor
 loop repeatedly resolves `edges[lastStep](state)` to the next node id,
-dispatches it per its `kind` (`code` runs `node.run`; `agent` builds a
-prompt and dispatches a subagent; `subflow` fans `.selector(state)` out
+dispatches it per its `kind` (`code` runs `node.run`; `agent` parks a
+claim ticket and blocks until a harness claims and reports it (see *Claim
+flow* below); `subflow` fans `.selector(state)` out
 into real child `flow_runs`, one per item, and blocks until every sibling
 is terminal; `human-gate` builds `waitJson` and blocks), and persists the
 outcome — a `stateUpdate` advances and loops again, a thrown error or
 `_error` sentinel fails/blocks the flow, `__end__` runs `runAudit` and
 writes the terminal status (`succeeded`/`failed`/`skipped`). Blocked flows
-resume via `POST /manifold/resume-from-gate`; any non-terminal flow can be
+resume when their wait clears — a gate decision for `human-gate`, a ticket
+report for `agent-claim` (see *Claim flow* below); any non-terminal flow can be
 cancelled by an operator. See `ENGINE_INTERNALS.md` for the exact
 persistence call at each step and the full status-transition map.
 
@@ -283,17 +286,19 @@ always merges into `state` on every pass — have *that* node's own
 edge read that (capped) instead of trying to count its own dispatches or
 looping unconditionally.
 
-**Generalized engine-wide (2026-08-24)**: the same rationale that removed
-the SUBMIT infra loop applied to every `kind:"agent"` node's `node.retry`
-config — `dispatchAgentWithRetry` (`engine/executor-subagent.js`) no
-longer retries at all, for any agent dispatch, anywhere. Live cost data
-was the trigger: `freelance_workana-proposal::SCORE` burned up to 41
-calls per flow retrying against a single unreliable model with no
+**Generalized engine-wide (2026-08-24, still true in the pull world)**:
+the same rationale that removed the SUBMIT infra loop applied to every
+`kind:"agent"` node — there is no retry on agent work, anywhere. (The old
+push-dispatch retry helper this section used to name,
+`dispatchAgentWithRetry` in the deleted `engine/executor-subagent.js`, is
+gone with push dispatch; the pull path parks exactly one ticket per visit.)
+Live cost data was the trigger: `freelance_workana-proposal::SCORE` burned
+up to 41 calls per flow retrying against a single unreliable model with no
 fallback, and 11 of 13 flows failed anyway — the retries weren't
 rescuing the outcome, just multiplying cost on calls that failed
-regardless. Every agent node is now a single attempt; a failure throws
-immediately, records as a normal failure event, and the operator retries
-manually — no exceptions, no per-node opt-out. Any `retry: {...}` left on
+regardless. Every agent node is now a single attempt; a failed report
+records as a normal failure event, and the operator retries manually — no
+exceptions, no per-node opt-out. Any `retry: {...}` left on
 a node definition is inert and ignored.
 
 **Presence-check pattern for a single-outcome leg**: when a leg either
@@ -526,7 +531,7 @@ export default {
 | `kind`              | Required fields                                                                      | Returns                | Exits to                                  |
 | ------------------- | ------------------------------------------------------------------------------------ | ---------------------- | ----------------------------------------- |
 | `code`              | `run(state, ctx) => stateUpdate \| Promise<stateUpdate>` — `ctx` exposes `invokePipeline` (see below) | `stateUpdate`          | normal edge                               |
-| `agent`             | `agent`, `promptBuilder(state)`, `applyResult(state, output)`. Optional `circuitBreaker: true` — see *Circuit breaker* below. | `stateUpdate`          | normal edge                               |
+| `agent`             | `agent`, `promptBuilder(state)` (or `skill`). Optional `circuitBreaker: true` — see *Circuit breaker* below. Parks a claim ticket and blocks — see *Claim flow* below. | reported result becomes the node's output | normal edge, after the report resumes the flow |
 | `subflow`           | `selector(state) => Item[]`, `flow: { nodes, edges }` (required — no other shape). Never set `.groupId` — it's always the node's own id; the loader throws if you set it. See *Subflow nodes (childFlows)* below for the full authoring guide. | one real child `flow_runs` per item; parent blocks (`waitJson.kind:"children-pending"`) until every sibling child is terminal, then auto-resumes **if `mode` is satisfied** — otherwise the parent is failed directly, with a real retryable `failure_events` row | normal edge, once all children terminal and `mode` satisfied |
 | `human-gate`        | `pendingSelector(state) => Item[]`. Each item is `string` *or* `{ id: string, reason?, hint?, text?, editable? }` — see *Human-gate pending item shape* below | sets `waitJson`; flow → `blocked` | resumes via CLI `approve` / `respond` *or* dashboard GateForm |
 | `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the gateway broadcasts `manifold.gate.opened` / `manifold.gate.closed` over WS with the full payload, and the bridge decides how to surface it (inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into an iOS chat surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
@@ -541,6 +546,45 @@ so the engine fails the parent automatically if neither leg succeeds. See
 worked `CODE_LOGIN`/`AGENT_LOGIN` example.
 
 Detailed dispatch logic: `executor.js` lines 380–730.
+
+Detailed dispatch logic: `executor.js`'s `runFlow`.
+
+### Claim flow (pull-first agent turns)
+
+A `kind:"agent"` node never places a subagent call. Reaching one parks a
+claim ticket and blocks the flow; an external harness claims the ticket,
+does the work, and reports the result back:
+
+1. **Park** — the node's invocation row becomes a ticket in `ready` state
+   (`flow_node_invocations.claim_state`); the flow blocks with
+   `waitJson: { kind: "agent-claim", ticket, nodeId }` (reentrant —
+   `lastStep` stays put so resume re-enters this same node). Parking emits
+   `agent.claim.parked` on the event bus.
+2. **Wake** — a harness that learns of the ticket (WS event stream,
+   `manifold_claim` polling, or an `agent.ready` push to its webhook)
+   opens a receiver turn carrying claim instructions.
+3. **Claim** — `manifold_claim` binds the oldest `ready` ticket to the
+   caller's `(harness, agent, session)` triple under a lease (default 5
+   min). An empty response means someone else holds everything — poll
+   again, never execute unclaimed.
+4. **Execute** — the receiver does the node's work. The prompt travels
+   with the wake (`agent.ready`'s `claim.prompt`) or is read from the
+   pipeline definition; nothing calls `node.promptBuilder` at park/claim
+   time (the loader still requires the field).
+5. **Heartbeat** — long work renews the lease via `manifold_heartbeat`.
+   An un-renewed lease returns the ticket to `ready` via the periodic
+   `sweepExpiredClaims` tick — a crashed claimant costs a re-queue, never
+   a stuck flow.
+6. **Report** — `manifold_report` stores the result **only if the
+   reporter's triple matches the ticket's claimant binding** (another
+   caller's report is refused loudly), marks the ticket `reported`, and
+   resumes the flow through the gate resume path. Resume re-enters the
+   same node, which consumes the stored result instead of parking again.
+
+The dashboard shows the live ticket on parked runs (`claim: { ticket,
+state, harness/agent/session, claimedAt, leaseExpiresAt }` on both the
+runs list and run detail). At boot, parked flows are left strictly alone
+— the ticket row survives the crash, so there is nothing to re-drive.
 
 ## Subflow nodes (childFlows)
 
@@ -568,10 +612,18 @@ under *Subflow nodes*.
 
 ### Circuit breaker (`node.circuitBreaker`)
 
+> Enforcement status: the flag, the health store
+> (`state/node-health-store.js`), and the `node-health status|reset` CLI
+> remain, but nothing consults them in the pull path — the dispatch-time
+> gate left with push dispatch (`dispatchAgentEntry`, deleted). A broken
+> agent's parked tickets age out through the claim lease/sweep cycle, not
+> through this flag. This section is kept so the remaining pieces stay
+> discoverable if enforcement is ever re-attached to the park path.
+
 An opt-in flag on any `kind:"agent"` node — top-level, or a cascade
 sub-node inside a `flow.kind:"cascade"` subflow's own `flow.nodes` — that
-fails fast instead of repeatedly dispatching an agent that's known to be
-broken:
+fails fast instead of repeatedly parking work for an agent that's known
+to be broken:
 
 ```js
 FLAKY_AGENT: {
@@ -583,11 +635,8 @@ FLAKY_AGENT: {
 }
 ```
 
-Implemented entirely inside `dispatchAgentEntry` (`engine/executor-nodes.js`)
-— the single dispatch path every `kind:"agent"` node goes through,
-regardless of whether it's a top-level node or a cascade sub-node running
-inside its own child flow. Before doing any work — before the budget gate, before building the
-prompt, before spawning a session — it checks
+When attached, the gate runs before any work — before the budget gate,
+before building the prompt, before parking — it checks
 `nodeHealthStore.isBlocked(pipelineId, nodeId)` and throws immediately if
 blocked, with a message that includes the exact reset command:
 
@@ -597,14 +646,12 @@ reset via "openclaw manifold node-health reset <pipelineId> <nodeId>"
 once the underlying issue is confirmed fixed
 ```
 
-On a genuine dispatch failure it calls `nodeHealthStore.markUnhealthy(...)`
-before re-throwing, which blocks every future dispatch of that
+On a genuine failure the park path would call `nodeHealthStore.markUnhealthy(...)`
+before re-throwing, blocking every future turn of that
 `(pipelineId, nodeId)` pair until an operator resets it — see *CLI*
-below (`openclaw manifold node-health status|reset`). Deliberately does
-**not** mark unhealthy for `NodeBlocked` (an ordinary budget-gate pause,
-not a dispatch failure) or `GatewayHandoffNeeded` (the subagent runtime
-being unreachable in the current context, not evidence the agent itself
-is broken).
+below (`openclaw manifold node-health status|reset`). `NodeBlocked` (an
+ordinary budget-gate pause, not a failure) would deliberately stay
+unmarked.
 
 Gated purely on the flag — a node that never sets `circuitBreaker` is a
 complete no-op through this whole path, so plain agent nodes are
@@ -915,8 +962,8 @@ subflow-internal group compounds inside their subflow node).
 **Rule:** Node ids match `[A-Za-z0-9_.]+`. Use UPPER_SNAKE, `lowercase`,
 or `parent.child` for subflow members. **Never use hyphens.**
 
-**Why:** Session keys are
-`agent:<a>:subagent:gf-<flowShort>-<nodeId>-<itemKey>` and item keys
+**Why:** Legacy session keys are
+`agent:<a>:subagent:mf-<flowShort>-<nodeId>-<itemKey>` and item keys
 are kebab-case slugs (hyphenated). The dashboard's
 `dashboard/server.js: sendTranscripts` splits on the **first hyphen**
 to recover `(nodeId, itemKey)`. A node id with a hyphen would silently
@@ -970,17 +1017,22 @@ each gated independently by the operator. Don't use for pipelines
 that share a real-world resource (browser, login, etc.); the
 serialization is doing real work there.
 
-## Session keys (subagents spawned by manifold)
+## Session keys (claim turns and legacy subagent sessions)
 
-```
-agent:<agentId>:subagent:gf-<flowId.slice(0,8)>-<seed>
-seed = itemKey ? `${nodeId}-${itemKey}` : nodeId
-```
+Pull-world identity is the **claim ticket** (the node's invocation id)
+plus the claimant `(harness, agent, session)` triple bound at
+`manifold_claim` time — see *Claim flow* above. No session key is minted
+at park time.
 
-Built by `defaultAgentSessionKey` in `executor.js:1056`. Override by
-setting `node.sessionKey` (static) or `node.sessionKeyBuilder(state, flowId, itemKey?)`.
+The `agent:<agentId>:subagent:mf-<flowShort>-<nodeId>[-<itemKey>]` shape
+below is the legacy push-dispatch key: nothing mints it anymore, but the
+matchers (`engine/executor-helpers.js`'s `isManifoldOwnedSessionKey`)
+still recognize it so boot-time task cleanup can tell manifold-owned
+sessions apart, and telemetry/transcript reads still attribute it.
+Override fields (`node.sessionKey` / `node.sessionKeyBuilder`) are inert
+in the pull path.
 
-Reverse-parsing (dashboard): split the segment after `gf-<flowShort>-`
+Reverse-parsing (dashboard): split the segment after `mf-<flowShort>-`
 on the **first hyphen**. `dashboard/server.js: sendTranscripts`.
 
 Each session corresponds to a file:
@@ -1041,7 +1093,7 @@ stateDiagram-v2
     running --> blocked: human-gate opens,<br/>ctx.needs() not ready,<br/>children-pending
     blocked --> running: gate resolved /<br/>needed data arrived
 
-    running --> queued: agent-dispatch semaphore<br/>or cross-process lock contended
+    running --> queued: shared admission pool full<br/>or cross-process lock contended
     queued --> running: slot/lock freed<br/>(self-resolving, no operator action)
 
     running --> succeeded: reached __end__ cleanly
@@ -1059,7 +1111,7 @@ stateDiagram-v2
 | ------------- | ------------------------------------------------------------------------------------------------ |
 | `running`     | Executor loop is (or should be) driving this flow.                                               |
 | `blocked`     | `waitJson` is set; an operator/external actor must clear it (human-gate, `ctx.needs()` not-ready, children-pending). Executor exited the loop. |
-| `queued`      | Waiting on an *internal* resource that frees itself (agent-dispatch semaphore, cross-process lock) — distinct from `blocked` specifically so consumers can tell "needs a human" from "will resolve on its own" without inspecting `wait_json.kind`. |
+| `queued`      | Waiting on an *internal* resource that frees itself (shared admission-pool slot — `flow-start`/`child-dispatch` — or cross-process lock) — distinct from `blocked` specifically so consumers can tell "needs a human" from "will resolve on its own" without inspecting `wait_json.kind`. |
 | `succeeded`   | Reached `__end__` cleanly. Terminal.                                                             |
 | `failed`      | A node threw, or an applyResult rejected. Terminal. Also where a bare `ctx.blocked()` call ends up today — see *Code-node `ctx` argument* above. |
 | `skipped`     | Pipeline ran but produced no output (nothing to score, all filtered, cap reached). Terminal.     |

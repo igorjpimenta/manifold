@@ -1,10 +1,10 @@
 # manifold companion plugins — the identity contract
 
-Manifold core keys every dispatch to three dimensions, and only one of
-them is declared: the **harness**, named per push target. The **agent**
-and **session** of each turn arrive with the turn itself — the calling
-harness's companion wakes them from the push payload. Unstamped
-agent/session fail the dispatch; nothing defaults, ever.
+Manifold core keys every claim to three dimensions, and only one of them
+is declared: the **harness**, named per push target. The **agent** and
+**session** of each turn arrive with the turn itself — the calling
+harness's companion wakes them from the push payload or its own poll
+loop. Unstamped agent/session fail the claim; nothing defaults, ever.
 
 | dimension | source | who reads |
 | --------- | ------ | --------- |
@@ -12,22 +12,46 @@ agent/session fail the dispatch; nothing defaults, ever.
 | agent     | pipeline node `entry.agent` (**required** — anonymous dispatch is refused loudly) | core: session attribution, push receiver |
 | session   | opaque core handle (`mf-…`, minted by core) ↔ gateway key (`agent:<agent>:subagent:mf-…`, mapped by adapter); `entry.sessionKey` or `sessionKeyBuilder` overrides pass through verbatim | core: turn identity; adapter: wake fallback |
 
+## Claim flow (pull-first agent turns)
+
+Agent turns run pull-only: **park → push `agent.ready` → claim via MCP →
+execute → report**. No core path places a subagent call for a pipeline
+node; the harness wakes its own receiver and the receiver pulls the work.
+
+1. **Park.** An agent node parks its invocation as a `ready` ticket and
+   blocks with `waitJson: { kind: "agent-claim", ticket, nodeId }`,
+   emitting `agent.claim.parked` on the event bus.
+2. **Push `agent.ready`.** A harness that learns of the ticket (WS event
+   stream, `manifold_claim` polling) POSTs `{event:"agent.ready", flow,
+   session, claim}` to its webhook to wake a receiver. `claim.ticket` is
+   required; `claim.prompt` may carry the work inline.
+3. **Claim via MCP.** The receiver calls `manifold_claim`, binding the
+   oldest `ready` ticket to its `(harness, agent, session)` triple under
+   a lease (default 5 min). Empty hands means someone else holds
+   everything — stop, do not execute.
+4. **Execute**, then **report** via `manifold_report` with the ticket and
+   the result object.
+
+Binding rules: the triple is stamped from request identity, never from a
+tool param. A heartbeat (`manifold_heartbeat`) or report from any other
+triple is refused loudly. A lease that lapses un-renewed returns the
+ticket to `ready` via the periodic `sweepExpiredClaims` tick — a crashed
+claimant costs a re-queue, never a stuck flow. See the root `README.md`'s
+*Claim flow* section for the core-side half of this contract.
+
 ## Session-key conventions
 
-Core speaks only its own namespace: `dispatchAgentEntry` mints an opaque
-handle `mf-<flow8>-<node>[-<item>]` (`mintAgentSessionKey`); a node may
-override via `entry.sessionKey` or `entry.sessionKeyBuilder(state, flowId)`,
-honored verbatim. `entry.agent` is required — anonymous dispatch is refused
-loudly. No env fallback, ever.
+The `mf-<flow8>-<node>[-<item>]` opaque handle is the legacy push key
+shape: nothing mints it anymore, but core still recognizes it
+(`isManifoldOwnedSessionKey`) so boot-time task cleanup can tell
+manifold-owned sessions apart. `entry.agent` is required — an anonymous
+claim is refused loudly. No env fallback, ever.
 
-The adapter maps at the edge (`session-keys.js`, wrapping
-`runtime.subagent` once where it is injected): outgoing `run`/
-`waitForRun`/`getSessionMessages` args translate opaque→gateway
-(`agent:<agent>:subagent:<opaque>`); incoming runIds/messages translate
-back. runId mappings live in memory for the dispatch lifecycle only —
-revival re-attaches by session key, never by runId. The session index
-stores gateway keys (adapter-facing state, written through conversion);
-non-`mf-` keys pass through verbatim in both directions.
+Pull-world identity is the ticket plus the claimant triple above, not a
+session key. A woken receiver works in a fresh `manifold-claim-<ticket>`
+session (falling back to the originating session only if the fresh turn
+fails); the session index keeps mapping legacy gateway keys for
+attribution, and non-`mf-` keys pass through verbatim.
 
 ## Pipeline directories
 
@@ -120,34 +144,37 @@ lost event. No auth in-process: bind localhost or put a bearer-checked
 reverse proxy in front. The dashboard SSE path is untouched; this is the
 harness-subscriber door.
 
-## Push webhook (wake on dispatch)
+## Push webhook (wake on park / gate-open)
 
 Polling flow status leaves an idle agent waiting for its next heartbeat.
-Instead, core POSTs the handoff the moment a turn is dispatched or a gate
-opens, and the adapter opens a **fresh session** for the receiver:
+Instead, a push wakes the receiver the moment its work is ready, and the
+adapter opens a **fresh session** for it:
 
 1. On the adapter: set `webhookBearer` in the plugin config. The route
    `POST /api/manifold/pushed` stays disarmed (503) until set.
 2. On core: register the callback URL (persistent, checked first at push
    time — autoregister's upsert, or `pushUrls[harness]` / single `pushUrl`
    (+ `pushBearer`) in config). Nothing registered anywhere = no-op;
-   dispatches behave exactly as before. Manual equivalent (what autoregister
+   parking behaves exactly as before. Manual equivalent (what autoregister
    does for you, and what to run when it warns you):
    `manifold webhook set --harness openclaw --url
    http://<gateway-host>:<port>/api/manifold/pushed --bearer <same-as-webhookBearer>`
    then `manifold webhook test --harness openclaw` (core POSTs
    `{event:"webhook.test"}`; the adapter answers `{ok:true,test:true}`
    without waking anyone).
-3. On dispatch/gate-open, core POSTs `{event, at, flow, session}` (see
-   `events/push.js`); the adapter verifies the bearer, then runs a fresh
-   turn in session `manifold-push-<flowId>-<nodeId>` carrying the handoff.
+3. On gate-open, core POSTs `{event, at, flow, session}` (see
+   `events/push.js`); on a parked claim, the harness POSTs
+   `{event:"agent.ready", flow, session, claim}` when the ticket is ready
+   for pickup. The adapter verifies the bearer, then runs a fresh
+   turn — `manifold-claim-<ticket>` for `agent.ready` (carrying CLAIM
+   instructions: claim via `manifold_claim`, execute, report via
+   `manifold_report`), `manifold-push-<flowId>-<nodeId>` for gates.
    If the fresh turn fails, it falls back to the originating sessionKey; if
    both fail it logs loudly (the run itself is unaffected). Delivery never
    fails the run (bounded 3s timeout, failures are warnings).
-   There is no pending queue or heartbeat drain on this path (winch parks a
-   missed claim for 4h; manifold has no equivalent — a dispatched turn or an
-   open gate needs its receiver now). When the fresh session AND the
-   originating-session fallback both fail, the adapter logs loudly
+   There is no pending queue or heartbeat drain on this path — a ready
+   ticket or an open gate needs its receiver now. When the fresh session
+   AND the originating-session fallback both fail, the adapter logs loudly
    (`manifold: push wake … FAILED`) and the HTTP answer reports
    `{woken:false}` — that log line is the page, not a queue.
 
@@ -155,13 +182,14 @@ opens, and the adapter opens a **fresh session** for the receiver:
 
 | event | when | wake |
 | ----- | ---- | ---- |
-| `agent.dispatched` | agent turn spawned (`session` names the receiver) | fresh session, fallback to originating `sessionKey` |
+| `agent.ready` | parked claim ticket ready for pickup (`claim.ticket` names it) | fresh `manifold-claim-<ticket>` session carrying CLAIM instructions |
 | `gate.opened` | human-gate record written | fresh session when a receiver agent is known, else report-only (`{woken:false}`) |
 | `webhook.test` | autoregister's test ping | none (answers `{ok:true,test:true}`) |
 
 Payload shape: `{event, at, flow: {id, pipelineId, nodeId} | null,
-session: {harness, agent, sessionKey}}`. `agent.dispatched` requires
-`session.agent` (400 otherwise); `gate.opened` without an agent is
+session: {harness, agent, sessionKey}}`, plus `claim: {ticket,
+prompt?}` on `agent.ready`. `agent.ready` requires `session.agent` and
+`claim.ticket` (400 otherwise); `gate.opened` without an agent is
 report-only (200, `woken:false`).
 
 ## generic clients
