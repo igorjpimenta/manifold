@@ -19,7 +19,7 @@
 
 import { randomUUID } from "node:crypto";
 import { eq, and } from "drizzle-orm";
-import { getSharedDb, withSharedWrite } from "./db.js";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 import { nodeHealth } from "./schema.js";
 import path from "node:path";
@@ -27,7 +27,9 @@ import os from "node:os";
 import { mkdirSync } from "node:fs";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+function defaultDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
 const INSERT_BLOCKED_SQL = `
   INSERT OR IGNORE INTO node_health
@@ -43,7 +45,7 @@ const IS_BLOCKED_SQL = `
   SELECT 1 FROM node_health WHERE pipeline_id = ? AND node_id = ? AND status = 'blocked' LIMIT 1
 `;
 
-export async function createNodeHealthStore({ logger, dbPath = DEFAULT_DB_PATH } = {}) {
+export async function createNodeHealthStore({ logger, dbPath = defaultDbPath() } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);

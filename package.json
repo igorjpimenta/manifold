@@ -13,6 +13,7 @@
     "./elevation": "./elevation.js",
     "./tool-handoff": "./state/tool-handoff.js",
     "./state/db": "./state/db.js",
+    "./state/paths": "./state/paths.js",
     "./state/batch-writer": "./state/batch-writer.js",
     "./state/schema": "./state/schema.js"
   },
