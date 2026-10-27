@@ -9,7 +9,8 @@
 //   - api.runtime.lineage.recordTrigger / recordSpawn cross-plugin API
 //   - `openclaw lineage` CLI subcommands
 
-import { openStore, DEFAULT_DB_PATH } from "./store.js";
+import { openStore } from "./store.js";
+import { resolveStorePaths } from "../state/paths.js";
 import { makeResolver } from "./resolver.js";
 import { registerCliCommands } from "./cli.js";
 import { resolveCost } from "./pricer.js";
@@ -34,8 +35,11 @@ export function getSharedResolver() {
 // buffered and flushed once the service starts.
 let PENDING_CALLS = [];
 
-export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
-  const dbPath = _dbPath ?? DEFAULT_DB_PATH;
+export function registerTelemetry(api, { getBroadcast, _dbPath, _flowsDbPath, _sources, _lcmDbPath, _agentsDir, _runtimeDbPath, storePaths = null } = {}) {
+  const paths = storePaths ?? resolveStorePaths();
+  const dbPath = _dbPath ?? paths.opsDb;
+  const flowsDbPath = _flowsDbPath ?? paths.runtimeDb;
+  const runtimeDbPath = _runtimeDbPath ?? paths.runtimeDb;
 
   const logger = api.logger;
 
@@ -67,8 +71,8 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     start: async () => {
       if (SHARED_STORE) { logger.info(`telemetry: store already initialized — skipping`); return; }
       try {
-        SHARED_STORE = await openStore({ dbPath });
-        SHARED_RESOLVER = makeResolver({ store: SHARED_STORE });
+        SHARED_STORE = await openStore({ dbPath, flowsDbPath });
+        SHARED_RESOLVER = makeResolver({ store: SHARED_STORE, flowsDbPath });
         logger.info(`telemetry: store ready at ${dbPath}`);
         if (PENDING_CALLS.length) {
           const pending = PENDING_CALLS.splice(0);
@@ -226,7 +230,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
 
   // ── HTTP routes ────────────────────────────────────────────────────────────
 
-  registerHttpRoutes({ api, getStore: () => SHARED_STORE, logger, getBroadcast });
+  registerHttpRoutes({ api, getStore: () => SHARED_STORE, logger, getBroadcast, sources: _sources, lcmDbPath: _lcmDbPath });
 
   // Redirect shim: /lineage/* → /manifold/telemetry/* until iOS build deploys.
   const SHIM_PATHS = [
@@ -417,6 +421,9 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
       getStore: () => ensureStore(),
       getResolver: async () => { await ensureStore(); return SHARED_RESOLVER; },
       dbPath,
+      sources: _sources,
+      agentsDir: _agentsDir,
+      runtimeDbPath,
     }),
     {
       commands: ["lineage"],

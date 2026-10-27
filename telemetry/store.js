@@ -4,12 +4,22 @@
 
 import path from "node:path";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
-import os from "node:os";
+import { resolveStorePaths } from "../state/paths.js";
 import fs from "node:fs";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+// Core-owned store home: one MANIFOLD_DATA_DIR move relocates the DB.
+// Resolved per call so tests can point MANIFOLD_* env at tmp dirs.
+function defaultOpsDbPath() {
+  return resolveStorePaths().opsDb;
+}
+
+function defaultFlowsDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
+
+const DEFAULT_DB_PATH = defaultOpsDbPath();
 
 const UPSERT_LINEAGE_SQL = `
   INSERT INTO session_lineage
@@ -45,26 +55,26 @@ const INSERT_COST_SQL = `
   VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?,?, ?,?,?,?)
 `;
 
-export async function openStore({ dbPath = DEFAULT_DB_PATH } = {}) {
+export async function openStore({ dbPath = defaultOpsDbPath(), flowsDbPath = defaultFlowsDbPath() } = {}) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
-  await attachFlowsDb(client);
-  return makeStore(client, dbPath);
+  await attachFlowsDb(client, flowsDbPath);
+  return makeStore(client, dbPath, flowsDbPath);
 }
 
-/** Cross-DB JOIN target: manifold's flow_runs lives in a sibling sqlite.
- *  Attached read-only so ROI queries (status × cost) work in a single hop.
- *  Silent if absent — installations without manifold keep working. */
-async function attachFlowsDb(client) {
-  const flowsPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+// Cross-DB JOIN target: manifold's flow_runs lives in a sibling sqlite.
+// Attached so ROI queries (status × cost) work in a single hop. Silent
+// when absent — installations without manifold keep working.
+async function attachFlowsDb(client, flowsDbPath) {
+  const flowsPath = flowsDbPath ?? defaultFlowsDbPath();
   if (!fs.existsSync(flowsPath)) return;
   try {
     await client.execute(`ATTACH DATABASE '${flowsPath.replace(/'/g, "''")}' AS flows`);
   } catch { /* attach failed — ROI queries will skip the JOIN */ }
 }
 
-function makeStore(client, dbPath) {
+function makeStore(client, dbPath, flowsDbPath) {
   return {
     _client: client,
     async upsertLineage(row) {

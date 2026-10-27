@@ -108,3 +108,38 @@ describe("telemetry/store.js — insertCost (deferred via batch-writer)", () => 
     _resetForTests(dbPath);
   });
 });
+
+describe("telemetry/store.js — injected flowsDbPath", () => {
+  test("openStore accepts a missing flows DB (attach skipped silently)", async () => {
+    const { openStore: open2 } = await import("../../../telemetry/store.js");
+    const dbPath = tmpDb();
+    const store = await open2({ dbPath, flowsDbPath: path.join(os.tmpdir(), `gf-nope-${randomUUID()}.sqlite`) });
+    assert.equal(await store.getLineage(randomUUID()), null);
+    store.close();
+    _resetForTests(dbPath);
+  });
+
+  test("MANIFOLD_OPS_DB env relocates the default DB path", async () => {
+    const modPath = `../../../telemetry/store.js?envreloc-${randomUUID()}`;
+    const dbPath = tmpDb();
+    const prev = process.env.MANIFOLD_OPS_DB;
+    process.env.MANIFOLD_OPS_DB = dbPath;
+    try {
+      const { openStore: open3 } = await import(modPath);
+      const store = await open3({});
+      await store.upsertLineage({
+        child_session_key: "k1",
+        root_session_key: "k1",
+        kind: "root",
+        root_kind: "cron",
+        source: "live",
+      });
+      assert.ok(await store.getLineage("k1"));
+      store.close();
+    } finally {
+      if (prev === undefined) delete process.env.MANIFOLD_OPS_DB;
+      else process.env.MANIFOLD_OPS_DB = prev;
+      _resetForTests(dbPath);
+    }
+  });
+});

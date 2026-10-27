@@ -69,6 +69,7 @@ import { registerPipelineRoutes } from "../../../routes/pipelines.js";
 import { authorizeBridgeRequest, sendUnauthorized } from "./auth/bridge.js";
 import { registerBudgetRoutes } from "../../../budget/index.js";
 import { registerTelemetry } from "../../../telemetry/index.js";
+import * as telemetrySources from "./telemetry-sources.js";
 import { scanAndCleanup as taskflowScanAndCleanup } from "../../../boot/taskflow-revive.js";
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-revival.js";
 
@@ -694,7 +695,7 @@ export default definePluginEntry({
         logger: api.logger, api, flowId, nodeId, decision,
       }),
     });
-    registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
+    registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast, storePaths, sources: telemetrySources });
 
     // ── Boot-time task orphan cleanup (absorbed from taskflow-revive) ─────────
 

@@ -1,21 +1,8 @@
 // /manifold/telemetry/sessions/parts — session transcript from lcm.db.
-import fs from "node:fs";
-import os from "node:os";
-import path from "node:path";
-import { getSharedDb } from "../state/db.js";
-
-const LCM_DB_PATH = path.join(os.homedir(), ".openclaw", "lcm.db");
-
-// The existsSync guard preserves the 503-below for a missing file instead
-// of letting the failure surface at first execute.
-function sharedLcmDb() {
-  if (!fs.existsSync(LCM_DB_PATH)) {
-    throw new Error("lcm.db not found");
-  }
-  return getSharedDb(LCM_DB_PATH, { readonly: true });
-}
-
-export function registerSessionRoutes({ api, logger, json, bad }) {
+// Route shape stays core; the lcm.db read lives in the harness-side
+// adapter, injected as `sources`. Without it the file is unreachable,
+// so the route answers the same 503 as a missing lcm.db.
+export function registerSessionRoutes({ api, logger, json, bad, sources = null, lcmDbPath } = {}) {
   api.registerHttpRoute({
     method: "GET",
     path: "/manifold/telemetry/sessions/parts",
@@ -25,98 +12,29 @@ export function registerSessionRoutes({ api, logger, json, bad }) {
       const sessionKey = u.searchParams.get("session_key");
       const limit = Math.min(parseInt(u.searchParams.get("limit") ?? "80", 10), 2000);
       if (!sessionKey) return bad(res, "session_key required");
-      let lcm;
-      try {
-        lcm = await sharedLcmDb();
-      } catch (err) {
-        logger?.warn?.(`lineage[sessions/parts] lcm.db open failed: ${err?.message}`);
+      if (!sources) {
+        logger?.warn?.(`lineage[sessions/parts] no gateway sources injected`);
         return json(res, { error: "lcm.db not available" }, 503);
       }
+      // Cursor params:
+      //   before_seq — newest `limit` rows with seq < before_seq (backward)
+      //   after_seq  — oldest `limit` rows with seq > after_seq  (forward)
+      // Default (no cursor): newest `limit` rows in the session.
+      const beforeSeq = u.searchParams.has("before_seq")
+        ? parseInt(u.searchParams.get("before_seq"), 10)
+        : null;
+      const afterSeq = u.searchParams.has("after_seq")
+        ? parseInt(u.searchParams.get("after_seq"), 10)
+        : null;
       try {
-        // Cursor params:
-        //   before_seq — newest `limit` rows with seq < before_seq (backward)
-        //   after_seq  — oldest `limit` rows with seq > after_seq  (forward)
-        // Default (no cursor): newest `limit` rows in the session.
-        const beforeSeq = u.searchParams.has("before_seq")
-          ? parseInt(u.searchParams.get("before_seq"), 10)
-          : null;
-        const afterSeq = u.searchParams.has("after_seq")
-          ? parseInt(u.searchParams.get("after_seq"), 10)
-          : null;
-
-        let seqClause, seqArgs, order;
-        if (afterSeq != null) {
-          seqClause = "AND m.seq > ?";
-          seqArgs   = [afterSeq];
-          order     = "ASC";
-        } else if (beforeSeq != null) {
-          seqClause = "AND m.seq < ?";
-          seqArgs   = [beforeSeq];
-          order     = "DESC";  // newest-first so LIMIT grabs the right page; re-sort after
-        } else {
-          seqClause = "";
-          seqArgs   = [];
-          order     = "DESC";
-        }
-
-        const rawRows = Array.from((await lcm.client.execute({
-          sql: `
-          SELECT mp.part_id, mp.part_type, mp.ordinal,
-                 m.seq, m.role,
-                 datetime(m.created_at, 'localtime') AS msg_ts,
-                 mp.text_content, mp.is_ignored, mp.is_synthetic,
-                 mp.tool_call_id, mp.tool_name, mp.tool_status,
-                 mp.tool_input, mp.tool_output, mp.tool_error, mp.tool_title,
-                 mp.patch_files,
-                 mp.step_cost, mp.step_tokens_in, mp.step_tokens_out,
-                 mp.compaction_auto, mp.metadata
-          FROM message_parts mp
-          JOIN messages m ON m.message_id = mp.message_id
-          JOIN conversations c ON c.conversation_id = m.conversation_id
-          WHERE c.session_key = ?
-            ${seqClause}
-            AND (mp.is_ignored IS NULL OR mp.is_ignored = 0)
-            AND mp.part_type IN ('text','reasoning','tool','patch','compaction')
-          ORDER BY m.seq ${order}, mp.ordinal ${order}
-          LIMIT ?
-        `,
-          args: [sessionKey, ...seqArgs, limit],
-        })).rows);
-
-        // DESC queries come back newest-first — re-sort ascending for the client.
-        const rows = order === "DESC"
-          ? rawRows.slice().sort((a, b) => a.seq - b.seq || a.ordinal - b.ordinal)
-          : rawRows;
-
-        const firstSeq = rows.length ? rows[0].seq : null;
-        const lastSeq  = rows.length ? rows[rows.length - 1].seq : null;
-
-        let hasMore = false;
-        if (firstSeq != null) {
-          hasMore = (await lcm.client.execute({
-            sql: `
-            SELECT 1 FROM messages m
-            JOIN conversations c ON c.conversation_id = m.conversation_id
-            WHERE c.session_key = ? AND m.seq < ? LIMIT 1
-          `,
-            args: [sessionKey, firstSeq],
-          })).rows.length > 0;
-        }
-
-        let hasMoreNewer = false;
-        if (lastSeq != null) {
-          hasMoreNewer = (await lcm.client.execute({
-            sql: `
-            SELECT 1 FROM messages m
-            JOIN conversations c ON c.conversation_id = m.conversation_id
-            WHERE c.session_key = ? AND m.seq > ? LIMIT 1
-          `,
-            args: [sessionKey, lastSeq],
-          })).rows.length > 0;
-        }
-
-        return json(res, { sessionKey, parts: rows, hasMore, hasMoreNewer, firstSeq, lastSeq });
+        const { parts, hasMore, hasMoreNewer, firstSeq, lastSeq } =
+          await sources.querySessionParts({ lcmDbPath, sessionKey, limit, beforeSeq, afterSeq });
+        return json(res, { sessionKey, parts, hasMore, hasMoreNewer, firstSeq, lastSeq });
       } catch (err) {
+        if (err?.code === "LCM_DB_MISSING") {
+          logger?.warn?.(`lineage[sessions/parts] lcm.db open failed: ${err?.message}`);
+          return json(res, { error: "lcm.db not available" }, 503);
+        }
         logger?.warn?.(`lineage[sessions/parts]: ${err?.message ?? err}`);
         return json(res, { error: String(err?.message ?? err) }, 500);
       }
