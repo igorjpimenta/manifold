@@ -9,7 +9,7 @@ import { test, describe, mock } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
+const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
 await mock.module(authUrl, {
   exports: {
     authorizeBridgeRequest: async () => ({ ok: true }),
@@ -108,6 +108,10 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef,
     pipelineRegistryStore: makeMockPipelineRegistryStore(pipelinesRef),
     invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
+    },
     failureStore: { queryErrorsByFlow: async (flowId) => queryErrorsByFlowImpl(flowId) },
     discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
     handleDiscuss:           async () => {},

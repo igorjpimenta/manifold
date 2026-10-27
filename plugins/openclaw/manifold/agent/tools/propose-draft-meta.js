@@ -18,7 +18,7 @@
 // when the caller is a subagent that was never given them directly.
 // See resolveGateContext in shared.js.
 
-import { mergePendingFields, readPending } from "../../state/pending-store.js";
+import { mergePendingFields, readPending } from "../../../../../state/pending-store.js";
 import { toolErr, META_FIELD_WHITELIST, normalizePendingFields, resolveGateContext, looksLikeNumericRange } from "./shared.js";
 
 export function registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore }) {

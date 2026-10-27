@@ -43,7 +43,7 @@ try {
     exports: { resolveAgentEffectiveModelPrimary: async () => null },
   });
 
-  const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
+  const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
   await mock.module(authUrl, {
     exports: {
       authorizeBridgeRequest: async () => ({ ok: true }),
@@ -86,6 +86,10 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef: { value: new Map() },
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
+    },
     stampDiscussSession: async () => {},
     normalizePendingFields: async () => ({}),
     readPending: () => null,

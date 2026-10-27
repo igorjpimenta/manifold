@@ -8,7 +8,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 
-import { registerGraphFlowTool } from "../../../../agent/tools/manifold-start.js";
+import { registerGraphFlowTool } from "../../../../plugins/openclaw/manifold/agent/tools/manifold-start.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 

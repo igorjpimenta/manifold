@@ -17,7 +17,6 @@ import { serializePipeline } from "./pipeline-graph.js";
 import { computeGlobalStats, computePipelineStats, compareRunToMedian, computeNodeStats, resolveDisplayStep } from "./stats.js";
 import { searchRuns } from "./search.js";
 import { costForRun, costForPipeline, costForAllPipelines } from "./cost.js";
-import { pairDashboardDevice } from "./device.js";
 import { computeViews } from "./views.js";
 import { stepsExecutedFromTree } from "./tree-stats.js";
 import { TERMINAL_STATUS_SET } from "../state/run-store.js";
@@ -48,7 +47,7 @@ const MIME = {
   ".ico":  "image/x-icon",
 };
 
-export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
+export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision, pairDevice = null }) {
   let server = null;
   // Track open SSE responses so we can drain them on stop().
   const sseClients = new Set();
@@ -56,7 +55,7 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
 
   // ── Gateway API client ────────────────────────────────────────────────────
   // All data reads go through the gateway's /manifold/* API using a paired
-  // device token from device.js (same auth mechanism as the iOS app).
+  // device token from the injected pairDevice (same auth mechanism as the iOS app).
 
   const GATEWAY_BASE = `http://127.0.0.1:${Number(process.env.OPENCLAW_GATEWAY_PORT) || 18789}`;
   let _gwToken = null;
@@ -883,9 +882,11 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
       if (server) return;
 
       // Authenticate to the gateway as a genuinely paired device — same
-      // model the iOS app/CLI use (see device.js's own header for why:
-      // individually revocable/scopable, unlike the shared master token).
-      // First run: pairDashboardDevice() opens a real WS connect attempt
+      // model the iOS app/CLI use (individually revocable/scopable, unlike
+      // the shared master token). pairDevice is injected by the adapter,
+      // which owns the device-pairing module; null here means core is
+      // running without the adapter, so fall back to the shared token.
+      // First run: pairDevice() opens a real WS connect attempt
       // authenticated with OPENCLAW_GATEWAY_TOKEN. Since that's a loopback
       // connection vouched for by the real shared secret, it's silently
       // paired with its own persisted device token — no separate approval
@@ -893,13 +894,16 @@ export function createDashboardServer({ writeStore, pipelinesRef, pipelineRegist
       // OPENCLAW_GATEWAY_TOKEN) lands as a genuine pending request, falling
       // back to the shared token meanwhile and logging the requestId so
       // the operator can `openclaw devices approve <requestId>`.
-      const pairing = await pairDashboardDevice({ logger });
-      if (pairing.alreadyPaired) {
+      if (!pairDevice) {
+        logger?.warn?.("manifold dashboard: pairDevice unavailable — createDashboardServer was not given pairDevice; using OPENCLAW_GATEWAY_TOKEN fallback");
+      }
+      const pairing = pairDevice ? await pairDevice({ logger }) : null;
+      if (pairing?.alreadyPaired) {
         _gwToken = pairing.token;
         logger?.info?.("manifold dashboard: authenticated to gateway via paired device token");
       } else {
         _gwToken = process.env.OPENCLAW_GATEWAY_TOKEN || null;
-        if (pairing.requestId) {
+        if (pairing?.requestId) {
           logger?.warn?.(
             `manifold dashboard: not yet paired as a device — run: ` +
             `openclaw devices approve ${pairing.requestId} then restart the dashboard ` +

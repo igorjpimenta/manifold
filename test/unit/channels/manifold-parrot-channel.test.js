@@ -52,7 +52,7 @@ try {
 
   // live-activity-bridge/auth.js is dynamically imported inside the handler.
   // Resolve its URL relative to the test file — matching operator.test.js / runs.test.js.
-  const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
+  const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
   await mock.module(authUrl, {
     exports: {
       authorizeBridgeRequest: async (...a) => authMockImpl.authorizeBridgeRequest(...a),
@@ -69,7 +69,7 @@ try {
     },
   });
 
-  ({ createManifoldParrotChannelEntry } = await import("../../../channels/manifold-parrot-channel.js"));
+  ({ createManifoldParrotChannelEntry } = await import("../../../plugins/openclaw/manifold/channels/manifold-parrot-channel.js"));
 } catch (err) {
   importError = err?.message ?? String(err);
 }

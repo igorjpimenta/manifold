@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
+const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
 await mock.module(authUrl, {
   exports: {
     authorizeBridgeRequest: async () => ({ ok: true }),
@@ -47,6 +47,10 @@ function makeDeps(api, overrides = {}) {
   return {
     api,
     failureStore: { list: async () => [] },
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
+    },
     runStore: { listRunsPage: async () => [], get: async () => null },
     runtimeDbPath: tmpDb("runtime"),
     opsDbPath: tmpDb("ops"),

@@ -32,7 +32,7 @@ const { lockNameForFile, acquireLock } = await import("../../../locks/lock.js");
 const {
   registerProfileWriteLock,
   profileEditResultPathFor,
-} = await import("../../../hooks/profile-write-lock.js");
+} = await import("../../../plugins/openclaw/manifold/hooks/profile-write-lock.js");
 
 function resultPathFor(runId) {
   return profileEditResultPathFor(runId, { resultsDir: RESULTS_DIR });

@@ -16,7 +16,7 @@ const MANIFOLD_VERSION = require("../package.json").version;
 const RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 const OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
 
-export function registerHealthRoutes({ api }) {
+export function registerHealthRoutes({ api, auth }) {
   api.registerHttpRoute({
     path: "/manifold/health",
     auth: "plugin",
@@ -28,7 +28,7 @@ export function registerHealthRoutes({ api }) {
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = auth;
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const db = {};

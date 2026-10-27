@@ -16,7 +16,7 @@ await mock.module(toolHandoffUrl, {
   },
 });
 
-const { registerScoreToolWakeHook } = await import("../../../hooks/score-tool-wake.js");
+const { registerScoreToolWakeHook } = await import("../../../plugins/openclaw/manifold/hooks/score-tool-wake.js");
 
 function makeMockApi() {
   const handlers = [];

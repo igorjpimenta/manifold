@@ -12,11 +12,9 @@
     "./browser-tabs": "./locks/browser-tabs.js",
     "./elevation": "./elevation.js",
     "./tool-handoff": "./state/tool-handoff.js",
-    "./profile-lock": "./hooks/profile-write-lock.js",
     "./state/db": "./state/db.js",
     "./state/batch-writer": "./state/batch-writer.js",
-    "./state/schema": "./state/schema.js",
-    "./bridge-auth": "./auth/bridge.js"
+    "./state/schema": "./state/schema.js"
   },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",
@@ -32,14 +30,6 @@
     "better-sqlite3": "^13.0.3",
     "drizzle-orm": "^0.45.2",
     "graphql": "^16.14.2"
-  },
-  "openclaw": {
-    "extensions": [
-      "./index.js"
-    ],
-    "compat": {
-      "openclawMin": "2026.5.6"
-    }
   },
   "devDependencies": {
     "drizzle-kit": "^0.31.11"

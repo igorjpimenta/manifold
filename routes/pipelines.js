@@ -1,4 +1,4 @@
-export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePipelinesLoaded }) {
+export function registerPipelineRoutes({ api, auth, pipelinesRef, readStore, ensurePipelinesLoaded }) {
   // GET /manifold/pipelines — catalog of pipeline definitions joined with
   // run-history vitals. Mirrors the dashboard's /api/pipelines but trimmed
   // to what the iPhone Pipelines list view needs at a glance (lastRunAt,
@@ -16,7 +16,7 @@ export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePip
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
+      const { authorizeBridgeRequest, sendUnauthorized } = auth;
       const authz = await authorizeBridgeRequest(req);
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
 

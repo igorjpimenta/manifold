@@ -25,7 +25,7 @@ await mock.module(telemetryUrl, {
   },
 });
 
-const { registerReportDraftSkipTool } = await import("../../../../agent/tools/report-draft-skip.js");
+const { registerReportDraftSkipTool } = await import("../../../../plugins/openclaw/manifold/agent/tools/report-draft-skip.js");
 
 function createToolApi() {
   const tools = [];

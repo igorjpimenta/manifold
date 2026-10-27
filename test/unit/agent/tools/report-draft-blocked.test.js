@@ -24,7 +24,7 @@ await mock.module(telemetryUrl, {
   },
 });
 
-const { registerReportDraftBlockedTool } = await import("../../../../agent/tools/report-draft-blocked.js");
+const { registerReportDraftBlockedTool } = await import("../../../../plugins/openclaw/manifold/agent/tools/report-draft-blocked.js");
 
 function createToolApi() {
   const tools = [];

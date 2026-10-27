@@ -14,7 +14,7 @@ import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-
 // Mock before any import of routes/failures.js so the dynamic import inside
 // the handler gets the stub, not the real live-activity-bridge module.
 
-const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
+const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
 await mock.module(authUrl, {
   exports: {
     authorizeBridgeRequest: async () => ({ ok: true }),
@@ -31,6 +31,10 @@ function makeDeps(api, overrides = {}) {
     api,
     failureStore: { list: () => [], get: () => null },
     invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
+    },
     ...overrides,
   };
 }

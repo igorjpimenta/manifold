@@ -63,14 +63,6 @@ const PUBLIC_API = {
       "clearPendingResult",
     ],
   },
-  "./profile-lock": {
-    file: "./hooks/profile-write-lock.js",
-    exports: ["registerProfileWriteLock", "profileEditResultPathFor", "PROFILE_EDIT_RESULTS_DIR"],
-  },
-  "./bridge-auth": {
-    file: "./auth/bridge.js",
-    exports: ["authorizeBridgeRequest", "sendUnauthorized"],
-  },
   "./state/db": {
     file: "./state/db.js",
     exports: ["openDb", "getSharedDb", "isSqliteBusy", "withSharedWrite"],

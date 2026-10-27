@@ -34,7 +34,7 @@ await mock.module(nodeExecutionsUrl, {
   },
 });
 
-const authUrl = new URL("../../../auth/bridge.js", import.meta.url).href;
+const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
 await mock.module(authUrl, {
   exports: {
     authorizeBridgeRequest: async () => ({ ok: true }),
@@ -53,6 +53,10 @@ const FULL_DEPS_BASE = {
   costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
   pipelinesRef: { value: new Map() },
   invokeElevated: async () => ({}),
+    auth: {
+      authorizeBridgeRequest: async () => ({ ok: true }),
+      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
+    },
   discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
   handleDiscuss:           async () => {},
   handleDiscussHistory:    async () => {},
