@@ -10,7 +10,6 @@
 
 import http from "node:http";
 import { readFile, readdir, stat } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serializePipeline } from "./pipeline-graph.js";
@@ -28,13 +27,10 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Static assets come from vite's build output under `dist/`. Run `npm run
 // build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
-// Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/. The
-// manifold executor uses the sessionKey pattern
-// `agent:<agentId>:subagent:mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`
-// (gateway shape of core's opaque handle — see session-keys.js) so we can
-// find every session a
-// flow spawned by scanning each agent's sessions.json for matching keys.
-const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
+// Agent session JSONLs live under the injected agentsDir (the harness's
+// sessions root — the adapter supplies it, core hardcodes no harness home).
+// Transcripts match on the gateway key shape the executor mints
+// (agent:<agent>:subagent:mf-<flowId8>-<nodeId>[-<itemKey>]).
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -51,7 +47,8 @@ const MIME = {
   ".ico":  "image/x-icon",
 };
 
-export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
+export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision, agentsDir }) {
+  if (!agentsDir) throw new Error("createDashboardServer: agentsDir is required");
   let server = null;
   // Track open SSE responses so we can drain them on stop().
   const sseClients = new Set();
@@ -653,14 +650,14 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     const keyPattern = new RegExp(`^agent:([^:]+):subagent:mf-${flowShort}-(.+)$`);
 
     let agentDirs = [];
-    try { agentDirs = await readdir(AGENTS_DIR, { withFileTypes: true }); }
+    try { agentDirs = await readdir(agentsDir, { withFileTypes: true }); }
     catch { return sendJson(res, 200, []); }
 
     const transcripts = [];
     for (const ent of agentDirs) {
       if (!ent.isDirectory()) continue;
       const agent = ent.name;
-      const indexPath = path.join(AGENTS_DIR, agent, "sessions", "sessions.json");
+      const indexPath = path.join(agentsDir, agent, "sessions", "sessions.json");
       let index;
       try {
         const raw = await readFile(indexPath, "utf-8");
@@ -701,7 +698,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
   }
 
   async function parseSessionTurns(agent, sessionId) {
-    const file = path.join(AGENTS_DIR, agent, "sessions", `${sessionId}.jsonl`);
+    const file = path.join(agentsDir, agent, "sessions", `${sessionId}.jsonl`);
     let raw;
     try { raw = await readFile(file, "utf-8"); }
     catch { return []; }

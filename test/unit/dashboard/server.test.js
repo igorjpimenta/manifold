@@ -4,6 +4,11 @@
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
+import { mkdtempSync } from "node:fs";
+
+const AGENTS_FIXTURE_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-dashboard-agents-")); // empty: transcript reads find no agents
 
 delete process.env.OPENCLAW_GATEWAY_TOKEN;
 
@@ -129,6 +134,7 @@ before(async () => {
     host: "127.0.0.1",
     logger: {},
     recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }),
+    agentsDir: AGENTS_FIXTURE_DIR,
   });
   await server.start();
 });

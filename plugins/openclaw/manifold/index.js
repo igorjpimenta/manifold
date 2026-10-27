@@ -98,7 +98,8 @@ const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 const DEFAULT_DASHBOARD_PORT = 7430;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 
-const TASKFLOW_RUNS_DB = path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
+const TASKFLOW_RUNS_DB = process.env.MANIFOLD_TASKFLOW_RUNS_DB
+  || path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
 
 // Module-level singleton — captures a working `runtime.subagent` from the
 // gateway-bindable plugin load. The `before_dispatch` hook fires outside that
@@ -759,6 +760,8 @@ export default definePluginEntry({
         host: dashboardHost,
         logger: api.logger,
         recordItemDecision: gateResolver.recordItemDecision,
+        agentsDir: process.env.MANIFOLD_AGENTS_DIR
+          || path.join(os.homedir(), ".openclaw", "agents"),
       });
       api.registerService({
         id: "manifold-dashboard",

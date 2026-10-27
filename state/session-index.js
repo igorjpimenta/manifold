@@ -8,7 +8,8 @@
 // Reads (flowIdForSessionKey) take gateway keys verbatim — callers holding
 // task_runs rows already have that shape, no conversion needed.
 //
-// Storage: ~/.openclaw/runtime.sqlite (see defaultDbPath()).
+// Storage: defaultDbPath() below (resolveStorePaths().runtimeDb —
+// package-owned, see state/paths.js).
 //
 // INSERT OR IGNORE via UNIQUE(flow_id, session_key) — recording the same
 // session key twice (e.g. on error-retry with the same key) is a no-op.

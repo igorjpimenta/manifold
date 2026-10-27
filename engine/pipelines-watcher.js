@@ -1,5 +1,6 @@
 // pipelines-watcher.js — keep `pipelinesRef` in sync with the on-disk
-// `~/.openclaw/workspace/.pipelines/` directory.
+// pipelines directory (injected `pipelinesDir`: table → env → dataDir default,
+// see state/paths.js — never a hardcoded harness path).
 //
 // Why: without this, `loadPipelines` only runs once at gateway boot (via the
 // `manifold-loader` service or `ensurePipelinesLoaded`'s "load once if
