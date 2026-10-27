@@ -36,6 +36,90 @@ anonymously. No env fallback, ever.
    "http://<gateway-host>:<port>/api/manifold/pushed", "bearer":
    "<same-as-webhookBearer>" } }`.
 
+## MCP transport (per harness)
+
+The pipeline tools (`manifold_start`, `manifold_status`, `manifold_runs`,
+`manifold_approve`, `manifold_cancel`) ship over MCP stdio and Streamable
+HTTP (`bin/manifold.js` → `mcp/stdio.js`, `mcp/http.js`). Identity mirrors
+the push contract: the **harness** is declared at construction
+(`MANIFOLD_HARNESS` env for stdio, `X-Manifold-Harness` header for HTTP),
+**agent**+**session** arrive per call (`_meta.manifold`, or stamped
+`manifold_agent`/`manifold_session` args). Unstamped calls are refused;
+nothing defaults, ever.
+
+### openclaw
+
+In `~/.openclaw/openclaw.json`, alongside the plugin id:
+
+```json
+"mcp": {
+  "servers": {
+    "manifold": {
+      "command": "manifold",
+      "args": ["serve", "--mcp", "stdio"],
+      "env": { "MANIFOLD_HARNESS": "openclaw" }
+    }
+  }
+}
+```
+
+Calls arrive as `mcp__manifold__manifold_start` etc. A companion stamps
+`_meta.manifold` (agent+session) per call the way the push adapter stamps
+its wake — unstamped calls fail at the boundary, never as poison
+downstream. Remote daemon instead: `manifold serve --mcp http`
+(`MANIFOLD_BEARER` required) behind TLS, same tools, same stamps.
+
+### opencode
+
+`~/.config/opencode/opencode.jsonc` — MCP entry plus the no-op meta
+companion line, mirroring the existing `file://` entries:
+
+```jsonc
+{
+  "mcp": {
+    "manifold": {
+      "type": "local",
+      "command": ["manifold", "serve", "--mcp", "stdio"],
+      "env": {
+        "MANIFOLD_HARNESS": "opencode"
+      }
+    }
+  },
+  "plugin": [
+    "file://<npm-root-g>/@igorjpimenta/manifold/plugins/opencode/manifold-meta.js"
+  ]
+}
+```
+
+Agent/session on opencode: hooks can only mutate outgoing `args`, and the
+MCP path has no `params._meta` slot, so per-call stamps travel as
+`manifold_agent`/`manifold_session` args (sound over stdio, where the
+spawner is the sole peer). Without stamps the calls fail loudly — the
+signal that the hook side is not wired yet.
+
+### generic clients
+
+No plugin: declare the harness and stamp agent/session per call yourself:
+
+```
+MANIFOLD_HARNESS=generic manifold serve --mcp stdio
+```
+
+```
+claude mcp add manifold --env MANIFOLD_HARNESS=generic -- manifold serve --mcp stdio
+```
+
+## WS event stream
+
+`manifold serve --ws [--port N]` (default 38294) broadcasts the in-process
+push stream verbatim over WebSocket: `{"type":"welcome"}`, then
+`{"type":"history","events":[...]}` (replay, oldest-first, capped), then
+one `{"type":"event","event":{...}}` per entry. Track your own seen state —
+reconnecting replays history, so a missed frame costs a re-read, never a
+lost event. No auth in-process: bind localhost or put a bearer-checked
+reverse proxy in front. The dashboard SSE path is untouched; this is the
+harness-subscriber door.
+
 ## Push webhook (wake on dispatch)
 
 Polling flow status leaves an idle agent waiting for its next heartbeat.
@@ -47,13 +131,25 @@ opens, and the adapter opens a **fresh session** for the receiver:
 2. On core: register the callback URL (persistent, checked first at push
    time — autoregister's upsert, or `pushUrls[harness]` / single `pushUrl`
    (+ `pushBearer`) in config). Nothing registered anywhere = no-op;
-   dispatches behave exactly as before.
+   dispatches behave exactly as before. Manual equivalent (what autoregister
+   does for you, and what to run when it warns you):
+   `manifold webhook set --harness openclaw --url
+   http://<gateway-host>:<port>/api/manifold/pushed --bearer <same-as-webhookBearer>`
+   then `manifold webhook test --harness openclaw` (core POSTs
+   `{event:"webhook.test"}`; the adapter answers `{ok:true,test:true}`
+   without waking anyone).
 3. On dispatch/gate-open, core POSTs `{event, at, flow, session}` (see
    `events/push.js`); the adapter verifies the bearer, then runs a fresh
    turn in session `manifold-push-<flowId>-<nodeId>` carrying the handoff.
    If the fresh turn fails, it falls back to the originating sessionKey; if
    both fail it logs loudly (the run itself is unaffected). Delivery never
    fails the run (bounded 3s timeout, failures are warnings).
+   There is no pending queue or heartbeat drain on this path (winch parks a
+   missed claim for 4h; manifold has no equivalent — a dispatched turn or an
+   open gate needs its receiver now). When the fresh session AND the
+   originating-session fallback both fail, the adapter logs loudly
+   (`manifold: push wake … FAILED`) and the HTTP answer reports
+   `{woken:false}` — that log line is the page, not a queue.
 
 ### Event payloads
 

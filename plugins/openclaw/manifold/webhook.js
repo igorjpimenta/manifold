@@ -5,10 +5,17 @@
 // (agent.dispatched) or a human gate opens (gate.opened) and a push target
 // is registered for this harness (see events/push.js for the payload
 // contract). This handler verifies the bearer, then opens a FRESH session
-// for the receiver via runtime.subagent.run — the new session starts with
-// full context, not a pointer. A failed fresh turn falls back to the
+// for the receiver via runtime.subagent.run carrying a receiver prompt that
+// STARTS the pipeline work — manifold_start with flow/node context for
+// agent.dispatched, the manifold_approve resume path for gate.opened — and
+// reacts to the turn result. A failed fresh turn falls back to the
 // originating sessionKey; if both fail the handler logs loudly (the HTTP
 // answer still reports the failure — the run itself is unaffected).
+//
+// There is deliberately no pending queue / heartbeat drain here: unlike a
+// backlog claim (re-readable on the next poll), a dispatched turn or an open
+// gate needs its receiver now. A double failure pages loudly through the
+// error log instead of parking silently.
 //
 // Resilience order per wake: fresh session → originating session →
 // report-only. Nothing here ever throws into the HTTP layer.
@@ -76,16 +83,37 @@ export function wakeSessionKey(flowId, nodeId) {
   return `manifold-push-${flowId}-${nodeId}`;
 }
 
-// Handoff text for the fresh session: full context when core sent it,
-// else a composed pointer back to the originating session.
+// Handoff text for the fresh session. A projection of the push payload
+// only (flow/session context) — no session history enters the prompt. The
+// prompt STARTS the pipeline work, it does not point at it:
+// agent.dispatched names manifold_start with the flow/node context, and
+// gate.opened names the manifold_approve resume path.
 export function wakeMessage(body) {
-  if (body.event === "gate.opened") {
-    const f = body.flow ?? {};
-    return `Manifold gate opened for flow ${f.id ?? "(unknown)"} at node ${f.nodeId ?? "(unknown)"} (pipeline ${f.pipelineId ?? "(unknown)"}). Review it via the manifold operator surface.`;
-  }
   const f = body.flow ?? {};
-  const s = body.session ?? {};
-  return `Manifold dispatched flow ${f.id ?? "(unknown)"} node ${f.nodeId ?? "(unknown)"} to you (originating session ${s.sessionKey ?? "(unknown)"}). Continue the work from the flow state.`;
+  const sess = body.session ?? {};
+  const context = JSON.stringify({ flow: f, session: sess });
+  if (body.event === "gate.opened") {
+    return [
+      `Manifold gate opened for flow ${f.id ?? "(unknown)"} at node ${f.nodeId ?? "(unknown)"} (pipeline ${f.pipelineId ?? "(unknown)"}).`,
+      `Review the blocked item (manifold_status ${f.id ?? "<flowId>"}) then record your decision with: manifold_approve ${f.id ?? "<flowId>"} <itemId> <approve|reject|edit>.`,
+      `Context: ${context}`,
+    ].join("\n");
+  }
+  return [
+    `Manifold dispatched flow ${f.id ?? "(unknown)"} node ${f.nodeId ?? "(unknown)"} (pipeline ${f.pipelineId ?? "(unknown)"}) to you, ${sess.agent ?? "(unknown agent)"} (originating session ${sess.sessionKey ?? "(unknown)"}).`,
+    `Start the pipeline work now: call manifold_start with this flow/node context, drive the turn, and report via the manifold tools. Do not wait for another wake.`,
+    `Context: ${context}`,
+  ].join("\n");
+}
+
+// A subagent turn counts as woken when it returns without signalling
+// failure. Reacting to the result (not just its presence) keeps a
+// failed-but-returned turn on the fallback chain instead of reporting a
+// wake that never started work.
+export function turnOk(result) {
+  if (!result) return false;
+  if (typeof result === "object" && (result.ok === false || result.error != null)) return false;
+  return true;
 }
 
 export function registerPushWebhook({ api, logger, getSubagent } = {}) {
@@ -141,7 +169,8 @@ export function registerPushWebhook({ api, logger, getSubagent } = {}) {
         let woken = false;
         let wokenSession = null;
 
-        // 1) Fresh session for the receiver.
+        // 1) Fresh session for the receiver. The result decides: a
+        // returned-but-failed turn is not a wake — fall through below.
         if (subagent && typeof subagent.run === "function") {
           try {
             const r = await subagent.run({
@@ -149,9 +178,11 @@ export function registerPushWebhook({ api, logger, getSubagent } = {}) {
               message,
               agentId: agent,
             });
-            if (r) {
+            if (turnOk(r)) {
               woken = true;
               wokenSession = wakeSessionKey(flowId, nodeId);
+            } else {
+              log?.warn?.(`manifold: fresh-session wake for ${flowId}/${nodeId} returned without starting work, falling back`);
             }
           } catch (err) {
             log?.warn?.(`manifold: fresh-session wake failed, falling back: ${err?.message ?? err}`);
@@ -166,9 +197,11 @@ export function registerPushWebhook({ api, logger, getSubagent } = {}) {
               message,
               agentId: agent,
             });
-            if (r) {
+            if (turnOk(r)) {
               woken = true;
               wokenSession = originatingSession;
+            } else {
+              log?.warn?.(`manifold: fallback wake for ${flowId}/${nodeId} returned without starting work`);
             }
           } catch (err) {
             log?.warn?.(`manifold: fallback wake failed: ${err?.message ?? err}`);
