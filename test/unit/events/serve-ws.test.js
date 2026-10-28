@@ -1,7 +1,8 @@
-// serve-ws.test.js — the event pipe: welcome, history replay, live
-// broadcast to every connected client. Real server + real sockets on an
-// ephemeral port; entries stream verbatim. Uses the global WebSocket client
-// (Node 24), the same transport winch's ws.test.js uses.
+// serve-ws.test.js — open-flows sync: welcome, history replay, the
+// connect-time open-flows snapshot, then live frames filtered per
+// harness. Real server + real sockets on an ephemeral port. Uses the
+// global WebSocket client (Node 24), the same transport winch's
+// ws.test.js uses.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -29,9 +30,9 @@ function seed() {
 // The inbox is attached at connect time and never replaced: with several
 // clients racing the same broadcast, attaching a fresh onmessage per
 // collect() call drops frames that land between collects.
-function connect(port) {
+function connect(port, qs = "/") {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${qs}`);
     sockets.push(ws);
     ws.inbox = [];
     ws.onmessage = (e) => {
@@ -120,4 +121,60 @@ test("empty stream: welcome id 0, empty history, still streams later entries", a
 
 test("requires a stream (subscribe + history)", () => {
   assert.throws(() => startWsServer({}), /requires an events\/stream/);
+  assert.throws(() => startWsServer({ stream, getOpenFlows: 42 }), /getOpenFlows must be a function/);
+});
+
+test("harness-scoped connect gets filtered history plus the open-flows snapshot", async () => {
+  stream.append({ event: "agent.dispatched", session: { harness: "h", agent: "a", sessionKey: "k" } });
+  stream.append({ event: "agent.dispatched", session: { harness: "other", agent: "a", sessionKey: "k" } });
+  const openFlows = [{ id: "F1", pipelineId: "p", nodeId: "n1", status: "running", harness: "h" }];
+  srv = await startWsServer({
+    stream,
+    port: 0,
+    getOpenFlows: async (harness) => {
+      assert.equal(harness, "h");
+      return openFlows;
+    },
+  });
+  const ws = await connect(srv.port, "/?harness=h");
+  const [welcome, history, snapshot] = await collect(ws, 3);
+  assert.equal(welcome.type, "welcome");
+  assert.equal(history.type, "history");
+  assert.deepEqual(history.events.map((e) => e.session.harness), ["h"]);
+  assert.equal(snapshot.type, "open-flows");
+  assert.equal(snapshot.harness, "h");
+  assert.deepEqual(snapshot.flows, openFlows);
+});
+
+test("live frames filter per harness; untagged entries go everywhere", async () => {
+  srv = await startWsServer({ stream, port: 0, getOpenFlows: async () => [] });
+  const a = await connect(srv.port, "/?harness=h");
+  const b = await connect(srv.port, "/?harness=other");
+  await collect(a, 3);
+  await collect(b, 3);
+  stream.append({ event: "agent.dispatched", session: { harness: "h" } });
+  const [liveA] = await collect(a, 1);
+  assert.equal(liveA.event.session.harness, "h");
+  await new Promise((r) => setTimeout(r, 100));
+  assert.deepEqual(b.inbox, []);
+  stream.append({ event: "flow.changed", session: { harness: null } });
+  const [liveA2] = await collect(a, 1);
+  const [liveB2] = await collect(b, 1);
+  assert.equal(liveA2.event.event, "flow.changed");
+  assert.equal(liveB2.event.event, "flow.changed");
+});
+
+test("open-flows snapshot failure degrades to an empty list", async () => {
+  srv = await startWsServer({
+    stream,
+    port: 0,
+    getOpenFlows: async () => { throw new Error("db down"); },
+  });
+  const ws = await connect(srv.port);
+  const [welcome, history, snapshot] = await collect(ws, 3);
+  assert.equal(welcome.type, "welcome");
+  assert.equal(history.type, "history");
+  assert.equal(snapshot.type, "open-flows");
+  assert.equal(snapshot.harness, null);
+  assert.deepEqual(snapshot.flows, []);
 });

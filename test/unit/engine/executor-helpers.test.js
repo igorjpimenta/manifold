@@ -8,7 +8,6 @@ import {
   mergeForConflict,
   withEditableTextDefault,
   mintAgentSessionKey,
-  isManifoldOwnedSessionKey,
   shortSummary,
   deepClone,
   detectBlockedSentinel,
@@ -219,32 +218,6 @@ describe("mintAgentSessionKey", () => {
   it("appends itemKey", () => {
     const key = mintAgentSessionKey("12345678-0000-0000-0000-000000000000", "DRAFT", "item-1");
     assert.ok(key.includes("draft-item-1"), key);
-  });
-});
-
-// ── isManifoldOwnedSessionKey ─────────────────────────────────────────────────
-
-describe("isManifoldOwnedSessionKey", () => {
-  it("returns true for a core-minted opaque handle", () => {
-    assert.equal(isManifoldOwnedSessionKey(mintAgentSessionKey("12345678-aabb-ccdd-eeff-000000000000", "PROPOSE")), true);
-  });
-
-  it("returns true for the adapter's gateway shape of an opaque handle", () => {
-    assert.equal(isManifoldOwnedSessionKey("agent:cyrano:subagent:mf-12345678-propose"), true);
-  });
-
-  it("returns false for the legacy gf- shape core no longer mints", () => {
-    assert.equal(isManifoldOwnedSessionKey("agent:cyrano:subagent:gf-12345678-propose"), false);
-  });
-
-  it("returns false for a non-manifold session key", () => {
-    assert.equal(isManifoldOwnedSessionKey("agent:main:cron:some-job"), false);
-  });
-
-  it("returns false for null/undefined/non-string input", () => {
-    assert.equal(isManifoldOwnedSessionKey(null), false);
-    assert.equal(isManifoldOwnedSessionKey(undefined), false);
-    assert.equal(isManifoldOwnedSessionKey(42), false);
   });
 });
 

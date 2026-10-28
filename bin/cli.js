@@ -22,6 +22,9 @@ import { startMcpServer } from "../mcp/stdio.js";
 import { createRealOps } from "../mcp/wire-ops.js";
 import { createEventStream } from "../events/stream.js";
 import { startWsServer, DEFAULT_WS_PORT } from "../events/serve-ws.js";
+import { collectOpenFlows, attachOpenFlowsProducer } from "../events/open-flows.js";
+import { flowStateEmitter } from "../events.js";
+import { createRunStore } from "../state/run-store.js";
 import { createPushTargetsStore } from "../state/push-targets.js";
 import { resolvePushTarget, notifyPush } from "../events/push.js";
 import { resolveStorePaths } from "../state/paths.js";
@@ -733,7 +736,7 @@ const USAGE = `usage: manifold <command>
                                        serve the pipeline tools over MCP stdio or Streamable HTTP
                                        (stdio harness from MANIFOLD_HARNESS env only; agent+session stamped per call;
                                        http additionally needs MANIFOLD_BEARER + X-Manifold-Harness per session)
-  serve --ws [--port N] [--host H]       stream push events over WebSocket (verbatim + history replay)
+  serve --ws [--port N] [--host H]       stream open-flows sync over WebSocket (history + snapshot + live)
   webhook set --harness H --url U [--bearer B] [--timeout-ms N]
                                             register a harness push URL (checked first at push time)
   webhook list                             list registered push URLs
@@ -824,8 +827,30 @@ export async function runCli(argv) {
         return;
       }
       const stream = createEventStream();
-      await startWsServer({ stream, port: port ?? DEFAULT_WS_PORT, host, logger });
-      logger.info(`manifold: events on ws://${host}:${port ?? DEFAULT_WS_PORT} (verbatim; subscribers track their own state)`);
+      // The queue carries flow transitions for the whole instance
+      // (single-harness: every open flow is this harness's). The snapshot
+      // on connect is labelled with the subscriber's own ?harness=, and
+      // tagged push entries filter per harness downstream.
+      const runStore = createRunStore({ logger, dbPath: resolveStorePaths().runtimeDb });
+      attachOpenFlowsProducer({
+        stream,
+        runStore,
+        harness: null,
+        subscribe: (fn) => {
+          flowStateEmitter.on("change", fn);
+          return () => flowStateEmitter.off("change", fn);
+        },
+        logger,
+      });
+      await startWsServer({
+        stream,
+        port: port ?? DEFAULT_WS_PORT,
+        host,
+        logger,
+        getOpenFlows: (harness) => collectOpenFlows({ runStore, harness }),
+      });
+      try { await runStore.ready?.(); } catch {}
+      logger.info(`manifold: open-flows sync on ws://${host}:${port ?? DEFAULT_WS_PORT} (connect with ?harness=H for the open-flows snapshot)`);
       return;
     }
 
