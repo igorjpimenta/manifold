@@ -51,7 +51,8 @@ const MIME = {
   ".ico":  "image/x-icon",
 };
 
-export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
+export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision, opsDbPath }) {
+  if (!opsDbPath) throw new Error("createDashboardServer: opsDbPath is required");
   let server = null;
   // Track open SSE responses so we can drain them on stop().
   const sseClients = new Set();
@@ -377,7 +378,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         const sinceMs = Number.isFinite(sinceDays) && sinceDays > 0
           ? Date.now() - sinceDays * 86_400_000
           : null;
-        const cost = await costForAllPipelines(await fetchAllRuns(), { sinceMs });
+        const cost = await costForAllPipelines(await fetchAllRuns(), { sinceMs, dbPath: opsDbPath });
         return sendJson(res, 200, cost);
       }
 
@@ -392,7 +393,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
           ? Date.now() - sinceDays * 86_400_000
           : null;
         const priorWindowMs = sinceMs ? Date.now() - sinceMs : null;
-        const cost = await costForPipeline(await fetchAllRuns({ pipelineId }), pipelineId, { sinceMs, priorWindowMs });
+        const cost = await costForPipeline(await fetchAllRuns({ pipelineId }), pipelineId, { sinceMs, priorWindowMs, dbPath: opsDbPath });
         return sendJson(res, 200, cost);
       }
 
@@ -469,7 +470,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       // the aggregation shape.
       const runCostMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/cost$/i);
       if (req.method === "GET" && runCostMatch) {
-        const cost = await costForRun(runCostMatch[1]);
+        const cost = await costForRun(runCostMatch[1], { dbPath: opsDbPath });
         return sendJson(res, 200, cost);
       }
 

@@ -6,6 +6,15 @@
 import { test, mock, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
+import os from "node:os";
+import path from "node:path";
+
+// Injected store paths (missing files probe as ok:false without creating them).
+const storePaths = {
+  dataDir: path.join(os.tmpdir(), "manifold-health-test"),
+  runtimeDb: path.join(os.tmpdir(), "manifold-health-test", "runtime.sqlite"),
+  opsDb: path.join(os.tmpdir(), "manifold-health-test", "ops.sqlite"),
+};
 
 const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
 await mock.module(authUrl, {
@@ -25,7 +34,7 @@ const stubAuth = {
 describe("registerHealthRoutes", () => {
   test("registers GET /manifold/health and answers with version + per-file status", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api, auth: stubAuth });
+    registerHealthRoutes({ api, auth: stubAuth, storePaths });
     assert.equal(routes.length, 1);
     assert.equal(routes[0].path, "/manifold/health");
     const res = createMockRes();
@@ -43,7 +52,7 @@ describe("registerHealthRoutes", () => {
 
   test("POST rejected with 405", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api, auth: stubAuth });
+    registerHealthRoutes({ api, auth: stubAuth, storePaths });
     const res = createMockRes();
     await routes[0].handler(createMockReq("POST", "/manifold/health"), res);
     assert.equal(res.statusCode, 405);

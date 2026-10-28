@@ -624,7 +624,8 @@ export default definePluginEntry({
       api,
       auth: { authorizeBridgeRequest, sendUnauthorized },
       readStore,
-      costForAllPipelines,
+      costForAllPipelines: (runs, opts) =>
+        costForAllPipelines(runs, { ...opts, dbPath: storePaths.opsDb }),
       runStore,
       pipelinesRef,
       pipelineRegistryStore,
@@ -678,7 +679,7 @@ export default definePluginEntry({
       runStore,
     });
 
-    registerHealthRoutes({ api, auth: { authorizeBridgeRequest, sendUnauthorized } });
+    registerHealthRoutes({ api, auth: { authorizeBridgeRequest, sendUnauthorized }, storePaths });
 
     registerPipelineRoutes({
       api,
@@ -696,7 +697,7 @@ export default definePluginEntry({
         logger: api.logger, api, flowId, nodeId, decision,
       }),
     });
-    registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
+    registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast, storePaths });
 
     // ── Boot-time task orphan cleanup (absorbed from taskflow-revive) ─────────
 
@@ -740,7 +741,7 @@ export default definePluginEntry({
 
     if (dashboardEnabled) {
       const dashboardStore = readStore;
-      const dashboardBus = createEventBus({ store: dashboardStore, nodeExecutionsStore, logger: api.logger });
+      const dashboardBus = createEventBus({ store: dashboardStore, nodeExecutionsStore, logger: api.logger, dbPath: storePaths.runtimeDb });
       dashboardBusRef = dashboardBus;
       pipelinesWatcher.onReload((info) => {
         publishCatalogChanged(info).catch(() => {});
@@ -756,6 +757,7 @@ export default definePluginEntry({
         ensurePipelinesLoaded,
         executor,
         eventBus: dashboardBus,
+        opsDbPath: storePaths.opsDb,
         port: dashboardPort,
         host: dashboardHost,
         logger: api.logger,

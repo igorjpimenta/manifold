@@ -129,6 +129,7 @@ before(async () => {
     host: "127.0.0.1",
     logger: {},
     recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }),
+    opsDbPath: "/nonexistent/manifold-server-test/ops.sqlite",
   });
   await server.start();
 });
