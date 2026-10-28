@@ -50,6 +50,10 @@ const PUBLIC_API = {
     exports: ["browserProfileForLock", "beginTabSession", "endTabSession"],
   },
   "./elevation": { file: "./elevation.js", exports: ["invokeElevated"] },
+  "./routes/bearer-auth": {
+    file: "./routes/bearer-auth.js",
+    exports: ["authorizeBearerRequest", "sendUnauthorized"],
+  },
   "./tool-handoff": {
     file: "./state/tool-handoff.js",
     exports: [

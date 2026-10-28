@@ -6,16 +6,17 @@
  *   - Method guards on cost + list + queue routes.
  *   - Cost, list, and queue handlers return expected shapes.
  */
-import { test, mock, describe } from "node:test";
+import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-  },
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js);
+// the authReq helper below sends it, matching the "Bearer x" test token.
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = "x";
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
 // sendFullRun now calls failureStore.queryErrorsByFlow(...) (Phase 1.5,
@@ -64,10 +65,6 @@ function makeDeps(api, overrides = {}) {
     costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
     pipelinesRef: { value: new Map() },
     invokeElevated: async () => ({}),
-    auth: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-    },
     failureStore: {
       queryErrorsByFlow: async (flowId) => queryErrorsByFlowImpl(flowId),
       queryErrorsByFlowIds: async (flowIds) => queryErrorsByFlowIdsImpl(flowIds),
@@ -158,7 +155,7 @@ describe("registerRunRoutes — method guards", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/cost");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/manifold/cost"), res);
+    await handler(authReq("POST", "/manifold/cost"), res);
     assert.equal(res.statusCode, 405);
   });
 
@@ -167,7 +164,7 @@ describe("registerRunRoutes — method guards", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/manifold/runs"), res);
+    await handler(authReq("POST", "/manifold/runs"), res);
     assert.equal(res.statusCode, 405);
   });
 
@@ -176,7 +173,7 @@ describe("registerRunRoutes — method guards", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/manifold/queue"), res);
+    await handler(authReq("POST", "/manifold/queue"), res);
     assert.equal(res.statusCode, 405);
   });
 });
@@ -191,7 +188,7 @@ describe("registerRunRoutes — cost handler", () => {
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/cost");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/cost"), res);
+    await handler(authReq("GET", "/manifold/cost"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.pipelines), "pipelines is array");
@@ -206,7 +203,7 @@ describe("registerRunRoutes — queue handler", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/queue"), res);
+    await handler(authReq("GET", "/manifold/queue"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.items, []);
@@ -226,7 +223,7 @@ describe("registerRunRoutes — queue handler", () => {
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/queue"), res);
+    await handler(authReq("GET", "/manifold/queue"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.items.length, 1);
@@ -253,7 +250,7 @@ describe("registerRunRoutes — queue handler", () => {
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/queue");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/queue"), res);
+    await handler(authReq("GET", "/manifold/queue"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.items[0].parentFlowId, null);
     assert.equal(body.items[0].nodeId, null);
@@ -267,7 +264,7 @@ describe("registerRunRoutes — errors handler", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/errors");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/errors"), res);
+    await handler(authReq("GET", "/manifold/errors"), res);
     assert.equal(res.statusCode, 400);
   });
 
@@ -279,7 +276,7 @@ describe("registerRunRoutes — errors handler", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/errors");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/errors?flowIds=flow-a"), res);
+    await handler(authReq("GET", "/manifold/errors?flowIds=flow-a"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(body.errors["flow-a"], "flow-a key present");
@@ -292,7 +289,7 @@ describe("registerRunRoutes — errors handler", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/errors");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/errors?flowIds=flow-z"), res);
+    await handler(authReq("GET", "/manifold/errors?flowIds=flow-z"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.errors, {});
@@ -305,7 +302,7 @@ describe("registerRunRoutes — runs list handler", () => {
     registerRunRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/runs"), res);
+    await handler(authReq("GET", "/manifold/runs"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.runs), "runs is an array");
@@ -322,7 +319,7 @@ describe("registerRunRoutes — runs list handler", () => {
     registerRunRoutes(makeDeps(api, { readStore: { listStatusCounts: () => ({}), listRunsPage: () => [fakeRun], get: () => null } }));
     const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/runs"), res);
+    await handler(authReq("GET", "/manifold/runs"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.runs.length, 1);
     assert.equal(body.runs[0].flowId, "abc123");
@@ -342,7 +339,7 @@ describe("registerRunRoutes — runs list handler", () => {
     registerRunRoutes(makeDeps(api, { readStore: { listStatusCounts: () => ({}), listRunsPage: () => [fakeRun], get: () => null } }));
     const { handler } = routes.find((r) => r.path === "/manifold/runs" && r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/runs"), res);
+    await handler(authReq("GET", "/manifold/runs"), res);
     const body = JSON.parse(res.body);
     assert.equal(body.runs[0].currentStep, "FETCH");
     assert.equal(body.runs[0].lastStep, "INIT");

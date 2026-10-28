@@ -5,7 +5,7 @@
  * method guard before auth, and happy-path execution with stub stores
  * (auth mocked — failures.test.js pattern).
  */
-import { test, mock, describe } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
 import path from "node:path";
@@ -14,12 +14,13 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
-  },
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
+const TEST_BEARER = "test-bearer-graphql";
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_BEARER;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
 const { registerGraphqlRoutes } = await import("../../../routes/graphql.js");
@@ -47,10 +48,6 @@ function makeDeps(api, overrides = {}) {
   return {
     api,
     failureStore: { list: async () => [] },
-    auth: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
-    },
     runStore: { listRunsPage: async () => [], get: async () => null },
     runtimeDbPath: tmpDb("runtime"),
     opsDbPath: tmpDb("ops"),
@@ -61,7 +58,7 @@ function makeDeps(api, overrides = {}) {
 function postReq(body) {
   const text = typeof body === "string" ? body : JSON.stringify(body);
   return {
-    ...createMockReq("POST", "/manifold/graphql"),
+    ...createMockReq("POST", "/manifold/graphql", { authorization: `Bearer ${TEST_BEARER}` }),
     [Symbol.asyncIterator]: async function* () { yield text; },
   };
 }

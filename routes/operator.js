@@ -4,10 +4,10 @@ import { createStateStore } from "../state/state-store.js";
 import { completeCancellation } from "../engine/executor-cancel.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { resumeFlowFromGate } from "./operator-resume.js";
+import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
 export function registerOperatorRoutes({
   api,
-  auth,
   store,
   readStore,
   executor,
@@ -58,10 +58,9 @@ export function registerOperatorRoutes({
       if (req.method !== "POST") {
         res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
-      api.logger.info(`manifold gate/resolve: via ${authz.via}`);
+      api.logger.info("manifold gate/resolve: bearer ok");
       let raw = "";
       for await (const chunk of req) raw += chunk;
       let body;
@@ -142,8 +141,7 @@ export function registerOperatorRoutes({
       if (req.method !== "POST") {
         res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       let raw = "";
       for await (const chunk of req) raw += chunk;
@@ -238,8 +236,7 @@ export function registerOperatorRoutes({
       if (req.method !== "POST") {
         res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       let raw = "";
       for await (const chunk of req) raw += chunk;

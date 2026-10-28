@@ -3,8 +3,9 @@
 // Ignore is a pure iOS device-local annotation with no server round trip
 // at all, so it has no route here. Only GET (list) and POST .../retry
 // (implemented in routes/operator-retry.js) remain.
+import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
-export function registerFailureRoutes({ api, auth, failureStore, invokeElevated }) {
+export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
   // ── GET /manifold/failures ─────────────────────────────────────────────
   api.registerHttpRoute({
     path: "/manifold/failures",
@@ -17,8 +18,7 @@ export function registerFailureRoutes({ api, auth, failureStore, invokeElevated 
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       const resolved = url.searchParams.get("resolved");
@@ -58,8 +58,7 @@ export function registerFailureRoutes({ api, auth, failureStore, invokeElevated 
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
 
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);

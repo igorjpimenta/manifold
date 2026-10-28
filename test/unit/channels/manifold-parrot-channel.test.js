@@ -1,9 +1,18 @@
 // Unit tests for channels/manifold-parrot-channel.js
 
-import { test, mock, describe } from "node:test";
+import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { createMockApi, createMockRes } from "../../helpers/mock-api.js";
+
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
+const TEST_BEARER = "test-bearer-parrot";
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_BEARER;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
+});
 
 // ─── module-level mocks ──────────────────────────────────────────────────────
 // All external SDK deps are mocked before the module under test is imported.
@@ -21,12 +30,6 @@ let dispatchCalls = [];
 let dispatchResult = { route: { sessionKey: "session-key-1" } };
 let dispatchShouldThrow = null;
 let capturedDispatchArgs = null;
-
-// Auth mock implementation — mutated by individual tests when needed.
-const authMockImpl = {
-  authorizeBridgeRequest: async () => ({ ok: true }),
-  sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
-};
 
 try {
   await mock.module("openclaw/plugin-sdk/channel-core", {
@@ -47,16 +50,6 @@ try {
         if (dispatchShouldThrow) throw dispatchShouldThrow;
         return dispatchResult;
       },
-    },
-  });
-
-  // live-activity-bridge/auth.js is dynamically imported inside the handler.
-  // Resolve its URL relative to the test file — matching operator.test.js / runs.test.js.
-  const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-  await mock.module(authUrl, {
-    exports: {
-      authorizeBridgeRequest: async (...a) => authMockImpl.authorizeBridgeRequest(...a),
-      sendUnauthorized: (...a) => authMockImpl.sendUnauthorized(...a),
     },
   });
 
@@ -186,13 +179,13 @@ function buildReadyEntry(overrides = {}) {
   return { ...built, abortCtrl, startPromise };
 }
 
-/** POST request with an async-iterable body. */
+/** POST request with an async-iterable body, bearer-authenticated. */
 function makePostReq(body, extraHeaders = {}) {
   const raw = typeof body === "string" ? body : JSON.stringify(body);
   return {
     method: "POST",
     url: "/channels/manifold-parrot/message",
-    headers: { host: "localhost", ...extraHeaders },
+    headers: { host: "localhost", authorization: `Bearer ${TEST_BEARER}`, ...extraHeaders },
     [Symbol.asyncIterator]: async function* () { yield raw; },
   };
 }
@@ -318,18 +311,25 @@ describe("HTTP handler — method guard", () => {
 // ─── HTTP handler — auth ─────────────────────────────────────────────────────
 
 describe("HTTP handler — auth", () => {
-  test("returns 401 when authorizeBridgeRequest fails", { skip: SKIP ? SKIP_MSG : false }, async () => {
-    const originalAuth = authMockImpl.authorizeBridgeRequest;
-    authMockImpl.authorizeBridgeRequest = async () => ({ ok: false, reason: "bad token" });
-    try {
-      const { route } = buildReadyEntry();
-      const req = makePostReq({ flowId: randomUUID(), text: "hello" });
-      const res = createMockRes();
-      await route.handler(req, res);
-      assert.equal(res.statusCode, 401);
-    } finally {
-      authMockImpl.authorizeBridgeRequest = originalAuth;
-    }
+  test("returns 401 without a bearer token", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const { route } = buildReadyEntry();
+    const req = {
+      method: "POST",
+      url: "/channels/manifold-parrot/message",
+      headers: { host: "localhost" },
+      [Symbol.asyncIterator]: async function* () { yield JSON.stringify({ flowId: randomUUID(), text: "hello" }); },
+    };
+    const res = createMockRes();
+    await route.handler(req, res);
+    assert.equal(res.statusCode, 401);
+  });
+
+  test("returns 401 on bearer mismatch", { skip: SKIP ? SKIP_MSG : false }, async () => {
+    const { route } = buildReadyEntry();
+    const req = makePostReq({ flowId: randomUUID(), text: "hello" }, { authorization: "Bearer wrong" });
+    const res = createMockRes();
+    await route.handler(req, res);
+    assert.equal(res.statusCode, 401);
   });
 });
 
@@ -341,7 +341,7 @@ describe("HTTP handler — body validation", () => {
     const req = {
       method: "POST",
       url: "/channels/manifold-parrot/message",
-      headers: { host: "localhost" },
+      headers: { host: "localhost", authorization: `Bearer ${TEST_BEARER}` },
       [Symbol.asyncIterator]: async function* () { yield "not-json{{{"; },
     };
     const res = createMockRes();
@@ -383,7 +383,7 @@ describe("HTTP handler — body validation", () => {
     const req = {
       method: "POST",
       url: "/channels/manifold-parrot/message",
-      headers: { host: "localhost" },
+      headers: { host: "localhost", authorization: `Bearer ${TEST_BEARER}` },
       [Symbol.asyncIterator]: async function* () {},
     };
     const res = createMockRes();

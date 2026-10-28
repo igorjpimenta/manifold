@@ -4,7 +4,6 @@
   "description": "OpenClaw companion for manifold: registers pipeline agent tools, discuss routes, the manifold-parrot channel, and boot services on the gateway.",
   "exports": {
     ".": "./index.js",
-    "./bridge-auth": "./auth/bridge.js",
     "./profile-lock": "./hooks/profile-write-lock.js"
   },
   "license": "UNLICENSED",
@@ -25,9 +24,7 @@
     "agent/tools/shared.js",
     "agent/tools/submit-draft.js",
     "agent/tools/submit-score.js",
-    "auth/bridge.js",
     "channels/manifold-parrot-channel.js",
-    "dashboard/device.js",
     "hooks/profile-read-gate.js",
     "hooks/profile-write-lock.js",
     "hooks/score-tool-wake.js",

@@ -3,26 +3,27 @@
  *
  * Verifies:
  *   - registerFailureRoutes registers exactly 2 routes at the right paths/auth/match.
- *   - Method guards fire before the auth check (no live-activity-bridge needed).
- *   - Happy-path handler returns failure list JSON (auth mocked).
+ *   - Method guards fire before the bearer check.
+ *   - Happy-path handler returns failure list JSON (bearer-authenticated).
  */
-import { test, mock, describe, before } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// ── auth mock ────────────────────────────────────────────────────────────────
-// Mock before any import of routes/failures.js so the dynamic import inside
-// the handler gets the stub, not the real live-activity-bridge module.
-
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
-  },
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
+const TEST_BEARER = "test-bearer-failures";
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_BEARER;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
 const { registerFailureRoutes } = await import("../../../routes/failures.js");
+
+function authedReq(method, path) {
+  return createMockReq(method, path, { authorization: `Bearer ${TEST_BEARER}` });
+}
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -31,10 +32,6 @@ function makeDeps(api, overrides = {}) {
     api,
     failureStore: { list: () => [], get: () => null },
     invokeElevated: async () => ({}),
-    auth: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
-    },
     ...overrides,
   };
 }
@@ -83,7 +80,7 @@ describe("registerFailureRoutes — method guards", () => {
     registerFailureRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("POST", "/manifold/failures"), res);
+    await handler(authedReq("POST", "/manifold/failures"), res);
     assert.equal(res.statusCode, 405);
   });
 
@@ -92,7 +89,7 @@ describe("registerFailureRoutes — method guards", () => {
     registerFailureRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("DELETE", "/manifold/failures"), res);
+    await handler(authedReq("DELETE", "/manifold/failures"), res);
     assert.equal(res.statusCode, 405);
   });
 });
@@ -105,7 +102,7 @@ describe("registerFailureRoutes — list handler", () => {
     registerFailureRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/failures"), res);
+    await handler(authedReq("GET", "/manifold/failures"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.rows), "body.rows is an array");
@@ -126,7 +123,7 @@ describe("registerFailureRoutes — list handler", () => {
     }));
     const { handler } = routes.find((r) => r.match === "exact");
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/failures"), res);
+    await handler(authedReq("GET", "/manifold/failures"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.equal(body.rows.length, 1);

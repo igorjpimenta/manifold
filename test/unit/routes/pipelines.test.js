@@ -6,27 +6,28 @@
  *   - Method guard fires before auth.
  *   - Happy-path handler returns {pipelines, todayStartMs, generatedAtMs} shape.
  */
-import { test, mock, describe } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-  },
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
+const TEST_BEARER = "test-bearer-pipelines";
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_BEARER;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
 const { registerPipelineRoutes } = await import("../../../routes/pipelines.js");
 
+function authedReq(method, path) {
+  return createMockReq(method, path, { authorization: `Bearer ${TEST_BEARER}` });
+}
+
 function makeDeps(api, overrides = {}) {
   return {
     api,
-    auth: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-    },
     pipelinesRef: { value: new Map() },
     readStore: { listAllPipelineStats: () => new Map() },
     ensurePipelinesLoaded: async () => {},
@@ -57,7 +58,7 @@ describe("registerPipelineRoutes — method guard", () => {
     const { api, routes } = createMockApi();
     registerPipelineRoutes(makeDeps(api));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("POST", "/manifold/pipelines"), res);
+    await routes[0].handler(authedReq("POST", "/manifold/pipelines"), res);
     assert.equal(res.statusCode, 405);
   });
 
@@ -65,7 +66,7 @@ describe("registerPipelineRoutes — method guard", () => {
     const { api, routes } = createMockApi();
     registerPipelineRoutes(makeDeps(api));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("DELETE", "/manifold/pipelines"), res);
+    await routes[0].handler(authedReq("DELETE", "/manifold/pipelines"), res);
     assert.equal(res.statusCode, 405);
   });
 });
@@ -75,7 +76,7 @@ describe("registerPipelineRoutes — handler", () => {
     const { api, routes } = createMockApi();
     registerPipelineRoutes(makeDeps(api));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
+    await routes[0].handler(authedReq("GET", "/manifold/pipelines"), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.ok(Array.isArray(body.pipelines), "pipelines is an array");
@@ -94,7 +95,7 @@ describe("registerPipelineRoutes — handler", () => {
     const pipelines = new Map([["team_test", fakePipeline]]);
     registerPipelineRoutes(makeDeps(api, { pipelinesRef: { value: pipelines } }));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
+    await routes[0].handler(authedReq("GET", "/manifold/pipelines"), res);
     const body = JSON.parse(res.body);
     const [p] = body.pipelines;
     assert.equal(p.id, "team_test");
@@ -115,7 +116,7 @@ describe("registerPipelineRoutes — handler", () => {
       readStore: { listAllPipelineStats: () => new Map([["orphan_pipeline", orphanStats]]) },
     }));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
+    await routes[0].handler(authedReq("GET", "/manifold/pipelines"), res);
     const body = JSON.parse(res.body);
     const orphan = body.pipelines.find((p) => p.id === "orphan_pipeline");
     assert.ok(orphan, "orphan pipeline appears");
@@ -145,7 +146,7 @@ describe("registerPipelineRoutes — handler", () => {
     ]);
     registerPipelineRoutes(makeDeps(api, { pipelinesRef: { value: pipelines } }));
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/manifold/pipelines"), res);
+    await routes[0].handler(authedReq("GET", "/manifold/pipelines"), res);
     const body = JSON.parse(res.body);
     assert.ok(body.pipelines.some((p) => p.id === "team_test"), "the real pipeline must still appear");
     assert.ok(
