@@ -17,11 +17,9 @@ import { createFailureStore } from "../state/failure-store.js";
 import { createAdmissionQueueStore } from "../state/admission-queue-store.js";
 import { createNodeHealthStore } from "../state/node-health-store.js";
 import { createSessionIndex } from "../state/session-index.js";
-import { createPushTargetsStore } from "../state/push-targets.js";
 import { createExecutor } from "../engine/executor.js";
 import { createGateResolver } from "../gates/gate-resolver.js";
 import { loadPipelines } from "../engine/loader.js";
-import { resolvePushTarget, notifyPush as pushNotify } from "../events/push.js";
 import { createEmitter } from "../events/emit.js";
 import { getGlobalConcurrencyLimit } from "../engine/global-concurrency.js";
 import { resolveStorePaths } from "../state/paths.js";
@@ -37,7 +35,6 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
   const admissionQueueStore = createAdmissionQueueStore({ logger, getLimit: getGlobalConcurrencyLimit });
   const nodeHealthStore = await createNodeHealthStore({ logger }).catch(() => null);
   const sessionIndex = await createSessionIndex({ logger }).catch(() => null);
-  const pushTargetsStore = await createPushTargetsStore({ logger, dbPath: runtimeDb }).catch(() => null);
 
   const api = {
     logger: logger ?? console,
@@ -89,19 +86,6 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     failureStore,
     nodeHealthStore,
     notifyFlowEnteredWaiting: async () => {},
-    notifyPush: async (payload) => {
-      try {
-        const harness = payload?.session?.harness ?? null;
-        const target = resolvePushTarget({
-          pushTargets: harness ? await pushTargetsStore?.get(harness).catch(() => null) : null,
-          harnessId: harness,
-          config: config ?? {},
-        });
-        if (target) await pushNotify({ target, payload, logger });
-      } catch (err) {
-        logger?.warn?.(`manifold: standalone notifyPush failed: ${err?.message ?? err}`);
-      }
-    },
     sessionIndex,
     nodeExecutionsStore,
     runStore,

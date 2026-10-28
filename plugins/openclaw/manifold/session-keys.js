@@ -12,8 +12,7 @@
 // never by runId.
 //
 // Non-mf keys pass through verbatim in both directions: explicit
-// entry.sessionKey overrides and gateway-native keys (e.g. the push
-// webhook's `manifold-push-…` wake keys) are never reshaped.
+// entry.sessionKey overrides and gateway-native keys are never reshaped.
 
 import { randomBytes } from "node:crypto";
 

@@ -237,24 +237,12 @@ export const modelHealth = sqliteTable('model_health', {
 });
 
 
-// Push delivery targets, one row per harness. Written by deliberate admin
-// acts (adapter autoregister, operator tooling); read on every dispatch
-// and gate-open. No expiry: a removed target is a delete, not a flag.
 // Per-harness pipeline directory overrides, one row per harness. Written by
 // deliberate admin acts (`manifold pipelines register`, operator tooling);
 // read once at boot to resolve the pipelines dir. No expiry: removing an
-// override is a delete, not a flag — same posture as push_targets.
+// override is a delete, not a flag.
 export const pipelineDirs = sqliteTable('pipeline_dirs', {
   harness:   text('harness').primaryKey(),
   path:      text('path').notNull(),
   createdAt: integer('created_at').notNull(),
-});
-
-export const pushTargets = sqliteTable('push_targets', {
-  harness:   text('harness').primaryKey(),
-  url:       text('url').notNull(),
-  bearer:    text('bearer'),
-  timeoutMs: integer('timeout_ms'),
-  createdAt: integer('created_at').notNull(),
-  updatedAt: integer('updated_at').notNull(),
 });

@@ -26,7 +26,7 @@ import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
 import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
-import { wrapSubagentKeys, toGatewaySessionKey, toGatewayKey } from "./session-keys.js";
+import { wrapSubagentKeys, toGatewayKey } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
 import {
   registerGraphFlowTool,
@@ -83,14 +83,9 @@ import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
 import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
 import { registerManifoldMetaHook } from "./meta.js";
-import { registerPushWebhook } from "./webhook.js";
-import { autoregisterPushTarget } from "./autoregister.js";
 import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
 import { setLocksDir } from "../../../locks/lock.js";
 import { setStateFile } from "../../../gates/paused-flows.js";
-import { createPushTargetsStore } from "../../../state/push-targets.js";
-import { resolvePushTarget, pushPayload, notifyPush } from "../../../events/push.js";
-import { createEventStream } from "../../../events/stream.js";
 
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 const DEFAULT_DASHBOARD_PORT = 7430;
@@ -162,39 +157,6 @@ export default definePluginEntry({
         minimum: 1,
         description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8.",
       },
-      pushUrls: {
-        type: "object",
-        description: "Per-harness push targets core POSTs dispatch/gate events to (each: {url, bearer?, timeoutMs?}). DB-registered targets win over this map.",
-      },
-      pushUrl: {
-        type: "string",
-        description: "Single fallback push URL for all harnesses when pushUrls has no entry.",
-      },
-      pushBearer: {
-        type: "string",
-        description: "Bearer core sends as Authorization on fallback pushUrl POSTs.",
-      },
-      pushTimeoutMs: {
-        type: "integer",
-        minimum: 1,
-        description: "Bounded push POST timeout. Default: 3000.",
-      },
-      webhookBearer: {
-        type: "string",
-        description: "Shared secret core must send as Authorization: Bearer on POST /api/manifold/pushed. Must match the registered push target bearer. Route stays disarmed (503) until set.",
-      },
-      webhookPublicBaseUrl: {
-        type: "string",
-        description: "Gateway address core can reach, e.g. http://127.0.0.1:18789. Used by self-registration to build the route URL.",
-      },
-      webhookHarness: {
-        type: "string",
-        description: "Harness name registered for push delivery. Default: openclaw.",
-      },
-      webhookAutoregister: {
-        type: "boolean",
-        description: "Register the route URL as this harness's push target on boot (upsert + test ping). Default true when webhookBearer is set.",
-      },
       profilePath: {
         type: "string",
         description: "Absolute path of the PROFILE.md file guarded by the before_tool_call read gate and edit lock (hooks/profile-read-gate.js, hooks/profile-write-lock.js). Default: ~/.openclaw/workspace/.shared/freelance/profile/PROFILE.md",
@@ -219,10 +181,13 @@ export default definePluginEntry({
     // config `pipelinesDir` → <dataDir>/workspace/.pipelines). The table lets
     // an operator relocate one harness without touching env or config; sync
     // open-per-op store, so this resolves before any service starts.
-    const pushHarness = userCfg.webhookHarness ?? "openclaw";
+    // Single-harness default: the harness name used when a caller doesn't
+    // declare one (pipelines-dir resolution, tool defaults). Per-call
+    // identity (X-Manifold-Harness, tool args) wins wherever it matters.
+    const defaultHarness = "openclaw";
     const pipelineDirsStore = createPipelineDirsStore({ dbPath: runtimeDbPath, logger: api.logger });
     const pipelinesDir = pipelineDirsStore.resolveDir({
-      harness: pushHarness,
+      harness: defaultHarness,
       env: process.env,
       dataDir: storePaths.dataDir,
       configDir: userCfg.pipelinesDir || null,
@@ -346,37 +311,10 @@ export default definePluginEntry({
       getDashboardBroadcast: () => (dashboardBusRef ? (e) => dashboardBusRef.broadcast(e) : null),
     });
 
-    // Push delivery (events/push.js): dispatch/gate events POST to the
-    // harness's registered target so it can wake the receiver. The store
-    // is async-opened but register() is sync — same lazy Promise-proxy
-    // shape as nodeHealthStore/sessionIndex above. Best-effort and
-    // guarded: a failed lookup or POST never breaks the run.
-    const _pushTargetsPromise = createPushTargetsStore({ logger: api.logger, dbPath: runtimeDbPath });
-    const pushConfig = {
-      pushUrls: userCfg.pushUrls,
-      pushUrl: userCfg.pushUrl,
-      pushBearer: userCfg.pushBearer,
-      pushTimeoutMs: userCfg.pushTimeoutMs,
-    };
-    const pushStream = createEventStream();
-    async function notifyPushEvent({ event, flowId = null, nodeId = null, pipelineId = null, sessionKey = null, agent = null }) {
-      const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey: toGatewaySessionKey(sessionKey, agent), agent, harnessId: pushHarness });
-      pushStream.append(payload);
-      let dbEntry = null;
-      try {
-        const row = await _pushTargetsPromise.then((ps) => ps.get(pushHarness));
-        if (row) dbEntry = { url: row.url, bearer: row.bearer, timeoutMs: row.timeoutMs };
-      } catch {}
-      const target = resolvePushTarget({ pushTargets: dbEntry, harnessId: pushHarness, config: pushConfig });
-      if (!target) return { ok: false, reason: "disabled" };
-      return notifyPush({ target, payload, logger: api.logger });
-    }
-
     const executor = createExecutor({
       api,
       config: api.config,
       pipelinesDir,
-      notifyPush: notifyPushEvent,
       store,
       pipelinesRef,
       ensurePipelinesLoaded,
@@ -545,7 +483,7 @@ export default definePluginEntry({
         admissionQueueStore,
         pipelineDirsStore,
         resolvePipelinesDir: (harness) => pipelineDirsStore.resolveDir({
-          harness: harness ?? pushHarness,
+          harness: harness ?? defaultHarness,
           env: process.env,
           dataDir: storePaths.dataDir,
           configDir: userCfg.pipelinesDir || null,
@@ -824,20 +762,6 @@ export default definePluginEntry({
     });
 
     // ── Runtime-capture service ──────────────────────────────────────────────
-
-    // Push wake route + boot-time self-registration (best-effort).
-    registerPushWebhook({ api, logger: api.logger, getSubagent: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null) });
-    api.registerService({
-      id: "manifold-push-autoregister",
-      start: async () => {
-        try {
-          const ps = await _pushTargetsPromise;
-          await autoregisterPushTarget({ pushTargetsStore: ps, pluginConfig: userCfg, apiConfig: api.config, logger: api.logger });
-        } catch (err) {
-          api.logger.warn(`manifold: push autoregister failed: ${err?.message ?? err}`);
-        }
-      },
-    });
 
     api.registerService({
       id: "manifold-runtime-capture",

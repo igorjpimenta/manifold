@@ -37,7 +37,7 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, notifyPush, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
   // Explicit params win; api is the legacy fallback the adapter still
   // supplies during cutover (tests construct with api only).
   const _config = config ?? api?.config ?? null;
@@ -89,7 +89,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     sessionIndex,
     logger,
     emit,
-    notifyPush,
   });
 
   // Direct store.setQueued/setRunning, not the CAS-retry-wrapped
@@ -179,7 +178,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
 
   const { executeNode } = createNodeRunner({
     maybeBudgetGate, dispatchAgentWithRetry, executeSubflowNode,
-    withCrossProcessLockMaybe, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, notifyPush, logger,
+    withCrossProcessLockMaybe, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, logger,
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
