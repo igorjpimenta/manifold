@@ -30,6 +30,9 @@ export function registerOperatorRoutes({
   // component emitter for child-session proposal apply
   componentEmitter,
   getBroadcast,
+  // Injected gateway adapter, not core state: session reads go through
+  // here so core never imports the gateway's session store.
+  sessions,
 }) {
   const { retryFailureBranch } = createRetryFailure({
     store, readStore, failureStore, pipelinesRef, executor, runStore, ownerSessionKey,
@@ -40,10 +43,10 @@ export function registerOperatorRoutes({
 
   const { handleDiscuss } = createDiscussHandler({
     api, stampDiscussSession, normalizePendingFields, readPending, mergePendingFields,
-    setPendingText, componentEmitter,
+    setPendingText, componentEmitter, sessions,
   });
 
-  const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+  const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions });
 
   // ── POST /manifold/gate/resolve ───────────────────────────────────────────
 

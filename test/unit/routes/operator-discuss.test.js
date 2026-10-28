@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -12,6 +13,19 @@ import {
 import { createMockApi } from "../../helpers/mock-api.js";
 
 // No mocking required — the pure helpers carry no external static imports.
+
+// Filesystem-backed stub for the injected `sessions` gateway dep, rooted at
+// process.env.HOME so the tmp-HOME fixtures below keep working.
+function makeSessionsStub() {
+  return {
+    resolveSessionFile: (agentId, sessionId) =>
+      path.join(process.env.HOME, ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`),
+    sessionFileExists: (file) => {
+      try { return existsSync(file); } catch { return false; }
+    },
+    readSessionFileText: (file) => readFile(file, "utf-8"),
+  };
+}
 
 // ── stringifyMessageContent ───────────────────────────────────────────────────
 
@@ -224,7 +238,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       ];
       writeSession(tmpHome, "main", "sess-small", lines);
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-small",
       });
@@ -252,7 +266,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       }
       writeSession(tmpHome, "main", "sess-huge", lines);
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-huge",
       });
@@ -280,7 +294,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       }
       writeSession(tmpHome, "main", "sess-huge-2", lines);
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const first = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-huge-2",
       });
@@ -310,7 +324,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
     try {
       process.env.HOME = tmpHome;
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api });
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
         flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-missing",
       });

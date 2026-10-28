@@ -1,6 +1,3 @@
-import path from "node:path";
-import os from "node:os";
-import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
 
 // ── Pure helpers ──────────────────────────────────────────────────────────────
 
@@ -82,6 +79,7 @@ export function createDiscussHandler({
   mergePendingFields,
   setPendingText,
   componentEmitter,
+  sessions,
 }) {
   async function handleDiscuss(body) {
     const flowId = typeof body.flowId === "string" ? body.flowId : "";
@@ -102,12 +100,11 @@ export function createDiscussHandler({
     const itemIdForDraft = typeof body.itemId === "string" ? body.itemId : null;
     const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : null;
     const startedAt = Date.now();
-    const sessionFile = path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`);
-    const isFirstTurn = !existsSync(sessionFile);
+    const sessionFile = sessions.resolveSessionFile(agentId, sessionId);
+    const isFirstTurn = !sessions.sessionFileExists(sessionFile);
     if (isFirstTurn) {
       try {
-        mkdirSync(path.dirname(sessionFile), { recursive: true });
-        writeFileSync(sessionFile, "", { flag: "w" });
+        sessions.ensureSessionFile(sessionFile);
       } catch (err) {
         api.logger.warn(`manifold discuss: session-file touch failed for ${sessionFile}: ${err?.message ?? err}`);
       }
@@ -115,31 +112,14 @@ export function createDiscussHandler({
     try {
       const workspaceDir = agentRuntime.resolveAgentWorkspaceDir(api.config, agentId)
         ?? agentRuntime.resolveAgentWorkspaceDir(api.config);
-      const { resolveAgentEffectiveModelPrimary } = await import("openclaw/plugin-sdk/agent-runtime");
-      const primarySpec = modelOverride ?? resolveAgentEffectiveModelPrimary(api.config, agentId) ?? "";
+      const primarySpec = modelOverride ?? await sessions.resolveAgentEffectiveModelPrimary(api.config, agentId) ?? "";
       const _agentCfg = !modelOverride && (api.config?.agents?.list ?? []).find((a) => a?.id === agentId);
       const _modelCfg = _agentCfg ? (_agentCfg?.model ?? api.config?.agents?.defaults?.model) : null;
       const chain = (_modelCfg && typeof _modelCfg === "object")
         ? [_modelCfg.primary, ...(Array.isArray(_modelCfg.fallbacks) ? _modelCfg.fallbacks : [])]
             .filter((r) => typeof r === "string" && r.length > 0)
         : [];
-      const _home = process.env.HOME || process.env.USERPROFILE || "/root";
-      const _authPaths = [
-        path.join(_home, `.openclaw/agents/${agentId}/agent/auth-state.json`),
-        path.join(_home, ".openclaw/agents/main/agent/auth-state.json"),
-      ];
-      const isCooldown = (p) => {
-        for (const fp of _authPaths) {
-          try {
-            const st = JSON.parse(readFileSync(fp, "utf8"));
-            for (const [k, v] of Object.entries(st?.usageStats ?? {})) {
-              if (k.startsWith(`${p}:`) && typeof v?.disabledUntil === "number" && Date.now() < v.disabledUntil) return true;
-            }
-            break;
-          } catch {}
-        }
-        return false;
-      };
+      const isCooldown = (p) => sessions.isProviderCooldown(agentId, p);
       const { provider: activeProvider, model: activeModel } = selectDiscussProvider({
         primarySpec, chain, isCooldown,
       });
@@ -206,15 +186,11 @@ export function createDiscussHandler({
       // Harvest child sessions spawned during this turn
       if (itemIdForDraft) {
         try {
-          const _agentsRoot = path.join(os.homedir(), ".openclaw", "agents");
-          const _agentDirs = readdirSync(_agentsRoot).filter((_d) => {
-            try { return existsSync(path.join(_agentsRoot, _d, "sessions", "sessions.json")); }
-            catch { return false; }
-          });
           const _childEntries = [];
-          for (const _aid of _agentDirs) {
+          for (const _aid of sessions.listSessionAgents()) {
             try {
-              const _sj = JSON.parse(readFileSync(path.join(_agentsRoot, _aid, "sessions", "sessions.json"), "utf8"));
+              const _sj = sessions.readSessionsIndex(_aid);
+              if (!_sj) continue;
               for (const [_ck, _ent] of Object.entries(_sj)) {
                 if (_ent?.spawnedBy === sessionKey && typeof _ent?.startedAt === "number" && _ent.startedAt >= startedAt) {
                   _childEntries.push({ childKey: _ck, agentId: _aid, entry: _ent });
@@ -223,24 +199,22 @@ export function createDiscussHandler({
             } catch {}
           }
           for (const { childKey: _ck, agentId: _cAid, entry: _initEnt } of _childEntries) {
-            const _sjPath = path.join(_agentsRoot, _cAid, "sessions", "sessions.json");
             const _dl = Date.now() + 60_000;
             let _ent = _initEnt;
             while (_ent?.status !== "done" && _ent?.status !== "error" && Date.now() < _dl) {
               await new Promise((r) => setTimeout(r, 500));
               try {
-                const _sj = JSON.parse(readFileSync(_sjPath, "utf8"));
-                _ent = _sj[_ck] ?? _ent;
+                const _sj = sessions.readSessionsIndex(_cAid);
+                if (_sj) _ent = _sj[_ck] ?? _ent;
               } catch {}
             }
             if (_ent?.status !== "done" && _ent?.status !== "error") {
               api.logger.warn(`manifold discuss: child session ${_ck} did not terminate within 60s`);
               continue;
             }
-            const _jsonlPath = _ent?.sessionFile
-              ?? path.join(_agentsRoot, _cAid, "sessions", `${_ent?.sessionId ?? _ck.split(":").pop()}.jsonl`);
-            if (!existsSync(_jsonlPath)) continue;
-            const _lines = readFileSync(_jsonlPath, "utf8").split("\n").filter(Boolean);
+            const _jsonlPath = sessions.resolveChildSessionFile(_cAid, _ent, _ck);
+            if (!sessions.sessionFileExists(_jsonlPath)) continue;
+            const _lines = sessions.readSessionFileSync(_jsonlPath).split("\n").filter(Boolean);
             let _eFields = null;
             let _eDraft = null;
             for (const _ln of _lines) {
@@ -354,7 +328,7 @@ export function createDiscussHandler({
 // trade rather than a silent correctness loss.
 const MAX_HISTORY_LINES = 500;
 
-export function createDiscussHistoryHandler({ api }) {
+export function createDiscussHistoryHandler({ api, sessions }) {
   async function handleDiscussHistory(body) {
     const flowId = typeof body.flowId === "string" ? body.flowId : "";
     const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : "";
@@ -371,13 +345,12 @@ export function createDiscussHistoryHandler({ api }) {
     try {
       const keyMatch = /^agent:([^:]+):/.exec(sessionKey);
       const agentId = keyMatch?.[1] ?? "main";
-      const sessionFile = path.join(os.homedir(), ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`);
+      const sessionFile = sessions.resolveSessionFile(agentId, sessionId);
       let msgs = [];
       let hasMore = false;
       let nextOffset = offset;
-      if (existsSync(sessionFile)) {
-        const { readFile } = await import("node:fs/promises");
-        const rawContent = await readFile(sessionFile, "utf-8");
+      if (sessions.sessionFileExists(sessionFile)) {
+        const rawContent = await sessions.readSessionFileText(sessionFile);
         const lines = rawContent.split("\n");
         const end = Math.max(0, lines.length - offset);
         const start = Math.max(0, end - MAX_HISTORY_LINES);
