@@ -15,7 +15,6 @@
 
 import { toolErr } from "./shared.js";
 import { resolveInvocationId, writePendingResult } from "../../../../../state/tool-handoff.js";
-import { toOpaqueKey } from "../../session-keys.js";
 
 export function registerSubmitScoreTool({ api }) {
   api.registerTool((ctx) => ({
@@ -70,10 +69,8 @@ export function registerSubmitScoreTool({ api }) {
       }
 
       // ctx.sessionKey is the plain-text session id the dispatch registered
-      // under — resolve it directly. toOpaqueKey maps back the legacy
-      // gateway-shaped keys still in flight from before the cutover.
-      const opaque = toOpaqueKey(ctx?.sessionKey);
-      const invocationId = (opaque != null ? resolveInvocationId(opaque) : null) ?? resolveInvocationId(ctx?.sessionKey);
+      // under — resolve it directly.
+      const invocationId = resolveInvocationId(ctx?.sessionKey);
       if (!invocationId) {
         return toolErr("could not resolve this session's dispatch context — this tool must be called from within a SCORE_LLM node dispatch");
       }

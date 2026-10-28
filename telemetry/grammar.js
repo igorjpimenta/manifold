@@ -14,14 +14,10 @@ const REGEX = {
   CRON_RUN:  /^agent:([^:]+):cron:([0-9a-f-]{36}):run:([0-9a-f-]+)$/,
   CRON_OWN:  /^agent:([^:]+):cron-(.+)$/,
   BARE_SUB:  /^agent:([^:]+):subagent:([0-9a-f-]{36})$/,
-  // Manifold dispatch sessions, current plain-text shape (`mf-<flow8>-…` —
-  // see engine/executor-helpers.js's mintAgentSessionKey) plus the legacy
-  // gateway-namespaced form (`agent:<agent>:subagent:mf-…`, minted before
-  // the plain-text cutover, still present in older session files). The
-  // embedded flow8 resolves via the "flow" parentHint branch, same as
-  // GF_DISCUSS. agentId is null for plain-text keys — the agent travels as
-  // its own field everywhere now, never inside the key.
-  MF_SUB:    /^(?:agent:([^:]+):subagent:)?(mf-[0-9a-f]{8}-.+)$/,
+  // Manifold dispatch sessions: plain-text `mf-<flow8>-<node>[-<item>]`
+  // (see engine/executor-helpers.js's mintAgentSessionKey). The embedded
+  // flow8 resolves via the "flow" parentHint branch, same as GF_DISCUSS.
+  MF_SUB:    /^(mf-[0-9a-f]{8}-.+)$/,
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
@@ -29,10 +25,8 @@ const REGEX = {
   // gf-discuss-<flow8>-<gateNodeId>-<itemId>. The embedded flow8 is a real
   // flow_id prefix — resolves via the same "flow" parentHint branch a
   // pipeline-node subagent's flow:<id> parent uses (classifyWithExternal
-  // below), never the EXPLICIT_BARE catch-all. The legacy
-  // gateway-namespaced form (`agent:<agent>:gf-discuss-…`, minted before
-  // the plain-text cutover) resolves identically, plus the agent.
-  GF_DISCUSS: /^(?:agent:([^:]+):)?gf-discuss-([0-9a-f]{8})-(.+)$/,
+  // below), never the EXPLICIT_BARE catch-all.
+  GF_DISCUSS: /^gf-discuss-([0-9a-f]{8})-(.+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
   // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
   // when a pipeline is started via iOS button or CLI. Format:
@@ -78,19 +72,19 @@ export function classify(sessionKey) {
     };
   }
   if ((m = REGEX.GF_DISCUSS.exec(sessionKey))) {
-    const [, agentId, flowShort] = m;
+    const [, flowShort] = m;
     return {
-      kind: "flow-gate-discuss", agentId: agentId ?? null, flowShort,
+      kind: "flow-gate-discuss", agentId: null, flowShort,
       parentHint: { kind: "flow", flowShort },
     };
   }
   if ((m = REGEX.MF_SUB.exec(sessionKey))) {
-    const [, agentId, opaque] = m;
+    const [, opaque] = m;
     const flowShort = opaque.slice(3, 11);
     const tail = opaque.slice(12);
     const dash = tail.indexOf("-");
     return {
-      kind: "manifold-subagent", agentId: agentId ?? null, opaque, flowShort,
+      kind: "manifold-subagent", agentId: null, opaque, flowShort,
       nodeId: dash === -1 ? tail : tail.slice(0, dash),
       itemKey: dash === -1 ? null : tail.slice(dash + 1),
       parentHint: { kind: "flow", flowShort },

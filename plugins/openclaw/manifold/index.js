@@ -9,8 +9,6 @@
 //   - `parallel`    : fixed set of named `.tasks`, all dispatched concurrently
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
-import path from "node:path";
-import os from "node:os";
 import { createPipelinesLoader } from "../../../engine/loader.js";
 import { createStateStore } from "../../../state/state-store.js";
 import { createRunStore } from "../../../state/run-store.js";
@@ -69,7 +67,6 @@ import { registerPipelineRoutes } from "../../../routes/pipelines.js";
 // routes import the guard directly, so no auth object is injected here.
 import { registerBudgetRoutes } from "../../../budget/index.js";
 import { registerTelemetry } from "../../../telemetry/index.js";
-import { scanAndCleanup as taskflowScanAndCleanup } from "../../../boot/taskflow-revive.js";
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-revival.js";
 
 // reviveOrphanFlows only runs once, at service startup — a stuck-promotion
@@ -91,8 +88,6 @@ import { setStateFile } from "../../../gates/paused-flows.js";
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 const DEFAULT_DASHBOARD_PORT = 7430;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
-
-const TASKFLOW_RUNS_DB = path.join(os.homedir(), ".openclaw", "tasks", "runs.sqlite");
 
 // Module-level singleton — captures a working `runtime.subagent` from the
 // gateway-bindable plugin load. The `before_dispatch` hook fires outside that
@@ -143,14 +138,6 @@ export default definePluginEntry({
             type: "string",
             description: "Default agent for gate discuss sessions. Used when the blocked gate node does not declare its own discuss.agent.",
           },
-        },
-      },
-      taskflowRevive: {
-        type: "object",
-        description: "Config for boot-time task orphan cleanup.",
-        additionalProperties: false,
-        properties: {
-          startupDelayMs: { type: "number", minimum: 0 },
         },
       },
       globalConcurrency: {
@@ -627,34 +614,6 @@ export default definePluginEntry({
     });
     registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
 
-    // ── Boot-time task orphan cleanup (absorbed from taskflow-revive) ─────────
-
-    // Optional extra delay before the scan, for operators who want one.
-    // Dispatches already wait for gateway readiness at the executor's gate,
-    // so it defaults to 0.
-    const taskflowStartupDelayMs = Number(userCfg.taskflowRevive?.startupDelayMs) >= 0
-      ? Number(userCfg.taskflowRevive?.startupDelayMs)
-      : 0;
-    api.registerService({
-      id: "manifold-taskflow-revive",
-      start: async (ctx) => {
-        const logger = ctx?.logger ?? api.logger;
-        logger.info(`taskflow-revive: service started (startupDelay=${taskflowStartupDelayMs}ms)`);
-        // Not awaited, same as manifold-flow-revival: its dispatches go
-        // through the executor's subagent and wait for gateway readiness,
-        // which can't come until this start() returns.
-        taskflowScanAndCleanup(api, TASKFLOW_RUNS_DB, taskflowStartupDelayMs, logger, {
-          // Lets a manifold-owned orphan be delegated to the flow's own
-          // revival function (engine/executor.js's reviveAgentKindOrphan,
-          // via reviveViaFlowRevival) instead of only being skipped —
-          // see boot/taskflow-revive.js's own header for why.
-          sessionIndex, runStore, executor,
-        }).catch((err) => {
-          logger.warn(`taskflow-revive[boot]: scan failed: ${err?.message ?? String(err)}`);
-        });
-      },
-    });
-
     // ── Dialog door: WS message transport into open discuss sessions ───────
     // iOS (or any harness client) connects with ?bearer= and sends
     // {type:"message",...} frames. Turns run through the same elevation
@@ -800,7 +759,7 @@ export default definePluginEntry({
       start: async () => {
         if (!moduleState.workingSubagent && api.runtime?.subagent) {
           // Wrapped ONCE here: every core dispatch below resolves through
-          // this reference, so opaque handles map at exactly one edge.
+          // this reference, so runIds map back at exactly one edge.
           moduleState.workingSubagent = wrapSubagentKeys(api.runtime.subagent);
           api.logger.info("manifold: captured working subagent runtime for executor use");
         }

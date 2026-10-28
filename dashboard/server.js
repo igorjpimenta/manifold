@@ -30,10 +30,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
 // Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/. The
-// manifold executor uses the sessionKey pattern
-// `agent:<agentId>:subagent:mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`
-// (gateway shape of core's opaque handle — see session-keys.js) so we can
-// find every session a
+// manifold executor uses plain-text session ids
+// (`mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`, minted by core —
+// no agent prefix, no gateway namespace) so we can find every session a
 // flow spawned by scanning each agent's sessions.json for matching keys.
 const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
 
@@ -653,9 +652,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
     const flowShort = flowId.slice(0, 8);
-    // sessionKey pattern (gateway shape of core's opaque `mf-` handle):
-    //   agent:<agent>:subagent:mf-<flowShort>-<nodeId>[-<itemKey>]
-    const keyPattern = new RegExp(`^agent:([^:]+):subagent:mf-${flowShort}-(.+)$`);
+    // Plain-text session ids (`mf-<flowShort>-<nodeId>[-<itemKey>]`, minted
+    // by core): match verbatim — the agent is the directory being scanned.
+    const keyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
 
     let agentDirs = [];
     try { agentDirs = await readdir(AGENTS_DIR, { withFileTypes: true }); }
@@ -674,8 +673,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       if (!index || typeof index !== "object") continue;
       for (const [sessionKey, meta] of Object.entries(index)) {
         const m = keyPattern.exec(sessionKey);
-        if (!m || m[1] !== agent) continue;
-        const tail = m[2];
+        if (!m) continue;
+        const tail = m[1];
         // tail is `<nodeId>` or `<nodeId>-<itemKey>`. manifold's node ids
         // are conventionally token-style (letters/digits/underscores/dots,
         // no hyphens) — e.g. SCORE, ENSURE_LOGIN_CODE, propose.draft — while

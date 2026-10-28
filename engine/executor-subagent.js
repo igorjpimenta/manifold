@@ -94,9 +94,7 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit
    * `node.retry` config, if still present on any node, is inert and ignored.
    */
   async function dispatchAgentWithRetry({ node, nodeId, sessionKey, initialMessage, applyCtx, applyExtraArg, applyMeta, flowId, needsCtx }) {
-    // agent travels alongside so the adapter-side index proxy can shape the
-    // stored gateway key (session-index stores gateway keys, keyed from the
-    // opaque handle core dispatches with — never the reverse).
+    // The plain-text session id stores verbatim.
     if (sessionIndex?.record) await sessionIndex.record({ flowId, sessionKey, nodeId, agent: node.agent ?? null });
     const output = await runSubagentTurn({
       sessionKey,

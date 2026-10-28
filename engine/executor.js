@@ -882,8 +882,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
    * the agent no way to know it already tried this once, risking a
    * duplicate side effect. Instead this sends REVIVAL_MSG to the SAME
    * deterministic session key the original dispatch used, so the agent can
-   * check its own history and decide whether to finish or resume — the same
-   * pattern boot/taskflow-revive.js already uses for task-run orphans.
+   * check its own history and decide whether to finish or resume.
    */
   // nodeId is the crashed/in-flight node — the caller (boot/flow-revival.js)
   // resolves it from f.currentStep/waitJson.nodeId, since flow.lastStep is

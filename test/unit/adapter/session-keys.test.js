@@ -1,11 +1,9 @@
-// session-keys.test.js — plain-text session identity plus the runId
-// registry: session keys pass through verbatim in both directions;
-// legacy gateway-shaped keys still map back; runIds still map both ways.
+// session-keys.test.js — plain-text session identity: every key passes
+// through verbatim in both directions; only runIds translate (mapped for
+// the dispatch lifecycle, forgotten when the wait settles).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  toOpaqueKey,
-  toCoreSessionKey,
   coreRunIdForGateway,
   wrapSubagentKeys,
 } from "../../../plugins/openclaw/manifold/session-keys.js";
@@ -20,27 +18,6 @@ function makeRaw(log = []) {
     },
   };
 }
-
-describe("toOpaqueKey (legacy gateway map-back)", () => {
-  it("maps pre-cutover gateway keys to their opaque handle", () => {
-    assert.equal(toOpaqueKey("agent:cyrano:subagent:mf-12345678-propose"), "mf-12345678-propose");
-  });
-
-  it("returns null, never throws, on anything else", () => {
-    assert.equal(toOpaqueKey("mf-12345678-propose"), null);
-    assert.equal(toOpaqueKey("agent:main:cron:x"), null);
-    assert.equal(toOpaqueKey(null), null);
-    assert.equal(toOpaqueKey(42), null);
-  });
-});
-
-describe("passthrough rules", () => {
-  it("leaves every key verbatim inbound", () => {
-    assert.equal(toCoreSessionKey("mf-12345678-propose"), "mf-12345678-propose");
-    assert.equal(toCoreSessionKey("gf-discuss-12345678-gate-i1"), "gf-discuss-12345678-gate-i1");
-    assert.equal(toCoreSessionKey("agent:c:subagent:mf-aa-bb"), "mf-aa-bb");
-  });
-});
 
 describe("wrapSubagentKeys", () => {
   it("wraps once per raw runtime", () => {
@@ -61,11 +38,27 @@ describe("wrapSubagentKeys", () => {
     assert.equal(coreRunIdForGateway("gw-run-1"), null);
   });
 
-  it("passes every key through on getSessionMessages", async () => {
+  it("passes every key shape through on getSessionMessages", async () => {
     const log = [];
     const w = wrapSubagentKeys(makeRaw(log));
     await w.run({ sessionKey: "mf-12345678-propose", agentId: "cyrano", message: "hi" });
     await w.getSessionMessages({ sessionKey: "mf-12345678-propose" });
     assert.equal(log[1][1], "mf-12345678-propose");
+    await w.getSessionMessages({ sessionKey: "gf-discuss-12345678-gate-i1" });
+    assert.equal(log[2][1], "gf-discuss-12345678-gate-i1");
+  });
+
+  it("maps gateway runIds back to core runIds inside message payloads", async () => {
+    const raw = {
+      run: async () => ({ runId: "gw-run-9" }),
+      getSessionMessages: async () => ({
+        messages: [{ runId: "gw-run-9", content: "x" }, { run_id: "gw-run-9", content: "y" }],
+      }),
+    };
+    const w = wrapSubagentKeys(raw);
+    const out = await w.run({ sessionKey: "mf-1", agentId: "c", message: "hi" });
+    const res = await w.getSessionMessages({ sessionKey: "mf-1" });
+    assert.equal(res.messages[0].runId, out.runId);
+    assert.equal(res.messages[1].run_id, out.runId);
   });
 });
