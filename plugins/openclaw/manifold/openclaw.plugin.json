@@ -50,17 +50,6 @@
           }
         }
       },
-      "taskflowRevive": {
-        "type": "object",
-        "description": "Config for boot-time task orphan cleanup (absorbed from taskflow-revive plugin).",
-        "additionalProperties": false,
-        "properties": {
-          "startupDelayMs": {
-            "type": "number",
-            "minimum": 0
-          }
-        }
-      },
       "globalConcurrency": {
         "type": "integer",
         "minimum": 1,

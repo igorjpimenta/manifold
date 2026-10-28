@@ -106,23 +106,6 @@ export function mintAgentSessionKey(flowId, nodeId, itemKey) {
   return `mf-${flowId.slice(0, 8)}-${seed}`;
 }
 
-// Opaque core handle minted above, verbatim (core-side maps, handoff keys).
-const OPAQUE_SESSION_KEY_RE = /^mf-[0-9a-f]{8}-/;
-// Gateway shape the adapter produces for an opaque handle:
-// `agent:<agent>:subagent:mf-<flow8>-<node>[-<item>]`. Matched so boot-time
-// orphan classification keeps working — it only ever sees gateway-shaped
-// keys from task_runs rows.
-const GATEWAY_SESSION_KEY_RE = /:subagent:mf-[0-9a-f]{8}-/;
-
-// Convention-based check, same fallback role as before — see
-// boot/taskflow-revive.js's isManifoldOwnedSession(), which prefers the
-// session store's own pluginOwnerId field and only falls back to this
-// when that lookup is unavailable.
-export function isManifoldOwnedSessionKey(sessionKey) {
-  return typeof sessionKey === "string"
-    && (OPAQUE_SESSION_KEY_RE.test(sessionKey) || GATEWAY_SESSION_KEY_RE.test(sessionKey));
-}
-
 export function shortSummary(text) {
   if (!text) return "";
   const oneLine = String(text).split("\n")[0];
