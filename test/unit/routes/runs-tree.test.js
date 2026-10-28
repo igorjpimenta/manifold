@@ -5,16 +5,17 @@
  *   GET /manifold/runs/:flowId/tree/expand?type=flow&childFlowId=Y
  *   GET /manifold/runs/:flowId/tree/invocation/:invocationId
  */
-import { test, describe, mock } from "node:test";
+import { test, describe, mock, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-  },
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js);
+// the authReq helper below sends it, matching the "Bearer x" test token.
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = "x";
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
 let listInvocationsForFlowImpl = () => [];
@@ -108,10 +109,6 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef,
     pipelineRegistryStore: makeMockPipelineRegistryStore(pipelinesRef),
     invokeElevated: async () => ({}),
-    auth: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-    },
     failureStore: { queryErrorsByFlow: async (flowId) => queryErrorsByFlowImpl(flowId) },
     discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
     handleDiscuss:           async () => {},

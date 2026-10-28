@@ -5,14 +5,19 @@
  * a subflow node's real flow_runs children via getAllSubflowGroups
  * (nodeExecutionsStore/runStore). The old branchService path is gone.
  */
-import { test, describe, mock } from "node:test";
+import { test, describe, mock, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// auth.js checks Authorization: Bearer <token> against OPENCLAW_GATEWAY_TOKEN.
-// Set the env var before importing so the real auth function passes our test token.
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
+// Set the env var before importing so the real guard passes our test token.
 const TEST_TOKEN = "test-token-for-unit-tests-runs-branches";
-process.env.OPENCLAW_GATEWAY_TOKEN = TEST_TOKEN;
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_TOKEN;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
+});
 
 // sendSubflowsList now calls getNodeExecutionsStore() (via getAllSubflowGroups)
 // — mocked so tests are deterministic regardless of the real (or
@@ -34,14 +39,6 @@ await mock.module(nodeExecutionsUrl, {
   },
 });
 
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-  },
-});
-
 const { registerRunRoutes } = await import("../../../routes/runs.js");
 
 // Wraps createMockReq with the auth header so the prefix handler doesn't 401.
@@ -53,10 +50,6 @@ const FULL_DEPS_BASE = {
   costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
   pipelinesRef: { value: new Map() },
   invokeElevated: async () => ({}),
-    auth: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-    },
   discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
   handleDiscuss:           async () => {},
   handleDiscussHistory:    async () => {},

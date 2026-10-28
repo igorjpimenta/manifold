@@ -1,10 +1,10 @@
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { getAllSubflowGroups } from "../state/subflow-state.js";
 import { assembleState } from "../engine/executor-helpers.js";
+import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
 export function registerRunRoutes({
   api,
-  auth,
   readStore,
   costForAllPipelines,
   runStore,
@@ -35,8 +35,7 @@ export function registerRunRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       const sinceMsRaw = url.searchParams.get("sinceMs");
@@ -82,8 +81,7 @@ export function registerRunRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       const limitRaw = url.searchParams.get("limit");
@@ -181,8 +179,7 @@ export function registerRunRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       const raw = url.searchParams.get("flowIds") ?? "";
@@ -223,8 +220,7 @@ export function registerRunRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       try {
         // Lean, purpose-built mapper — deliberately not the /runs list's
@@ -276,8 +272,7 @@ export function registerRunRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       const raw = url.searchParams.get("flowIds") ?? "";
@@ -318,8 +313,7 @@ export function registerRunRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
       const tail = url.pathname.slice("/manifold/runs/".length);

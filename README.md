@@ -29,7 +29,7 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | run/tool handoff helpers (`notifyToolFired`, `registerDispatch`, …) | oc-config |
 | `@igorjpimenta/manifold-openclaw/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` | oc-config |
-| `@igorjpimenta/manifold-openclaw/bridge-auth` | `authorizeBridgeRequest`, `sendUnauthorized` | oc-config |
+| `…/routes/bearer-auth` | `authorizeBearerRequest`, `sendUnauthorized` (MANIFOLD_BEARER, winch-style) | sibling extension |
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
 | `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |

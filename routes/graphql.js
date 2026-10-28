@@ -4,10 +4,10 @@
 // the consumer picks fields, the core stays the single writer. Mutations
 // are intentionally absent — writes go through the existing POST routes.
 import { createRootValue, executeQuery } from "../graphql/schema.js";
+import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
 export function registerGraphqlRoutes({
   api,
-  auth,
   failureStore,
   runStore,
   runtimeDbPath,
@@ -25,8 +25,7 @@ export function registerGraphqlRoutes({
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       let raw = "";
       try {

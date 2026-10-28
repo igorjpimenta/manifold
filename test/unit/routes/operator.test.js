@@ -13,25 +13,34 @@
  * with a clear reason — they still run in any environment where the gateway
  * is normally installed.
  */
-import { test, mock, describe } from "node:test";
+import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
+
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
+const TEST_BEARER = "test-bearer-operator";
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_BEARER;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
+});
 
 function createMockReqWithBody(method, path, body) {
   const chunks = body != null ? [Buffer.from(typeof body === "string" ? body : JSON.stringify(body))] : [];
   return {
-    ...createMockReq(method, path),
+    ...createMockReq(method, path, { authorization: `Bearer ${TEST_BEARER}` }),
     [Symbol.asyncIterator]: async function* () { for (const c of chunks) yield c; },
   };
 }
 
 // Mock the external deps that operator.js statically imports:
 //   1. openclaw/plugin-sdk/agent-runtime  (resolveAgentEffectiveModelPrimary)
-//   2. live-activity-bridge/auth.js       (authorizeBridgeRequest)
-//   3. state/state-store.js               (createStateStore) — spied, not
+//   2. state/state-store.js               (createStateStore) — spied, not
 //      stubbed inert, so the ownerKey-mismatch cancel fallback's call
 //      arguments can be asserted directly (see "cancel handler ownerKey
-//      mismatch fallback" below).
+//      mismatch fallback" below). Route auth needs no mock: it reads
+//      process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
 let registerOperatorRoutes = null;
 let importError = null;
 
@@ -41,14 +50,6 @@ let mockCancelStore = { setRunning: async () => ({ applied: true }), cancel: asy
 try {
   await mock.module("openclaw/plugin-sdk/agent-runtime", {
     exports: { resolveAgentEffectiveModelPrimary: async () => null },
-  });
-
-  const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-  await mock.module(authUrl, {
-    exports: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-    },
   });
 
   const stateStoreUrl = new URL("../../../state/state-store.js", import.meta.url).href;
@@ -86,10 +87,6 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef: { value: new Map() },
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
-    auth: {
-      authorizeBridgeRequest: async () => ({ ok: true }),
-      sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-    },
     stampDiscussSession: async () => {},
     normalizePendingFields: async () => ({}),
     readPending: () => null,
@@ -284,7 +281,7 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
     const { api, routes } = createMockApi();
     registerOperatorRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/cancel");
-    const req = { ...createMockReq("POST", "/manifold/cancel"), body: "{}" };
+    const req = { ...createMockReq("POST", "/manifold/cancel", { authorization: `Bearer ${TEST_BEARER}` }), body: "{}" };
     const res = createMockRes();
     // Simulate the gateway providing a parsed body (empty object)
     req.json = async () => ({});

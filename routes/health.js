@@ -9,6 +9,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { checkDb } from "../state/db-health.js";
 import { noteDbFailure } from "../state/db-guard.js";
+import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
 const require = createRequire(import.meta.url);
 const MANIFOLD_VERSION = require("../package.json").version;
@@ -16,7 +17,7 @@ const MANIFOLD_VERSION = require("../package.json").version;
 const RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
 const OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
 
-export function registerHealthRoutes({ api, auth }) {
+export function registerHealthRoutes({ api }) {
   api.registerHttpRoute({
     path: "/manifold/health",
     auth: "plugin",
@@ -28,8 +29,7 @@ export function registerHealthRoutes({ api, auth }) {
         res.end("method not allowed");
         return true;
       }
-      const { authorizeBridgeRequest, sendUnauthorized } = auth;
-      const authz = await authorizeBridgeRequest(req);
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const db = {};
       let ok = true;

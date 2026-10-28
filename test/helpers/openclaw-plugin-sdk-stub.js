@@ -18,9 +18,3 @@ export function createChatChannelPlugin(spec) {
 export async function dispatchInboundDirectDmWithRuntime() {
   return undefined;
 }
-
-export async function listDevicePairing() {
-  return { paired: [] };
-}
-
-export class GatewayClient {}

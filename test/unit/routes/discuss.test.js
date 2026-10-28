@@ -13,14 +13,6 @@ import path from "node:path";
 import os from "node:os";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res) => { res.statusCode = 401; res.end(); },
-  },
-});
-
 // B2.5 — handleDiscuss/handleDiscussAudio build their promptBuilder ctx via
 // assembleState() instead of trusting sourceFlow.stateJson directly. Mocked
 // here so the wiring test below doesn't need a real DB-backed runStore/

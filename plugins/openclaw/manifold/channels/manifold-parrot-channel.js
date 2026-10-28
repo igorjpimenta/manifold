@@ -13,6 +13,7 @@ import { dispatchInboundDirectDmWithRuntime } from "openclaw/plugin-sdk/channel-
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
+import { authorizeBearerRequest, sendUnauthorized } from "../../../../routes/bearer-auth.js";
 
 export function createManifoldParrotChannelEntry({
   readStore,
@@ -84,8 +85,7 @@ export function createManifoldParrotChannelEntry({
             return true;
           }
 
-          const { authorizeBridgeRequest, sendUnauthorized } = await import("../auth/bridge.js");
-          const authz = await authorizeBridgeRequest(req);
+          const authz = authorizeBearerRequest(req, { logger: api.logger });
           if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
 
           let raw = "";

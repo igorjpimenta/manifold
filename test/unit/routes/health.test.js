@@ -3,33 +3,33 @@
  *
  * Manifold's own liveness: version + uptime, no harness contact.
  */
-import { test, mock, describe } from "node:test";
+import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-const authUrl = new URL("../../../plugins/openclaw/manifold/auth/bridge.js", import.meta.url).href;
-await mock.module(authUrl, {
-  exports: {
-    authorizeBridgeRequest: async () => ({ ok: true }),
-    sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
-  },
+// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
+const TEST_BEARER = "test-bearer-health";
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_BEARER;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
 const { registerHealthRoutes } = await import("../../../routes/health.js");
 
-const stubAuth = {
-  authorizeBridgeRequest: async () => ({ ok: true }),
-  sendUnauthorized: (res, reason) => { res.statusCode = 401; res.end(reason ?? "unauthorized"); },
-};
+function authedReq(method, path) {
+  return createMockReq(method, path, { authorization: `Bearer ${TEST_BEARER}` });
+}
 
 describe("registerHealthRoutes", () => {
   test("registers GET /manifold/health and answers with version + per-file status", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api, auth: stubAuth });
+    registerHealthRoutes({ api });
     assert.equal(routes.length, 1);
     assert.equal(routes[0].path, "/manifold/health");
     const res = createMockRes();
-    await routes[0].handler(createMockReq("GET", "/manifold/health"), res);
+    await routes[0].handler(authedReq("GET", "/manifold/health"), res);
     assert.equal(res.statusCode, 200);
     const out = JSON.parse(res.body);
     assert.equal(typeof out.ok, "boolean");
@@ -43,9 +43,9 @@ describe("registerHealthRoutes", () => {
 
   test("POST rejected with 405", async () => {
     const { api, routes } = createMockApi();
-    registerHealthRoutes({ api, auth: stubAuth });
+    registerHealthRoutes({ api });
     const res = createMockRes();
-    await routes[0].handler(createMockReq("POST", "/manifold/health"), res);
+    await routes[0].handler(authedReq("POST", "/manifold/health"), res);
     assert.equal(res.statusCode, 405);
   });
 });
