@@ -22,7 +22,7 @@ import { startMcpServer } from "../mcp/stdio.js";
 import { createRealOps } from "../mcp/wire-ops.js";
 import { createEventStream } from "../events/stream.js";
 import { startWsServer, DEFAULT_WS_PORT } from "../events/serve-ws.js";
-import { collectOpenFlows, attachPresenceProducer } from "../events/flow-presence.js";
+import { collectOpenFlows, attachPresenceProducer } from "../events/open-flows.js";
 import { flowStateEmitter } from "../events.js";
 import { createRunStore } from "../state/run-store.js";
 import { createPushTargetsStore } from "../state/push-targets.js";
@@ -736,7 +736,7 @@ const USAGE = `usage: manifold <command>
                                        serve the pipeline tools over MCP stdio or Streamable HTTP
                                        (stdio harness from MANIFOLD_HARNESS env only; agent+session stamped per call;
                                        http additionally needs MANIFOLD_BEARER + X-Manifold-Harness per session)
-  serve --ws [--port N] [--host H]       stream harness presence over WebSocket (history + open-flows snapshot + live)
+  serve --ws [--port N] [--host H]       stream open-flows sync over WebSocket (history + snapshot + live)
   webhook set --harness H --url U [--bearer B] [--timeout-ms N]
                                             register a harness push URL (checked first at push time)
   webhook list                             list registered push URLs
@@ -850,7 +850,7 @@ export async function runCli(argv) {
         getOpenFlows: (harness) => collectOpenFlows({ runStore, harness }),
       });
       try { await runStore.ready?.(); } catch {}
-      logger.info(`manifold: harness presence on ws://${host}:${port ?? DEFAULT_WS_PORT} (connect with ?harness=H for the open-flows snapshot)`);
+      logger.info(`manifold: open-flows sync on ws://${host}:${port ?? DEFAULT_WS_PORT} (connect with ?harness=H for the open-flows snapshot)`);
       return;
     }
 

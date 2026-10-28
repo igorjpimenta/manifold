@@ -1,4 +1,4 @@
-// flow-presence.test.js — harness presence over the event queue: harness
+// open-flows.test.js — open-flows sync over the event queue: harness
 // tagging, per-subscriber filtering, the connect-time open-flows snapshot,
 // and the flow-change producer. Pure unit tests with stub stores.
 import { test } from "node:test";
@@ -10,7 +10,7 @@ import {
   collectOpenFlows,
   presenceEvent,
   attachPresenceProducer,
-} from "../../../events/flow-presence.js";
+} from "../../../events/open-flows.js";
 
 const tagged = (harness) => ({ event: "agent.dispatched", session: { harness } });
 const untagged = () => ({ event: "flow.changed", session: { harness: null } });

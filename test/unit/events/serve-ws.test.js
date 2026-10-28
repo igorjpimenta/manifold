@@ -1,4 +1,4 @@
-// serve-ws.test.js — harness presence: welcome, history replay, the
+// serve-ws.test.js — open-flows sync: welcome, history replay, the
 // connect-time open-flows snapshot, then live frames filtered per
 // harness. Real server + real sockets on an ephemeral port. Uses the
 // global WebSocket client (Node 24), the same transport winch's

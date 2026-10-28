@@ -1,4 +1,4 @@
-// serve-ws.js — harness presence over WebSocket. Tails the in-process
+// serve-ws.js — open-flows sync over WebSocket. Tails the in-process
 // event queue (events/stream.js) and, on every connect, first replays the
 // backlog and then sends the currently-open flows for that harness —
 // presence, not revival. No interpretation of what entries mean beyond
@@ -20,7 +20,7 @@
 
 import http from "node:http";
 import crypto from "node:crypto";
-import { filterEntries, visibleTo } from "./flow-presence.js";
+import { filterEntries, visibleTo } from "./open-flows.js";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 export const DEFAULT_WS_PORT = 38294;
