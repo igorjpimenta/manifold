@@ -128,7 +128,10 @@ export function registerDiscussHandlers({
     const stamp = readDiscussSession(sourceFlow.flowId, gateNodeId, normalizedItemId);
     const resolvedAgent = stamp?.agent ?? effectiveDiscuss.agent;
     const sessionId = stamp?.sessionId ?? `gf-discuss-${sourceFlow.flowId.slice(0, 8)}-${gateNodeId.toLowerCase()}-${normalizedItemId}`;
-    const sessionKey = `agent:${resolvedAgent}:${sessionId}`;
+    // Plain-text session identity: the key IS the session id. No
+    // `agent:` prefix, no gateway namespace — the agent travels as its
+    // own field and any harness can use the id verbatim.
+    const sessionKey = sessionId;
     return {
       ok: true,
       sessionKey,

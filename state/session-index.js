@@ -1,12 +1,7 @@
-// session-index.js — durable flowId→sessionKey index. Adapter-facing state:
-// it stores GATEWAY keys (`agent:<agent>:subagent:mf-…`), never core's opaque
-// `mf-…` handles — NO schema migration was needed because the stored shape
-// is unchanged, only the prefix core mints changed. Core's dispatch path
-// reaches this store through the adapter's conversion proxy (which maps the
-// opaque dispatch handle to its gateway key via the `agent` param on
-// record()); direct record() calls must already carry gateway keys.
-// Reads (flowIdForSessionKey) take gateway keys verbatim — callers holding
-// task_runs rows already have that shape, no conversion needed.
+// session-index.js — durable flowId→sessionKey index. Keys are plain-text
+// session ids minted by core (`mf-…` dispatches, `gf-discuss-…` threads) —
+// no gateway namespace anywhere in the stored shape. Reads
+// (flowIdForSessionKey) take those ids verbatim.
 //
 // Storage: ~/.openclaw/runtime.sqlite (see defaultDbPath()).
 //
@@ -38,8 +33,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, close() {} };
   }
 
-  // `agent` is accepted and ignored: the adapter proxy consumes it to map
-  // the opaque handle to its gateway key before delegating here.
+  // `agent` is accepted and ignored (kept for call-site compatibility).
   async function record({ flowId, sessionKey, nodeId = null, branchItemId = null, agent = null } = {}) {
     void agent;
     if (!flowId || !sessionKey) return;

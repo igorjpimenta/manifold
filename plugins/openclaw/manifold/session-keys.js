@@ -1,53 +1,37 @@
-// session-keys.js — adapter-owned gateway key mapping. The winch-shaped
-// boundary: core speaks ONLY its own namespace (opaque `mf-<flow8>-<node>`
-// handles minted by engine/executor-helpers.js); the gateway speaks
-// `agent:<agent>:subagent:<opaque>`. This module translates at the edge.
+// session-keys.js — adapter-owned session identity helpers. Session ids
+// are plain text, harness-neutral strings minted by core (`mf-<flow8>-…`
+// dispatches, `gf-discuss-<flow8>-…` discuss threads): no `agent:` prefix,
+// no `subagent` infix, no gateway namespace anywhere in the contract.
+// The gateway stores exactly the string it is given, so reads (session
+// transcripts, trajectories) key off the same plain id the dispatch used.
 //
-// Wrap ONCE per raw runtime (wrapSubagentKeys memoizes by identity, same
-// posture as engine/gateway-subagent.js's gate): outgoing run/waitForRun/
-// getSessionMessages args map opaque→gateway, incoming runIds/messages map
-// back. runId mapping is dispatch-scoped and in-memory (coreRunId→gateway
-// gatewayRunId both ways, dropped when its waitForRun settles) — a restart
-// wipes it, which is safe because revival re-attaches by session key,
-// never by runId.
-//
-// Non-mf keys pass through verbatim in both directions: explicit
-// entry.sessionKey overrides and gateway-native keys are never reshaped.
+// Two legacy bridges remain for gateway-shaped keys minted before the
+// cutover (`agent:<agent>:subagent:<opaque>`): toOpaqueKey/toCoreSessionKey
+// map them back so in-flight pre-cutover flows keep resolving. Nothing
+// mints gateway-shaped keys anymore.
+// runId mapping below is untouched: gateway runIds are native gateway
+// events, so the dispatch-lifecycle registry stays regardless of key shape.
 
 import { randomBytes } from "node:crypto";
 
-// Pure: opaque core handle + agent → gateway key. Throws on empty input —
-// a dispatch without both is a caller bug, fail loudly at the edge.
-export function toGatewayKey({ opaque, agent } = {}) {
-  if (!opaque || !agent) throw new Error("session-keys: toGatewayKey needs { opaque, agent }");
-  return `agent:${agent}:subagent:${opaque}`;
+// Inbound: legacy gateway mf-shape→opaque, everything else verbatim.
+// Only gateway-shaped keys minted before the cutover still match; current
+// dispatches already carry the opaque handle, which passes through.
+export function toCoreSessionKey(key) {
+  const opaque = toOpaqueKey(key);
+  if (opaque !== null && opaque.startsWith("mf-")) return opaque;
+  return key;
 }
 
-// Pure: gateway key → opaque core handle, or null for foreign shapes.
-// Never throws — callers use null to mean "not ours, pass through".
+// Legacy map-back for gateway-shaped keys minted before the cutover
+// (`agent:<agent>:subagent:<opaque>` → `<opaque>`), or null for anything
+// else. Never throws — callers use null to mean "not ours, pass through".
+// Nothing mints this shape anymore; this stays only so in-flight
+// pre-cutover flows keep resolving until they drain.
 export function toOpaqueKey(gatewayKey) {
   if (typeof gatewayKey !== "string") return null;
   const m = /^agent:([^:]+):subagent:(.+)$/.exec(gatewayKey);
   return m ? m[2] : null;
-}
-
-// Core-minted handles start here; everything else is foreign/verbatim.
-function isOpaqueHandle(key) {
-  return typeof key === "string" && key.startsWith("mf-");
-}
-
-// Outbound: opaque→gateway, gateway/foreign verbatim.
-export function toGatewaySessionKey(key, agent) {
-  if (!isOpaqueHandle(key)) return key;
-  if (!agent) return key;
-  return toGatewayKey({ opaque: key, agent });
-}
-
-// Inbound: gateway mf-shape→opaque, everything else verbatim.
-export function toCoreSessionKey(key) {
-  const opaque = toOpaqueKey(key);
-  if (opaque !== null && isOpaqueHandle(opaque)) return opaque;
-  return key;
 }
 
 // runId↔runId registry for the dispatch lifecycle. Module-level (not
@@ -56,13 +40,8 @@ export function toCoreSessionKey(key) {
 const coreToGatewayRunId = new Map();
 const gatewayToCoreRunId = new Map();
 
-// Opaque↔gateway session registry, filled by run() (the only call that
-// always carries agentId). getSessionMessages carries no agent field, so it
-// resolves the opaque handle through this table instead. Entries outlive
-// the dispatch — revival re-attaches by session key — but never cross a
-// restart; a fresh process re-registers on its first run(), which always
-// precedes any getSessionMessages in runSubagentTurn.
-const coreToGatewaySession = new Map();
+// No session registry: session ids pass through verbatim, so
+// getSessionMessages needs no lookup table (runIds still map below).
 
 export function coreRunIdForGateway(gatewayRunId) {
   if (!gatewayRunId) return null;
@@ -121,14 +100,7 @@ export function wrapSubagentKeys(raw) {
 
   if (typeof raw.run === "function") {
     wrapped.run = async (args) => {
-      const gatewayKey = toGatewaySessionKey(args?.sessionKey, args?.agentId);
-      if (isOpaqueHandle(args?.sessionKey) && gatewayKey !== args.sessionKey) {
-        coreToGatewaySession.set(args.sessionKey, gatewayKey);
-      }
-      const out = await raw.run({
-        ...args,
-        sessionKey: gatewayKey,
-      });
+      const out = await raw.run({ ...args });
       const coreRunId = mintCoreRunId();
       if (out && typeof out === "object" && typeof out.runId === "string") {
         rememberRunMapping(coreRunId, out.runId);
@@ -157,16 +129,7 @@ export function wrapSubagentKeys(raw) {
 
   if (typeof raw.getSessionMessages === "function") {
     wrapped.getSessionMessages = async (args) => {
-      // Opaque handles resolve through the run()-registered table; anything
-      // unregistered (explicit overrides, gateway-native keys) passes
-      // through verbatim — the gateway stored exactly that string.
-      const sessionKey = isOpaqueHandle(args?.sessionKey)
-        ? (coreToGatewaySession.get(args.sessionKey) ?? args.sessionKey)
-        : args?.sessionKey;
-      const out = await raw.getSessionMessages({
-        ...args,
-        sessionKey,
-      });
+      const out = await raw.getSessionMessages({ ...args });
       if (out && typeof out === "object" && Array.isArray(out.messages)) {
         return { ...out, messages: mapMessageFields(out.messages) };
       }
