@@ -1,5 +1,5 @@
 // cli.js — both CLI surfaces in one module: runCli(argv) serves MCP/WS
-// plus webhook management in a standalone process (bin/manifold.js's thin
+// in a standalone process (bin/manifold.js's thin
 // entry calls it), and registerCliCommands(...) registers the
 // `openclaw manifold` subcommands on the gateway's commander program.
 // Neither surface imports the openclaw SDK, so this module loads under
@@ -22,9 +22,6 @@ import { startMcpServer } from "../mcp/stdio.js";
 import { createRealOps } from "../mcp/wire-ops.js";
 import { createEventStream } from "../events/stream.js";
 import { startWsServer, DEFAULT_WS_PORT } from "../events/serve-ws.js";
-import { createPushTargetsStore } from "../state/push-targets.js";
-import { resolvePushTarget, notifyPush } from "../events/push.js";
-import { resolveStorePaths } from "../state/paths.js";
 
 // cli.js — registers the `openclaw manifold <subcommand>` CLI surface.
 //
@@ -733,12 +730,7 @@ const USAGE = `usage: manifold <command>
                                        serve the pipeline tools over MCP stdio or Streamable HTTP
                                        (stdio harness from MANIFOLD_HARNESS env only; agent+session stamped per call;
                                        http additionally needs MANIFOLD_BEARER + X-Manifold-Harness per session)
-  serve --ws [--port N] [--host H]       stream push events over WebSocket (verbatim + history replay)
-  webhook set --harness H --url U [--bearer B] [--timeout-ms N]
-                                            register a harness push URL (checked first at push time)
-  webhook list                             list registered push URLs
-  webhook remove --harness H               drop a registered push URL
-  webhook test --harness H                 POST a test ping to the harness target`;
+  serve --ws [--port N] [--host H]       stream push events over WebSocket (verbatim + history replay)`;
 
 function fail(msg, code = 2) {
   console.error(msg);
@@ -751,23 +743,6 @@ function stderrLogger() {
     warn: (...a) => console.error(...a),
     error: (...a) => console.error(...a),
   };
-}
-
-function validTimeoutMs(v) {
-  if (v === undefined || v === null) return null;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n <= 0) fail(`manifold: --timeout-ms must be a positive integer, got ${JSON.stringify(v)}`);
-  return n;
-}
-
-function validPushUrl(url) {
-  try {
-    const parsed = new URL(String(url));
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("not http(s)");
-    return String(url).trim();
-  } catch {
-    fail(`manifold: invalid webhook url (must be http(s)://…): ${url}`, 1);
-  }
 }
 
 export async function runCli(argv) {
@@ -827,69 +802,6 @@ export async function runCli(argv) {
       await startWsServer({ stream, port: port ?? DEFAULT_WS_PORT, host, logger });
       logger.info(`manifold: events on ws://${host}:${port ?? DEFAULT_WS_PORT} (verbatim; subscribers track their own state)`);
       return;
-    }
-
-    case "webhook": {
-      const [sub, ...subRest] = rest;
-      if (!["set", "list", "remove", "test"].includes(sub)) {
-        fail("usage: manifold webhook (set|list|remove|test) …");
-      }
-      const dbPath = resolveStorePaths().runtimeDb;
-      const pushTargets = await createPushTargetsStore({ dbPath });
-      try {
-        if (sub === "list") {
-          console.log(JSON.stringify(await pushTargets.getAll(), null, 2));
-          return;
-        }
-        const { values } = parseArgs({
-          args: subRest,
-          options: {
-            harness: { type: "string" },
-            url: { type: "string" },
-            bearer: { type: "string" },
-            "timeout-ms": { type: "string" },
-          },
-        });
-        const harness = values.harness;
-        if (!harness || !harness.trim()) fail(`manifold webhook ${sub} requires --harness <name>`);
-        if (sub === "remove") {
-          const { removed } = await pushTargets.remove(harness);
-          if (!removed) fail(`no webhook registered for harness: ${harness}`, 1);
-          console.log(JSON.stringify({ removed: harness }));
-          return;
-        }
-        if (sub === "set") {
-          if (!values.url) fail("manifold webhook set requires --url <http(s)://…>");
-          const timeoutMs = validTimeoutMs(values["timeout-ms"]);
-          try {
-            await pushTargets.upsert({
-              harness,
-              url: validPushUrl(values.url),
-              bearer: values.bearer ?? null,
-              timeoutMs,
-            });
-            const row = await pushTargets.get(harness);
-            console.log(JSON.stringify({ ...row, bearer: row.bearer ? "<set>" : null }, null, 2));
-          } catch (err) {
-            fail(String(err?.message ?? err), 1);
-          }
-          return;
-        }
-        // test: resolve exactly like a push would (DB-registered target) and
-        // POST a test ping. The adapter answers {ok:true,test:true}.
-        const hook = resolvePushTarget({ pushTargets: await pushTargets.get(harness), harnessId: harness });
-        if (!hook) fail(`no webhook target for harness: ${harness} (register one with webhook set first)`, 1);
-        const r = await notifyPush({
-          target: hook,
-          payload: { event: "webhook.test", at: Date.now(), session: { harness } },
-          logger: stderrLogger(),
-        });
-        console.log(JSON.stringify(r, null, 2));
-        if (!r.ok) process.exitCode = 1;
-        return;
-      } finally {
-        pushTargets.close();
-      }
     }
 
     default:

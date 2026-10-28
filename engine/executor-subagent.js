@@ -10,7 +10,7 @@ import { waitForToolSignal } from "../state/tool-handoff.js";
 // still bounds the run itself.
 const WAIT_UNTIL_RUN_ENDS_MS = 2_147_483_647;
 
-export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit, notifyPush }) {
+export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit }) {
   /**
    * Dispatch one subagent turn against an existing or fresh session key,
    * await its completion, fetch the last assistant message.
@@ -104,13 +104,6 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit
       skill: node.skill,
       agentId: node.agent,
     });
-    // Push wake: the turn spawned — tell the harness now rather than at
-    // poll time. Best-effort and guarded: never breaks the dispatch.
-    if (typeof notifyPush === "function") {
-      try {
-        await notifyPush({ event: "agent.dispatched", flowId, nodeId, sessionKey, agent: node.agent ?? null });
-      } catch {}
-    }
     // Transcript event: without it the reply is visible only inside apply().
     // visible only inside apply(). Tool-fired path carries no reply text — skipped,
     // since the contract requires text and an empty event helps nobody.

@@ -43,7 +43,6 @@ export function createNodeRunner({
   config,
   lineage,
   pipelinesDir,
-  notifyPush,
   logger,
   runStore,
   nodeExecutionsStore,
@@ -54,7 +53,6 @@ export function createNodeRunner({
   // supplies during cutover (tests construct with api only).
   const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
-  const _notifyPush = typeof notifyPush === "function" ? notifyPush : null;
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
   // "agent" branches in executeNodeBody — this function has no fallback-
@@ -298,11 +296,6 @@ export function createNodeRunner({
         lastOpenedAt: now,
       };
       await nodeExecutionsStore.writeGateRecord(flowId, nodeId, gateRecord);
-      if (_notifyPush) {
-        try {
-          await _notifyPush({ event: "gate.opened", flowId, nodeId, pipelineId: state?.pipelineId ?? null, sessionKey: null, agent: null });
-        } catch {}
-      }
       const waitJson = {
         kind: "human-gate",
         nodeId,
