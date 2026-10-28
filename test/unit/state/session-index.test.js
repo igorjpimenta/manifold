@@ -357,8 +357,8 @@ describe("flowIdForSessionKey()", () => {
   test("returns the flowId once record() has been called for that session key", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "agent:scorer:subagent:gf-abcdef12-score_llm", nodeId: "SCORE_LLM" });
-    assert.equal(await idx.flowIdForSessionKey("agent:scorer:subagent:gf-abcdef12-score_llm"), flowId);
+    await idx.record({ flowId, sessionKey: "agent:scorer:subagent:mf-abcdef12-score_llm", nodeId: "SCORE_LLM" });
+    assert.equal(await idx.flowIdForSessionKey("agent:scorer:subagent:mf-abcdef12-score_llm"), flowId);
     idx.close();
   });
 

@@ -26,6 +26,21 @@ describe("classify", () => {
     assert.equal(r.parentHint, null);
   });
 
+  it("classifies manifold-subagent with a flow parent hint", () => {
+    const r = classify("agent:cyrano:subagent:mf-12345678-propose");
+    assert.equal(r.kind, "manifold-subagent");
+    assert.equal(r.agentId, "cyrano");
+    assert.equal(r.flowShort, "12345678");
+    assert.equal(r.nodeId, "propose");
+    assert.equal(r.parentHint?.kind, "flow");
+    assert.equal(r.parentHint?.flowShort, "12345678");
+  });
+
+  it("leaves the legacy gf- dispatch shape unmatched", () => {
+    const r = classify("agent:cyrano:subagent:gf-12345678-propose");
+    assert.equal(r.kind, "unknown");
+  });
+
   it("classifies bare-subagent (parent from spawn hook)", () => {
     const r = classify("agent:scorer:subagent:22222222-2222-2222-2222-222222222222");
     assert.equal(r.kind, "bare-subagent");

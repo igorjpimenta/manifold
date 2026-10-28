@@ -14,6 +14,12 @@ const REGEX = {
   CRON_RUN:  /^agent:([^:]+):cron:([0-9a-f-]{36}):run:([0-9a-f-]+)$/,
   CRON_OWN:  /^agent:([^:]+):cron-(.+)$/,
   BARE_SUB:  /^agent:([^:]+):subagent:([0-9a-f-]{36})$/,
+  // Manifold dispatch sessions, gateway shape of core's opaque handle
+  // (`mf-<flow8>-<node>[-<item>]` — see engine/executor-helpers.js's
+  // mintAgentSessionKey and the adapter edge mapping in
+  // plugins/openclaw/manifold/session-keys.js). The embedded flow8 resolves
+  // via the "flow" parentHint branch, same as GF_DISCUSS.
+  MF_SUB:    /^agent:([^:]+):subagent:(mf-[0-9a-f]{8}-.+)$/,
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
@@ -74,6 +80,18 @@ export function classify(sessionKey) {
     const [, agentId, flowShort] = m;
     return {
       kind: "flow-gate-discuss", agentId, flowShort,
+      parentHint: { kind: "flow", flowShort },
+    };
+  }
+  if ((m = REGEX.MF_SUB.exec(sessionKey))) {
+    const [, agentId, opaque] = m;
+    const flowShort = opaque.slice(3, 11);
+    const tail = opaque.slice(12);
+    const dash = tail.indexOf("-");
+    return {
+      kind: "manifold-subagent", agentId, opaque, flowShort,
+      nodeId: dash === -1 ? tail : tail.slice(0, dash),
+      itemKey: dash === -1 ? null : tail.slice(dash + 1),
       parentHint: { kind: "flow", flowShort },
     };
   }

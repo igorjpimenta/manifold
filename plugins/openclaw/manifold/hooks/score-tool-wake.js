@@ -20,6 +20,7 @@
 // waits on.
 
 import { notifyToolFired } from "../../../../state/tool-handoff.js";
+import { coreRunIdForGateway } from "../session-keys.js";
 
 const SCORE_TOOL_NAME = "submit_score";
 
@@ -45,6 +46,9 @@ export function registerScoreToolWakeHook(api) {
     // return value (aliased from sanitizedResult) — that top-level
     // isError flag is what toolErr() sets, so check it directly.
     if (event.result?.isError) return;
-    notifyToolFired(event.runId);
+    // event.runId is a gateway runId; core's waitForToolSignal race listens
+    // on the mapped core runId (session-keys.js). Unmapped (foreign or
+    // pre-M6) runIds pass through verbatim — no waiter, no-op.
+    notifyToolFired(coreRunIdForGateway(event.runId) ?? event.runId);
   });
 }

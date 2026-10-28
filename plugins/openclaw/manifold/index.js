@@ -25,6 +25,8 @@ import { createNodeHealthStore } from "../../../state/node-health-store.js";
 import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
+import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
+import { wrapSubagentKeys, toGatewaySessionKey, toGatewayKey } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
 import {
   registerGraphFlowTool,
@@ -214,7 +216,18 @@ export default definePluginEntry({
     ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
     setLocksDir(storePaths.locksDir);
     setStateFile(stateFile(storePaths.dataDir));
-    const pipelinesDir = userCfg.pipelinesDir || storePaths.pipelinesDir;
+    // Pipeline dir resolution (table[harness] → MANIFOLD_PIPELINES_DIR env →
+    // config `pipelinesDir` → <dataDir>/workspace/.pipelines). The table lets
+    // an operator relocate one harness without touching env or config; sync
+    // open-per-op store, so this resolves before any service starts.
+    const pushHarness = userCfg.webhookHarness ?? "openclaw";
+    const pipelineDirsStore = createPipelineDirsStore({ dbPath: runtimeDbPath, logger: api.logger });
+    const pipelinesDir = pipelineDirsStore.resolveDir({
+      harness: pushHarness,
+      env: process.env,
+      dataDir: storePaths.dataDir,
+      configDir: userCfg.pipelinesDir || null,
+    }).dir;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
     const discussDefaultAgent = typeof userCfg.manifoldParrot?.defaultAgent === "string" ? userCfg.manifoldParrot.defaultAgent : null;
     const dashboardEnabled = userCfg.dashboardEnabled !== false;
@@ -307,8 +320,16 @@ export default definePluginEntry({
     // classification, which runs while the gateway is still starting).
     const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
-      record(data) { return _sessionIndexPromise.then(si => si.record(data)); },
+      record(data) {
+        return _sessionIndexPromise.then((si) => si.record({
+          ...data,
+          sessionKey: typeof data?.sessionKey === "string" && data.sessionKey.startsWith("mf-") && data?.agent
+            ? toGatewayKey({ opaque: data.sessionKey, agent: data.agent })
+            : data?.sessionKey,
+        }));
+      },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
+      flowIdForSessionKey(sessionKey) { return _sessionIndexPromise.then(si => si.flowIdForSessionKey(sessionKey)); },
       close() { _sessionIndexPromise.then(si => si.close?.()).catch(() => {}); },
     };
 
@@ -332,7 +353,6 @@ export default definePluginEntry({
     // shape as nodeHealthStore/sessionIndex above. Best-effort and
     // guarded: a failed lookup or POST never breaks the run.
     const _pushTargetsPromise = createPushTargetsStore({ logger: api.logger, dbPath: runtimeDbPath });
-    const pushHarness = userCfg.webhookHarness ?? "openclaw";
     const pushConfig = {
       pushUrls: userCfg.pushUrls,
       pushUrl: userCfg.pushUrl,
@@ -341,7 +361,7 @@ export default definePluginEntry({
     };
     const pushStream = createEventStream();
     async function notifyPushEvent({ event, flowId = null, nodeId = null, pipelineId = null, sessionKey = null, agent = null }) {
-      const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey, agent, harnessId: pushHarness });
+      const payload = pushPayload({ event, flowId, nodeId, pipelineId, sessionKey: toGatewaySessionKey(sessionKey, agent), agent, harnessId: pushHarness });
       pushStream.append(payload);
       let dbEntry = null;
       try {
@@ -368,7 +388,10 @@ export default definePluginEntry({
       runStore,
       nodeExecutionsStore,
       admissionQueueStore,
-      getWorkingSubagent: () => moduleState.workingSubagent,
+      // Wrapped at the single injection edge: raw api.runtime.subagent never
+      // reaches core directly (wrapSubagentKeys memoizes, so repeated
+      // resolves don't re-wrap).
+      getWorkingSubagent: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null),
       whenGatewayReady: () => gatewayReadiness.whenReady(),
       emit: emitCanonical,
     });
@@ -521,6 +544,13 @@ export default definePluginEntry({
         runStore,
         nodeExecutionsStore,
         admissionQueueStore,
+        pipelineDirsStore,
+        resolvePipelinesDir: (harness) => pipelineDirsStore.resolveDir({
+          harness: harness ?? pushHarness,
+          env: process.env,
+          dataDir: storePaths.dataDir,
+          configDir: userCfg.pipelinesDir || null,
+        }),
       }),
       {
         commands: ["manifold"],
@@ -801,7 +831,7 @@ export default definePluginEntry({
     // ── Runtime-capture service ──────────────────────────────────────────────
 
     // Push wake route + boot-time self-registration (best-effort).
-    registerPushWebhook({ api, logger: api.logger, getSubagent: () => moduleState.workingSubagent ?? api.runtime?.subagent });
+    registerPushWebhook({ api, logger: api.logger, getSubagent: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null) });
     api.registerService({
       id: "manifold-push-autoregister",
       start: async () => {
@@ -818,7 +848,9 @@ export default definePluginEntry({
       id: "manifold-runtime-capture",
       start: async () => {
         if (!moduleState.workingSubagent && api.runtime?.subagent) {
-          moduleState.workingSubagent = api.runtime.subagent;
+          // Wrapped ONCE here: every core dispatch below resolves through
+          // this reference, so opaque handles map at exactly one edge.
+          moduleState.workingSubagent = wrapSubagentKeys(api.runtime.subagent);
           api.logger.info("manifold: captured working subagent runtime for executor use");
         }
       },

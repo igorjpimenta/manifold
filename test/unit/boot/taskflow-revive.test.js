@@ -210,7 +210,7 @@ describe("isManifoldOwnedSession", () => {
 
   it("returns false when the store says a different plugin owns it, even if the key looks manifold-shaped", () => {
     // The authoritative store record wins over the naming-convention heuristic.
-    const sessionKey = "agent:scorer:subagent:gf-99d6948f-score_llm";
+    const sessionKey = "agent:scorer:subagent:mf-99d6948f-score_llm";
     const agentsRoot = makeAgentsRoot("scorer", { [sessionKey]: { pluginOwnerId: "some-other-plugin" } });
     assert.equal(isManifoldOwnedSession({ agentId: "scorer", sessionKey }, { agentsRoot }), false);
   });
@@ -218,7 +218,7 @@ describe("isManifoldOwnedSession", () => {
   it("falls back to the sessionKey heuristic when the agent has no session store on disk", () => {
     const agentsRoot = join(tmpdir(), `taskflow-agents-missing-${randomUUID()}`);
     assert.equal(
-      isManifoldOwnedSession({ agentId: "nonexistent-agent", sessionKey: "agent:scorer:subagent:gf-99d6948f-score_llm" }, { agentsRoot }),
+      isManifoldOwnedSession({ agentId: "nonexistent-agent", sessionKey: "agent:scorer:subagent:mf-99d6948f-score_llm" }, { agentsRoot }),
       true,
     );
     assert.equal(
@@ -230,7 +230,7 @@ describe("isManifoldOwnedSession", () => {
   it("falls back to the sessionKey heuristic when the session isn't in the store", () => {
     const agentsRoot = makeAgentsRoot("scorer", { "agent:scorer:subagent:unrelated": { pluginOwnerId: "manifold" } });
     assert.equal(
-      isManifoldOwnedSession({ agentId: "scorer", sessionKey: "agent:scorer:subagent:gf-99d6948f-score_llm" }, { agentsRoot }),
+      isManifoldOwnedSession({ agentId: "scorer", sessionKey: "agent:scorer:subagent:mf-99d6948f-score_llm" }, { agentsRoot }),
       true,
     );
   });
@@ -339,7 +339,7 @@ describe("scanAndCleanup", () => {
   // manifold-owned session must not be touched at all, not even to cancel it.
   it("skips a manifold-owned session entirely — no cancel call, no revival dispatch", async () => {
     const dbPath = makeTempDb([
-      { task_id: "task-manifold-01", status: "running", child_session_key: "agent:scorer:subagent:gf-99d6948f-score_llm", last_event_at: 1000 },
+      { task_id: "task-manifold-01", status: "running", child_session_key: "agent:scorer:subagent:mf-99d6948f-score_llm", last_event_at: 1000 },
     ]);
     let cancelCalled = false;
     let runCalled = false;
@@ -366,7 +366,7 @@ describe("scanAndCleanup", () => {
   // either the generic cancel+reviveSession path or a silent skip.
   it("delegates a manifold-owned orphan to the flow's own revival function", async () => {
     const dbPath = makeTempDb([
-      { task_id: "task-manifold-02", status: "running", child_session_key: "agent:scorer:subagent:gf-99d6948f-score_llm", last_event_at: 1000 },
+      { task_id: "task-manifold-02", status: "running", child_session_key: "agent:scorer:subagent:mf-99d6948f-score_llm", last_event_at: 1000 },
     ]);
     let cancelCalled = false;
     let genericRunCalled = false;
@@ -379,7 +379,7 @@ describe("scanAndCleanup", () => {
       },
     };
     const flow = { flowId: "flow-99d6948f", status: "queued", waitJson: { kind: "agent-dispatch", nodeId: "SCORE_LLM" } };
-    const sessionIndex = { flowIdForSessionKey: async (key) => (key === "agent:scorer:subagent:gf-99d6948f-score_llm" ? flow.flowId : null) };
+    const sessionIndex = { flowIdForSessionKey: async (key) => (key === "agent:scorer:subagent:mf-99d6948f-score_llm" ? flow.flowId : null) };
     const runStore = { get: async (id) => (id === flow.flowId ? flow : null) };
     let delegatedFlow = null;
     let delegatedNodeId = null;
@@ -400,7 +400,7 @@ describe("scanAndCleanup", () => {
   // delegation exists to avoid for a manifold-owned session.
   it("skips (does not fall back to generic cancel) when the delegated flow is already terminal", async () => {
     const dbPath = makeTempDb([
-      { task_id: "task-manifold-03", status: "running", child_session_key: "agent:scorer:subagent:gf-deadbeef-score_llm", last_event_at: 1000 },
+      { task_id: "task-manifold-03", status: "running", child_session_key: "agent:scorer:subagent:mf-deadbeef-score_llm", last_event_at: 1000 },
     ]);
     let cancelCalled = false;
     const api = {

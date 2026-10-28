@@ -10,15 +10,35 @@ agent/session fail the dispatch; nothing defaults, ever.
 | --------- | ------ | --------- |
 | harness   | push target registration (`webhookHarness`, default `openclaw`) | core: logs, push routing |
 | agent     | pipeline node `entry.agent` (**required** — anonymous dispatch is refused loudly) | core: session attribution, push receiver |
-| session   | gateway-native keys (`agent:<agent>:…`, minted by manifold; `entry.sessionKey` or `sessionKeyBuilder`) | core: turn identity; adapter: wake fallback |
+| session   | opaque core handle (`mf-…`, minted by core) ↔ gateway key (`agent:<agent>:subagent:mf-…`, mapped by adapter); `entry.sessionKey` or `sessionKeyBuilder` overrides pass through verbatim | core: turn identity; adapter: wake fallback |
 
 ## Session-key conventions
 
-Keys are gateway-native: `agent:<agent>:<scope>:<name>`. Manifold mints
-them (`defaultAgentSessionKey`); a node may override via `entry.sessionKey`
-or `entry.sessionKeyBuilder(state, flowId)`. `entry.agent` is required —
-`dispatchAgentEntry` throws on a missing agent rather than dispatching
-anonymously. No env fallback, ever.
+Core speaks only its own namespace: `dispatchAgentEntry` mints an opaque
+handle `mf-<flow8>-<node>[-<item>]` (`mintAgentSessionKey`); a node may
+override via `entry.sessionKey` or `entry.sessionKeyBuilder(state, flowId)`,
+honored verbatim. `entry.agent` is required — anonymous dispatch is refused
+loudly. No env fallback, ever.
+
+The adapter maps at the edge (`session-keys.js`, wrapping
+`runtime.subagent` once where it is injected): outgoing `run`/
+`waitForRun`/`getSessionMessages` args translate opaque→gateway
+(`agent:<agent>:subagent:<opaque>`); incoming runIds/messages translate
+back. runId mappings live in memory for the dispatch lifecycle only —
+revival re-attaches by session key, never by runId. The session index
+stores gateway keys (adapter-facing state, written through conversion);
+non-`mf-` keys pass through verbatim in both directions.
+
+## Pipeline directories
+
+Resolution order: `pipeline_dirs` table[harness] → `MANIFOLD_PIPELINES_DIR`
+env → config `pipelinesDir` → `<dataDir>/workspace/.pipelines` default. No
+new plugin config keys (env + table only, like push).
+
+- `openclaw manifold pipelines register --harness <h> --path <dir>`
+  upserts the override (dir must exist); effective on next gateway boot.
+- `openclaw manifold pipelines list [--harness <h>]` shows registered
+  rows plus the currently effective dir and which tier won.
 
 ## openclaw
 
