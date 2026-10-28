@@ -2,7 +2,7 @@
 //
 // A harness subscriber connects to the WS event server and immediately
 // receives the currently-open flows for its harness, followed by the
-// live queue. Presence, not revival: the queue replays history on every
+// live queue. Sync, not revival: the queue replays history on every
 // connect, so a missed frame costs a re-read, never a lost event.
 //
 // Single-harness invariant: one manifold instance serves one harness, so
@@ -67,7 +67,7 @@ export async function collectOpenFlows({ runStore, harness = null } = {}) {
 // Live queue entry for a flow transition. Terminal rows are included on
 // purpose: the snapshot covers the open set, the stream covers movement,
 // and a harness learns about closes the same way it learns about opens.
-export function presenceEvent(flow, harness = null) {
+export function openFlowsEvent(flow, harness = null) {
   if (!flow) return null;
   return {
     event: "flow.changed",
@@ -85,15 +85,15 @@ export function presenceEvent(flow, harness = null) {
 // Producer wiring for serve --ws: every flow-state change becomes one
 // queue entry. Delivery faults never throw into the producer — a failed
 // lookup or append only logs. Returns an unsubscribe function.
-export function attachPresenceProducer({ stream, runStore, harness = null, subscribe, logger = null } = {}) {
-  if (!stream || typeof stream.append !== "function") throw new Error("open-flows: attachPresenceProducer requires a stream");
-  if (!runStore || typeof runStore.get !== "function") throw new Error("open-flows: attachPresenceProducer requires a runStore");
-  if (typeof subscribe !== "function") throw new Error("open-flows: attachPresenceProducer requires a subscribe function");
+export function attachOpenFlowsProducer({ stream, runStore, harness = null, subscribe, logger = null } = {}) {
+  if (!stream || typeof stream.append !== "function") throw new Error("open-flows: attachOpenFlowsProducer requires a stream");
+  if (!runStore || typeof runStore.get !== "function") throw new Error("open-flows: attachOpenFlowsProducer requires a runStore");
+  if (typeof subscribe !== "function") throw new Error("open-flows: attachOpenFlowsProducer requires a subscribe function");
   const onChange = (flowId) => {
     (async () => {
       try {
         const flow = await runStore.get(flowId);
-        const entry = presenceEvent(flow, harness);
+        const entry = openFlowsEvent(flow, harness);
         if (entry) stream.append(entry);
       } catch (err) {
         try { logger?.warn?.(`open-flows: producer failed: ${err?.message ?? err}`); } catch {}

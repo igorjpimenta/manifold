@@ -22,7 +22,7 @@ import { startMcpServer } from "../mcp/stdio.js";
 import { createRealOps } from "../mcp/wire-ops.js";
 import { createEventStream } from "../events/stream.js";
 import { startWsServer, DEFAULT_WS_PORT } from "../events/serve-ws.js";
-import { collectOpenFlows, attachPresenceProducer } from "../events/open-flows.js";
+import { collectOpenFlows, attachOpenFlowsProducer } from "../events/open-flows.js";
 import { flowStateEmitter } from "../events.js";
 import { createRunStore } from "../state/run-store.js";
 import { createPushTargetsStore } from "../state/push-targets.js";
@@ -832,7 +832,7 @@ export async function runCli(argv) {
       // on connect is labelled with the subscriber's own ?harness=, and
       // tagged push entries filter per harness downstream.
       const runStore = createRunStore({ logger, dbPath: resolveStorePaths().runtimeDb });
-      attachPresenceProducer({
+      attachOpenFlowsProducer({
         stream,
         runStore,
         harness: null,

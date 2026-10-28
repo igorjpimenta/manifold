@@ -1,7 +1,7 @@
 // serve-ws.js — open-flows sync over WebSocket. Tails the in-process
 // event queue (events/stream.js) and, on every connect, first replays the
 // backlog and then sends the currently-open flows for that harness —
-// presence, not revival. No interpretation of what entries mean beyond
+// sync, not revival. No interpretation of what entries mean beyond
 // the harness tag: untagged entries are instance-wide and go to every
 // subscriber; tagged entries go only to their harness (or to unscoped
 // subscribers). The dashboard SSE path is untouched — this is the door
@@ -115,7 +115,7 @@ export function startWsServer({ stream, port = null, host = "127.0.0.1", history
       const history = snapshot(clientHarness);
       socket.write(encodeFrame(JSON.stringify({ type: "welcome", lastEventId: history.length })));
       socket.write(encodeFrame(JSON.stringify({ type: "history", events: history })));
-      // The presence snapshot lands right after history: the subscriber
+      // The open-flows snapshot lands right after history: the subscriber
       // learns the open set before the first live frame moves it.
       if (typeof getOpenFlows === "function") {
         const flows = await getOpenFlows(clientHarness).catch((err) => {
