@@ -30,7 +30,8 @@ export function registerOperatorRoutes({
   // component emitter for child-session proposal apply
   componentEmitter,
   getBroadcast,
-  // gateway session-introspection adapter (plugins/openclaw/manifold/sessions.js)
+  // Injected gateway adapter, not core state: session reads go through
+  // here so core never imports the gateway's session store.
   sessions,
 }) {
   const { retryFailureBranch } = createRetryFailure({
