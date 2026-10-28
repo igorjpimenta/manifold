@@ -47,7 +47,8 @@ import { costForAllPipelines } from "../../../dashboard/cost.js";
 import { createPipelinesWatcher } from "../../../engine/pipelines-watcher.js";
 import { flushAll as flushBatchWriter } from "../../../state/batch-writer.js";
 import { invokeElevated } from "../../../elevation.js";
-import { createManifoldParrotChannelEntry } from "./channels/manifold-parrot-channel.js";
+import { createDialogServer } from "../../../events/ws-dialog.js";
+import { stampDiscussSession } from "../../../routes/discuss-session.js";
 
 // Route modules extracted from this file.
 import { flowStateEmitter, gateEmitter } from "../../../events.js";
@@ -133,14 +134,14 @@ export default definePluginEntry({
         type: "string",
         description: "Host/interface to bind. Default: 127.0.0.1 (loopback only). Override at your own risk.",
       },
-      manifoldParrot: {
+      discuss: {
         type: "object",
-        description: "manifold-parrot channel config. manifold-parrot is the built-in discuss channel a consumer opens when a human-gate is blocked.",
+        description: "Discuss defaults. Used when a blocked gate node does not declare its own discuss.agent.",
         additionalProperties: false,
         properties: {
           defaultAgent: {
             type: "string",
-            description: "Default agent for the manifold-parrot channel. Used when the blocked gate node does not declare its own discuss.agent.",
+            description: "Default agent for gate discuss sessions. Used when the blocked gate node does not declare its own discuss.agent.",
           },
         },
       },
@@ -193,7 +194,7 @@ export default definePluginEntry({
       configDir: userCfg.pipelinesDir || null,
     }).dir;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
-    const discussDefaultAgent = typeof userCfg.manifoldParrot?.defaultAgent === "string" ? userCfg.manifoldParrot.defaultAgent : null;
+    const discussDefaultAgent = typeof userCfg.discuss?.defaultAgent === "string" ? userCfg.discuss.defaultAgent : null;
     const dashboardEnabled = userCfg.dashboardEnabled !== false;
     const dashboardPort = Number.isInteger(userCfg.dashboardPort) ? userCfg.dashboardPort : DEFAULT_DASHBOARD_PORT;
     const dashboardHost = userCfg.dashboardHost || DEFAULT_DASHBOARD_HOST;
@@ -657,15 +658,49 @@ export default definePluginEntry({
       },
     });
 
-    // ── Parrot channel (takes the shared emitter directly) ────────────────────
-
-    createManifoldParrotChannelEntry({
-      readStore,
-      discussStore,
-      resolveDiscussTarget: discussHandlers.resolveDiscussTarget,
-      stampDiscussSession:  discussHandlers.stampDiscussSession,
-      emit: emitCanonical,
-    }).register(api);
+    // ── Dialog door: WS message transport into open discuss sessions ───────
+    // iOS (or any harness client) connects with ?bearer= and sends
+    // {type:"message",...} frames. Turns run through the same elevation
+    // the HTTP discuss route uses.
+    let _dialogServer = null;
+    api.registerService({
+      id: "manifold-dialog",
+      start: async () => {
+        _dialogServer = createDialogServer({
+          port: Number(process.env.MANIFOLD_DIALOG_PORT) || 38295,
+          host: process.env.MANIFOLD_DIALOG_HOST ?? "127.0.0.1",
+          readFlow: (flowId) => readStore.get(flowId),
+          resolveTarget: discussHandlers.resolveDiscussTarget,
+          runTurn: async ({ flowId, sessionKey, sessionId, agentId, modelOverride, itemId, text, systemPrompt }) => {
+            const elev = await invokeElevated("/manifold/_elev/discuss", {
+              flowId, sessionKey, sessionId, agentId, modelOverride, text, itemId,
+              systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,
+            }, { timeoutMs: 360_000 });
+            let payload;
+            try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
+            if (!(elev.ok && payload.ok)) {
+              return { ok: false, code: payload.code ?? "elev_failed", error: payload.error ?? payload.code ?? elev.error ?? `HTTP ${elev.status}` };
+            }
+            return {
+              ok: true, reply: payload.reply ?? "", proposedDraft: payload.proposedDraft ?? null,
+              proposedMeta: payload.proposedMeta ?? null, durationMs: payload.durationMs ?? null,
+            };
+          },
+          discussStore,
+          stampSession: stampDiscussSession,
+          recordLineage: (entry) => api.runtime?.lineage?.recordSpawn?.(entry),
+          runStore,
+          nodeExecutionsStore,
+          emit: emitCanonical,
+          logger: api.logger,
+        });
+        await _dialogServer.start();
+      },
+      stop: async () => {
+        try { await _dialogServer?.stop(); } catch {}
+        _dialogServer = null;
+      },
+    });
 
     // ── Dashboard ────────────────────────────────────────────────────────────
 

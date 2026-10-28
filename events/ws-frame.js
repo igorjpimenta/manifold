@@ -44,7 +44,7 @@ export function encodeWsFrame(text) {
 // there and optionally return a tag stored for broadcast filtering.
 // broadcast(obj, visibleTo) encodes once and writes to every open socket
 // whose tag passes — untagged sockets always receive.
-export function attachWsEndpoint(server, { match, onConnect = null, logger = null } = {}) {
+export function attachWsEndpoint(server, { match, onConnect = null, onMessage = null, logger = null } = {}) {
   if (typeof match !== "function") throw new Error("ws-frame: attachWsEndpoint requires a match(pathname) predicate");
   const clients = new Set();
   const tags = new Map();
@@ -70,15 +70,18 @@ export function attachWsEndpoint(server, { match, onConnect = null, logger = nul
     }
   }
 
-  // Client frames are only ever interesting as close/ping; everything
-  // else is consumed and ignored. Mask bit respected when skipping
-  // payloads.
+  // Client frames are only ever interesting as close/ping — unless the
+  // endpoint takes messages, in which case complete text messages are
+  // delivered to onMessage and everything else is consumed and ignored.
+  // Mask bit respected when skipping payloads.
   function wireSocket(socket) {
     let buf = Buffer.alloc(0);
+    let textParts = null;
     socket.on("data", (chunk) => {
       buf = Buffer.concat([buf, chunk]);
       for (;;) {
         if (buf.length < 2) return;
+        const fin = (buf[0] & 0x80) !== 0;
         const opcode = buf[0] & 0x0f;
         let len = buf[1] & 0x7f;
         let off = 2;
@@ -95,14 +98,46 @@ export function attachWsEndpoint(server, { match, onConnect = null, logger = nul
           len = buf.readUInt32BE(6);
           off = 10;
         }
-        if (buf[1] & 0x80) off += 4;
+        let mask = null;
+        if (buf[1] & 0x80) {
+          if (buf.length < off + 4) return;
+          mask = buf.slice(off, off + 4);
+          off += 4;
+        }
         if (buf.length < off + len) return;
+        let payload = buf.slice(off, off + len);
         buf = buf.slice(off + len);
+        if (mask) {
+          const unmasked = Buffer.allocUnsafe(payload.length);
+          for (let i = 0; i < payload.length; i++) unmasked[i] = payload[i] ^ mask[i % 4];
+          payload = unmasked;
+        }
         if (opcode === 0x8) {
           socket.destroy();
           return;
         }
-        if (opcode === 0x9) socket.write(Buffer.from([0x8a, 0x00]));
+        if (opcode === 0x9) {
+          socket.write(Buffer.from([0x8a, 0x00]));
+          continue;
+        }
+        // Text start (0x1) opens a message, continuations (0x0) extend it;
+        // anything else (binary, reserved) is consumed and ignored. Without
+        // an onMessage taker there is nothing to deliver to.
+        if (onMessage && (opcode === 0x1 || (opcode === 0x0 && textParts !== null))) {
+          if (opcode === 0x1) textParts = [];
+          textParts.push(payload.toString("utf8"));
+          if (fin) {
+            const text = textParts.join("");
+            textParts = null;
+            try {
+              onMessage(socket, text);
+            } catch (err) {
+              logger?.warn?.(`ws-frame: onMessage failed: ${err?.message ?? err}`);
+            }
+          }
+          continue;
+        }
+        textParts = null;
       }
     });
     socket.on("close", () => drop(socket));

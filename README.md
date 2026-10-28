@@ -759,11 +759,13 @@ edited result must read from there.
 
 A `human-gate` node can optionally let the operator chat with an agent
 about a pending item before deciding. The chat lives on a dedicated iOS
-Inbox screen and is delivered through the **manifold-parrot** channel
-(`POST /channels/manifold-parrot/message`).
+Inbox screen and is transported over the WS dialog door
+(`ws://<gateway-host>:<dialog-port>/api/dialog?bearer=<MANIFOLD_BEARER>`):
+the client sends `{type:"message", flowId, itemId, text}` frames and gets
+back `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`).
 
-**Global default** — set `manifoldParrot.defaultAgent` in `openclaw.json`
-so every gate in every pipeline gets a discuss channel without declaring
+**Global default** — set `discuss.defaultAgent` in `openclaw.json`
+so every gate in every pipeline gets a discuss agent without declaring
 its own `discuss` block:
 
 ```json
@@ -773,7 +775,7 @@ its own `discuss` block:
       "manifold": {
         "enabled": true,
         "config": {
-          "manifoldParrot": {
+          "discuss": {
             "defaultAgent": "main"
           }
         }
@@ -816,14 +818,14 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 
 | Concern | Behavior |
 |---|---|
-| Channel | `manifold-parrot` — the built-in discuss channel. Operator messages arrive at `POST /channels/manifold-parrot/message` with `{ flowId, itemId, text }`. |
-| Session key | `agent:<agent>:manifold-parrot:direct:<flowIdShort>-<gateNodeId>-<itemId>` — stamped on the first turn and locked for the gate's lifetime. |
+| Channel | the WS dialog door — no channel plugin. Operator messages arrive as `{type:"message", flowId, itemId, text}` frames; the door answers `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`). |
+| Session key | stamped session key (`agent:<agent>:<sessionId>`) — locked on the first turn and kept for the gate's lifetime. |
 | Session stamp | Written to `~/.openclaw/discuss-sessions/<flowId8>__<gateNodeId>__<itemId>.json` on first turn so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
 | Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires `discuss.component` SSE immediately; Apply button appears on iOS. |
 | Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` SSE; updates the chip row on iOS. `budget` must be a positive integer. |
 | subflow (sub-node gate) | Gates inside `flow.nodes` opt in identically. `resolveDiscussTarget` walks `subflow` parents and picks the first `kind: "human-gate"` sub-node with a `discuss` block. |
-| Resolution order | Stamped session → node `discuss.agent` → `manifoldParrot.defaultAgent` in openclaw.json. |
+| Resolution order | Stamped session → node `discuss.agent` → `discuss.defaultAgent` in openclaw.json. |
 | iOS history | `GET /manifold/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
 
 **Pipeline authors:** `promptBuilder` is your contract surface. Inline the

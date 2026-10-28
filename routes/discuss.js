@@ -12,6 +12,32 @@ import { assembleState } from "../engine/executor-helpers.js";
 // All handlers close over the deps passed from index.js / runs.js / operator.js
 // rather than using module-level singletons.
 
+// Shared prompt projection for every discuss turn entry point (HTTP route,
+// audio route, WS dialog door): feed the gate's promptBuilder the same
+// assembleState-enriched state the engine's own dispatch loop reads.
+// Returns the prompt string or null (no builder, or the builder threw).
+export async function buildDiscussPrompt({ flow, target, runStore, nodeExecutionsStore, logger = null } = {}) {
+  if (!target?.promptBuilder) return null;
+  try {
+    const ctx = {
+      // B2.5 — read via assembleState() (resultJson replayed on top of
+      // the still-live stateJson) instead of trusting the raw blob
+      // directly, matching how the engine's own dispatch loop reads
+      // state. Fixes a real gap too: this call site never enriched
+      // with _subflowGroups before, so a discuss promptBuilder reading
+      // state.loop (the pre-migration field name) always got nothing.
+      state: await assembleState(flow.flowId, { runStore, nodeExecutionsStore, baseState: flow.stateJson ?? {} }),
+      itemId: target.itemId,
+      flowId: flow.flowId,
+      pipelineId: flow.stateJson?.pipelineId ?? null,
+    };
+    return await Promise.resolve(target.promptBuilder(ctx));
+  } catch (err) {
+    try { logger?.warn?.(`manifold discuss promptBuilder threw for ${flow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`); } catch {}
+    return null;
+  }
+}
+
 export function registerDiscussHandlers({
   api,
   store,
@@ -96,7 +122,7 @@ export function registerDiscussHandlers({
         ok: false,
         status: 400,
         code: "discuss_not_supported",
-        error: "this gate's pipeline hasn't opted into discussion (set `discuss: { agent, promptBuilder }` on the gate node, or set `manifoldParrot.defaultAgent` in the manifold plugin config in openclaw.json)",
+        error: "this gate's pipeline hasn't opted into discussion (set `discuss: { agent, promptBuilder }` on the gate node, or set `discuss.defaultAgent` in the manifold plugin config in openclaw.json)",
       };
     }
     const stamp = readDiscussSession(sourceFlow.flowId, gateNodeId, normalizedItemId);
@@ -150,26 +176,7 @@ export function registerDiscussHandlers({
       res.end(JSON.stringify({ ok: false, code: target.code, error: target.error }));
       return true;
     }
-    let systemPrompt = null;
-    if (target.promptBuilder) {
-      try {
-        const ctx = {
-          // B2.5 — read via assembleState() (resultJson replayed on top of
-          // the still-live stateJson) instead of trusting the raw blob
-          // directly, matching how the engine's own dispatch loop reads
-          // state. Fixes a real gap too: this call site never enriched
-          // with _subflowGroups before, so a discuss promptBuilder reading
-          // state.loop (the pre-migration field name) always got nothing.
-          state: await assembleState(sourceFlow.flowId, { runStore, nodeExecutionsStore, baseState: sourceFlow.stateJson ?? {} }),
-          itemId: target.itemId,
-          flowId: sourceFlow.flowId,
-          pipelineId: sourceFlow.stateJson?.pipelineId ?? null,
-        };
-        systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
-      } catch (err) {
-        api.logger.warn(`manifold discuss promptBuilder threw for ${sourceFlow.flowId.slice(0, 8)}/${target.itemId}: ${err?.message ?? err}`);
-      }
-    }
+    let systemPrompt = await buildDiscussPrompt({ flow: sourceFlow, target, runStore, nodeExecutionsStore, logger: api.logger });
     const turnId = randomUUID();
     const flowIdShort = sourceFlow.flowId.slice(0, 8);
     res.statusCode = 202;
@@ -451,26 +458,7 @@ export function registerDiscussHandlers({
     res.setHeader("Content-Type", "application/json");
     res.end(JSON.stringify({ ok: true, turnId, audioUrl }));
 
-    let systemPrompt = null;
-    if (target.promptBuilder) {
-      try {
-        const ctx = {
-          // B2.5 — read via assembleState() (resultJson replayed on top of
-          // the still-live stateJson) instead of trusting the raw blob
-          // directly, matching how the engine's own dispatch loop reads
-          // state. Fixes a real gap too: this call site never enriched
-          // with _subflowGroups before, so a discuss promptBuilder reading
-          // state.loop (the pre-migration field name) always got nothing.
-          state: await assembleState(sourceFlow.flowId, { runStore, nodeExecutionsStore, baseState: sourceFlow.stateJson ?? {} }),
-          itemId: target.itemId,
-          flowId: sourceFlow.flowId,
-          pipelineId: sourceFlow.stateJson?.pipelineId ?? null,
-        };
-        systemPrompt = await Promise.resolve(target.promptBuilder(ctx));
-      } catch (err) {
-        api.logger.warn(`manifold discuss/audio promptBuilder threw for ${flowIdShort}/${target.itemId}: ${err?.message ?? err}`);
-      }
-    }
+    let systemPrompt = await buildDiscussPrompt({ flow: sourceFlow, target, runStore, nodeExecutionsStore, logger: api.logger });
 
     setImmediate(() => transcribeAndDispatch({
       sourceFlow, target, turnId, audioPath, audioUrl, metaPath,
