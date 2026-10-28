@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
-import { useSseState } from "@/api/sse";
+import { useWsState } from "@/api/ws";
 import { cn } from "@/lib/utils";
 
 export function Layout({ children }: { children: ReactNode }) {
-  const conn = useSseState();
+  const conn = useWsState();
   return (
     <div className="min-h-screen">
       <header className="sticky top-0 z-10 flex items-center gap-3 sm:gap-4 bg-bg-elev px-3 sm:px-5 py-[10px] border-b border-border">

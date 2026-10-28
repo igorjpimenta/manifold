@@ -13,14 +13,14 @@ import { StateTree } from "@/components/StateTree";
 import { CopyButton } from "@/components/CopyButton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, artifactUrl } from "@/api/client";
-import { useSse } from "@/api/sse";
+import { useWs } from "@/api/ws";
 import { formatBytes, formatTime } from "@/lib/format";
-import type { ArtifactEntry, SubflowData, FlowRunFull, FlowTreeItem, Pipeline, RunCompare, RunCost, SseEvent, Transcript } from "@/api/types";
+import type { ArtifactEntry, SubflowData, FlowRunFull, FlowTreeItem, Pipeline, RunCompare, RunCost, LiveEvent, Transcript } from "@/api/types";
 
 export function RunDetail({ flowId }: { flowId: string }) {
   const [run, setRun] = useState<FlowRunFull | null>(null);
   const [pipeline, setPipeline] = useState<Pipeline | null>(null);
-  const [events, setEvents] = useState<SseEvent[]>([]);
+  const [events, setEvents] = useState<LiveEvent[]>([]);
   const [artifacts, setArtifacts] = useState<ArtifactEntry[]>([]);
   const [transcripts, setTranscripts] = useState<Transcript[] | null>(null);
   const [compare, setCompare] = useState<RunCompare | null>(null);
@@ -51,7 +51,7 @@ export function RunDetail({ flowId }: { flowId: string }) {
 
   useEffect(() => { loadAll(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [flowId]);
 
-  useSse((evt) => {
+  useWs((evt) => {
     if (!("flowId" in evt) || evt.flowId !== flowId) return;
     setEvents((prev) => [evt, ...prev]);
     if (evt.kind !== "run.created") loadAll();
@@ -230,7 +230,7 @@ export function RunDetail({ flowId }: { flowId: string }) {
   );
 }
 
-function formatEventBody(evt: SseEvent): string {
+function formatEventBody(evt: LiveEvent): string {
   switch (evt.kind) {
     case "run.created":   return `created at ${evt.currentStep ?? "?"} (${evt.status})`;
     case "run.ended": return `terminated (${evt.status})`;

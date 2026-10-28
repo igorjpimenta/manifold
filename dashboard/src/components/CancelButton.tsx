@@ -33,7 +33,7 @@ export function CancelButton({ flowId }: { flowId: string }) {
     setPhase("busy");
     try {
       await api.cancel(flowId);
-      // SSE (run.ended) refreshes the parent; the button disappears
+      // The live feed (run.ended) refreshes the parent; the button disappears
       // once `run.status` flips terminal.
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

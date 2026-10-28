@@ -16,7 +16,7 @@ import { SubflowSummary } from "@/components/SubflowSummary";
 import { NeedsAttention } from "@/components/NeedsAttention";
 import { ClickToCopy } from "@/components/ClickToCopy";
 import { api } from "@/api/client";
-import { useSse } from "@/api/sse";
+import { useWs } from "@/api/ws";
 import { formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AllPipelinesCost, FlowRunSummary, GlobalStats, Pipeline } from "@/api/types";
@@ -111,7 +111,7 @@ export function Home() {
     /* eslint-disable-line react-hooks/exhaustive-deps */
   }, [status, pipeline, range, query, pinnedDay]);
 
-  useSse((evt) => {
+  useWs((evt) => {
     if (evt.kind === "run.created" || evt.kind === "run.updated" || evt.kind === "run.ended") {
       loadRuns();
       loadRecent();

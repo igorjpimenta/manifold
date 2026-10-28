@@ -477,9 +477,9 @@ export interface RunCompare {
   revisionMedian: number | null;
 }
 
-// ─── SSE events (from /api/events) ───────────────────────────────────────────
+// ─── Live events (WS /api/events/ws + REST run history) ──────────────────────
 
-export type SseEvent =
+export type LiveEvent =
   | { kind: "run.created"; flowId: string; at: number; status: RunStatus; lastStep: string | null; currentStep: string | null; pipelineId: string | null }
   | { kind: "run.updated"; flowId: string; at: number; prevStatus: RunStatus; currStatus: RunStatus; prevStep: string | null; currStep: string | null; revision: number; stateKeysAdded: string[]; stateKeysRemoved: string[]; waitKind: string | null }
   | { kind: "run.ended"; flowId: string; at: number; status: RunStatus }

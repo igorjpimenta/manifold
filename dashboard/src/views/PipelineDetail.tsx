@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { TodayStrip, estimateLast24hSpent, DAY_MS as TODAY_DAY_MS } from "@/components/TodayStrip";
 import { computeAnomalies } from "@/lib/anomaly";
 import { api } from "@/api/client";
-import { useSse } from "@/api/sse";
+import { useWs } from "@/api/ws";
 import { cn } from "@/lib/utils";
 import type { DeclaredView, Pipeline, PipelineCost, PipelineNode, PipelineStats, PipelineViews } from "@/api/types";
 
@@ -45,7 +45,7 @@ export function PipelineDetail({ pipelineId }: { pipelineId: string }) {
   const loadViews = () => { api.pipelineViews(pipelineId, 30).then(setPipelineViews).catch(() => setPipelineViews(null)); };
 
   useEffect(() => { loadDef(); loadStats(); loadCost(); loadViews(); /* eslint-disable-line react-hooks/exhaustive-deps */ }, [pipelineId]);
-  useSse((evt) => {
+  useWs((evt) => {
     if (evt.kind === "pipeline.catalog.updated") { loadDef(); loadStats(); }
     else if (evt.kind === "run.created" || evt.kind === "run.updated" || evt.kind === "run.ended") {
       loadStats();
