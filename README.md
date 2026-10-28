@@ -826,7 +826,7 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` SSE; updates the chip row on iOS. `budget` must be a positive integer. |
 | subflow (sub-node gate) | Gates inside `flow.nodes` opt in identically. `resolveDiscussTarget` walks `subflow` parents and picks the first `kind: "human-gate"` sub-node with a `discuss` block. |
 | Resolution order | Stamped session → node `discuss.agent` → `discuss.defaultAgent` in openclaw.json. |
-| iOS history | `GET /manifold/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
+| History | `GET /manifold/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
 
 **Pipeline authors:** `promptBuilder` is your contract surface. Inline the
 listing context, current draft, and orchestration rules the agent needs.
