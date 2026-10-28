@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/api/client";
-import { useSse } from "@/api/sse";
+import { useWs } from "@/api/ws";
 import { cn } from "@/lib/utils";
 import type { Pipeline } from "@/api/types";
 
@@ -15,7 +15,7 @@ export function PipelinesList() {
 
   const load = () => { api.pipelines().then(setPipelines); };
   useEffect(load, []);
-  useSse((evt) => { if (evt.kind === "pipeline.catalog.updated") load(); });
+  useWs((evt) => { if (evt.kind === "pipeline.catalog.updated") load(); });
 
   return (
     <>

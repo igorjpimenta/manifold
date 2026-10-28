@@ -89,8 +89,9 @@ const pipelineRegistryStore = {
   getNodeVersionsBatch: async (reqs) => reqs.map(() => ({ kind: "single", agent: "test-agent" })),
 };
 
+let liveSubscriber = null;
 const eventBus = {
-  subscribe: () => () => {},
+  subscribe: (cb) => { liveSubscriber = cb; return () => { liveSubscriber = null; }; },
   snapshot: () => ({ ok: true }),
   getEventsFor: async () => [{ kind: "run.created" }],
 };
@@ -218,5 +219,28 @@ describe("dashboard/server.js — direct store reads (no gateway)", () => {
     const { status, body } = await get(`/api/runs/${FLOW_ID}/events`);
     assert.equal(status, 200);
     assert.equal(body.length, 1);
+  });
+
+  test("WS /api/events/ws receives live bus events", async () => {
+    assert.ok(liveSubscriber, "server subscribes to the event bus on start");
+    const ws = new WebSocket(`${BASE.replace(/^http/, "ws")}/api/events/ws`);
+    const received = [];
+    ws.onmessage = (e) => { received.push(JSON.parse(String(e.data))); };
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("ws open timed out")), 5000);
+      ws.onopen = () => { clearTimeout(timer); resolve(); };
+      ws.onerror = (e) => { clearTimeout(timer); reject(new Error(`ws error: ${e?.message ?? "unknown"}`)); };
+    });
+    try {
+      const evt = { kind: "run.updated", flowId: FLOW_ID, at: Date.now() };
+      liveSubscriber(evt);
+      const started = Date.now();
+      while (received.length === 0 && Date.now() - started < 5000) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      assert.deepEqual(received[0], evt);
+    } finally {
+      try { ws.close(); } catch {}
+    }
   });
 });

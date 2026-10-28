@@ -2,13 +2,14 @@
 //
 // Bound to 127.0.0.1 only (no LAN exposure, no auth surface). All routes are
 // read-only — actuation stays in the CLI and Telegram surfaces. Live updates
-// are pushed via Server-Sent Events from the event-bus (event-log.js), which
-// polls the store at 1 Hz since the openclaw runtime exposes no flow-change
-// hook.
+// are pushed over WebSocket from the event-bus (event-log.js), which fires
+// on every store write — no polling lag, no per-client catch-up stream:
+// the run-detail page reloads full state from REST after any reconnect.
 //
 // File-serving for the bundled SPA uses node:http only; no express/fastify.
 
 import http from "node:http";
+import { attachWsEndpoint } from "../events/ws-frame.js";
 import { readFile, readdir, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -53,8 +54,8 @@ const MIME = {
 
 export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
   let server = null;
-  // Track open SSE responses so we can drain them on stop().
-  const sseClients = new Set();
+  // Live WS door (events/ws-frame.js) — opened in start(), drained on stop().
+  let door = null;
   let unsubscribe = null;
 
   // ── Direct store reads ────────────────────────────────────────────────────
@@ -300,11 +301,17 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     return data;
   }
 
-  function dispatchSse(event) {
-    const payload = `data: ${JSON.stringify(event)}\n\n`;
-    for (const res of sseClients) {
-      try { res.write(payload); } catch { /* client gone; cleanup on close */ }
-    }
+  // Same /graph prefix strip as handle() below: the bundle is built with
+  // vite base `/graph/`, so the WS URL embeds the prefix when served
+  // under it and arrives bare on direct loopback.
+  function wsPathMatch(pathname) {
+    return pathname === "/api/events/ws" || pathname === "/graph/api/events/ws";
+  }
+
+  function dispatchWs(event) {
+    try {
+      door?.broadcast(event);
+    } catch { /* client gone; cleanup on close */ }
   }
 
   async function handle(req, res) {
@@ -589,12 +596,10 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return handleBulkCancel(req, res);
       }
 
-      // ── SSE ────────────────────────────────────────────────────────────────
-      if (req.method === "GET" && pathname === "/api/events") {
-        return openSse(req, res);
-      }
-
       // ── Static SPA fallback ─────────────────────────────────────────────
+      // Live events moved to the WS door (/api/events/ws, attached in
+      // start()); there is no HTTP fallback — a client that cannot
+      // Upgrade must poll the REST history endpoints instead.
       // Any unmatched GET maps to a file inside `dist/`. `/` and `/index.html`
       // serve the SPA shell; vite-emitted `/assets/<hash>.{js,css}` URLs land
       // here too. Path-traversal guarded by ensuring the resolved absolute
@@ -815,7 +820,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       return sendJson(res, 500, { error: "rerun failed", message: msg });
     }
     // Fire the executor loop in the background; the HTTP response returns
-    // the new flowId immediately and SSE drives the dashboard.
+    // the new flowId immediately and the WS door drives the dashboard.
     setImmediate(() => {
       Promise.resolve()
         .then(() => ensurePipelinesLoaded?.())
@@ -1001,32 +1006,12 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     return serveFile(res, resolved);
   }
 
-  function openSse(req, res) {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      "Connection": "keep-alive",
-      "X-Accel-Buffering": "no",
-    });
-    res.write(": connected\n\n");
-    sseClients.add(res);
-    const ping = setInterval(() => {
-      try { res.write(": ping\n\n"); } catch { /* swallow */ }
-    }, 25_000);
-    if (typeof ping?.unref === "function") ping.unref();
-    const close = () => {
-      clearInterval(ping);
-      sseClients.delete(res);
-    };
-    req.on("close", close);
-    req.on("error", close);
-  }
-
   return {
     async start() {
       if (server) return;
 
       server = http.createServer((req, res) => { handle(req, res); });
+      door = attachWsEndpoint(server, { match: wsPathMatch, logger });
       await new Promise((resolve, reject) => {
         const onErr = (err) => { server = null; reject(err); };
         server.once("error", onErr);
@@ -1035,15 +1020,12 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
           resolve();
         });
       });
-      unsubscribe = eventBus.subscribe(dispatchSse);
+      unsubscribe = eventBus.subscribe(dispatchWs);
       logger?.info?.(`manifold dashboard: listening on http://${host}:${port}`);
     },
     async stop() {
       if (unsubscribe) { unsubscribe(); unsubscribe = null; }
-      for (const res of sseClients) {
-        try { res.end(); } catch { /* swallow */ }
-      }
-      sseClients.clear();
+      if (door) { door.close(); door = null; }
       if (server) {
         await new Promise((resolve) => server.close(() => resolve()));
         server = null;

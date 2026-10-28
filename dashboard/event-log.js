@@ -16,7 +16,7 @@
 // instant a node is dispatched, not only once its output merges into
 // state_json.
 //
-// Each event is delivered to live SSE subscribers AND appended to a per-flow
+// Each event is delivered to live WS subscribers AND appended to a per-flow
 // ring buffer (cap 256 events) so the run-detail page can replay history on
 // first load.
 //
@@ -250,7 +250,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
         return [];
       }
     },
-    // Push a non-flow event straight to SSE subscribers without ring-buffering
+    // Push a non-flow event straight to live subscribers without ring-buffering
     // it. Used for pipelines_changed and any other "side-channel" notification
     // the dashboard wants to surface live.
     broadcast(event) {

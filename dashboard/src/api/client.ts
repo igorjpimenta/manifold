@@ -16,7 +16,7 @@ import type {
   RunCompare,
   RunCost,
   SearchResponse,
-  SseEvent,
+  LiveEvent,
   SubflowData,
   Transcript,
 } from "./types";
@@ -61,7 +61,7 @@ export const api = {
     return json<FlowRunSummary[]>(`${API}/runs?${q.toString()}`);
   },
   run:           (flowId: string) => json<FlowRunFull>(`${API}/runs/${flowId}`),
-  runEvents:     (flowId: string) => json<SseEvent[]>(`${API}/runs/${flowId}/events`),
+  runEvents:     (flowId: string) => json<LiveEvent[]>(`${API}/runs/${flowId}/events`),
   runArtifacts:  (flowId: string) => json<ArtifactEntry[]>(`${API}/runs/${flowId}/artifacts`),
   runTranscripts:(flowId: string) => json<Transcript[]>(`${API}/runs/${flowId}/transcripts`),
   runCompare:    (flowId: string) => json<RunCompare | null>(`${API}/runs/${flowId}/compare`),

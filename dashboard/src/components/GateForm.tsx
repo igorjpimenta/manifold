@@ -2,8 +2,8 @@
 // on a human-gate / gate with pending items, this renders an
 // approve / reject / edit form for each pending item and POSTs to
 // `/api/runs/:flowId/approve` (which mirrors the CLI's `manifold
-// approve` semantics). SSE refreshes the parent run state once the
-// executor reacts.
+// approve` semantics). The live WS feed refreshes the parent run state
+// once the executor reacts.
 //
 // Pending entries may be raw strings ("listing-123") or objects with
 // `.id` (`{ id: "listing-123", reason: "..." }`); both shapes render.
@@ -65,7 +65,7 @@ export function GateForm({ flowId, pending }: GateFormProps) {
     setError(null);
     try {
       await api.approve(flowId, { itemId, decision, text });
-      // No state mutation here — SSE (run.updated) will refresh RunDetail
+      // No state mutation here — the live feed (run.updated) refreshes RunDetail
       // and the form will disappear once the item is no longer pending.
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

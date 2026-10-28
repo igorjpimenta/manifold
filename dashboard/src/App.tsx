@@ -1,6 +1,6 @@
 // Hash-routed shell. Four views; no react-router needed — the routes are
 // stable and tiny. `useHash()` watches `hashchange`; views mount/unmount on
-// route change, which gives us free SSE-subscription cleanup via React effects.
+// route change, which gives us free WS-subscription cleanup via React effects.
 
 import { useEffect, useMemo, useState } from "react";
 import { Layout } from "./components/Layout";
@@ -9,7 +9,7 @@ import { PipelinesList } from "./views/PipelinesList";
 import { PipelineDetail } from "./views/PipelineDetail";
 import { RunDetail } from "./views/RunDetail";
 import { Search } from "./views/Search";
-import { SseProvider } from "./api/sse";
+import { WsProvider } from "./api/ws";
 
 function useHash(): string {
   const [hash, setHash] = useState<string>(() => window.location.hash || "#/");
@@ -35,8 +35,8 @@ export default function App() {
   }, [hash]);
 
   return (
-    <SseProvider>
+    <WsProvider>
       <Layout>{view}</Layout>
-    </SseProvider>
+    </WsProvider>
   );
 }
