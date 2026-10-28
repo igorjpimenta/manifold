@@ -6,17 +6,15 @@
 // Also optional: --cost extracts every assistant-message usage.cost from
 // the same jsonls and writes cost_by_call rows, stamped with the lineage.
 
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { resolveCost } from "./pricer.js";
 import { getSharedDb } from "../state/db.js";
+import { resolveStorePaths } from "../state/paths.js";
 import { execAll } from "./http-helpers.js";
 
-const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
-const RUNTIME_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-
-export async function runBackfill({ store, resolver, logger, includeCost = false, force = false } = {}) {
+// Gateway file reads (trajectory walk, session text) arrive via `sources`,
+// injected by the harness-side adapter. Core keeps the lineage loop and the
+// runtime.sqlite edge query over injected paths.
+export async function runBackfill({ store, resolver, logger, includeCost = false, force = false, sources = null, agentsDir, runtimeDbPath = resolveStorePaths().runtimeDb } = {}) {
   const t0 = Date.now();
   const stats = {
     sessionsScanned: 0, lineageWritten: 0, lineageSkipped: 0,
@@ -24,59 +22,53 @@ export async function runBackfill({ store, resolver, logger, includeCost = false
     childFlowEdgesScanned: 0, childFlowEdgesWritten: 0, childFlowEdgesSkipped: 0, childFlowEdgeErrors: 0,
   };
 
-  let agents;
-  try { agents = fs.readdirSync(AGENTS_DIR, { withFileTypes: true }); }
-  catch (e) { logger?.warn(`backfill: cannot read ${AGENTS_DIR}: ${e.message}`); return stats; }
+  if (!sources) { logger?.warn("backfill: no gateway sources injected — skipping"); return stats; }
+  let pairs;
+  try { pairs = sources.listTrajectoryPairs({ agentsDir }); }
+  catch (e) { logger?.warn(`backfill: cannot read trajectories: ${e.message}`); return stats; }
 
   // Process in a single transaction for speed — rolls back cleanly on crash
   await store._client.execute("BEGIN");
   try {
-    for (const ent of agents) {
-      if (!ent.isDirectory()) continue;
-      const sd = path.join(AGENTS_DIR, ent.name, "sessions");
-      let files;
-      try { files = fs.readdirSync(sd); } catch { continue; }
-      for (const fn of files) {
-        if (!fn.endsWith(".trajectory.jsonl")) continue;
-        stats.sessionsScanned++;
-        const trajPath = path.join(sd, fn);
-        const sessionFile = path.join(sd, fn.replace(/\.trajectory\.jsonl$/, ".jsonl"));
-        try {
-          const head = readFirstLine(trajPath);
-          if (!head) continue;
-          const d = JSON.parse(head);
-          const sessionKey = d.sessionKey;
-          const sessionId = d.sessionId;
-          if (!sessionKey || !sessionId) continue;
+    for (const { trajPath, sessionFile } of pairs) {
+      stats.sessionsScanned++;
+      try {
+        const head = sources.readTrajectoryHead(trajPath);
+        if (!head) continue;
+        const d = JSON.parse(head);
+        const sessionKey = d.sessionKey;
+        const sessionId = d.sessionId;
+        if (!sessionKey || !sessionId) continue;
 
-          // Lineage row
-          if (!force) {
-            const existing = await store.getLineage(sessionKey);
-            if (existing) { stats.lineageSkipped++; }
-            else {
-              const row = await resolver.resolve(sessionKey, {
-                source: "backfill",
-                firstSeenAt: Date.parse(d.ts) || Date.now(),
-              });
-              if (row) { await store.upsertLineage(row); stats.lineageWritten++; }
-            }
-          } else {
+        // Lineage row
+        if (!force) {
+          const existing = await store.getLineage(sessionKey);
+          if (existing) { stats.lineageSkipped++; }
+          else {
             const row = await resolver.resolve(sessionKey, {
               source: "backfill",
               firstSeenAt: Date.parse(d.ts) || Date.now(),
             });
             if (row) { await store.upsertLineage(row); stats.lineageWritten++; }
           }
-
-          // Cost rows
-          if (includeCost && fs.existsSync(sessionFile)) {
-            const lineage = await store.getLineage(sessionKey);
-            await extractCostFromSession(sessionFile, sessionId, sessionKey, lineage, store, stats);
-          }
-        } catch (err) {
-          stats.errors++;
-          if (stats.errors <= 5) logger?.warn(`backfill: ${trajPath}: ${err.message}`);
+        } else {
+          const row = await resolver.resolve(sessionKey, {
+            source: "backfill",
+            firstSeenAt: Date.parse(d.ts) || Date.now(),
+          });
+          if (row) { await store.upsertLineage(row); stats.lineageWritten++; }
         }
+
+        // Cost rows
+        if (includeCost) {
+          const sessionText = sources.readSessionText(sessionFile);
+          if (sessionText == null) continue;
+          const lineage = await store.getLineage(sessionKey);
+          await extractCostFromSession(sessionText, sessionId, sessionKey, lineage, store, stats);
+        }
+      } catch (err) {
+        stats.errors++;
+        if (stats.errors <= 5) logger?.warn(`backfill: ${trajPath}: ${err.message}`);
       }
     }
     await store._client.execute("COMMIT");
@@ -99,7 +91,7 @@ export async function runBackfill({ store, resolver, logger, includeCost = false
   // since it reads a different database and one failing doesn't need to
   // roll back the other.
   try {
-    const childStats = await backfillChildFlowTriggerEdges({ store, resolver, logger, force });
+    const childStats = await backfillChildFlowTriggerEdges({ store, resolver, logger, force, runtimeDbPath });
     stats.childFlowEdgesScanned = childStats.scanned;
     stats.childFlowEdgesWritten = childStats.written;
     stats.childFlowEdgesSkipped = childStats.skipped;
@@ -116,9 +108,10 @@ export async function runBackfill({ store, resolver, logger, includeCost = false
 // Oldest-parent-first: a multi-level fan-out's own parent edge (itself
 // possibly a backfilled child) must exist by the time its child row is
 // processed, and a parent flow_run's created_at is always <= its child's.
-async function backfillChildFlowTriggerEdges({ store, resolver, logger, force = false, runtimeDbPath = RUNTIME_DB_PATH } = {}) {
+async function backfillChildFlowTriggerEdges({ store, resolver, logger, force = false, runtimeDbPath = resolveStorePaths().runtimeDb } = {}) {
   const stats = { scanned: 0, written: 0, skipped: 0, errors: 0 };
-  if (!fs.existsSync(runtimeDbPath)) return stats;
+  const { existsSync } = await import("node:fs");
+  if (!existsSync(runtimeDbPath)) return stats;
 
   let rows;
   rows = await execAll((await getSharedDb(runtimeDbPath, { readonly: true })).client, `
@@ -174,21 +167,9 @@ async function backfillChildFlowTriggerEdges({ store, resolver, logger, force = 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function readFirstLine(p) {
-  // Read just enough to find the first newline. Most first lines are <1KB.
-  const fd = fs.openSync(p, "r");
-  try {
-    const buf = Buffer.alloc(4096);
-    const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    const s = buf.slice(0, n).toString("utf8");
-    const nl = s.indexOf("\n");
-    return nl === -1 ? s : s.slice(0, nl);
-  } finally { fs.closeSync(fd); }
-}
-
-async function extractCostFromSession(sessionFile, sessionId, sessionKey, lineage, store, stats) {
-  // Stream the jsonl line by line (some sessions are tens of MB).
-  const data = fs.readFileSync(sessionFile, "utf8");
+async function extractCostFromSession(sessionText, sessionId, sessionKey, lineage, store, stats) {
+  // Scan the jsonl line by line (some sessions are tens of MB).
+  const data = sessionText;
   let start = 0;
   while (start < data.length) {
     const nl = data.indexOf("\n", start);

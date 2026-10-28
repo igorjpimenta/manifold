@@ -4,7 +4,7 @@
 
 import { execAll, execGet } from "./http-helpers.js";
 
-export function registerCliCommands({ program, logger, getStore, getResolver, dbPath }) {
+export function registerCliCommands({ program, logger, getStore, getResolver, dbPath, sources = null, agentsDir, runtimeDbPath } = {}) {
   const cmd = program.command("lineage").description("Session lineage + cost attribution");
 
   cmd.command("lookup <sessionKeyOrId>")
@@ -12,7 +12,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
     .action(async (target) => {
       const store = await getStore(); const resolver = await getResolver();
       if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
-      const key = target.startsWith("agent:") ? target : await sessionIdToKey(target);
+      const key = target.startsWith("agent:") ? target : await sources?.sessionKeyForSessionId(target, { agentsDir });
       if (!key) { console.error(`could not resolve ${target} to a sessionKey`); process.exitCode = 1; return; }
       const chain = await resolver.walk(key);
       for (let i = 0; i < chain.length; i++) {
@@ -231,7 +231,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       const store = await getStore(); const resolver = await getResolver();
       if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
       const { runBackfill } = await import("./backfill.js");
-      const summary = await runBackfill({ store, resolver, logger, includeCost: !!opts.cost, force: !!opts.force });
+      const summary = await runBackfill({ store, resolver, logger, includeCost: !!opts.cost, force: !!opts.force, sources, agentsDir, runtimeDbPath });
       console.log(JSON.stringify(summary, null, 2));
     });
 
@@ -289,26 +289,6 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
     });
 }
 
-// Look up a sessionId by reading the first line of its trajectory.jsonl (which
-// carries the sessionKey). Mirrors what cost.js does. Best-effort.
-async function sessionIdToKey(sessionId) {
-  const fs = await import("node:fs/promises");
-  const os = await import("node:os");
-  const path = await import("node:path");
-  const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
-  const agents = await fs.readdir(AGENTS_DIR, { withFileTypes: true });
-  for (const ent of agents) {
-    if (!ent.isDirectory()) continue;
-    const trajPath = path.join(AGENTS_DIR, ent.name, "sessions", `${sessionId}.trajectory.jsonl`);
-    try {
-      const first = (await fs.readFile(trajPath, "utf8")).split("\n", 1)[0];
-      const d = JSON.parse(first);
-      if (d?.sessionKey) return d.sessionKey;
-    } catch { /* not in this agent's dir */ }
-  }
-  return null;
-}
-
 // Resolve `lineage tree <target>` into a sessionKey via an explicit --kind.
 // No shape-sniffing — the caller has to declare what they're handing in.
 // Predictable, no ambiguous matches across the table.
@@ -321,7 +301,7 @@ async function resolveTreeTarget(target, client, kind) {
       const hit = await execGet(client, `SELECT 1 FROM session_lineage WHERE child_session_key = ? LIMIT 1`, [t]);
       return hit ? t : null;
     },
-    "session-id":  () => sessionIdToKey(t),
+    "session-id":  () => sources?.sessionKeyForSessionId(t, { agentsDir }) ?? null,
     "msg": async () => {
       const r = await execGet(client, `SELECT session_key FROM cost_by_call WHERE msg_id = ? AND session_key IS NOT NULL LIMIT 1`, [t]);
       return r?.session_key ?? null;
