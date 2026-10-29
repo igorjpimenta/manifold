@@ -26,7 +26,7 @@ import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
 import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
-import { wrapSubagentKeys, toGatewayKey } from "./session-keys.js";
+import { wrapSubagentKeys } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
 import {
   registerGraphFlowTool,
@@ -285,13 +285,10 @@ export default definePluginEntry({
     // classification, which runs while the gateway is still starting).
     const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
+      // Session ids are plain text (minted by core, no gateway namespace),
+      // so they store verbatim — no edge translation on the record path.
       record(data) {
-        return _sessionIndexPromise.then((si) => si.record({
-          ...data,
-          sessionKey: typeof data?.sessionKey === "string" && data.sessionKey.startsWith("mf-") && data?.agent
-            ? toGatewayKey({ opaque: data.sessionKey, agent: data.agent })
-            : data?.sessionKey,
-        }));
+        return _sessionIndexPromise.then((si) => si.record({ ...data }));
       },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
       flowIdForSessionKey(sessionKey) { return _sessionIndexPromise.then(si => si.flowIdForSessionKey(sessionKey)); },

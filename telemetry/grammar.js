@@ -1,4 +1,4 @@
-// sessionKey scope grammar — every openclaw sessionKey shape we know about,
+// sessionKey scope grammar — every sessionKey shape we know about,
 // with a single `classify` entry point that returns the parent breadcrumb (or
 // null for roots). The breadcrumb might be:
 //   { parentKind: "flow", flow8: "..." }   → resolver joins to flow_runs
@@ -14,24 +14,25 @@ const REGEX = {
   CRON_RUN:  /^agent:([^:]+):cron:([0-9a-f-]{36}):run:([0-9a-f-]+)$/,
   CRON_OWN:  /^agent:([^:]+):cron-(.+)$/,
   BARE_SUB:  /^agent:([^:]+):subagent:([0-9a-f-]{36})$/,
-  // Manifold dispatch sessions, gateway shape of core's opaque handle
-  // (`mf-<flow8>-<node>[-<item>]` — see engine/executor-helpers.js's
-  // mintAgentSessionKey and the adapter edge mapping in
-  // plugins/openclaw/manifold/session-keys.js). The embedded flow8 resolves
-  // via the "flow" parentHint branch, same as GF_DISCUSS.
-  MF_SUB:    /^agent:([^:]+):subagent:(mf-[0-9a-f]{8}-.+)$/,
+  // Manifold dispatch sessions, current plain-text shape (`mf-<flow8>-…` —
+  // see engine/executor-helpers.js's mintAgentSessionKey) plus the legacy
+  // gateway-namespaced form (`agent:<agent>:subagent:mf-…`, minted before
+  // the plain-text cutover, still present in older session files). The
+  // embedded flow8 resolves via the "flow" parentHint branch, same as
+  // GF_DISCUSS. agentId is null for plain-text keys — the agent travels as
+  // its own field everywhere now, never inside the key.
+  MF_SUB:    /^(?:agent:([^:]+):subagent:)?(mf-[0-9a-f]{8}-.+)$/,
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
-  // Synthetic discuss-turn session keys minted for a gate's discuss thread
-  // when there's no gate-stamp sessionId yet (ios/poller-helpers.js,
-  // routes/discuss.js:116) — gf-discuss-<flow8>-<gateNodeId>-<itemId>. The
-  // embedded flow8 is a real flow_id prefix — resolves via the same "flow"
-  // parentHint branch a pipeline-node subagent's flow:<id> parent uses
-  // (classifyWithExternal below), NOT the EXPLICIT_BARE catch-all this used
-  // to silently fall into (treating the whole thing as a self-rooted
-  // "explicit" purpose string instead of walking to the real flow/cron).
-  GF_DISCUSS: /^agent:([^:]+):gf-discuss-([0-9a-f]{8})-(.+)$/,
+  // Synthetic discuss-turn session ids for a gate's discuss thread —
+  // gf-discuss-<flow8>-<gateNodeId>-<itemId>. The embedded flow8 is a real
+  // flow_id prefix — resolves via the same "flow" parentHint branch a
+  // pipeline-node subagent's flow:<id> parent uses (classifyWithExternal
+  // below), never the EXPLICIT_BARE catch-all. The legacy
+  // gateway-namespaced form (`agent:<agent>:gf-discuss-…`, minted before
+  // the plain-text cutover) resolves identically, plus the agent.
+  GF_DISCUSS: /^(?:agent:([^:]+):)?gf-discuss-([0-9a-f]{8})-(.+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
   // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
   // when a pipeline is started via iOS button or CLI. Format:
@@ -79,7 +80,7 @@ export function classify(sessionKey) {
   if ((m = REGEX.GF_DISCUSS.exec(sessionKey))) {
     const [, agentId, flowShort] = m;
     return {
-      kind: "flow-gate-discuss", agentId, flowShort,
+      kind: "flow-gate-discuss", agentId: agentId ?? null, flowShort,
       parentHint: { kind: "flow", flowShort },
     };
   }
@@ -89,7 +90,7 @@ export function classify(sessionKey) {
     const tail = opaque.slice(12);
     const dash = tail.indexOf("-");
     return {
-      kind: "manifold-subagent", agentId, opaque, flowShort,
+      kind: "manifold-subagent", agentId: agentId ?? null, opaque, flowShort,
       nodeId: dash === -1 ? tail : tail.slice(0, dash),
       itemKey: dash === -1 ? null : tail.slice(dash + 1),
       parentHint: { kind: "flow", flowShort },

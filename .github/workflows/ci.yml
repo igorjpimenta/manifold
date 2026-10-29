@@ -14,7 +14,9 @@ jobs:
   js:
     name: JS — install and syntax
     runs-on: self-hosted
-    timeout-minutes: 10
+    # Full unit suite plus dashboard install/typecheck/build no longer fits
+    # in 10 minutes on a loaded runner; matches the release workflow's 20.
+    timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@v4

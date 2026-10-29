@@ -36,6 +36,17 @@ describe("classify", () => {
     assert.equal(r.parentHint?.flowShort, "12345678");
   });
 
+  it("classifies plain-text manifold ids with null agent and the same flow hint", () => {
+    const r = classify("mf-12345678-propose-item-1");
+    assert.equal(r.kind, "manifold-subagent");
+    assert.equal(r.agentId, null);
+    assert.equal(r.flowShort, "12345678");
+    assert.equal(r.nodeId, "propose");
+    assert.equal(r.itemKey, "item-1");
+    assert.equal(r.parentHint?.kind, "flow");
+    assert.equal(r.parentHint?.flowShort, "12345678");
+  });
+
   it("leaves the legacy gf- dispatch shape unmatched", () => {
     const r = classify("agent:cyrano:subagent:gf-12345678-propose");
     assert.equal(r.kind, "unknown");
@@ -86,6 +97,15 @@ describe("classify", () => {
     const r = classify("agent:main:gf-discuss-a700a3ea-propose-some-item-slug");
     assert.equal(r.kind, "flow-gate-discuss");
     assert.equal(r.agentId, "main");
+    assert.equal(r.flowShort, "a700a3ea");
+    assert.equal(r.parentHint?.kind, "flow");
+    assert.equal(r.parentHint?.flowShort, "a700a3ea");
+  });
+
+  it("classifies plain-text discuss ids with null agent and the same flow hint", () => {
+    const r = classify("gf-discuss-a700a3ea-propose-some-item-slug");
+    assert.equal(r.kind, "flow-gate-discuss");
+    assert.equal(r.agentId, null);
     assert.equal(r.flowShort, "a700a3ea");
     assert.equal(r.parentHint?.kind, "flow");
     assert.equal(r.parentHint?.flowShort, "a700a3ea");

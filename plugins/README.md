@@ -12,24 +12,22 @@ callbacks, no receiver sessions.
 | --------- | ------ | --------- |
 | harness   | per-call declaration (`MANIFOLD_HARNESS` / `X-Manifold-Harness`; `openclaw` default for pipelines-dir resolution) | core: logs, pipelines-dir resolution |
 | agent     | pipeline node `entry.agent` (**required** — anonymous dispatch is refused loudly) | core: session attribution |
-| session   | opaque core handle (`mf-…`, minted by core) ↔ gateway key (`agent:<agent>:subagent:mf-…`, mapped by adapter); `entry.sessionKey` or `sessionKeyBuilder` overrides pass through verbatim | core: turn identity; adapter: key mapping |
+| session   | plain-text session id (`mf-…` dispatches minted by core, `gf-discuss-…` discuss threads); `entry.sessionKey` or `sessionKeyBuilder` overrides pass through verbatim | core: turn identity |
 
 ## Session-key conventions
 
-Core speaks only its own namespace: `dispatchAgentEntry` mints an opaque
-handle `mf-<flow8>-<node>[-<item>]` (`mintAgentSessionKey`); a node may
+Core speaks only its own namespace: `dispatchAgentEntry` mints a plain-text
+session id `mf-<flow8>-<node>[-<item>]` (`mintAgentSessionKey`); a node may
 override via `entry.sessionKey` or `entry.sessionKeyBuilder(state, flowId)`,
 honored verbatim. `entry.agent` is required — anonymous dispatch is refused
 loudly. No env fallback, ever.
 
-The adapter maps at the edge (`session-keys.js`, wrapping
-`runtime.subagent` once where it is injected): outgoing `run`/
-`waitForRun`/`getSessionMessages` args translate opaque→gateway
-(`agent:<agent>:subagent:<opaque>`); incoming runIds/messages translate
-back. runId mappings live in memory for the dispatch lifecycle only —
-revival re-attaches by session key, never by runId. The session index
-stores gateway keys (adapter-facing state, written through conversion);
-non-`mf-` keys pass through verbatim in both directions.
+The adapter passes session ids through verbatim (`session-keys.js`,
+wrapping `runtime.subagent` once where it is injected): only runIds
+translate (core `mf-run-…` ↔ gateway runId, in memory for the dispatch
+lifecycle); revival re-attaches by session key, never by runId. The
+session index stores the same plain-text ids the dispatch used, so any
+harness can read them without knowing a gateway namespace.
 
 ## Pipeline directories
 

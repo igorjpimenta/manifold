@@ -819,7 +819,7 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Concern | Behavior |
 |---|---|
 | Channel | the WS dialog door — no channel plugin. Operator messages arrive as `{type:"message", flowId, itemId, text}` frames; the door answers `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`). |
-| Session key | stamped session key (`agent:<agent>:<sessionId>`) — locked on the first turn and kept for the gate's lifetime. |
+| Session key | the plain-text session id itself (`mf-…` dispatches, `gf-discuss-…` discuss threads) — locked on the first turn and kept for the gate's lifetime. |
 | Session stamp | Written to `~/.openclaw/discuss-sessions/<flowId8>__<gateNodeId>__<itemId>.json` on first turn so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
 | Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires `discuss.component` SSE immediately; Apply button appears on iOS. |
@@ -917,12 +917,11 @@ subflow-internal group compounds inside their subflow node).
 **Rule:** Node ids match `[A-Za-z0-9_.]+`. Use UPPER_SNAKE, `lowercase`,
 or `parent.child` for subflow members. **Never use hyphens.**
 
-**Why:** Session keys are
-`agent:<a>:subagent:gf-<flowShort>-<nodeId>-<itemKey>` and item keys
-are kebab-case slugs (hyphenated). The dashboard's
-`dashboard/server.js: sendTranscripts` splits on the **first hyphen**
-to recover `(nodeId, itemKey)`. A node id with a hyphen would silently
-get misattributed to the item key.
+**Why:** Session keys are plain-text `mf-<flowShort>-<nodeId>-<itemKey>`
+ids and item keys are kebab-case slugs (hyphenated). Telemetry and the
+dashboard split the opaque tail on the **first hyphen** to recover
+`(nodeId, itemKey)`. A node id with a hyphen would silently get
+misattributed to the item key.
 
 **Examples:** ✅ `SCORE`, `ENSURE_LOGIN_CODE`, `propose.draft`
 ❌ `ensure-login`, `score-listing`
@@ -975,12 +974,15 @@ serialization is doing real work there.
 ## Session keys (subagents spawned by manifold)
 
 ```
-agent:<agentId>:subagent:gf-<flowId.slice(0,8)>-<seed>
-seed = itemKey ? `${nodeId}-${itemKey}` : nodeId
+mf-<flowId.slice(0,8)>-<seed>
+seed = nodeId.toLowerCase() [-<itemKey>]
 ```
 
-Built by `defaultAgentSessionKey` in `executor.js:1056`. Override by
-setting `node.sessionKey` (static) or `node.sessionKeyBuilder(state, flowId, itemKey?)`.
+Built by `mintAgentSessionKey` in `engine/executor-helpers.js`. Discuss
+threads use `gf-discuss-<flowId.slice(0,8)>-<gateNodeId>-<itemId>` instead.
+Both are plain-text session ids — no agent prefix, no gateway namespace —
+so any harness can use them verbatim. Override by setting
+`node.sessionKey` (static) or `node.sessionKeyBuilder(state, flowId, itemKey?)`.
 
 Reverse-parsing (dashboard): split the segment after `gf-<flowShort>-`
 on the **first hyphen**. `dashboard/server.js: sendTranscripts`.

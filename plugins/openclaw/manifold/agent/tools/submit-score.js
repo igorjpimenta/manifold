@@ -69,9 +69,9 @@ export function registerSubmitScoreTool({ api }) {
         return toolErr(`score must be ≤30 when a hard gate failed (language=${fitFlags.language}, budget=${fitFlags.budget}, domain=${fitFlags.domain}), got ${score}`);
       }
 
-      // ctx.sessionKey arrives gateway-shaped; the dispatch registered
-      // under core's opaque handle (session-keys.js) — map back first,
-      // falling back to the raw key for verbatim explicit overrides.
+      // ctx.sessionKey is the plain-text session id the dispatch registered
+      // under — resolve it directly. toOpaqueKey maps back the legacy
+      // gateway-shaped keys still in flight from before the cutover.
       const opaque = toOpaqueKey(ctx?.sessionKey);
       const invocationId = (opaque != null ? resolveInvocationId(opaque) : null) ?? resolveInvocationId(ctx?.sessionKey);
       if (!invocationId) {
