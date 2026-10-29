@@ -39,7 +39,6 @@ export function formatSessionLabel(sessionKey, tsFirstMs) {
 
 export function sessionKindForRoot(rootKind, sessionKey) {
   if (typeof sessionKey === "string") {
-    if (sessionKey.startsWith("agent:operator:ios:"))     return "ios-trigger";
     if (sessionKey.startsWith("agent:operator:cli:"))     return "cli-trigger";
     if (sessionKey.startsWith("agent:operator:"))         return "operator-trigger";
   }

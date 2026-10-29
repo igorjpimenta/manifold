@@ -173,29 +173,6 @@ export function registerTreeRoutes({ api, getStore, logger, json, bad, parseRang
             };
           });
 
-        } else if (parent.startsWith("pipeline|")) {
-          // Legacy parent shape — kept for in-flight iOS clients.
-          const parts = parent.split("|");
-          if (parts.length !== 4) return bad(res, `invalid pipeline parent: ${parent}`, 400);
-          const [, kind, label, pipelineId] = parts;
-          const rows = await execAll(client, `
-            SELECT flow_id, COUNT(*) AS calls, ROUND(SUM(cost_total), 6) AS cost,
-                   MIN(ts) AS ts_first, MAX(ts) AS ts_last
-            FROM ${ATTRIBUTED}
-            WHERE root_kind = ? AND root_label = ? AND pipeline_id = ? AND flow_id IS NOT NULL ${dayClause}
-            GROUP BY flow_id ORDER BY ts_first DESC NULLS LAST
-            LIMIT 100
-          `, [kind, label, pipelineId, ...rangeArgs]);
-          children = rows.map((r) => ({
-            key: `flow:${r.flow_id}`,
-            kind: "flow-triggered",
-            label: `flow ${r.flow_id.slice(0, 8)} · ${formatSessionLabel(null, r.ts_first)}`,
-            cost: r.cost ?? 0,
-            calls: r.calls,
-            hasChildren: true,
-            meta: { flow_id: r.flow_id, ts_first: r.ts_first, ts_last: r.ts_last },
-          }));
-
         } else if (parent.startsWith("flow:")) {
           const flowId = parent.slice("flow:".length);
           const rows = await execAll(client, `

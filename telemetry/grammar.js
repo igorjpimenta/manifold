@@ -29,12 +29,12 @@ const REGEX = {
   GF_DISCUSS: /^gf-discuss-([0-9a-f]{8})-(.+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
   // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
-  // when a pipeline is started via iOS button or CLI. Format:
-  //   agent:operator:(ios|cli|operator):<flowId-uuid>
+  // when a pipeline is started via CLI or another harness. Format:
+  //   agent:operator:(cli|operator):<flowId-uuid>
   // Treated as root (no parent). The `unknown` source variant is NOT included
   // here because those historic flows were actually cron-triggered and need
   // separate SQL attribution, not the operator label.
-  OPERATOR_TRIGGER: /^agent:operator:(ios|cli|operator):([0-9a-f-]{36})$/,
+  OPERATOR_TRIGGER: /^agent:operator:(cli|operator):([0-9a-f-]{36})$/,
   // Catch-all for legacy / manual sessions whose key is `agent:<id>:<tail>`
   // with no recognized scope prefix — e.g. hand-typed --session-id values
   // that don't follow a known scope. Treated as kind=explicit (same semantics

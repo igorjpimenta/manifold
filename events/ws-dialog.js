@@ -5,8 +5,8 @@
 // implemented this same turn lifecycle (validate → 202+turnId → persist
 // the operator message → stamp the session → run the turn → persist the
 // reply → emit the transcript). This door is that lifecycle on a socket:
-// one connection carries outbound turns and inbound replies, so iOS (or
-// any harness client) needs no channel plugin and no HTTP round-trips.
+// one connection carries outbound turns and inbound replies, so any
+// harness client needs no channel plugin and no HTTP round-trips.
 //
 // Wire protocol, client → server (JSON text frames):
 //   {"type":"message","id":<client-echo?>,flowId,itemId?,text}

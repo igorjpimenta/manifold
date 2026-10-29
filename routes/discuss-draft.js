@@ -154,7 +154,7 @@ export async function persistRevisedMeta({ flowId, itemId, fields, store, logger
           })
         : rp.editableFields;
       // Real shape — gate-projector.js's projectGateItem() serves
-      // rp.layout verbatim to iOS, so a budget/timeframe/language edit
+      // rp.layout verbatim to clients, so a budget/timeframe/language edit
       // has to land here or the chip never reflects it, regardless of
       // editableMeta/editableFields getting updated correctly.
       const nextLayout = Array.isArray(rp.layout)

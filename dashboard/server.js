@@ -491,7 +491,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       }
 
       // /api/runs/:flowId/tree — node-invocation tree, the same
-      // shape/endpoint iOS's node tree already consumes at the gateway
+      // shape/endpoint companion clients already consume at the gateway
       // level. Backs PathTrail/GraphView's executed-path rendering
       // instead of stateJson._stepHistory.
       const runTreeMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/tree$/i);
@@ -777,9 +777,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     }
 
     // Delegates to the shared recordItemDecision helper. Same write site as
-    // the CLI's `manifold approve` and the /manifold/gate/resolve route the
-    // manifold ios module POSTs to (the Telegram delivery service that used
-    // to also write here was never wired up and has since been removed).
+    // the CLI's `manifold approve` and the /manifold/gate/resolve route that
+    // companion harnesses POST to.
     // Resolution -> state.approvalPending[itemId] = {decision, source: "dashboard"};
     // the existing consolidator advances the flow when all items decide.
     const result = await recordItemDecision({

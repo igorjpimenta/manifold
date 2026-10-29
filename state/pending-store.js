@@ -1,5 +1,5 @@
 // Per-(flow, item) on-disk pending proposal store. Survives gateway
-// restart so the operator can cold-open the iOS Inbox and still see
+// restart so the operator can cold-open a client Inbox and still see
 // the "Apply as draft" stripe for a proposal Cyrano made before the
 // app was opened (or before the gateway last bounced).
 //

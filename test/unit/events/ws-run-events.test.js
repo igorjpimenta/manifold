@@ -1,12 +1,14 @@
 /**
  * Unit tests for events/ws-run-events.js
  *
- * Verifies (previously zero coverage — the gateway WS projection):
- *   - running → run.started (once per status) + run.updated (per revision).
+ * Verifies the gateway WS projection (previously zero coverage):
+ *   - every write emits a per-revision run.updated patch (no status-gated
+ *     narrow events: no run.started, no gate.opened, no run.ended, no
+ *     pipeline.stats.updated — subscribers that need lifecycle edges derive
+ *     them from status transitions in the patch stream).
  *   - Revision dedupe: replays of the same write emit nothing.
- *   - blocked human-gate → thin gate.opened; other waits emit none.
- *   - terminal → run.ended; stats projection follows via timer.
- *   - All egress through canonical kinds (wire name is the kind).
+ *   - Child flows also push a per-revision patch to the non-terminal parent.
+ *   - Terminal flows drop their revision entry (no unbounded map growth).
  *   - Null broadcast / unknown flow stay silent, never throw.
  */
 import { test, describe } from "node:test";
@@ -16,16 +18,14 @@ import { createEmitter } from "../../../events/emit.js";
 
 const silentLogger = { info: () => {}, warn: () => {}, error: () => {} };
 
-function makeHarness(flows, { broadcast = null, stats = {} } = {}) {
+function makeHarness(flows, { broadcast = null } = {}) {
   const calls = [];
   const broadcastFn = broadcast ?? ((name, payload) => calls.push({ name, payload }));
   const store = { get: async (id) => flows[id] ?? null };
-  const readStore = { statsFor: async () => ({ ...stats }) };
   const nodeExecutionsStore = { getInvocation: async () => null };
   const { emit } = createEmitter({ getBroadcast: () => broadcastFn, logger: silentLogger });
   const listener = createWsRunEventsListener({
     store,
-    readStore,
     nodeExecutionsStore,
     pipelineLookup: () => ({ displayName: "Pipe", emoji: "🧩" }),
     getBroadcast: () => broadcastFn,
@@ -52,18 +52,14 @@ function names(calls) {
 // ── lifecycle ────────────────────────────────────────────────────────────────
 
 describe("ws-run-events — lifecycle", () => {
-  test("running revision emits started once + updated with canonical kinds", async () => {
+  test("revision emits only the per-revision patch", async () => {
     const { listener, calls } = makeHarness({ "flow-1": runningFlow(1) });
     await listener("flow-1");
 
-    assert.ok(names(calls).includes("plugin.run.started"), "started fires");
-    assert.ok(names(calls).includes("plugin.run.updated"), "updated fires");
-    for (const c of calls) {
-      assert.ok(c.payload.kind, "envelope stamps kind");
-    }
-    const started = calls.find((c) => c.name === "plugin.run.started");
-    assert.equal(started.payload.kind, "run.started");
-    assert.equal(started.payload.flowId, "flow-1");
+    assert.deepEqual(names(calls), ["plugin.run.updated"]);
+    const [updated] = calls;
+    assert.equal(updated.payload.kind, "run.updated");
+    assert.equal(updated.payload.flowId, "flow-1");
   });
 
   test("same revision replayed emits nothing (revision gate)", async () => {
@@ -74,40 +70,30 @@ describe("ws-run-events — lifecycle", () => {
     assert.equal(calls.length, count, "replay of a processed write is silent");
   });
 
-  test("next revision emits updated only, not a second started", async () => {
+  test("next revision emits another patch", async () => {
     const flows = { "flow-1": runningFlow(1) };
     const { listener, calls } = makeHarness(flows);
     await listener("flow-1");
     flows["flow-1"] = runningFlow(2);
     await listener("flow-1");
 
-    assert.equal(names(calls).filter((n) => n === "plugin.run.started").length, 1);
     assert.equal(names(calls).filter((n) => n === "plugin.run.updated").length, 2);
   });
 
-  test("terminal emits ended + stats projection", async () => {
+  test("terminal revision drops the revision entry", async () => {
     const flows = {
       "flow-1": { ...runningFlow(5), status: "succeeded", revision: 6 },
     };
-    const { listener, calls } = makeHarness(flows, { stats: { todayActive: 3 } });
+    const { listener, calls } = makeHarness(flows);
     await listener("flow-1");
-    await new Promise((r) => setTimeout(r, 250));
-
-    const ended = calls.find((c) => c.name === "plugin.run.ended");
-    assert.ok(ended, "run.ended fires");
-    assert.equal(ended.payload.kind, "run.ended");
-    assert.equal(ended.payload.status, "succeeded");
-    const stats = calls.find((c) => c.name === "plugin.pipeline.stats.updated");
-    assert.ok(stats, "stats projection follows the terminal transition");
-    assert.equal(stats.payload.kind, "pipeline.stats.updated");
-    assert.equal(stats.payload.id, "team_pipe");
+    assert.deepEqual(names(calls), ["plugin.run.updated"]);
   });
 });
 
 // ── gates ────────────────────────────────────────────────────────────────────
 
 describe("ws-run-events — gates", () => {
-  test("blocked human-gate emits thin gate.opened", async () => {
+  test("blocked human-gate emits only the per-revision patch", async () => {
     const flows = {
       "flow-1": {
         ...runningFlow(2),
@@ -118,13 +104,11 @@ describe("ws-run-events — gates", () => {
     const { listener, calls } = makeHarness(flows);
     await listener("flow-1");
 
-    const opened = calls.find((c) => c.name === "plugin.gate.opened");
-    assert.ok(opened, "gate.opened fires");
-    assert.equal(opened.payload.kind, "gate.opened");
-    assert.equal(opened.payload.flowId, "flow-1");
+    assert.ok(!names(calls).includes("plugin.gate.opened"), "no narrow gate.opened");
+    assert.ok(names(calls).includes("plugin.run.updated"), "rich patch still fires");
   });
 
-  test("blocked non-gate wait emits no gate.opened", async () => {
+  test("blocked non-gate wait emits only the per-revision patch", async () => {
     const flows = {
       "flow-1": {
         ...runningFlow(2),
@@ -154,7 +138,6 @@ describe("ws-run-events — silence", () => {
     const { emit } = createEmitter({ getBroadcast: () => null, logger: silentLogger });
     const listener = createWsRunEventsListener({
       store,
-      readStore: { statsFor: async () => ({}) },
       nodeExecutionsStore: { getInvocation: async () => null },
       pipelineLookup: () => ({}),
       getBroadcast: () => null,

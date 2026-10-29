@@ -740,8 +740,8 @@ export function registerDiscussHandlers({
       res.end(JSON.stringify({ ok: false, code: target.code, error: target.error }));
       return true;
     }
-    // No explicit payload — fall back to the filesystem sidecar so iOS
-    // can commit a pre-built Cyrano proposal with a single tap without
+    // No explicit payload — fall back to the filesystem sidecar so a client
+    // can commit a pre-built proposal with a single tap without
     // needing to fetch and re-POST the full draft text.
     if (!text && !fields) {
       const sidecar = readPending(sourceFlow.flowId, target.itemId);

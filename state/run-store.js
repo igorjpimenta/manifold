@@ -549,7 +549,7 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       } catch { return []; }
     },
 
-    // Cursor-paginated run list for iOS — includes JSON_EXTRACT display fields.
+    // Cursor-paginated run list for companion views — includes JSON_EXTRACT display fields.
     async listRunsPage({ pipelineId, status, limit = 50, beforeMs, beforeId } = {}) {
       const conditions = [isNull(flowRuns.parentInvocationId)];
       if (pipelineId) conditions.push(eq(flowRuns.pipelineId, pipelineId));

@@ -145,7 +145,7 @@ export function describeWaitFallback(waitJson, nodeId) {
 // own `requestPayload.layout` array — no auto-synthesis from legacy
 // editableFields/editableText/chatThread/references fields exists anymore,
 // so an author who forgets `layout` gets a loud error here instead of an
-// empty gate on iOS. A `layout` containing kind:"deck" must have that as
+// empty gate on any client. A `layout` containing kind:"deck" must have that as
 // its ONLY entry (mixing a deck with other components is ambiguous —
 // GateDeckView pages the WHOLE gate, there's nowhere for sibling
 // components to render), and each deck question must be a well-formed

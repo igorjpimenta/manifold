@@ -81,9 +81,9 @@ describe("classify", () => {
   });
 
   it("classifies operator-trigger as root", () => {
-    const r = classify("agent:operator:ios:33333333-3333-3333-3333-333333333333");
+    const r = classify("agent:operator:cli:33333333-3333-3333-3333-333333333333");
     assert.equal(r.kind, "operator-trigger");
-    assert.equal(r.operatorSource, "ios");
+    assert.equal(r.operatorSource, "cli");
     assert.equal(r.parentHint, null);
   });
 

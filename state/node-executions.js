@@ -171,7 +171,7 @@ async function _createStore(dbPath) {
         return _findLatestInvocation(flowId, nodeId, subflowKey);
       },
 
-      // ios/live-bridge.js's snapshot() uses this to backfill blockedAtMs
+      // A companion live-bridge snapshot() uses this to backfill blockedAtMs
       // for gate items opened before requestedAt existed on wait_json
       // items — invokedAt is the exact moment the gate NODE itself was
       // dispatched (written eagerly at invocation start, independent of

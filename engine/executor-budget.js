@@ -56,7 +56,7 @@ function budgetGateBlockedInfo(_nodeId, _itemId) {
   return {
     _kind: "budget-gate-approval",
     reason: "daily budget cap reached — node held for operator approval",
-    hint: "approve or reject on iPhone (DashClaw → Home → 🔒 Budget)",
+    hint: "approve or reject from your companion app",
   };
 }
 

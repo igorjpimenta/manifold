@@ -51,7 +51,7 @@ async function ensurePipelinesLoaded(pipelinesRef, logger, dir = null) {
 //
 // Only safe to wrap an action once its own async work is FULLY done —
 // fire-and-forget follow-on work scheduled as setImmediate/setTimeout (fine
-// for a long-lived HTTP/Telegram/dashboard/iOS caller) is dropped by the
+// for a long-lived HTTP/Telegram/dashboard/companion-app caller) is dropped by the
 // exit below. Every command must await its own work to completion: retry
 // via routes/operator-retry.js's awaitCompletion, approve via
 // gates/gate-resolver.js's awaitCompletion (which also covers
@@ -368,7 +368,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
   // applyResolutionsAndResume schedules the actual setRunning + executor.
   // resume via setImmediate (and, on sustained revision contention, a
   // further live retry round via setTimeout) and returns before either
-  // fires, which is correct for the long-lived HTTP/Telegram/dashboard/iOS
+  // fires, which is correct for the long-lived HTTP/Telegram/dashboard/companion-app
   // callers that share this resolver but fatal for this one-shot CLI
   // process. Passing awaitCompletion:true switches it to await all of that
   // directly instead.

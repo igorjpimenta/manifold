@@ -51,9 +51,8 @@ async function normalizeChildAsSubflowRow(child, invocation, nodeExecutionsStore
     // stayed 'running' for the whole branch lifetime and a pending gate
     // was signaled via `awaiting` alone, not a distinct status value.
     // 'queued' is passed through unchanged (Phase 4) — it has no old-model
-    // analogue to preserve, and iOS's StatusPill/BranchDetailModel already
-    // render it distinctly (self-resolving internal-resource wait, not a
-    // gate).
+    // analogue to preserve, and clients already render it distinctly
+    // (self-resolving internal-resource wait, not a gate).
     status: child.status === "blocked" ? "running" : child.status,
     step: child.lastStep,
     startedAt: child.createdAt,
@@ -67,7 +66,7 @@ async function normalizeChildAsSubflowRow(child, invocation, nodeExecutionsStore
       ? { requestPayload: child.waitJson, requestedAt: child.updatedAt, subNodeId: child.currentStep ?? null }
       : null,
     // Additive — the run-level equivalent of this field (routes/runs.js's
-    // RunSummary/RunDetail.statusReason) was already reaching iOS;
+    // RunSummary/RunDetail.statusReason) already reaches clients;
     // per-branch rows never carried it, which is why a queued child's
     // reason (e.g. "waiting for cross-process lock browser:linkedin")
     // had nowhere to surface once `awaiting` was reserved for gate waits.

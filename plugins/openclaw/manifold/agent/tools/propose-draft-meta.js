@@ -4,7 +4,7 @@
 // language updates that don't touch the prose body. Lets the operator
 // say "bump budget to R$ 20k" in chat and have Cyrano register just
 // that change without re-drafting. Same operator-gated semantics: the
-// proposal stashes via mergePendingFields; the iOS Apply button
+// proposal stashes via mergePendingFields; the companion Apply button
 // commits the merge into the .md file's frontmatter (preserving the
 // body).
 //

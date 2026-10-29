@@ -230,16 +230,16 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
   // param of the same name and exists for the same reason: this function's
   // default behavior schedules the actual executor.resume via setImmediate
   // (and, on sustained revision contention, a further round via setTimeout)
-  // and returns before either fires — correct for the long-lived HTTP/
-  // dashboard/iOS callers that use this, but fatal for the CLI's
+  // and returns before either fires — correct for the long-lived HTTP
+  // callers that use this (dashboard, companion apps), but fatal for the CLI's
   // one-shot `manifold approve` process, which needs the resume (and any
   // scheduled retry round) to have genuinely finished before it exits.
   async function applyResolutionsAndResume(flowId, resolutions, retryRound = 0, awaitCompletion = false) {
     // Revision-aware: re-read on conflict. Appends new decisions to
     // approvalResults[nodeId] so the executor sees the full decision history
     // on each re-entry. approvalPending is
-    // left untouched: its entries double as the iOS dismiss-signal check's
-    // "already-delivered" guard, so dropping them would cause re-delivery
+    // left untouched: its entries double as clients' "already-delivered"
+    // guard, so dropping them would cause re-delivery
     // on the next setWaiting pass for any
     // gate whose pendingSelector doesn't filter on approvedIds/rejectedIds.
     // recordItemDecision separately enforces per-item idempotency via the
@@ -303,7 +303,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
         logger.info(`manifold [${flowId.slice(0, 8)}] gate-resolver: resolved ${newResultsThisPass.length} (${approvedIds.length} approve, ${rejectedIds.length} reject total)${undecidedCount > 0 ? `; ${undecidedCount} still awaiting` : ""}${result.queued ? "; queued — waiting for a shared admission slot to resume" : "; resuming"}`);
         gateEmitter.emit("gate.closed", { flowId, nodeId });
         // Resume patches for this write come from the WS run listener's
-        // per-revision patch — emit no second shape here; iOS decodes one.
+        // per-revision patch — emit no second shape here; clients decode one.
         // Human-gate apply hook: fires per item, immediately after THAT
         // item's decision lands — the "write the moment this one decides,
         // don't wait for siblings" semantics, for both a root-level gate
@@ -452,7 +452,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       return { ok: false, code: "edit_requires_text" };
     }
     // Defense in depth: detect payloads that echo the gate's own
-    // description back as `editedText` — the iOS edit intent can ship the
+    // description back as `editedText` — a client edit intent can ship the
     // whole dialog body (including its "Approve to send / Reject to drop /
     // To edit, run in a terminal: openclaw manifold respond ..." footer)
     // instead of the operator's typed input. The check looks for any of
@@ -507,8 +507,8 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       // one thing at a time, so GAP_GATE's round 2 reuses the exact same
       // itemId as round 1. A blanket "already decided" here would
       // silently swallow round 2's answer forever: nothing else in this file
-      // clears approvalPending[itemId], by design — the iOS dismiss-signal
-      // check depends on it surviving past consumption.
+      // clears approvalPending[itemId], by design — client dismiss-signal
+      // checks depend on it surviving past consumption.
       // This guard runs BEFORE the item-membership validation below, so it
       // cannot use membership to tell the two cases apart: a re-presented
       // gate does carry a fresh waitJson.items entry, but nothing has

@@ -93,7 +93,7 @@ describe("persistRevisedDraft", () => {
     assert.equal(r.applied, true);
   });
 
-  it("rejects meta narration when source is not ios", async () => {
+  it("rejects meta narration when source is not the operator", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
     // Short text triggers looksLikeMetaNarration
@@ -105,7 +105,7 @@ describe("persistRevisedDraft", () => {
     assert.equal(r.code, "rejected_meta_narration");
   });
 
-  it("allows meta narration when source is ios (operator override)", async () => {
+  it("allows meta narration when source is the operator app (operator override)", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
@@ -176,7 +176,7 @@ describe("persistRevisedMeta", () => {
   // Every current gate-layout.js (freelance_workana-proposal etc.) declares
   // requestPayload.layout directly — there is no top-level editableFields
   // in production (executor-helpers.js enforces this). gate-projector.js
-  // serves `layout` verbatim to iOS, so a field-group edit has to land
+  // serves `layout` verbatim to clients, so a field-group edit has to land
   // there or the chip never updates, regardless of editableMeta/
   // editableFields being patched correctly.
   it("patches a field-group entry inside requestPayload.layout", async () => {

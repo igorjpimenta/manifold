@@ -20,7 +20,7 @@ node's own id).
 - [What a sub-node's `state` actually contains](#what-a-sub-nodes-state-actually-contains)
 - [Deriving `subflowKey` (the child's identity)](#deriving-subflowkey-the-childs-identity)
 - [Reading a subflow's results downstream](#reading-a-subflows-results-downstream)
-- [`flow.display` — identity for iOS/dashboard clients](#flowdisplay--identity-for-iosdashboard-clients)
+- [`flow.display` — identity for dashboard/companion clients](#flowdisplay--identity-for-dashboardcompanion-clients)
 - [Locks and concurrency](#locks-and-concurrency)
 - [Retrying, resuming, and gating one item](#retrying-resuming-and-gating-one-item)
 - [`code` node's `ctx.invokePipeline` inside a subflow](#code-nodes-ctxinvokepipeline-inside-a-subflow)
@@ -191,12 +191,12 @@ selector: (state) =>
     .filter(Boolean),
 ```
 
-## `flow.display` — identity for iOS/dashboard clients
+## `flow.display` — identity for dashboard/companion clients
 
 Optional. `(item) => ({ title, url })` (or any small, pure, I/O-free
 projection) called once on a child's first entry and persisted to
 `state.parallel.<subflowNodeId>.<subflowKey>._display` — powers the subflow row
-label in iOS's Subflows section (RunDetailView/PipelineDetailView) and the
+label in companion apps' Subflows sections (RunDetailView/PipelineDetailView) and the
 dashboard without those clients needing to know the item's own shape.
 
 ## Locks and concurrency
@@ -260,7 +260,7 @@ applies to a normal flow applies to it directly — there is no separate
 - **Cancel it**: `executor.cancel(childFlowId)` — cascades correctly; the
   parent's `child-resume-trigger.js` treats a cancelled sibling as
   terminal, same as succeeded/failed/skipped.
-- **See its own transcript / raw state**: any dashboard or iOS run-detail
+- **See its own transcript / raw state**: any dashboard or companion run-detail
   view works on a childFlowId exactly like a top-level flowId — `data`
   under `_subflowGroups[...][subflowKey].childFlowId` gives you that id
   directly.

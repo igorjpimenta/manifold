@@ -307,17 +307,17 @@ success signal.
 ### Optional: `recoveryActions`
 
 Pipelines can declare custom operator-recovery actions surfaced on the
-iOS Failures inbox. Each entry is a `kind` (URL slug + iOS dispatch
+operator Failures inbox. Each entry is a `kind` (URL slug + dispatch
 key) → descriptor + handler. The framework merges these with three
 always-on defaults (`retry`, `ignore`, `unignore`) and exposes the
-result per failure row as `available_actions[]`; iOS renders verbatim,
+result per failure row as `available_actions[]`; clients render verbatim,
 no pipeline-id awareness.
 
 ```js
 recoveryActions: {
   skip: {
     label: "Skip",
-    icon: "tray.and.arrow.down.fill",   // SF Symbol — iOS uses verbatim
+    icon: "tray.and.arrow.down.fill",   // SF Symbol — rendered verbatim by clients that support them
     tint: "danger",                     // info | warning | danger | neutral
     destructive: true,                  // optional; UI may confirm before firing
     requiresBranch: true,               // optional; hides on flow-level failures
@@ -445,9 +445,9 @@ export default {
   goal: "one-line description shown in the dashboard",
   // Identity surfaces wherever the pipeline shows up in operator UIs.
   //   emoji      — dashboard headers, consumer notifications, Live Activity widgets
-  //   sfSymbol   — iOS Inbox pipeline-row icon (any valid SF Symbol name; see
-  //                Apple's SF Symbols app). Falls back to "tray.fill" on the
-  //                bridge when omitted, so this field is optional but recommended.
+  //   sfSymbol   — Inbox pipeline-row icon (any valid SF Symbol name; see
+  //                Apple's SF Symbols app). Falls back to "tray.fill" when
+  //                omitted, so this field is optional but recommended.
   //   displayName — human label used everywhere a pipeline is named.
   identity: { emoji: "🧩", sfSymbol: "puzzlepiece.fill", displayName: "My flow" },
   schedule: ["0 9 * * *"],            // optional cron(s), GMT-3 if your gateway is in BR
@@ -529,7 +529,7 @@ export default {
 | `agent`             | `agent`, `promptBuilder(state)`, `applyResult(state, output)`. Optional `circuitBreaker: true` — see *Circuit breaker* below. | `stateUpdate`          | normal edge                               |
 | `subflow`           | `selector(state) => Item[]`, `flow: { nodes, edges }` (required — no other shape). Never set `.groupId` — it's always the node's own id; the loader throws if you set it. See *Subflow nodes (childFlows)* below for the full authoring guide. | one real child `flow_runs` per item; parent blocks (`waitJson.kind:"children-pending"`) until every sibling child is terminal, then auto-resumes **if `mode` is satisfied** — otherwise the parent is failed directly, with a real retryable `failure_events` row | normal edge, once all children terminal and `mode` satisfied |
 | `human-gate`        | `pendingSelector(state) => Item[]`. Each item is `string` *or* `{ id: string, reason?, hint?, text?, editable? }` — see *Human-gate pending item shape* below | sets `waitJson`; flow → `blocked` | resumes via CLI `approve` / `respond` *or* dashboard GateForm |
-| `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the gateway broadcasts `manifold.gate.opened` / `manifold.gate.closed` over WS with the full payload, and the bridge decides how to surface it (inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into an iOS chat surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
+| `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the gateway broadcasts `manifold.gate.opened` / `manifold.gate.closed` over WS with the full payload, and each consumer decides how to surface it (inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into a discuss surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
 
 A `code`-then-`agent` fallback (deterministic primary path, LLM-driven
 recovery leg) is no longer a distinct node kind — author it as a
@@ -620,15 +620,15 @@ factories and `submit-agent.js` files under `workspace/.pipelines/` and
 
 | Field | Surface |
 |---|---|
-| `title` | Card header on iOS Inbox |
+| `title` | Card header on the operator Inbox |
 | `description` | Card body — verbose; can include layout markers |
-| `editableText` | Prose body the iOS edit-sheet pre-fills with AND the iOS preview card shows. The free-form content the operator commits if they hit Approve unchanged. Body-only — no structured metadata. (Legacy alias: `editableDraft` — bridge accepts both for one transition cycle.) |
-| `editableFields` | Optional `[ { id, label, type, value, options?, prefix?, helper? } ]` — pipeline-declared structured fields rendered as tappable chips above the prose body. iOS picks input UI from `type`. |
-| `references` | Array of `{ id, label, body }` chips on the iOS gate row + DiscussView |
+| `editableText` | Prose body the edit-sheet pre-fills with AND the preview card shows. The free-form content the operator commits if they hit Approve unchanged. Body-only — no structured metadata. (Legacy alias: `editableDraft` — accepted for one transition cycle.) |
+| `editableFields` | Optional `[ { id, label, type, value, options?, prefix?, helper? } ]` — pipeline-declared structured fields rendered as tappable chips above the prose body. Clients pick input UI from `type`. |
+| `references` | Array of `{ id, label, body }` chips on the gate row + DiscussView |
 
 **Prose body (`editableText`)**: pipelines with a free-form editable surface (workana-reply, touch-cadence, workana-proposal's prose) set this. The full-prose edit sheet renders + commits its content. If omitted (`undefined`), the executor auto-fills from the subflow's prior code-node outputs — the last `{ ..., text: "…" }` shape wins. Set `editableText: ""` explicitly to opt OUT.
 
-**Structured fields (`editableFields`)**: pipelines that store metadata alongside the prose (workana-proposal's frontmatter: budget / timeframe / language) parse it once at builder time and expose each value as one entry. iOS renders a chip per entry; tap → focused single-field editor matching `type`; save → `apply-draft` `fields:` payload → server's `persistRevisedMeta` writes back. Pipelines without structured metadata omit the array.
+**Structured fields (`editableFields`)**: pipelines that store metadata alongside the prose (workana-proposal's frontmatter: budget / timeframe / language) parse it once at builder time and expose each value as one entry. Clients render a chip per entry; tap → focused single-field editor matching `type`; save → `apply-draft` `fields:` payload → server's `persistRevisedMeta` writes back. Pipelines without structured metadata omit the array.
 
 Field-entry shape:
 
@@ -637,10 +637,10 @@ Field-entry shape:
 | `id` | yes | Frontmatter key on disk (or any persistence key the pipeline understands) |
 | `label` | yes | Display label for the chip + sheet header |
 | `type` | yes | `text` / `multiline` / `money` / `enum`. Unknown types degrade to `text` on client. |
-| `value` | yes | Current value as a string. iOS renders display formatting per type (e.g. `money` gets thousand-separated). |
+| `value` | yes | Current value as a string. Clients render display formatting per type (e.g. `money` gets thousand-separated). |
 | `options` | for `enum` | Array of allowed string values. Renders as segmented control (≤4) or picker (>4). |
 | `prefix` | optional | For `money`: rendered before the value on both chip + input (e.g. `"R$"`). |
-| `helper` | optional | Footer hint shown in the single-field editor. No hardcoded copy on iOS — pipelines own the wording. |
+| `helper` | optional | Footer hint shown in the single-field editor. No hardcoded copy on clients — pipelines own the wording. |
 | `editable` | optional, default `true` | When `false`, the chip renders read-only (no tap target, muted styling). Useful for display-only context fields the operator should see but not edit (e.g. `source-listing`, `drafted-at`). |
 
 Example (workana-proposal):
@@ -758,7 +758,7 @@ edited result must read from there.
 ### Per-gate discuss opt-in
 
 A `human-gate` node can optionally let the operator chat with an agent
-about a pending item before deciding. The chat lives on a dedicated iOS
+about a pending item before deciding. The chat lives in a dedicated
 Inbox screen and is transported over the WS dialog door
 (`ws://<gateway-host>:<dialog-port>/api/dialog?bearer=<MANIFOLD_BEARER>`):
 the client sends `{type:"message", flowId, itemId, text}` frames and gets
@@ -810,7 +810,7 @@ GATE: {
 },
 ```
 
-Without the `discuss` block (and no global default), the iOS Inbox hides
+Without the `discuss` block (and no global default), the Inbox hides
 the Discuss row entirely. Gates that aren't reachable for chat behave
 exactly as before — Approve / Deny / Edit & approve / Cancel only.
 
@@ -822,8 +822,8 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Session key | the plain-text session id itself (`mf-…` dispatches, `gf-discuss-…` discuss threads) — locked on the first turn and kept for the gate's lifetime. |
 | Session stamp | Written to `~/.openclaw/discuss-sessions/<flowId8>__<gateNodeId>__<itemId>.json` on first turn so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
-| Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires `discuss.component` SSE immediately; Apply button appears on iOS. |
-| Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` SSE; updates the chip row on iOS. `budget` must be a positive integer. |
+| Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires a `discuss.component` event immediately; a connected client surfaces an Apply affordance. |
+| Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` event; updates the chip row on connected clients. `budget` must be a positive integer. |
 | subflow (sub-node gate) | Gates inside `flow.nodes` opt in identically. `resolveDiscussTarget` walks `subflow` parents and picks the first `kind: "human-gate"` sub-node with a `discuss` block. |
 | Resolution order | Stamped session → node `discuss.agent` → `discuss.defaultAgent` in openclaw.json. |
 | History | `GET /manifold/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
@@ -860,7 +860,7 @@ via `state.userAnswers[nodeId].at(-1).text`. If `choices` is omitted,
 the textarea remains.
 
 `choices` is invisible to the CLI (`manifold respond` still takes
-free text) and to the iOS Live Activity bridge (which has its own
+free text) and to companion Live Activity surfaces (which carry their own
 approve/deny opinion regardless of `choices`). It's a dashboard-form
 hint, not a contract.
 
@@ -1026,7 +1026,7 @@ Every node failure (top-level or inside a `subflow`) is recorded to
 served normalized as `errorEntries: [{ nodeId, subflowKey, message, at, executionId, invocationId }]` —
 a top-level field sibling to `stateJson` on `GET /manifold/runs/:flowId`
 and on each row of `GET /manifold/runs/:flowId/subflows`, not something
-nested inside `stateJson`. Dashboard/iOS render from `errorEntries`, not
+nested inside `stateJson`. Dashboard and companion clients render from `errorEntries`, not
 from any `state.errors` key.
 
 User-defined keys: anything else. Don't shadow the names above.
@@ -1364,11 +1364,11 @@ Or open the dashboard at `#/runs/<flowId>`:
 - `transcripts` card shows the full subagent conversation per session
 - `state` tree shows the full `stateJson`
 
-### Failures feed + operator recovery actions (iOS Inbox)
+### Failures feed + operator recovery actions (operator Inbox)
 
 A separate `failures.sqlite` store (sibling of `runtime.sqlite`)
 records one row per distinct branch- or flow-level failure on terminal
-`__end__`. Powers the iOS Inbox's Recover/Done buckets and the dashboard
+`__end__`. Powers the operator Inbox's Recover/Done buckets and the dashboard
 "Needs Attention" strip. Dedup via `UNIQUE(flow_id, branch_item_id,
 failure_node)`; UPSERT semantics on re-records (see
 `failure-store.js:215-235`).
@@ -1378,13 +1378,13 @@ failure_node)`; UPSERT semantics on re-records (see
 curl -H "Authorization: Bearer $TOKEN" \
   http://127.0.0.1:18789/manifold/failures
 
-# Include resolved + ignored — what the iOS Inbox fetches in one shot
+# Include resolved + ignored — what Inbox clients fetch in one shot
 curl -H "Authorization: Bearer $TOKEN" \
   'http://127.0.0.1:18789/manifold/failures?resolved=all&ignored=all&limit=200'
 ```
 
 Each row carries an `available_actions[]` array — descriptor list of
-operator actions the iOS Inbox renders (kind / label / icon / tint /
+operator actions Inbox clients render (kind / label / icon / tint /
 destructive). Framework defaults always present; pipeline-declared
 actions opt in via the `recoveryActions` map (see *Pipeline schema*
 above).
@@ -1396,7 +1396,7 @@ above).
 # Includes pipeline-declared kinds (e.g. `skip` on workana-proposal)
 # and would include future custom kinds without code changes here.
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"via":"ios"}' \
+  -d '{"via":"app"}' \
   http://127.0.0.1:18789/manifold/failures/<id>/action/<kind>
 
 # Framework-default routes — same semantics, dedicated URLs:
@@ -1472,7 +1472,7 @@ failures flow, pointed at the CHILD's own flowId instead of the parent's:
 
 ```
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"via":"ios"}' \
+  -d '{"via":"app"}' \
   http://127.0.0.1:18789/manifold/failures/<id>/retry
 ```
 
@@ -1617,7 +1617,7 @@ ended_at            INTEGER (ms epoch; null until terminal)
 
 indexes: status, owner_key, updated_at, parent_invocation_id (partial, WHERE NOT NULL)
 
--- "list of runs" queries (dashboard, CLI, iOS) should filter
+-- "list of runs" queries (dashboard, CLI, companion clients) should filter
 -- WHERE parent_invocation_id IS NULL — every childFlows subflow item is its
 -- own flow_runs row and is not an independent "run" from an operator's
 -- perspective. See state/run-store.js's own listStmt for the canonical

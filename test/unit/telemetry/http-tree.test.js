@@ -187,14 +187,14 @@ describe("/tree/expand invalid parent shapes", () => {
     assert.equal(res.statusCode, 400);
   });
 
-  it("returns 400 for malformed pipeline| parent", async () => {
+  it("returns 400 for the retired pipeline| parent shape", async () => {
     const api = makeApi();
     const { json, bad, parseRange } = makeHelpers();
     const store = await makeStore();
     registerTreeRoutes({ api, getStore: () => store, logger: null, json, bad, parseRange });
     const def = api._routes.get("/manifold/telemetry/tree/expand");
     const res = makeRes();
-    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=pipeline%7Ca%7Cb"), res);
+    await def.handler(makeReq("/manifold/telemetry/tree/expand?parent=pipeline%7Ckind%7Clabel%7Cid"), res);
     assert.equal(res.statusCode, 400);
   });
 

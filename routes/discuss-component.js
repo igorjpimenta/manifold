@@ -4,7 +4,7 @@
 // discuss.component.proposed plus the derived discuss.pending.updated
 // through the shared emitter. The pending derivation (draft→text,
 // meta→fields) lives here, beside the emit — not duplicated in each
-// producer — because it is what iOS cold-reconnect replays.
+// producer — because it is what cold-reconnect replays.
 export function createComponentEmitter({ discussStore, emit }) {
   return function componentEmitter({ flowId, itemId, component }) {
     return Promise.resolve().then(async () => {

@@ -1027,7 +1027,7 @@ describe("applyResolutionsAndResume — awaitCompletion", () => {
     assert.deepEqual(executor._calls, [flowId], "executor.resume must have fully resolved before maybeResolveFlow itself returns");
   });
 
-  test("still defers via setImmediate (resume not yet called) when awaitCompletion is omitted — HTTP/Telegram/dashboard/iOS callers need the fast return", async () => {
+  test("still defers via setImmediate (resume not yet called) when awaitCompletion is omitted — HTTP/Telegram/dashboard/companion callers need the fast return", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({
@@ -1941,8 +1941,8 @@ describe("recordItemDecision — getBroadcast WS emission", () => {
     assert.deepEqual(res, { ok: true, status: "applied" });
   });
 
-  test("broadcast fires after state is committed — iOS REST re-fetch will see the decision", async () => {
-    // The WS event is a wake signal only; the iOS client re-fetches via REST on receipt.
+  test("broadcast fires after state is committed — REST re-fetch will see the decision", async () => {
+    // The WS event is a wake signal only; clients re-fetch via REST on receipt.
     // This test asserts that by the time the broadcast fires, the store already holds
     // the decision — either in approvalPending (after updateApprovalState) or in
     // approvedIds/rejectedIds (after maybeResolveFlow's setRunning). Both are REST-visible.

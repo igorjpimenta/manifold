@@ -51,7 +51,7 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// Maps a failure's (error_type, summary) to the operator action the iOS
+// Maps a failure's (error_type, summary) to the operator action offered for it
 // Inbox should surface for this row:
 //   retry-step  — system-recoverable; one-tap retry the failed step
 //   skip-only   — work is moot (already done, listing closed); skip removes
@@ -249,8 +249,8 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
   // reached a clean terminal status (succeeded/skipped) despite this
   // failure. Applies identically to root and subflow-child flows — no
   // special-cased mechanism for children. Returns a timestamp (ms) when
-  // resolved, null when still open — not just a boolean, since iOS sorts
-  // the Done section by "most recently resolved" and windows it to the
+  // resolved, null when still open — not just a boolean, since the Done
+  // section sorts by "most recently resolved" and windows it to the
   // last 7 days.
   //
   // Do not extend resolution to cross-flow supersession — matching a
@@ -368,7 +368,7 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
   // last_retried_at are derivable (COUNT/MAX over flow_node_executions
   // WHERE kind='retry' for the invocation) but confirmed not wanted in
   // the UI at all, so no replacement is computed here either. Ignore
-  // state moved to iOS device-local storage entirely.
+  // state moved to client-side device-local storage entirely.
 
   // Engine-failed recorder — called both when a flow definitively fails
   // (node threw with no cascade left to try, edge resolved to nothing,

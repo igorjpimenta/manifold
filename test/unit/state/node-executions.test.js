@@ -1091,7 +1091,7 @@ describe("getLatestInvocationForNode()", () => {
 });
 
 describe("getLatestInvocationInvokedAt()", () => {
-  // Used by ios/live-bridge.js's snapshot() to backfill blockedAtMs for
+  // Used by companion live-bridge snapshots to backfill blockedAtMs for
   // gate items opened before requestedAt existed on wait_json items — the
   // exact moment the gate NODE was dispatched, independent of the flow's
   // own createdAt (which reflects the whole flow, not this specific node).
