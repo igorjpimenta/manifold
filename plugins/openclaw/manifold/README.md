@@ -5,9 +5,8 @@ OpenClaw companion for [manifold](https://github.com/igorjpimenta/manifold). Thr
 1. **Tools** — registers the pipeline agent tools (`manifold_start`,
    `propose_draft`, `submit_draft`, …) so agents can start runs and settle
    human gates without touching the CLI.
-2. **Discuss surface** — serves the operator discuss routes, the
-   manifold-parrot channel (opens on iOS when a human-gate blocks), and the
-   dashboard's paired-device identity.
+2. **Discuss surface** — serves the operator discuss routes and the WS dialog
+   door (message transport into open discuss sessions; bearer-guarded).
 3. **Boot services** — pipeline loader + watcher, flow revival, gateway
    readiness capture, and the PROFILE.md read/write guards.
 
@@ -32,7 +31,7 @@ core runtime version alongside it.
 | `ownerSessionKey` | `agent:main:explicit:manifold-owner` | session key scoping flow-run ownership |
 | `dashboardEnabled` | `true` | boot the read-only HTTP dashboard service |
 | `dashboardPort` / `dashboardHost` | `7430` / `127.0.0.1` | dashboard bind |
-| `manifoldParrot.defaultAgent` | — | default agent for the manifold-parrot discuss channel |
+| `discuss.defaultAgent` | — | default agent for gate discuss sessions |
 | `globalConcurrency` | `8` | shared ceiling for agent dispatch, subflow fan-out, and flow-run concurrency |
 
 Requires OpenClaw ≥ 2026.5.6 (declared as `openclaw.compat.openclawMin`).

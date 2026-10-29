@@ -39,14 +39,14 @@
       "dashboardHost": {
         "type": "string"
       },
-      "manifoldParrot": {
+      "discuss": {
         "type": "object",
-        "description": "manifold-parrot channel config. manifold-parrot is the built-in discuss channel that opens on iOS when a human-gate is blocked.",
+        "description": "Discuss defaults. Used when a blocked gate node does not declare its own discuss.agent.",
         "additionalProperties": false,
         "properties": {
           "defaultAgent": {
             "type": "string",
-            "description": "Default agent for the manifold-parrot channel. Used when the blocked gate node does not declare its own discuss.agent."
+            "description": "Default agent for gate discuss sessions. Used when the blocked gate node does not declare its own discuss.agent."
           }
         }
       },
