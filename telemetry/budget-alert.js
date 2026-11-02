@@ -14,7 +14,7 @@ import { getSharedDb, withSharedWrite } from "../state/db.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
 const DEFAULT_CAP_USD = 3.0;
-const DEFAULT_LOCK_THRESHOLD = 0.8;  // fraction of cap; operator-configurable via iOS
+const DEFAULT_LOCK_THRESHOLD = 0.8;  // fraction of cap; operator-configurable via dashboard
 
 // Thresholds — fraction of cap. Each fires at most once per local day.
 // 50% lets the operator intervene before damage is done; 80% is the
@@ -150,7 +150,7 @@ async function _recordAlertEvent({ threshold, total, cap }) {
   }));
 }
 
-/** Threshold-crossing history, newest first — powers the iOS cap-hit chart's
+/** Threshold-crossing history, newest first — powers a cap-hit chart's
  *  tap-to-detail (which threshold, what time), not just "was that day bad". */
 export async function getAlertHistory({ limit = 60 } = {}) {
   const client = await _getClient();

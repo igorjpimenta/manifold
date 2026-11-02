@@ -108,7 +108,7 @@ describe("registerBudgetRoutes /budget/cap", () => {
     assert.equal(body.capUSD, 5.0);
   });
 
-  it("PUT with valid capUSD broadcasts plugin.budget.cap.changed so iOS can reload the chart", async () => {
+  it("PUT with valid capUSD broadcasts plugin.budget.cap.changed so live charts reload", async () => {
     const api = makeApi();
     const { json, bad } = makeJson();
     const { getBroadcast, calls } = makeBroadcast();

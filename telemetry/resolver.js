@@ -298,7 +298,7 @@ export function rootLabelOf(frame) {
     case "cron-owner":         return frame.cronName || frame.key;
     case "telegram-dm":        return frame.telegramChatId || frame.key;
     case "explicit":           return frame.explicitPurpose || frame.key;
-    // The operator-trigger session key (agent:operator:(ios|cli|operator):<flowId-uuid>)
+    // The operator-trigger session key (agent:operator:(cli|operator):<flowId-uuid>)
     // carries no pipelineId — routes/operator.js's recordTrigger call stamps
     // the real pipelineId onto the flow/node cost rows directly (see
     // labels.js's displayRootLabel case "operator-trigger"), so this fallback

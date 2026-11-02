@@ -1,7 +1,7 @@
 // graphql/schema.js — client-agnostic query layer over manifold state.
 //
-// Any consumer (iOS, dashboard, CLI) picks the fields it needs; the edge
-// stays iOS-specific (push, Live Activities) and never duplicates this.
+// Any consumer (dashboard, CLI, harness client) picks the fields it needs;
+// the edge stays client-agnostic and never duplicates this.
 // Query-only by design: writes go through the POST routes, so reads
 // never emit domain events (single-writer).
 //

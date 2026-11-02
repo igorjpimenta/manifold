@@ -5,7 +5,7 @@
 // Each (flowId, itemId) pair gets one row that tracks:
 //   messages_json    — full ordered message history (operator + agent)
 //   turn_status      — idle | running | error (drives the "thinking" row)
-//   active_turn_id   — in-flight turnId; lets iOS reconcile SSE events
+//   active_turn_id   — in-flight turnId; lets clients reconcile live events
 //   pending_json     — proposed draft + fields mid-turn
 //   components_json  — tool-seeded components keyed by kind; one entry
 //                      per kind, last-write-wins. Cleared on gate resolve.
@@ -210,7 +210,7 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
   // One-shot bulk fetch: for a list of flowIds returns a map of
   // flowId → { pendingItemIds: string[] } for any flow that has at
   // least one discuss row with a non-null pending_json. The item_id
-  // values map 1-to-1 with subflow keys so the iOS client can mark
+  // values map 1-to-1 with subflow keys so the client can mark
   // individual subflow peek rows without a second round-trip.
   async function getBulkSummaries(flowIds) {
     if (!flowIds || flowIds.length === 0) return {};

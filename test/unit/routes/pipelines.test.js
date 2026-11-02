@@ -127,7 +127,7 @@ describe("registerPipelineRoutes — handler", () => {
   // as its own addressable pipeline (`${pipelineId}::${nodeId}`, flagged
   // _synthetic:true) purely so childFlows has a dispatch target — it is
   // never a pipeline an operator runs or should see. Before this filter,
-  // it appeared as a real (zero-run) catalog entry, cluttering the iOS
+  // it appeared as a real (zero-run) catalog entry, cluttering the
   // Pipelines list with one fake row per loop node ever migrated.
   test("_synthetic child-flow pipelines (loop-node dispatch targets) are excluded from the catalog", async () => {
     const { api, routes } = createMockApi();

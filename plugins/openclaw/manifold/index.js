@@ -615,7 +615,7 @@ export default definePluginEntry({
     registerTelemetry(api, { getBroadcast: () => _gatewayBroadcast });
 
     // ── Dialog door: WS message transport into open discuss sessions ───────
-    // iOS (or any harness client) connects with ?bearer= and sends
+    // Any harness client connects with ?bearer= and sends
     // {type:"message",...} frames. Turns run through the same elevation
     // the HTTP discuss route uses.
     let _dialogServer = null;
@@ -715,7 +715,6 @@ export default definePluginEntry({
         // this only binds the live stores and subscribes.
         _wsRunEventsListener = createWsRunEventsListener({
           store,
-          readStore,
           nodeExecutionsStore,
           pipelineLookup: (id) => pipelinesRef.value.get(id),
           getBroadcast: () => _gatewayBroadcast,

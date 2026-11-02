@@ -5,13 +5,13 @@
 // <draft>...</draft> text-tag protocol — structured tool calls are
 // more reliable than text formatting and survive markdown/quoting
 // quirks. Same operator-gated semantics: the proposal surfaces as an
-// "Apply as draft" button on the operator's iOS Inbox; nothing is
+// "Apply as draft" button on the operator's Inbox; nothing is
 // auto-committed.
 //
 // Reads (readStore — cross-process sqlite) to validate the flow + gate
 // item exist before stashing. Writes through the on-disk pending-store
 // (sidecar JSON per flow+item) so the proposal survives gateway
-// restart AND is readable on cold-open of the iOS app via the discuss
+// restart AND is readable on cold-open of a companion app via the discuss
 // history GET.
 //
 // Factory-form registration (like manifold_start) — needs `ctx.sessionKey`

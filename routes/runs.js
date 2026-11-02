@@ -431,7 +431,7 @@ export function registerRunRoutes({
     // too.
     const { loop: _loop, errors: _errors, gates: _staleGates, ...stateWithoutLegacy } = enrichedState;
     // A subflow child is now just a flow_runs row with parent_invocation_id set —
-    // resolve it back to the parent's flowId/nodeId/subflowKey so iOS can
+    // resolve it back to the parent's flowId/nodeId/subflowKey so clients can
     // render a "Parent run" link. Also resolves this child's REAL top-level
     // pipelineId (its own stateJson.pipelineId is the synthetic
     // "parent::NODE_ID" form loader.js registers subflow nodes under) —
@@ -938,8 +938,8 @@ export function registerRunRoutes({
 
   // ── sendTranscriptsList ───────────────────────────────────────────────────
 
-  // lite=1  → return turnCount only, no turn text (for the iOS list view)
-  // sessionKey=X → return a single transcript with full turns (for TranscriptView drill-in)
+  // lite=1  → return turnCount only, no turn text (for list views)
+  // sessionKey=X → return a single transcript with full turns (for transcript drill-in)
   async function sendTranscriptsList(res, flow, url) {
     const { readdir, readFile } = await import("node:fs/promises");
     const pathMod = await import("node:path");

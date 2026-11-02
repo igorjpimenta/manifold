@@ -50,7 +50,7 @@ const ACTIVE = new Set(["running", "blocked"]);
  *
  * Falls back to the registry value for every other case (succeeded /
  * cancelled / blocked / running, or a failed run with no runErrors
- * entry) — same as iOS's own RunsAPI, which reads currentStep/lastStep
+ * entry) — same as any client's own RunsAPI, which reads currentStep/lastStep
  * directly off the run row rather than walking a pipeline's edge
  * function against stateJson (dashboard/server.js has no direct DB
  * access to state that would make that walk correct here either —

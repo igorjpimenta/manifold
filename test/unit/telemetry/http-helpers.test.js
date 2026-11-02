@@ -86,15 +86,15 @@ describe("formatSessionLabel", () => {
 // ── sessionKindForRoot ────────────────────────────────────────────────────────
 
 describe("sessionKindForRoot", () => {
-  it("ios prefix → ios-trigger", () => {
-    assert.equal(sessionKindForRoot("explicit", "agent:operator:ios:abc"), "ios-trigger");
+  it("legacy operator prefix falls through to the generic operator-trigger", () => {
+    assert.equal(sessionKindForRoot("explicit", "agent:operator:ios:abc"), "operator-trigger");
   });
 
   it("cli prefix → cli-trigger", () => {
     assert.equal(sessionKindForRoot("explicit", "agent:operator:cli:abc"), "cli-trigger");
   });
 
-  it("operator prefix (non-ios/cli) → operator-trigger", () => {
+  it("operator prefix (non-cli) → operator-trigger", () => {
     assert.equal(sessionKindForRoot("explicit", "agent:operator:dashboard:abc"), "operator-trigger");
   });
 

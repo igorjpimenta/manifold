@@ -1,5 +1,5 @@
 // labels — translate internal scope names to operator-friendly display
-// strings. Used by HTTP responses so the iOS tile doesn't need its own
+// strings. Used by HTTP responses so clients don't need their own
 // translation table (single source of truth).
 //
 // Mapping is intentionally lossy in the friendly direction — we hide
@@ -20,7 +20,7 @@ const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 // operator ad-hoc sessions, spawned subagents, Telegram DMs).
 //
 // Deliberately a real string rather than SQL NULL: CostBreakdown.Row.label
-// is a non-optional String on the iOS client (CostAPI.swift), and
+// is a non-optional String on clients with strict decoding, and
 // stripTeamPrefix passes non-strings through unchanged, so a null label
 // fails the whole decode and silently blanks the Budget card rather than
 // crashing. Kept in step with UNATTRIBUTED_FILTER below so the projection,

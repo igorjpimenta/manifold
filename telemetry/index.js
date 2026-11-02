@@ -228,47 +228,6 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
 
   registerHttpRoutes({ api, getStore: () => SHARED_STORE, logger, getBroadcast });
 
-  // Redirect shim: /lineage/* → /manifold/telemetry/* until iOS build deploys.
-  const SHIM_PATHS = [
-    ["GET",  "/lineage/cost/home"],
-    ["GET",  "/lineage/cost/breakdown"],
-    ["GET",  "/lineage/cost/by-day"],
-    ["GET",  "/lineage/cost/by-hour"],
-    ["GET",  "/lineage/cost/runs"],
-    ["GET",  "/lineage/cost/by-node"],
-    ["GET",  "/lineage/cost/by-session"],
-    ["GET",  "/lineage/cost/top-calls"],
-    ["GET",  "/lineage/cost/today"],
-    ["GET",  "/lineage/cost/by-root"],
-    ["GET",  "/lineage/cost/by-trigger"],
-    ["GET",  "/lineage/cost/by-pipeline"],
-    ["GET",  "/lineage/cost/by-flow"],
-    ["GET",  "/lineage/cost/by-model"],
-    ["GET",  "/lineage/cost/by-cron-job"],
-    ["GET",  "/lineage/tree/expand"],
-    ["GET",  "/lineage/budget/cap"],
-    ["PUT",  "/lineage/budget/cap"],
-    ["GET",  "/lineage/budget/gate-threshold"],
-    ["PUT",  "/lineage/budget/gate-threshold"],
-    ["GET",  "/lineage/budget/cap-history"],
-    ["POST", "/lineage/budget/test-alert"],
-    ["GET",  "/lineage/sessions/parts"],
-  ];
-  for (const [method, oldPath] of SHIM_PATHS) {
-    const newPath = oldPath.replace("/lineage/", "/manifold/telemetry/");
-    api.registerHttpRoute({
-      method,
-      path: oldPath,
-      auth: "plugin",
-      handler: (req, res) => {
-        const qs = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
-        res.writeHead(301, { Location: newPath + qs });
-        res.end();
-        return true;
-      },
-    });
-  }
-
   // ── Runtime API ────────────────────────────────────────────────────────────
 
   api.runtime = api.runtime ?? {};
@@ -302,7 +261,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         // synthetic trigger path (rootKind: "explicit", rootLabel: pipelineId).
         //
         // "operator-trigger" hits the identical problem via a different route:
-        // routes/operator.js's synthetic `agent:operator:(ios|cli|operator):
+        // routes/operator.js's synthetic `agent:operator:(cli|operator):
         // <flowId>` key is never itself a stored child_session_key (only
         // `flow:<id>` rows get upserted), so a subflow dispatched from an
         // agent session whose chain reaches that key directly — rather than

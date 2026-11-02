@@ -469,7 +469,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
               // its rows carry no flow_id, so total_runs is 0 and the guard
               // already excludes it. Stated explicitly so a future change that
               // gives those rows a flow_id can't start emitting a success_rate
-              // the iOS ROI filter would read as a real pipeline signal.
+                // a client ROI filter would read as a real pipeline signal.
               if (!unattributed && r.succeeded_runs != null && r.total_runs > 0) {
                 out.succeeded_runs = r.succeeded_runs;
                 out.failed_runs    = r.failed_runs;

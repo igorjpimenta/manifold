@@ -4,7 +4,7 @@
 // No dual-write; registry.sqlite is never touched.
 //
 // After each successful write, flowStateEmitter fires so trigger-based
-// consumers (event-log, live-bridge) wake immediately instead of polling.
+// consumers (event-log, live views) wake immediately instead of polling.
 
 import { randomUUID } from "node:crypto";
 import { flowStateEmitter, gateEmitter, flowEmitter } from "../events.js";

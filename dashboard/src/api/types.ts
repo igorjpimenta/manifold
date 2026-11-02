@@ -114,8 +114,8 @@ export interface WaitJson {
 
 /**
  * Canonical error-record shape shared across every consumer — SQL row
- * (flow_node_executions), JSON wire response, this TS type, and the iOS
- * Swift struct all use the same field set. Replaces the old per-field
+ * (flow_node_executions), JSON wire response, this TS type, and client
+ * structs all use the same field set. Replaces the old per-field
  * inconsistency (SubflowData.errors was typed string[] but the real wire
  * payload could contain objects — that mistyping is what caused
  * SubflowsCard.tsx's .slice() crash; RunState.errors was typed

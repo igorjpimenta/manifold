@@ -1,6 +1,6 @@
-// failures.js — iOS-facing HTTP surface over failure-store.js.
+// failures.js — companion-facing HTTP surface over failure-store.js.
 //
-// Ignore is a pure iOS device-local annotation with no server round trip
+// Ignore is a pure client device-local annotation with no server round trip
 // at all, so it has no route here. Only GET (list) and POST .../retry
 // (implemented in routes/operator-retry.js) remain.
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";

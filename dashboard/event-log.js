@@ -113,7 +113,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
 
   // Terminal set matches the WS run listener exactly (succeeded, failed,
   // cancelled, skipped) — the two streams must agree on what "ended" means
-  // or dashboard and iOS diverge on skipped runs.
+  // or the dashboard and companion clients diverge on skipped runs.
   function isTerminal(status) {
     return status === "succeeded" || status === "failed" || status === "cancelled" || status === "skipped";
   }

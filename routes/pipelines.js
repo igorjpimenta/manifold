@@ -3,7 +3,7 @@ import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePipelinesLoaded }) {
   // GET /manifold/pipelines — catalog of pipeline definitions joined with
   // run-history vitals. Mirrors the dashboard's /api/pipelines but trimmed
-  // to what the iPhone Pipelines list view needs at a glance (lastRunAt,
+  // to what a pipelines list view needs at a glance (lastRunAt,
   // todayCount, succeeded/failed today, success-rate over a recent window).
   // No cost (slow JSONL walking lives in the per-pipeline detail route).
   // Historical pipelines (no def on disk but runs in db) are appended last.
@@ -24,8 +24,8 @@ export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePip
       try {
         await ensurePipelinesLoaded?.();
         const nowMs = Date.now();
-        // Caller-supplied "today" boundary so the iPhone can bucket by
-        // its local-day midnight (the operator thinks in their own TZ).
+      // Caller-supplied "today" boundary so clients can bucket by
+      // their local-day midnight (the operator thinks in their own TZ).
         // Falls back to UTC midnight to keep behaviour identical for
         // any caller that doesn't send it (parity with the dashboard).
         const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);

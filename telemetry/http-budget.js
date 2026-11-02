@@ -27,9 +27,9 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
             return json(res, { error: "capUSD must be a positive number" }, 400);
           }
           await setCapAndPersist(capUSD);
-          // iOS's Budget screen fetches cap/threshold via two independent
-          // requests (home tile + hourly chart) — without this broadcast the
-          // chart's cap line goes stale until the next unrelated reload.
+        // Companion views fetch cap/threshold via two independent
+        // requests (home tile + hourly chart) — without this broadcast the
+        // chart's cap line goes stale until the next unrelated reload.
           try { await emit("budget.cap.changed", { capUSD }); } catch {}
           return json(res, { ok: true, capUSD });
         } catch (err) {

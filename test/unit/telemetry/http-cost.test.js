@@ -202,8 +202,8 @@ describe("/cost/breakdown", () => {
     assert.ok(Array.isArray(body.rows));
   });
 
-  // The breakdown must never emit a null label: the iOS client decodes
-  // `label` as a non-optional String (CostAPI.swift), so a null label fails
+  // The breakdown must never emit a null label: clients decode
+  // `label` as a non-optional String, so a null label fails
   // the whole decode and silently blanks the Budget card. NULL pipeline_id
   // rows belong in a labeled sentinel bucket whose spend is counted — these
   // assert the sentinel is a real string and the spend is actually present.
@@ -230,7 +230,7 @@ describe("/cost/breakdown", () => {
     assert.equal(unattributed.calls, 1);
     assert.equal(unattributed.cost, 0.04);
     // Outcome counters are meaningless without a flow_id and would otherwise
-    // read as a real ROI signal to the iOS ROI filter.
+    // read as a real ROI signal to a client ROI filter.
     assert.equal(unattributed.success_rate, undefined);
     assert.equal(unattributed.total_runs, undefined);
     // total must reconcile with the rows, so the operator can account for
