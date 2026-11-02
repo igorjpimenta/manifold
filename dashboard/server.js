@@ -30,10 +30,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
 // Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/.
-// Legacy dispatches used core-minted plain-text ids
-// (`mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`), which this directory scan
-// matches by shape. Harness-owned ids carry no flow prefix, so the scan
-// does not find them.
+// This directory scan matches keys by shape (`mf-<flowShort>-…`); a key
+// with no flow prefix is invisible to it.
 const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
 
 const MIME = {
@@ -652,9 +650,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
     const flowShort = flowId.slice(0, 8);
-    // Legacy core-minted ids (`mf-<flowShort>-<nodeId>[-<itemKey>]`): match
-    // by shape. Harness-owned keys carry no flow prefix, so this scan does
-    // not find them.
+    // Match `mf-<flowShort>-…` keys by shape; a key with no flow prefix
+    // is invisible to this scan.
     const keyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
 
     let agentDirs = [];
