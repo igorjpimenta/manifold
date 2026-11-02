@@ -170,10 +170,12 @@ export function createDiscussHandler({
           }
         }
       }
-      if (isFirstTurn && itemIdForDraft) {
-        const gateNodeIdFromSession = sessionId.split("-")[3] ?? "";
-        try { stampDiscussSession(flowId, gateNodeIdFromSession, itemIdForDraft, agentId, sessionId); } catch {}
-      }
+    if (isFirstTurn && itemIdForDraft) {
+      // gateNodeId arrives explicitly from core (elev body) — never parsed
+      // out of the session id, whose shape belongs to the harness.
+      const gateNodeId = typeof body.gateNodeId === "string" ? body.gateNodeId : "";
+      try { stampDiscussSession(flowId, gateNodeId, itemIdForDraft, agentId, sessionId); } catch {}
+    }
       let replyText = result?.meta?.finalAssistantVisibleText
         ?? result?.meta?.finalAssistantRawText
         ?? (Array.isArray(result?.payloads)

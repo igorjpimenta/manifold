@@ -86,6 +86,15 @@ describe("classify", () => {
     assert.equal(r.parentHint?.kind, "memory-synth");
   });
 
+  it("classifies harness-owned discuss ids with agent and flow hint", () => {
+    const r = classify("agent:scout:discuss:a700a3ea-propose-some-item-slug");
+    assert.equal(r.kind, "discuss-thread");
+    assert.equal(r.agentId, "scout");
+    assert.equal(r.flowShort, "a700a3ea");
+    assert.equal(r.parentHint?.kind, "flow");
+    assert.equal(r.parentHint?.flowShort, "a700a3ea");
+  });
+
   it("classifies flow-gate-discuss with a flow parent hint, not the explicit-bare catch-all", () => {
     const r = classify("gf-discuss-a700a3ea-propose-some-item-slug");
     assert.equal(r.kind, "flow-gate-discuss");

@@ -537,6 +537,9 @@ export default definePluginEntry({
       discussStore,
       runStore,
       nodeExecutionsStore,
+      // Harness adapter: discuss thread ids come from here
+      // (sessions.newDiscussSessionId), never minted in core.
+      sessions,
     });
 
     // ── Route modules ────────────────────────────────────────────────────────
@@ -627,9 +630,9 @@ export default definePluginEntry({
           host: process.env.MANIFOLD_DIALOG_HOST ?? "127.0.0.1",
           readFlow: (flowId) => readStore.get(flowId),
           resolveTarget: discussHandlers.resolveDiscussTarget,
-          runTurn: async ({ flowId, sessionKey, sessionId, agentId, modelOverride, itemId, text, systemPrompt }) => {
+          runTurn: async ({ flowId, sessionKey, sessionId, agentId, gateNodeId, modelOverride, itemId, text, systemPrompt }) => {
             const elev = await invokeElevated("/manifold/_elev/discuss", {
-              flowId, sessionKey, sessionId, agentId, modelOverride, text, itemId,
+              flowId, sessionKey, sessionId, agentId, gateNodeId, modelOverride, text, itemId,
               systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,
             }, { timeoutMs: 360_000 });
             let payload;

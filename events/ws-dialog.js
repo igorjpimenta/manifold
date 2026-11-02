@@ -153,6 +153,7 @@ export function createDialogServer({
     try {
       result = await runTurn({
         flowId: flow.flowId, sessionKey: target.sessionKey, sessionId: target.sessionId, agentId: target.agent,
+        gateNodeId: target.gateNodeId,
         modelOverride: target.modelOverride ?? null, itemId: target.itemId, text,
         systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,
       });

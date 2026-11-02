@@ -50,6 +50,10 @@ export function registerDiscussHandlers({
   discussStore,
   runStore,
   nodeExecutionsStore,
+  // Injected gateway adapter, not core state: discuss thread ids come from
+  // the harness (sessions.newDiscussSessionId), never minted here — core
+  // never imports the gateway's session store (same seam as operator.js).
+  sessions,
 }) {
 
   // ── Resolve discuss target ────────────────────────────────────────────────
@@ -127,10 +131,26 @@ export function registerDiscussHandlers({
     }
     const stamp = readDiscussSession(sourceFlow.flowId, gateNodeId, normalizedItemId);
     const resolvedAgent = stamp?.agent ?? effectiveDiscuss.agent;
-    const sessionId = stamp?.sessionId ?? `gf-discuss-${sourceFlow.flowId.slice(0, 8)}-${gateNodeId.toLowerCase()}-${normalizedItemId}`;
-    // Plain-text session identity: the key IS the session id. No
-    // `agent:` prefix, no gateway namespace — the agent travels as its
-    // own field and any harness can use the id verbatim.
+    // Discuss thread identity comes from the harness, never from core: a
+    // stamped thread keeps its id verbatim (including pre-harness `gf-…`
+    // ids, so in-flight threads survive the switch); a new thread asks the
+    // harness adapter for one. No minted fallback — a harness that cannot
+    // name its own sessions cannot host a discuss thread.
+    const sessionId = stamp?.sessionId
+      ?? sessions?.newDiscussSessionId?.({
+        agentId: resolvedAgent, flowId: sourceFlow.flowId,
+        gateNodeId, itemId: normalizedItemId,
+      });
+    if (typeof sessionId !== "string" || !sessionId) {
+      return {
+        ok: false,
+        status: 503,
+        code: "discuss_session_unavailable",
+        error: "harness did not provide a discuss session id (sessions.newDiscussSessionId missing or empty)",
+      };
+    }
+    // The key IS the session id — harness-namespaced (`agent:<id>:…`), so
+    // the agent rides on the key and history lookups resolve it directly.
     const sessionKey = sessionId;
     return {
       ok: true,
@@ -145,9 +165,9 @@ export function registerDiscussHandlers({
       gateNodeId,
       // Specific node this discuss session is actually about, for cost/
       // lineage attribution — "PROPOSE.GATE", not just "PROPOSE", when the
-      // gate lives inside a loop's branch. Session id/key above intentionally
-      // stay keyed on the coarser gateNodeId (changing that format would
-      // break in-flight session lookups).
+      // gate lives inside a loop's branch. The sidecar stays keyed on the
+      // coarser gateNodeId above (a harness id is opaque to core, so only
+      // the (flow, gate, item) coordinates re-find the thread).
       nodeId: effectiveNodeId,
       modelOverride: typeof effectiveDiscuss.model === "string" && effectiveDiscuss.model.trim()
         ? effectiveDiscuss.model.trim()
@@ -207,6 +227,7 @@ export function registerDiscussHandlers({
           sessionKey: target.sessionKey,
           sessionId: target.sessionId,
           agentId: target.agent,
+          gateNodeId: target.gateNodeId,
           modelOverride: target.modelOverride,
           text,
           itemId: target.itemId,
@@ -334,6 +355,7 @@ export function registerDiscussHandlers({
         sessionKey: target.sessionKey,
         sessionId: target.sessionId,
         agentId: target.agent,
+        gateNodeId: target.gateNodeId,
         modelOverride: target.modelOverride,
         text: transcript,
         itemId: target.itemId,

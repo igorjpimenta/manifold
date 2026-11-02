@@ -30,6 +30,10 @@ await mock.module(executorHelpersUrl, {
 });
 
 const { registerDiscussHandlers } = await import("../../../routes/discuss.js");
+// Real harness adapter (node builtins only, no gateway imports) —
+// resolveDiscussTarget sources thread ids from here, so the tests prove
+// the harness-owned path, not a stub.
+const sessions = await import("../../../plugins/openclaw/manifold/sessions.js");
 
 function createMockReqWithBody(method, path_, body) {
   const chunks = body != null ? [Buffer.from(typeof body === "string" ? body : JSON.stringify(body))] : [];
@@ -49,6 +53,7 @@ function makeDeps(api, overrides = {}) {
     invokeElevated: async () => ({}),
     readPending: () => null,
     clearPending: () => {},
+    sessions,
     discussStore: { getComponent: () => null, listComponents: () => [], setComponent: () => {} },
     ...overrides,
   };
@@ -389,8 +394,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
   });
 });
 
-describe("registerDiscussHandlers — apply-draft invariant", () => {
-  test("handleDiscussApplyDraft does not expose gateResolver in its closure", () => {
+describe("registerDiscussHandlers — apply-draft invariant", () => {  test("handleDiscussApplyDraft does not expose gateResolver in its closure", () => {
     // We can't easily intercept the internal call chain without running the
     // full handler, but we CAN verify the factory doesn't receive gateResolver
     // as a dep at all — if someone passes it, the function signature doesn't
@@ -407,5 +411,53 @@ describe("registerDiscussHandlers — apply-draft invariant", () => {
     // The real guard is that the factory signature doesn't accept it.
     assert.equal(typeof result.handleDiscussApplyDraft, "function");
     assert.equal(resolveCallCount, 0, "gateResolver must not be called during factory setup");
+  });
+});
+
+// ── resolveDiscussTarget — harness-owned thread ids ────────────────────────
+// Core never mints discuss ids: a new thread asks the harness adapter
+// (sessions.newDiscussSessionId); a harness that cannot name one gets a
+// loud refusal, not a core-minted fallback.
+
+describe("registerDiscussHandlers — resolveDiscussTarget harness-owned ids", () => {
+  const testFlowId = `unit-test-discuss-harness-id-${Date.now()}`;
+
+  after(async () => {
+    await rm(path.join(os.homedir(), ".openclaw", "discuss-sessions"), { recursive: true, force: true }).catch(() => {});
+  });
+
+  function gateFlow() {
+    return {
+      flowId: testFlowId,
+      status: "blocked",
+      waitJson: { kind: "human-gate", nodeId: "GATE", items: [{ itemId: "item-1" }] },
+      stateJson: { pipelineId: "test-pipeline" },
+    };
+  }
+
+  function gatePipelines() {
+    return {
+      value: new Map([["test-pipeline", { nodes: { GATE: { kind: "human-gate", discuss: { agent: "test-agent" } } } }]]),
+    };
+  }
+
+  test("new thread takes the harness adapter id verbatim — never gf-discuss", () => {
+    const { api } = createMockApi();
+    const deps = makeDeps(api, { pipelinesRef: gatePipelines() });
+    const { resolveDiscussTarget } = registerDiscussHandlers(deps);
+    const target = resolveDiscussTarget(gateFlow(), "item-1");
+    assert.equal(target.ok, true);
+    assert.equal(target.sessionId, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
+    assert.equal(target.sessionKey, target.sessionId, "the key IS the session id");
+  });
+
+  test("refuses loudly when the harness provides no session id", () => {
+    const { api } = createMockApi();
+    const deps = makeDeps(api, { pipelinesRef: gatePipelines(), sessions: {} });
+    const { resolveDiscussTarget } = registerDiscussHandlers(deps);
+    const target = resolveDiscussTarget(gateFlow(), "item-1");
+    assert.equal(target.ok, false);
+    assert.equal(target.code, "discuss_session_unavailable");
+    assert.equal(target.status, 503);
   });
 });
