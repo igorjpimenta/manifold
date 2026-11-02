@@ -272,8 +272,8 @@ export default definePluginEntry({
     // classification, which runs while the gateway is still starting).
     const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
-      // Session ids are plain text (minted by core, no gateway namespace),
-      // so they store verbatim — no edge translation on the record path.
+      // Session ids are harness-owned plain text, passed through verbatim —
+      // no edge translation on the record path.
       record(data) {
         return _sessionIndexPromise.then((si) => si.record({ ...data }));
       },

@@ -946,9 +946,9 @@ export function registerRunRoutes({
     const osMod = await import("node:os");
     const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
-    // Plain-text session ids minted by core (`mf-<flowShort>-…` dispatches,
-    // `gf-discuss-<flowShort>-…` discuss threads): match verbatim — the
-    // agent is the directory being scanned.
+    // Legacy core-minted ids (`mf-<flowShort>-…` dispatches) and core-owned
+    // `gf-discuss-<flowShort>-…` threads: match by shape. Harness-owned
+    // dispatch keys carry no flow prefix, so this scan does not find them.
     const subagentKeyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
     const discussKeyPattern  = new RegExp(`^gf-discuss-${flowShort}-(.+)$`);
     const lite       = url.searchParams.get("lite") === "1";

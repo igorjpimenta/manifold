@@ -973,19 +973,24 @@ serialization is doing real work there.
 
 ## Session keys (subagents spawned by manifold)
 
+Manifold does not mint session ids: the harness owns the id format, so an
+agent node declares its own key and manifold passes it through verbatim.
+
 ```
-mf-<flowId.slice(0,8)>-<seed>
-seed = nodeId.toLowerCase() [-<itemKey>]
+node.sessionKey                          // static
+node.sessionKeyBuilder(state, flowId)    // derived
 ```
 
-Built by `mintAgentSessionKey` in `engine/executor-helpers.js`. Discuss
-threads use `gf-discuss-<flowId.slice(0,8)>-<gateNodeId>-<itemId>` instead.
-Both are plain-text session ids — no agent prefix, no gateway namespace —
-so any harness can use them verbatim. Override by setting
-`node.sessionKey` (static) or `node.sessionKeyBuilder(state, flowId, itemKey?)`.
+`dispatchAgentEntry` refuses an agent node that declares neither —
+tool-handoff and the lineage ledger both key off this value, so inventing
+one here would silently diverge from the harness's id. Discuss threads
+mint `gf-discuss-<flowId.slice(0,8)>-<gateNodeId>-<itemId>` internally
+(core-owned, no harness involved).
 
-Reverse-parsing (dashboard): split the segment after `gf-<flowShort>-`
-on the **first hyphen**. `dashboard/server.js: sendTranscripts`.
+Transcript lookup by id shape (`mf-<flow8>-…`, `gf-discuss-<flow8>-…`)
+therefore only covers pre-harness-owned ids and discuss threads: a
+harness-owned dispatch key carries no flow prefix, so the directory scan
+does not find it.
 
 Each session corresponds to a file:
 `~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`. The

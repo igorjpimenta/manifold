@@ -29,11 +29,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Static assets come from vite's build output under `dist/`. Run `npm run
 // build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
-// Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/. The
-// manifold executor uses plain-text session ids
-// (`mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`, minted by core —
-// no agent prefix, no gateway namespace) so we can find every session a
-// flow spawned by scanning each agent's sessions.json for matching keys.
+// Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/.
+// Legacy dispatches used core-minted plain-text ids
+// (`mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`), which this directory scan
+// matches by shape. Harness-owned ids carry no flow prefix, so the scan
+// does not find them.
 const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
 
 const MIME = {
@@ -652,8 +652,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
     const flowShort = flowId.slice(0, 8);
-    // Plain-text session ids (`mf-<flowShort>-<nodeId>[-<itemKey>]`, minted
-    // by core): match verbatim — the agent is the directory being scanned.
+    // Legacy core-minted ids (`mf-<flowShort>-<nodeId>[-<itemKey>]`): match
+    // by shape. Harness-owned keys carry no flow prefix, so this scan does
+    // not find them.
     const keyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
 
     let agentDirs = [];

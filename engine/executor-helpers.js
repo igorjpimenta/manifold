@@ -98,13 +98,6 @@ export function withEditableTextDefault(payload, branchData) {
   return { ...payload, editableText: candidate };
 }
 
-// Core-minted plain-text session id: `mf-<flow8>-<node>[-<item>]`. No agent
-// prefix, no gateway namespace — the id travels verbatim end to end.
-export function mintAgentSessionKey(flowId, nodeId, itemKey) {
-  const seed = itemKey ? `${nodeId.toLowerCase()}-${itemKey}` : nodeId.toLowerCase();
-  return `mf-${flowId.slice(0, 8)}-${seed}`;
-}
-
 export function shortSummary(text) {
   if (!text) return "";
   const oneLine = String(text).split("\n")[0];

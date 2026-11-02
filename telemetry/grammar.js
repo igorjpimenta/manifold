@@ -14,9 +14,10 @@ const REGEX = {
   CRON_RUN:  /^agent:([^:]+):cron:([0-9a-f-]{36}):run:([0-9a-f-]+)$/,
   CRON_OWN:  /^agent:([^:]+):cron-(.+)$/,
   BARE_SUB:  /^agent:([^:]+):subagent:([0-9a-f-]{36})$/,
-  // Manifold dispatch sessions: plain-text `mf-<flow8>-<node>[-<item>]`
-  // (see engine/executor-helpers.js's mintAgentSessionKey). The embedded
-  // flow8 resolves via the "flow" parentHint branch, same as GF_DISCUSS.
+  // Legacy core-minted dispatch ids: plain-text `mf-<flow8>-<node>[-<item>]`.
+  // New dispatches carry a harness-owned key (see engine/executor-nodes.js),
+  // which classifies as EXPLICIT or EXPLICIT_BARE; these rows still need the
+  // embedded flow8 resolved via the "flow" parentHint branch, same as GF_DISCUSS.
   MF_SUB:    /^(mf-[0-9a-f]{8}-.+)$/,
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,

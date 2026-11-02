@@ -1,9 +1,9 @@
 // session-keys.js — adapter-owned session identity helpers. Session ids
-// are plain text, harness-neutral strings minted by core (`mf-<flow8>-…`
-// dispatches, `gf-discuss-<flow8>-…` discuss threads): no `agent:` prefix,
-// no `subagent` infix, no gateway namespace anywhere in the contract.
+// are harness-owned plain-text strings passed through verbatim — manifold
+// no longer mints an `mf-…` shape. No `agent:` prefix, no `subagent` infix,
+// no gateway namespace is added at this edge.
 // The gateway stores exactly the string it is given, so reads (session
-// transcripts, trajectories) key off the same plain id the dispatch used.
+// transcripts, trajectories) key off the same id the dispatch used.
 //
 // No gateway-shaped keys are minted or matched anywhere: session ids pass
 // through verbatim, and runIds map below.

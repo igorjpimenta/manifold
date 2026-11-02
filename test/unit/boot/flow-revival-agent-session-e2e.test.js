@@ -63,6 +63,7 @@ function makeFixturePipeline() {
       AGENT_STEP: {
         kind: "agent",
         agent: "scout",
+        sessionKey: "agent:scout:fixture-session",
         promptBuilder: () => "FRESH_PROMPT: score this listing",
         apply: (state, reply) => ({ AGENT_STEP: { reply } }),
       },

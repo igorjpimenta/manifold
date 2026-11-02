@@ -2,7 +2,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
-import { detectBlockedSentinel, detectSkippedSentinel, mintAgentSessionKey, assembleState } from "./executor-helpers.js";
+import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
 import { registerDispatch, clearDispatch } from "../state/tool-handoff.js";
 import { registerSessionOwner, clearSessionOwner, runWithLockOwner } from "../locks/lock.js";
@@ -154,12 +154,17 @@ export function createNodeRunner({
     // NodeBlocked into blockedInfo.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
-    // Core-namespace handle only (`mf-<flow8>-<node>`); explicit
-    // entry.sessionKey / sessionKeyBuilder overrides pass through verbatim.
-    // Gateway shaping happens at the adapter edge, never here.
+    // Session ids belong to the harness, not manifold: pass a declared
+    // entry.sessionKey / entry.sessionKeyBuilder through verbatim, and
+    // refuse an agent node that declares neither — tool-handoff and the
+    // lineage ledger both key off this value, so inventing one here would
+    // silently diverge from the harness's own id.
     const sessionKey = entry.sessionKey
       ?? entry.sessionKeyBuilder?.(state, flowId)
-      ?? mintAgentSessionKey(flowId, nodeId);
+      ?? null;
+    if (!sessionKey) {
+      throw new Error(`manifold: refusing dispatch of node "${nodeId}" with no sessionKey (set entry.sessionKey or entry.sessionKeyBuilder)`);
+    }
     _lineage?.recordSpawn?.({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,

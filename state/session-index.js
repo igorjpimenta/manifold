@@ -1,7 +1,7 @@
-// session-index.js — durable flowId→sessionKey index. Keys are plain-text
-// session ids minted by core (`mf-…` dispatches, `gf-discuss-…` threads) —
-// no gateway namespace anywhere in the stored shape. Reads
-// (flowIdForSessionKey) take those ids verbatim.
+// session-index.js — durable flowId→sessionKey index. Keys are the
+// harness-owned session ids the dispatch used (plus core-owned
+// `gf-discuss-…` thread ids) — stored and read verbatim, with no assumed
+// shape.
 //
 // Storage: ~/.openclaw/runtime.sqlite (see defaultDbPath()).
 //
