@@ -27,13 +27,20 @@ describe("classify", () => {
   });
 
   it("classifies manifold-subagent with a flow parent hint", () => {
-    const r = classify("agent:cyrano:subagent:mf-12345678-propose");
+    const r = classify("mf-12345678-propose");
     assert.equal(r.kind, "manifold-subagent");
-    assert.equal(r.agentId, "cyrano");
+    assert.equal(r.agentId, null);
     assert.equal(r.flowShort, "12345678");
     assert.equal(r.nodeId, "propose");
     assert.equal(r.parentHint?.kind, "flow");
     assert.equal(r.parentHint?.flowShort, "12345678");
+  });
+
+  it("stops resolving legacy gateway-shaped keys to flows", () => {
+    // Pre-cutover session files keep their gateway keys; they degrade to
+    // the generic buckets instead of the flow walk — no crash, no lineage.
+    assert.equal(classify("agent:cyrano:subagent:mf-12345678-propose").kind, "unknown");
+    assert.equal(classify("agent:main:gf-discuss-a700a3ea-propose-x").kind, "explicit");
   });
 
   it("classifies plain-text manifold ids with null agent and the same flow hint", () => {
@@ -94,9 +101,9 @@ describe("classify", () => {
   });
 
   it("classifies flow-gate-discuss with a flow parent hint, not the explicit-bare catch-all", () => {
-    const r = classify("agent:main:gf-discuss-a700a3ea-propose-some-item-slug");
+    const r = classify("gf-discuss-a700a3ea-propose-some-item-slug");
     assert.equal(r.kind, "flow-gate-discuss");
-    assert.equal(r.agentId, "main");
+    assert.equal(r.agentId, null);
     assert.equal(r.flowShort, "a700a3ea");
     assert.equal(r.parentHint?.kind, "flow");
     assert.equal(r.parentHint?.flowShort, "a700a3ea");

@@ -72,10 +72,8 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
   }
 
   // Reverse of the above: given a session key alone (no flowId in hand —
-  // e.g. a task_runs row from boot/taskflow-revive.js's orphan scan, which
-  // only carries child_session_key), find which flow it belongs to. Used
-  // to delegate a manifold-owned orphan to the flow's own revival path
-  // instead of touching the session directly.
+  // e.g. a session key observed on the event queue with no flow attached),
+  // find which flow it belongs to.
   async function flowIdForSessionKey(sessionKey) {
     if (!sessionKey) return null;
     try {

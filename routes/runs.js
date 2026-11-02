@@ -946,8 +946,11 @@ export function registerRunRoutes({
     const osMod = await import("node:os");
     const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
-    const subagentKeyPattern = new RegExp(`^agent:([^:]+):subagent:mf-${flowShort}-(.+)$`);
-    const discussKeyPattern  = new RegExp(`^agent:([^:]+):(?:gf-discuss-|manifold-parrot:direct:)${flowShort}-(.+)$`);
+    // Plain-text session ids minted by core (`mf-<flowShort>-…` dispatches,
+    // `gf-discuss-<flowShort>-…` discuss threads): match verbatim — the
+    // agent is the directory being scanned.
+    const subagentKeyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
+    const discussKeyPattern  = new RegExp(`^gf-discuss-${flowShort}-(.+)$`);
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;
 
@@ -977,16 +980,16 @@ export function registerRunRoutes({
         let nodeId = null;
         let itemKey = null;
         const subM = subagentKeyPattern.exec(sessionKey);
-        if (subM && subM[1] === agent) {
-          const tail = subM[2];
+        if (subM) {
+          const tail = subM[1];
           const dashIdx = tail.indexOf("-");
           nodeId = dashIdx === -1 ? tail : tail.slice(0, dashIdx);
           itemKey = dashIdx === -1 ? null : tail.slice(dashIdx + 1);
         } else {
           const dM = discussKeyPattern.exec(sessionKey);
-          if (!dM || dM[1] !== agent) continue;
+          if (!dM) continue;
           nodeId = "discuss";
-          itemKey = dM[2];
+          itemKey = dM[1];
         }
         const sessionId = meta?.sessionId;
         if (!sessionId) continue;

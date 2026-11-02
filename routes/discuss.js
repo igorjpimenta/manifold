@@ -200,16 +200,6 @@ export function registerDiscussHandlers({
       api.runtime?.lineage?.recordSpawn?.({ childSessionKey: target.sessionKey, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
     }
 
-    import("node:fs/promises").then(({ mkdir, writeFile }) => {
-      const dir = path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId);
-      return mkdir(dir, { recursive: true }).then(() =>
-        writeFile(
-          path.join(dir, `${target.itemId}.pending.json`),
-          JSON.stringify({ turnId, text, receivedAtMs: Date.now() })
-        )
-      );
-    }).catch(() => { /* non-fatal */ });
-
     setImmediate(async () => {
       try {
         const elev = await invokeElevated("/manifold/_elev/discuss", {
@@ -268,9 +258,6 @@ export function registerDiscussHandlers({
         } else {
           api.logger.info(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: ${turnKind} emitted`);
         }
-        import("node:fs/promises").then(({ unlink }) =>
-          unlink(path.join(os.homedir(), ".openclaw", "discuss-turns", sourceFlow.flowId, `${target.itemId}.pending.json`))
-        ).catch(() => { /* non-fatal */ });
       } catch (err) {
         api.logger.warn(`manifold discuss async [${flowIdShort}/${turnId.slice(0, 8)}]: runner error: ${err?.message ?? err}`);
         try {
@@ -713,53 +700,16 @@ export function registerDiscussHandlers({
           }
           parsed.messages.sort((a, b) => (a.ts ?? 0) - (b.ts ?? 0));
         }
-
-        try {
-          const { readFile } = await import("node:fs/promises");
-          const sidecarPath = path.join(
-            os.homedir(), ".openclaw", "discuss-turns",
-            sourceFlow.flowId, `${target.itemId}.pending.json`
-          );
-          const rawSidecar = await readFile(sidecarPath, "utf8");
-          const pendingSidecar = JSON.parse(rawSidecar) || {};
-          const pendingTurnId = pendingSidecar.turnId;
-          if (pendingTurnId) {
-            let latestOpIdx = -1;
-            let latestOpTs = -Infinity;
-            for (let i = 0; i < parsed.messages.length; i++) {
-              const m = parsed.messages[i];
-              if (m && m.isOperator && !m.turnId && (m.ts ?? 0) > latestOpTs) {
-                latestOpTs = m.ts ?? 0;
-                latestOpIdx = i;
-              }
-            }
-            if (latestOpIdx !== -1) {
-              parsed.messages[latestOpIdx].turnId = pendingTurnId;
-              const hasReplyAfter = parsed.messages.some(
-                (m, i) => i > latestOpIdx && m && !m.isOperator
-              );
-              if (!hasReplyAfter) parsed.messages[latestOpIdx].pendingAgentReply = true;
-            } else if (pendingSidecar.text) {
-              parsed.messages.push({
-                id: pendingTurnId,
-                turnId: pendingTurnId,
-                isOperator: true,
-                text: pendingSidecar.text,
-                ts: pendingSidecar.receivedAtMs ?? Date.now(),
-                pendingAgentReply: true,
-                synthetic: true,
-              });
-            }
-          }
-        } catch { /* sidecar absent or unreadable → no-op */ }
       }
     } catch (err) {
       api.logger.warn(`manifold discuss history enrichment error: ${err?.message ?? err}`);
       if (!parsed) parsed = { ok: false, code: "internal", error: err?.message ?? String(err) };
     }
     if (parsed?.ok) {
-      parsed.channelId = "manifold-parrot";
-      parsed.channelInboundUrl = "/channels/manifold-parrot/message";
+      // No channel plugin anymore: replies go back through the same HTTP
+      // discuss route this history came from, or the WS dialog door.
+      parsed.channelId = "manifold-dialog";
+      parsed.channelInboundUrl = null;
     }
     res.statusCode = (parsed?.ok) ? 200 : 500;
     res.setHeader("Content-Type", "application/json");

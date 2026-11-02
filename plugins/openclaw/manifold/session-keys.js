@@ -5,34 +5,12 @@
 // The gateway stores exactly the string it is given, so reads (session
 // transcripts, trajectories) key off the same plain id the dispatch used.
 //
-// Two legacy bridges remain for gateway-shaped keys minted before the
-// cutover (`agent:<agent>:subagent:<opaque>`): toOpaqueKey/toCoreSessionKey
-// map them back so in-flight pre-cutover flows keep resolving. Nothing
-// mints gateway-shaped keys anymore.
-// runId mapping below is untouched: gateway runIds are native gateway
+// No gateway-shaped keys are minted or matched anywhere: session ids pass
+// through verbatim, and runIds map below.
+// runId mapping is untouched: gateway runIds are native gateway
 // events, so the dispatch-lifecycle registry stays regardless of key shape.
 
 import { randomBytes } from "node:crypto";
-
-// Inbound: legacy gateway mf-shape→opaque, everything else verbatim.
-// Only gateway-shaped keys minted before the cutover still match; current
-// dispatches already carry the opaque handle, which passes through.
-export function toCoreSessionKey(key) {
-  const opaque = toOpaqueKey(key);
-  if (opaque !== null && opaque.startsWith("mf-")) return opaque;
-  return key;
-}
-
-// Legacy map-back for gateway-shaped keys minted before the cutover
-// (`agent:<agent>:subagent:<opaque>` → `<opaque>`), or null for anything
-// else. Never throws — callers use null to mean "not ours, pass through".
-// Nothing mints this shape anymore; this stays only so in-flight
-// pre-cutover flows keep resolving until they drain.
-export function toOpaqueKey(gatewayKey) {
-  if (typeof gatewayKey !== "string") return null;
-  const m = /^agent:([^:]+):subagent:(.+)$/.exec(gatewayKey);
-  return m ? m[2] : null;
-}
 
 // runId↔runId registry for the dispatch lifecycle. Module-level (not
 // per-wrapper): the score-tool wake hook resolves gateway runIds from
@@ -71,18 +49,15 @@ function mapRunIdIn(runId) {
   return gatewayToCoreRunId.get(runId) ?? runId;
 }
 
-// Translate a `sessionKey`/`session_key`/`runId`/`run_id` string field when
-// it carries a mapped value; leave anything else (foreign shapes, missing)
-// untouched.
+// Translate a `runId`/`run_id` string field when it carries a mapped value;
+// leave anything else (foreign shapes, missing) untouched. Session keys
+// pass through verbatim — there is no gateway shape left to map back.
 function mapMessageFields(msg) {
   if (!msg || typeof msg !== "object") return msg;
   const out = Array.isArray(msg) ? [...msg] : { ...msg };
   const items = Array.isArray(out) ? out : [out];
   for (const item of items) {
     if (!item || typeof item !== "object") continue;
-    for (const k of ["sessionKey", "session_key"]) {
-      if (typeof item[k] === "string") item[k] = toCoreSessionKey(item[k]);
-    }
     for (const k of ["runId", "run_id"]) {
       if (typeof item[k] === "string") item[k] = mapRunIdIn(item[k]);
     }
