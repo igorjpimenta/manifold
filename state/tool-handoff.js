@@ -1,133 +1,157 @@
-// tool-handoff.js — in-process bridge between a dispatched subagent's tool
-// call and the dispatching node's apply(). The tools live outside core
-// (oc-config); core owns only this registry and the engine side that reads
-// it. It is also published for harness use (package.json "./tool-handoff").
+// tool-handoff.js — sqlite-backed bridge between a dispatched subagent's
+// tool call and the dispatching node's apply(). The tools live outside core
+// (oc-config submits results over MCP); core owns only this registry and
+// the engine side that reads it. It is also published for harness use
+// (package.json "./tool-handoff").
 //
 // runSubagentTurn (executor-subagent.js) only ever returns {text, runId} to
 // apply() — never a tool call's structured payload — so a tool has no other
-// channel to hand data back to the node that spawned it.
+// channel to hand structured data back to the node that spawned it.
 //
-// This is deliberately in-memory, not persisted: the tool's execute() and
-// the engine's executor loop that calls apply() run in the same Node
-// process — no IPC/RPC boundary between them. Nothing here needs to survive a gateway restart either — an orphaned
-// agent-kind node is revived by re-dispatching it from scratch with a
-// continuation prompt (engine/executor.js's reviveAgentKindOrphan /
-// boot/flow-revival.js), never by recovering an in-flight tool result. So a
-// plain Map is sufficient, and anything left in it when the process exits
-// just vanishes with it instead of becoming an orphaned file.
+// This is deliberately durable, not in-memory: the delivering side (an MCP
+// tool call) and the consuming side (the engine's executor loop) may live
+// in different processes — an in-process Map would silently drop results
+// across that boundary the way it already did across dual module
+// registries. A `tool_results` row keyed by the harness-stamped session key
+// is the rendezvous both sides can reach: the agent knows its session key,
+// the dispatch knows it too, neither needs the other's invocationId.
 //
-// State lives on globalThis, NOT as plain module-scope `const` bindings:
-// tool implementations and pipeline definitions may load through different
-// module registries in the same process (transpiled plugin code vs native
-// ESM imports), which do not share module state — each produces its OWN
-// separate instance of this module, each with its own plain `const` Maps.
-// A tool that wrote a pending result through one registry copy would be
-// invisible to an apply() reading through the other: same process, two
-// disconnected copies of "the same" module. globalThis is the one thing
-// all loaders in the process actually share, so the real Maps live there —
-// every export below is a thin wrapper over a lazily-initialized globalThis
-// slot.
+// Writes upsert (latest wins per session); the dispatch consumes its row
+// and clears it, so a retry never reads a stale result from a prior
+// attempt. Rows are keyed by session, not invocation: one row per session
+// at most, so the table cannot grow unbounded over gateway uptime.
 //
-// Lifecycle (tool side: harness tools; engine side: the executor loop):
-//   registerDispatch(sessionKey, invocationId) — dispatchAgentEntry
-//     (executor-nodes.js), right before spawning the subagent session
-//   resolveInvocationId(sessionKey)            — a tool's execute(), to
-//     find its own invocationId
-//   writePendingResult(invocationId, payload)  — the tool's execute()
-//   readPendingResult(invocationId)            — the node's apply()
-//   clearPendingResult(invocationId)           — apply(), unconditionally,
-//     so a stale value from a prior attempt/retry can never be silently
-//     reused
-//   clearDispatch(sessionKey)                  — dispatchAgentEntry, once
-//     the dispatch settles (success or throw), so the sessionKey ->
-//     invocationId map doesn't grow unbounded over gateway uptime
-//
-// notifyToolFired/waitForToolSignal is a separate, runId-keyed wake-up
-// mechanism, not a data channel — it carries no payload (the payload still
-// only ever flows through writePendingResult/readPendingResult above). It
-// exists to fix a specific race: runSubagentTurn's dispatchAgentWithRetry
-// call only finds out a tool result exists when waitForRun settles — either
-// the whole underlying agent run reaches its own natural end, or timeoutMs
-// expires — even when the ONE tool call the node actually cares about
-// already fired long before either of those. A hook (e.g.
-// hooks/score-tool-wake.js) calls notifyToolFired(runId) the instant the
-// relevant tool call completes; runSubagentTurn races waitForRun against
-// waitForToolSignal(runId) so it can proceed the moment the real answer
-// exists instead of waiting on — or timing out against — the rest of the
-// runId is the correlation key here because tool-call events carry it
-// natively, and subagent.run() already returned it before the wait even
-// starts — no extra registration/resolution step needed the way
-// invocationId requires.
+// Lifecycle (tool side: MCP deliver_result; engine side: the executor loop):
+//   writePendingResult({ sessionKey, runId?, agentId?, kind?, payload })
+//   readPendingResult(sessionKey)        — the row, or null
+//   clearPendingResult(sessionKey)       — the dispatch, once apply() has
+//     consumed the payload (also covers the failure path — a failed turn
+//     never retries into a stale row)
+//   waitForToolResult(sessionKey, { pollMs? }) — { promise, cancel }; the
+//     promise resolves with the row the moment one exists (checked once up
+//     front, then polled), so a result written before the waiter starts is
+//     never missed
 
-const GLOBAL_KEY = "__manifold_tool_handoff_state__";
+import { eq } from "drizzle-orm";
+import { getSharedDb, withSharedWrite } from "./db.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
+import { toolResults } from "./schema.js";
+import { resolveStorePaths } from "./paths.js";
 
-function state() {
-  if (!globalThis[GLOBAL_KEY]) {
-    globalThis[GLOBAL_KEY] = {
-      invocationBySessionKey: new Map(),
-      pendingResultByInvocation: new Map(),
-      toolSignalWaitersByRunId: new Map(),
-    };
+// One shared client per DB path, migrated once. Concurrent first callers
+// share the same promise, so the migration never races itself. Cross-
+// process races resolve the same way every other store's do: each process
+// migrates idempotently, then shares its own connection.
+const _clients = new Map();
+
+async function toolDb(dbPath) {
+  let pending = _clients.get(dbPath);
+  if (!pending) {
+    pending = (async () => {
+      await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+      return getSharedDb(dbPath);
+    })().catch((err) => {
+      _clients.delete(dbPath);
+      throw err;
+    });
+    _clients.set(dbPath, pending);
   }
-  return globalThis[GLOBAL_KEY];
+  return pending;
 }
 
-export function notifyToolFired(runId) {
-  if (!runId) return;
-  const { toolSignalWaitersByRunId } = state();
-  const waiters = toolSignalWaitersByRunId.get(runId);
-  if (!waiters) return;
-  toolSignalWaitersByRunId.delete(runId);
-  for (const resolve of waiters) resolve();
+function storeDbPath() {
+  return resolveStorePaths().runtimeDb;
 }
 
-// Returns { promise, cancel } rather than a bare promise — the loser of a
-// Promise.race is never cleaned up on its own, so the caller MUST call
-// cancel() once the race is decided (whichever side wins) or this entry
-// leaks in toolSignalWaitersByRunId until notifyToolFired happens to fire
-// for that exact runId (which, if the race was already won by waitForRun,
-// may never happen).
-export function waitForToolSignal(runId) {
-  if (!runId) return { promise: new Promise(() => {}), cancel: () => {} };
-  const { toolSignalWaitersByRunId } = state();
-  let resolveFn;
-  const promise = new Promise((resolve) => { resolveFn = resolve; });
-  if (!toolSignalWaitersByRunId.has(runId)) toolSignalWaitersByRunId.set(runId, new Set());
-  toolSignalWaitersByRunId.get(runId).add(resolveFn);
+function toRow(r) {
+  if (!r) return null;
+  let payload = null;
+  try { payload = JSON.parse(r.payloadJson); } catch { payload = null; }
   return {
-    promise,
-    cancel: () => {
-      const waiters = toolSignalWaitersByRunId.get(runId);
-      if (!waiters) return;
-      waiters.delete(resolveFn);
-      if (waiters.size === 0) toolSignalWaitersByRunId.delete(runId);
-    },
+    sessionKey: r.sessionKey,
+    runId: r.runId ?? null,
+    agentId: r.agentId ?? null,
+    kind: r.kind ?? null,
+    payload,
   };
 }
 
-export function registerDispatch(sessionKey, invocationId) {
-  if (sessionKey && invocationId) state().invocationBySessionKey.set(sessionKey, invocationId);
+/** Latest-wins upsert for one session. No session key, no write. */
+export async function writePendingResult({ sessionKey, runId = null, agentId = null, kind = null, payload, dbPath = null } = {}) {
+  if (!sessionKey || payload === undefined) return;
+  const path = dbPath ?? storeDbPath();
+  const { db } = await toolDb(path);
+  let payloadJson;
+  try { payloadJson = JSON.stringify(payload); } catch { return; }
+  await withSharedWrite(path, () =>
+    db.insert(toolResults).values({
+      sessionKey, runId: runId ?? null, agentId: agentId ?? null,
+      kind: kind ?? null, payloadJson, updatedAt: Date.now(),
+    }).onConflictDoUpdate({
+      target: toolResults.sessionKey,
+      set: {
+        runId: runId ?? null, agentId: agentId ?? null, kind: kind ?? null,
+        payloadJson, updatedAt: Date.now(),
+      },
+    })
+  );
 }
 
-export function resolveInvocationId(sessionKey) {
+/** The unconsumed result for one session, or null. */
+export async function readPendingResult(sessionKey, { dbPath = null } = {}) {
   if (!sessionKey) return null;
-  return state().invocationBySessionKey.get(sessionKey) ?? null;
+  const path = dbPath ?? storeDbPath();
+  const { db } = await toolDb(path);
+  const rows = await db.select().from(toolResults).where(eq(toolResults.sessionKey, sessionKey)).limit(1);
+  return toRow(rows[0] ?? null);
 }
 
-export function clearDispatch(sessionKey) {
-  if (sessionKey) state().invocationBySessionKey.delete(sessionKey);
+/** Forget one session's result. Idempotent — unknown keys are a no-op. */
+export async function clearPendingResult(sessionKey, { dbPath = null } = {}) {
+  if (!sessionKey) return;
+  const path = dbPath ?? storeDbPath();
+  const { db } = await toolDb(path);
+  await withSharedWrite(path, () =>
+    db.delete(toolResults).where(eq(toolResults.sessionKey, sessionKey))
+  );
 }
 
-export function writePendingResult(invocationId, payload) {
-  if (!invocationId) return;
-  state().pendingResultByInvocation.set(invocationId, payload);
-}
-
-export function readPendingResult(invocationId) {
-  if (!invocationId) return null;
-  return state().pendingResultByInvocation.get(invocationId) ?? null;
-}
-
-export function clearPendingResult(invocationId) {
-  if (invocationId) state().pendingResultByInvocation.delete(invocationId);
+// Poll-based waiter: resolves with the row the moment one exists for the
+// session (checked once up front, so a result written before the waiter
+// starts is never missed). Returns { promise, cancel } — the caller MUST
+// call cancel() once the race is decided, or the interval keeps the event
+// loop alive for nothing.
+export function waitForToolResult(sessionKey, { pollMs = 250, dbPath = null } = {}) {
+  let timer = null;
+  let settled = false;
+  let resolveFn;
+  const promise = new Promise((resolve) => { resolveFn = resolve; });
+  const finish = (row) => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearInterval(timer);
+    resolveFn(row);
+  };
+  const cancel = () => {
+    if (settled) return;
+    settled = true;
+    if (timer) clearInterval(timer);
+  };
+  (async () => {
+    try {
+      const first = await readPendingResult(sessionKey, { dbPath });
+      if (first) { finish(first); return; }
+      timer = setInterval(async () => {
+        try {
+          const row = await readPendingResult(sessionKey, { dbPath });
+          if (row) finish(row);
+        } catch { /* transient read failure: keep polling */ }
+      }, Math.max(10, pollMs));
+      if (timer.unref) timer.unref();
+    } catch {
+      // Store unavailable: leave the promise pending; the waiter's own
+      // race (waitForRun) still settles the dispatch either way.
+    }
+  })();
+  return { promise, cancel };
 }

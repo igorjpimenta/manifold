@@ -57,14 +57,10 @@ const PUBLIC_API = {
   "./tool-handoff": {
     file: "./state/tool-handoff.js",
     exports: [
-      "notifyToolFired",
-      "waitForToolSignal",
-      "registerDispatch",
-      "resolveInvocationId",
-      "clearDispatch",
       "writePendingResult",
       "readPendingResult",
       "clearPendingResult",
+      "waitForToolResult",
     ],
   },
   "./state/db": {

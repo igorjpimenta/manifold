@@ -1,8 +1,9 @@
 // wire-ops.js — real core ops for the MCP servers.
 //
-// createRealOps builds the five tool ops from live core pieces: the
-// run-store for status/runs/cancel, and the executor + gate-resolver for
-// start/approve. Everything is store-backed — no stubs, no fakes.
+// createRealOps builds the six tool ops from live core pieces: the
+// run-store for status/runs/cancel, the executor + gate-resolver for
+// start/approve, and the tool-results store for deliver_result.
+// Everything is store-backed — no stubs, no fakes.
 //
 // Standalone note: `serve --mcp` runs outside the gateway, so there is no
 // subagent runtime. Code/manual/subflow nodes drive fine; an agent-node
@@ -14,6 +15,7 @@ import { createRunStore } from "../state/run-store.js";
 import { createStateStore } from "../state/state-store.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { createFailureStore } from "../state/failure-store.js";
+import { writePendingResult } from "../state/tool-handoff.js";
 import { createAdmissionQueueStore } from "../state/admission-queue-store.js";
 import { createNodeHealthStore } from "../state/node-health-store.js";
 import { createSessionIndex } from "../state/session-index.js";
@@ -141,6 +143,10 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     },
     async cancelFlow({ flowId, reason }) {
       return runStore.cancelFlow(flowId, reason);
+    },
+    async deliverResult({ sessionKey, runId, agentId, kind, payload }) {
+      await writePendingResult({ sessionKey, runId, agentId, kind, payload });
+      return { ok: true, sessionKey };
     },
     logger,
   };

@@ -24,6 +24,10 @@ const ops = {
     calls.push(["cancelFlow", flowId]);
     return flowId === "FLOW-1" ? { cancelled: true, flowId } : { cancelled: false, reason: "not found" };
   },
+  async deliverResult({ sessionKey, payload }) {
+    calls.push(["deliverResult", sessionKey, payload]);
+    return { ok: true, sessionKey };
+  },
   logger: { info() {}, warn() {}, error() {} },
 };
 

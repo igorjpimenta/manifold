@@ -10,7 +10,8 @@
 //   runStatus({ flowId })                       -> flow record | null
 //   listRuns({ pipelineId, status, limit })     -> flow record[]
 //   approveGate({ flowId, itemId, decision, text }) -> { ok, ... }
-//   cancelFlow({ flowId, reason })              -> { cancelled, ... }
+//   cancelFlow({ flowId, reason })                 -> { cancelled, ... }
+//   deliverResult({ sessionKey, runId, agent, kind, payload }) -> { ok }
 //   logger                                       -> { info, warn, error } (optional)
 //
 // The caller identity is the resolved `identity` — never a tool param —
@@ -101,10 +102,29 @@ export const TOOL_DEFS = [
       },
     },
   },
+  {
+    name: "manifold_deliver_result",
+    description:
+      "Deliver a structured tool result for the calling session: the dispatch " +
+      "waiting on this session's turn picks it up instead of waiting out the " +
+      "agent run. The session is identified from the caller's stamped identity, " +
+      "never from a parameter — a result cannot be filed under another session. " +
+      "Latest write wins per session; the dispatch consumes and clears it.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["payload"],
+      properties: {
+        payload: { description: "JSON result payload the node's apply() receives as output.toolResult.payload." },
+        kind: { type: "string", description: "Result kind (e.g. score, draft) — routed opaquely, never interpreted here." },
+        runId: { type: "string", description: "Agent run id, when known (traceability only)." },
+      },
+    },
+  },
 ];
 
 export function createManifoldToolHandlers(ops = {}) {
-  const { startRun, runStatus, listRuns, approveGate, cancelFlow, logger } = ops;
+  const { startRun, runStatus, listRuns, approveGate, cancelFlow, deliverResult, logger } = ops;
 
   function need(fn, name) {
     if (typeof fn !== "function") throw new Error(`manifold: op ${name} is not wired (no ${name} in injected ops)`);
@@ -182,15 +202,33 @@ export function createManifoldToolHandlers(ops = {}) {
     },
 
     async manifold_cancel(args, identity) {
-      const flowId = args?.flowId;
-      if (typeof flowId !== "string" || !flowId) return err("manifold_cancel: flowId is required", "rejected");
+      const flowId = typeof args?.flowId === "string" ? args.flowId : null;
+      if (!flowId) return err("manifold_cancel: flowId is required", "rejected");
       try {
         const r = await need(cancelFlow, "cancelFlow")({ flowId, reason: args?.reason ?? null });
         if (!r?.cancelled) return err(`manifold_cancel refused: ${r?.reason ?? "unknown"}`, "rejected", { flowId });
         logger?.info?.(`manifold: ${identitySessionKey(identity)} cancelled ${flowId}`);
         return ok(JSON.stringify(r), { status: "ok", flowId });
       } catch (e) {
-        return err(`manifold_cancel failed: ${e?.message ?? e}`, "error");
+        return err(`manifold_cancel failed: ${e?.message ?? e}`, "error", { flowId });
+      }
+    },
+
+    async manifold_deliver_result(args, identity) {
+      if (args?.payload === undefined) {
+        return err("manifold_deliver_result: payload is required", "rejected");
+      }
+      try {
+        await need(deliverResult, "deliverResult")({
+          sessionKey: identity.session,
+          runId: typeof args?.runId === "string" ? args.runId : null,
+          agentId: identity.agent,
+          kind: typeof args?.kind === "string" ? args.kind : null,
+          payload: args.payload,
+        });
+        return ok("delivered", { status: "ok", sessionKey: identity.session });
+      } catch (e) {
+        return err(`manifold_deliver_result failed: ${e?.message ?? e}`, "error");
       }
     },
   };
