@@ -132,10 +132,10 @@ export function registerDiscussHandlers({
     const stamp = readDiscussSession(sourceFlow.flowId, gateNodeId, normalizedItemId);
     const resolvedAgent = stamp?.agent ?? effectiveDiscuss.agent;
     // Discuss thread identity comes from the harness, never from core: a
-    // stamped thread keeps its id verbatim (including pre-harness `gf-…`
-    // ids, so in-flight threads survive the switch); a new thread asks the
-    // harness adapter for one. No minted fallback — a harness that cannot
-    // name its own sessions cannot host a discuss thread.
+    // stamped thread keeps its id verbatim whatever its shape; a new
+    // thread asks the harness adapter for one. No minted fallback — a
+    // harness that cannot name its own sessions cannot host a discuss
+    // thread.
     const sessionId = stamp?.sessionId
       ?? sessions?.newDiscussSessionId?.({
         agentId: resolvedAgent, flowId: sourceFlow.flowId,

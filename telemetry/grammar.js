@@ -22,8 +22,9 @@ const REGEX = {
   // the flow8 the thread belongs to — resolved to a flow parentHint only
   // when it parses, never assumed.
   DISCUSS:     /^agent:([^:]+):discuss:(.+)$/,
-  // Legacy core-minted discuss ids (`gf-discuss-<flow8>-<gate>-<item>`).
-  // Kept for pre-harness rows; new threads carry the harness shape above.
+  // `gf-discuss-<flow8>-<gate>-<item>` thread ids: the embedded flow8 is
+  // a real flow_id prefix — resolves via the same "flow" parentHint
+  // branch as the harness-shape ids above.
   GF_DISCUSS: /^gf-discuss-([0-9a-f]{8})-(.+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
   // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
