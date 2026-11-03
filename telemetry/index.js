@@ -320,8 +320,8 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         // (cron, operator, etc.), not to a made-up kind of its own. Falls
         // back to `kind ?? "flow-node"` only if the resolver isn't ready or
         // the trigger edge hasn't landed yet (race between flow start and
-        // recordTrigger) — a later `lineage backfill` pass or a HTTP-layer
-        // ATTR_JOIN re-attribution still recovers those.
+        // recordTrigger) — the HTTP-layer ATTR_JOIN re-attribution still
+        // recovers those.
         const parentKey = `flow:${flowId}`;
         let rootKind = kind ?? "flow-node", rootLabel = null, rootSessionKey = childSessionKey;
         if (resolver) {
@@ -381,7 +381,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
       commands: ["lineage"],
       descriptors: [{
         name: "lineage",
-        description: "Session lineage + per-call cost attribution (lookup / stats / backfill / cost)",
+        description: "Session lineage + per-call cost attribution (lookup / stats / cost)",
         hasSubcommands: true,
       }],
     },

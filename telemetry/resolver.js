@@ -1,7 +1,7 @@
 // resolver — given a sessionKey, return its parent + root + breadcrumbs.
 //
 // Three resolution layers tried in order:
-//   1. lineage table (fastest; populated by hooks + backfill)
+//   1. lineage table (fastest; populated by hooks)
 //   2. sessionKey grammar (parses scope kind out of the key string)
 //   3. external joins (flow_runs sqlite, cron jobs.json)
 //
@@ -247,7 +247,7 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
 
   /**
    * Compute the storeable row for a single sessionKey (full lineage stamp).
-   * Used by the hooks and by backfill.
+   * Used by the hooks.
    */
   async function resolve(sessionKey, opts = {}) {
     const chain = await walk(sessionKey, opts);

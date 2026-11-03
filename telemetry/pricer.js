@@ -1,8 +1,7 @@
 // pricer — when the runner fails to stamp usage.cost in a JSONL message
 // (model not registered in config, fallback chain breakage, etc.), compute
-// dollar cost from token counts × per-million rates. Used by both the
-// before_message_write hook and backfill so writes converge on the same
-// value regardless of source.
+// dollar cost from token counts × per-million rates. Used by the
+// before_message_write hook so hook-written rows converge on one value.
 //
 // Rates sourced from openclaw.json's per-model `cost` blocks where present.
 // Adding a new (provider, model): just append to RATES.

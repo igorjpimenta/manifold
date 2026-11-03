@@ -19,7 +19,6 @@
 import { registerCostRoutes }    from "./http-cost.js";
 import { registerTreeRoutes }    from "./http-tree.js";
 import { registerBudgetRoutes }  from "./http-budget.js";
-import { registerSessionRoutes } from "./http-sessions.js";
 
 export function registerHttpRoutes({ api, getStore, logger, getBroadcast }) {
   const json = (res, body, status = 200) => {
@@ -42,5 +41,4 @@ export function registerHttpRoutes({ api, getStore, logger, getBroadcast }) {
   registerCostRoutes({ api, getStore, logger, json, bad, parseRange });
   registerTreeRoutes({ api, getStore, logger, json, bad, parseRange });
   registerBudgetRoutes({ api, getStore, logger, json, bad, getBroadcast });
-  registerSessionRoutes({ api, logger, json, bad });
 }
