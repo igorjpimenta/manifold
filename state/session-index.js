@@ -10,7 +10,7 @@
 import { mkdirSync } from "node:fs";
 import { eq, and } from "drizzle-orm";
 import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
-import { flowSessions } from "./schema.js";
+import { flowSessions, discussThreads } from "./schema.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
@@ -29,7 +29,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
   } catch (err) {
     logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);
     // Return a no-op shim so callers don't need to null-check.
-    return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, async listForFlow() { return []; }, close() {} };
+    return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, async listForFlow() { return []; }, async recordThread() {}, async findThread() { return null; }, close() {} };
   }
 
   // `agent` is accepted and ignored (kept for call-site compatibility).
@@ -113,11 +113,59 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
+  // Gate discuss thread identity: one row per (flow, gate, item), upserted
+  // on first turn. The roster is the thread map — the harness owns the id.
+  // Latest write wins on conflict.
+  async function recordThread({ flowId, gateNodeId, itemId, agentId = null, sessionKey } = {}) {
+    if (!flowId || !gateNodeId || !itemId || !sessionKey) return;
+    try {
+      await withSharedWrite(dbPath, () =>
+        db.insert(discussThreads).values({
+          flowId, gateNodeId, itemId,
+          agentId: agentId ?? null, sessionKey,
+          updatedAt: Date.now(),
+        }).onConflictDoUpdate({
+          target: [discussThreads.flowId, discussThreads.gateNodeId, discussThreads.itemId],
+          set: {
+            agentId: agentId ?? null, sessionKey,
+            updatedAt: Date.now(),
+          },
+        })
+      );
+    } catch (err) {
+      logger?.warn?.(`manifold session-index: recordThread failed: ${err?.message ?? err}`);
+    }
+  }
+
+  // Thread stamp for (flow, gate, item), or null when no turn ran yet.
+  async function findThread(flowId, gateNodeId, itemId) {
+    if (!flowId || !gateNodeId || !itemId) return null;
+    try {
+      const rows = await db.select({
+        sessionKey: discussThreads.sessionKey,
+        agentId: discussThreads.agentId,
+      }).from(discussThreads)
+        .where(and(
+          eq(discussThreads.flowId, flowId),
+          eq(discussThreads.gateNodeId, gateNodeId),
+          eq(discussThreads.itemId, itemId),
+        ))
+        .limit(1);
+      if (!rows.length) return null;
+      return { sessionKey: rows[0].sessionKey, agentId: rows[0].agentId ?? null };
+    } catch (err) {
+      logger?.warn?.(`manifold session-index: findThread failed: ${err?.message ?? err}`);
+      return null;
+    }
+  }
+
   return {
     record,
     hasSessionForNode,
     flowIdForSessionKey,
     listForFlow,
+    recordThread,
+    findThread,
     close() { try { client.close(); } catch { /* ignore */ } },
     _db: client,
   };

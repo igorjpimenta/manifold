@@ -129,6 +129,20 @@ export const flowSessions = sqliteTable('flow_sessions', {
   uniqueIndex('idx_flow_sessions_uniq').on(table.flowId, table.sessionKey),
 ]);
 
+// Gate discuss thread identity: one row per (flow, gate, item), keyed by
+// the coordinates — never by parsing the session id. Replaces the
+// per-thread JSON sidecars: the roster is the map, the harness owns the id.
+export const discussThreads = sqliteTable('discuss_threads', {
+  flowId:      text('flow_id').notNull(),
+  gateNodeId:  text('gate_node_id').notNull(),
+  itemId:      text('item_id').notNull(),
+  agentId:     text('agent_id'),
+  sessionKey:  text('session_key').notNull(),
+  updatedAt:   integer('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_discuss_threads_unique').on(table.flowId, table.gateNodeId, table.itemId),
+]);
+
 export const nodeHealth = sqliteTable('node_health', {
   id:              text('id').primaryKey(),
   pipelineId:      text('pipeline_id').notNull(),

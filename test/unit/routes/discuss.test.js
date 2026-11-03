@@ -56,6 +56,11 @@ function createMockReqWithBody(method, path_, body, headers = {}) {
 }
 
 function makeDeps(api, overrides = {}) {
+  // In-memory thread roster standing in for the session index: keyed by
+  // (flow, gate, item) exactly like the discuss_threads table, so stamp →
+  // resolve round-trips behave the same.
+  const threads = new Map();
+  const key = (flowId, gateNodeId, itemId) => `${flowId} ${gateNodeId} ${itemId}`;
   return {
     api,
     store: { get: () => null, list: () => [] },
@@ -67,6 +72,14 @@ function makeDeps(api, overrides = {}) {
     clearPending: () => {},
     sessions,
     discussStore: { getComponent: () => null, listComponents: () => [], setComponent: () => {} },
+    sessionIndex: {
+      async recordThread({ flowId, gateNodeId, itemId, agentId, sessionKey }) {
+        threads.set(key(flowId, gateNodeId, itemId), { sessionKey, agentId: agentId ?? null });
+      },
+      async findThread(flowId, gateNodeId, itemId) {
+        return threads.get(key(flowId, gateNodeId, itemId)) ?? null;
+      },
+    },
     ...overrides,
   };
 }
@@ -90,10 +103,9 @@ describe("registerDiscussHandlers — return shape", () => {
   ];
 
   const REQUIRED_HELPERS = [
-    "stampDiscussSession",
-    "resolveDiscussTarget",
-    "normalizePendingFields",
-  ];
+  "resolveDiscussTarget",
+  "normalizePendingFields",
+];
 
   for (const name of [...REQUIRED_HANDLERS, ...REQUIRED_HELPERS]) {
     test(`returns function: ${name}`, () => {
@@ -115,17 +127,69 @@ describe("registerDiscussHandlers — return shape", () => {
 // gate_transition when flow.status === "running" and waitJson is null.
 
 describe("registerDiscussHandlers — resolveDiscussTarget mid-batch (running)", () => {
-  test("always 503s with gate_transition when flow is running and waitJson is null", () => {
+  test("always 503s with gate_transition when flow is running and waitJson is null", async () => {
     const { api } = createMockApi();
     const deps = makeDeps(api);
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
-    const target = resolveDiscussTarget(
+    const target = await resolveDiscussTarget(
       { flowId: "flow-1", status: "running", waitJson: null, stateJson: { pipelineId: "test-pipeline" } },
       "alpha",
     );
     assert.equal(target.ok, false);
     assert.equal(target.code, "gate_transition");
     assert.equal(target.status, 503);
+  });
+});
+
+// ── resolveDiscussTarget — thread identity comes from the session roster ──
+// No sidecar files: the first turn records (flow, gate, item) → session,
+// later turns re-resolve the same thread verbatim — including the agent,
+// so a pipeline config change mid-thread can't orphan the conversation.
+
+describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identity", () => {
+  const testFlowId = `unit-test-discuss-roster-${Date.now()}`;
+
+  function gateDeps(api) {
+    return makeDeps(api, {
+      pipelinesRef: {
+        value: new Map([["test-pipeline", { nodes: { GATE: { kind: "human-gate", discuss: { agent: "config-agent" } } } }]]),
+      },
+    });
+  }
+
+  function gateFlow() {
+    return {
+      flowId: testFlowId,
+      status: "blocked",
+      waitJson: { kind: "human-gate", nodeId: "GATE", items: [{ itemId: "item-1" }] },
+      stateJson: { pipelineId: "test-pipeline" },
+    };
+  }
+
+  test("unstamped thread resolves with needsStamp and the config agent", async () => {
+    const { api } = createMockApi();
+    const { resolveDiscussTarget } = registerDiscussHandlers(gateDeps(api));
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
+    assert.equal(target.ok, true);
+    assert.equal(target.needsStamp, true);
+    assert.equal(target.agent, "config-agent");
+    assert.equal(typeof target.sessionId, "string");
+  });
+
+  test("stamped thread resolves verbatim, roster agent wins over config", async () => {
+    const { api } = createMockApi();
+    const deps = gateDeps(api);
+    const { resolveDiscussTarget } = registerDiscussHandlers(deps);
+    await deps.sessionIndex.recordThread({
+      flowId: testFlowId, gateNodeId: "GATE", itemId: "item-1",
+      agentId: "roster-agent", sessionKey: "agent:test:thread-1",
+    });
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
+    assert.equal(target.ok, true);
+    assert.equal(target.needsStamp, false);
+    assert.equal(target.sessionId, "agent:test:thread-1");
+    assert.equal(target.sessionKey, "agent:test:thread-1");
+    assert.equal(target.agent, "roster-agent");
   });
 });
 
@@ -138,7 +202,6 @@ describe("registerDiscussHandlers — handleDiscuss builds ctx.state via assembl
   const testFlowId = `unit-test-discuss-${Date.now()}`;
 
   after(async () => {
-    await rm(path.join(ISOLATED_DATA_DIR, "discuss-sessions"), { recursive: true, force: true }).catch(() => {});
     await rm(path.join(os.homedir(), ".openclaw", "discuss-turns", testFlowId), { recursive: true, force: true }).catch(() => {});
   });
 
@@ -240,7 +303,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
   const itemId = "item-1";
 
   after(async () => {
-    await rm(path.join(ISOLATED_DATA_DIR, "discuss-audio", testFlowId), { recursive: true, force: true }).catch(() => {});
+    await rm(path.join(ISOLATED_DATA_DIR, "media", "audio", "test-harness", testFlowId), { recursive: true, force: true }).catch(() => {});
   });
 
   const sourceFlow = {

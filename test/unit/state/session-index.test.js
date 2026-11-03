@@ -463,3 +463,39 @@ describe("listForFlow()", () => {
     idx.close();
   });
 });
+
+// ─── recordThread / findThread — discuss thread roster ───────────────────────
+
+describe("recordThread / findThread", () => {
+  test("findThread returns null when no turn ran yet", async () => {
+    const idx = await makeIndex();
+    assert.equal(await idx.findThread("flow-1", "GATE", "item-1"), null);
+    idx.close();
+  });
+
+  test("recordThread then findThread round-trips agent + session key", async () => {
+    const idx = await makeIndex();
+    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "scout", sessionKey: "agent:scout:t1" });
+    assert.deepEqual(
+      await idx.findThread("flow-1", "GATE", "item-1"),
+      { sessionKey: "agent:scout:t1", agentId: "scout" },
+    );
+    idx.close();
+  });
+
+  test("recordThread upserts on (flow, gate, item) — one row per thread", async () => {
+    const idx = await makeIndex();
+    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "a1", sessionKey: "k1" });
+    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "a2", sessionKey: "k2" });
+    assert.deepEqual(
+      await idx.findThread("flow-1", "GATE", "item-1"),
+      { sessionKey: "k2", agentId: "a2" },
+    );
+    const { rows } = await idx._db.execute({
+      sql: "SELECT * FROM discuss_threads WHERE flow_id = ?",
+      args: ["flow-1"],
+    });
+    assert.equal(rows.length, 1);
+    idx.close();
+  });
+});

@@ -44,7 +44,10 @@ function makeDeps(overrides = {}) {
       clearPending: async (flowId, itemId) => { calls.status.push({ flowId, itemId, status: "cleared" }); },
       stampMessageError: async (flowId, itemId, turnId, error) => { calls.status.push({ flowId, itemId, status: "error", turnId, error }); },
     },
-    stampSession: (...args) => { calls.stamp.push(args); },
+    sessionIndex: {
+      async recordThread(data) { calls.stamp.push(data); },
+      async findThread() { return null; },
+    },
     recordLineage: async (entry) => { calls.lineage.push(entry); },
     emit: async (event, payload) => { calls.emit.push({ event, payload }); return { ok: true }; },
     logger: { warn: () => {}, info: () => {} },
@@ -188,9 +191,9 @@ test("malformed frames are rejected without killing the socket", async () => {
   assert.equal(reply.type, "reply");
 });
 
-test("requires readFlow, resolveTarget, runTurn, discussStore, stampSession", () => {
+test("requires readFlow, resolveTarget, runTurn, discussStore, sessionIndex", () => {
   const deps = makeDeps();
-  for (const key of ["readFlow", "resolveTarget", "runTurn", "discussStore", "stampSession"]) {
+  for (const key of ["readFlow", "resolveTarget", "runTurn", "discussStore", "sessionIndex"]) {
     const partial = { ...deps };
     delete partial[key];
     assert.throws(() => createDialogServer({ port: 0, ...partial }), new RegExp(key));

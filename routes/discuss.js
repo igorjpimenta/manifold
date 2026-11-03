@@ -2,7 +2,6 @@ import path from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { looksLikeMetaNarration, normalizePendingFields } from "./discuss-helpers.js";
-import { stampDiscussSession, readDiscussSession } from "./discuss-session.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
 import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow, resolveAudioHarness } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
@@ -53,12 +52,13 @@ export function registerDiscussHandlers({
   // the harness (sessions.newDiscussSessionId), never minted here — core
   // never imports the gateway's session store (same seam as operator.js).
   sessions,
+  // The roster records what each thread was given, keyed by its coordinates.
   sessionIndex,
 }) {
 
   // ── Resolve discuss target ────────────────────────────────────────────────
 
-  function resolveDiscussTarget(sourceFlow, wantItemId) {
+  async function resolveDiscussTarget(sourceFlow, wantItemId) {
     const items = Array.isArray(sourceFlow.waitJson?.items) ? sourceFlow.waitJson.items : [];
     let normalizedItemId = null;
     let gateNodeId = null;
@@ -129,14 +129,13 @@ export function registerDiscussHandlers({
         error: "this gate's pipeline hasn't opted into discussion (set `discuss: { agent, promptBuilder }` on the gate node, or set `discuss.defaultAgent` in the manifold plugin config in openclaw.json)",
       };
     }
-    const stamp = readDiscussSession(sourceFlow.flowId, gateNodeId, normalizedItemId);
-    const resolvedAgent = stamp?.agent ?? effectiveDiscuss.agent;
-    // Discuss thread identity comes from the harness, never from core: a
-    // stamped thread keeps its id verbatim whatever its shape; a new
-    // thread asks the harness adapter for one. No minted fallback — a
-    // harness that cannot name its own sessions cannot host a discuss
-    // thread.
-    const sessionId = stamp?.sessionId
+    // Thread identity: the roster (keyed by flow, gate, item) holds what
+    // earlier turns used; a thread with no row asks the harness for an id,
+    // because the harness owns the session namespace. A missing row means
+    // no turn ran yet — the caller records the new thread.
+    const stamp = await sessionIndex?.findThread?.(sourceFlow.flowId, gateNodeId, normalizedItemId);
+    const resolvedAgent = stamp?.agentId ?? effectiveDiscuss.agent;
+    const sessionId = stamp?.sessionKey
       ?? sessions?.newDiscussSessionId?.({
         agentId: resolvedAgent, flowId: sourceFlow.flowId,
         gateNodeId, itemId: normalizedItemId,
@@ -160,9 +159,9 @@ export function registerDiscussHandlers({
       itemId: normalizedItemId,
       agent: resolvedAgent,
       needsStamp: !stamp,
-      // Coarse node id the discuss session itself is keyed/stamped under
-      // (readDiscussSession/stampDiscussSession above) — the loop's own id
-      // for a branch-mode gate, not the fine-grained per-sub-node id below.
+      // Coarse node id the discuss thread itself is keyed under in the
+      // roster — the loop's own id for a branch-mode gate, not the
+      // fine-grained per-sub-node id below.
       gateNodeId,
       // Specific node this discuss session is actually about, for cost/
       // lineage attribution — "PROPOSE.GATE", not just "PROPOSE", when the
@@ -193,7 +192,7 @@ export function registerDiscussHandlers({
       return true;
     }
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -217,7 +216,12 @@ export function registerDiscussHandlers({
     }
 
     if (target.needsStamp) {
-      stampDiscussSession(sourceFlow.flowId, target.gateNodeId ?? "", target.itemId, target.agent, target.sessionId);
+      try {
+        await sessionIndex?.recordThread?.({
+          flowId: sourceFlow.flowId, gateNodeId: target.gateNodeId ?? "",
+          itemId: target.itemId, agentId: target.agent ?? null, sessionKey: target.sessionKey,
+        });
+      } catch {}
       api.runtime?.lineage?.recordSpawn?.({ childSessionKey: target.sessionKey, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
     }
     // Transcript roster lives in flow_sessions alongside dispatch rows, so
@@ -447,7 +451,7 @@ export function registerDiscussHandlers({
     }
     const ext = AUDIO_MIME_EXT[contentType] ?? "m4a";
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -525,7 +529,7 @@ export function registerDiscussHandlers({
       return true;
     }
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -635,7 +639,7 @@ export function registerDiscussHandlers({
     const wantItemId = url.searchParams.get("itemId");
     const offsetParam = Number(url.searchParams.get("offset"));
     const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? Math.floor(offsetParam) : 0;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -785,7 +789,7 @@ export function registerDiscussHandlers({
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
     // Resolve target first so we can use target.itemId for the sidecar
     // lookup before checking whether payload is present.
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -863,7 +867,6 @@ export function registerDiscussHandlers({
     handleDiscussAudioRetry,
     handleDiscussHistory,
     handleDiscussApplyDraft,
-    stampDiscussSession,
     resolveDiscussTarget,
     normalizePendingFields,
   };

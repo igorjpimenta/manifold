@@ -73,7 +73,6 @@ export function selectDiscussProvider({ primarySpec, chain, isCooldown }) {
 
 export function createDiscussHandler({
   api,
-  stampDiscussSession,
   normalizePendingFields,
   readPending,
   mergePendingFields,
@@ -103,6 +102,9 @@ export function createDiscussHandler({
     const sessionFile = sessions.resolveSessionFile(agentId, sessionId);
     const isFirstTurn = !sessions.sessionFileExists(sessionFile);
     if (isFirstTurn) {
+      // Touch only — thread identity lives in core's session roster
+      // (recorded pre-elev); nothing is stamped here and the id is never
+      // parsed.
       try {
         sessions.ensureSessionFile(sessionFile);
       } catch (err) {
@@ -170,12 +172,8 @@ export function createDiscussHandler({
           }
         }
       }
-    if (isFirstTurn && itemIdForDraft) {
-      // gateNodeId arrives explicitly from core (elev body) — never parsed
-      // out of the session id, whose shape belongs to the harness.
-      const gateNodeId = typeof body.gateNodeId === "string" ? body.gateNodeId : "";
-      try { stampDiscussSession(flowId, gateNodeId, itemIdForDraft, agentId, sessionId); } catch {}
-    }
+    // Thread identity is recorded by core before the elev call (session
+    // roster); nothing is stamped here and the session id is never parsed.
       let replyText = result?.meta?.finalAssistantVisibleText
         ?? result?.meta?.finalAssistantRawText
         ?? (Array.isArray(result?.payloads)
