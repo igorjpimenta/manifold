@@ -36,6 +36,13 @@
       "when": 1793200686845,
       "tag": "0004_panoramic_ego",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793742229032,
+      "tag": "0005_square_kinsey_walden",
+      "breakpoints": true
     }
   ]
 }
