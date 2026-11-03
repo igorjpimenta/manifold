@@ -1,5 +1,5 @@
 // pipelines-watcher.js — keep `pipelinesRef` in sync with the on-disk
-// `~/.openclaw/workspace/.pipelines/` directory.
+// pipelines directory handed in as `pipelinesDir`.
 //
 // Why: without this, `loadPipelines` only runs once at gateway boot (via the
 // `manifold-loader` service or `ensurePipelinesLoaded`'s "load once if
