@@ -1,15 +1,15 @@
 // tool-handoff.js — in-process bridge between a dispatched subagent's tool
-// call and the dispatching node's apply().
+// call and the dispatching node's apply(). The tools live outside core
+// (oc-config); core owns only this registry and the engine side that reads
+// it. It is also published for harness use (package.json "./tool-handoff").
 //
 // runSubagentTurn (executor-subagent.js) only ever returns {text, runId} to
 // apply() — never a tool call's structured payload — so a tool has no other
 // channel to hand data back to the node that spawned it.
 //
 // This is deliberately in-memory, not persisted: the tool's execute() and
-// the engine's executor.js loop that calls apply() run in the same Node
-// process (api.registerTool wires the tool into the same in-process plugin
-// registry the executor loop lives in — no IPC/RPC boundary between them).
-// Nothing here needs to survive a gateway restart either — an orphaned
+// the engine's executor loop that calls apply() run in the same Node
+// process — no IPC/RPC boundary between them. Nothing here needs to survive a gateway restart either — an orphaned
 // agent-kind node is revived by re-dispatching it from scratch with a
 // continuation prompt (engine/executor.js's reviveAgentKindOrphan /
 // boot/flow-revival.js), never by recovering an in-flight tool result. So a
@@ -17,19 +17,18 @@
 // just vanishes with it instead of becoming an orphaned file.
 //
 // State lives on globalThis, NOT as plain module-scope `const` bindings:
-// the plugin's tool files load through jiti's CJS transpilation
-// (engine/executor-subagent.js, agent/tools/*.js), while pipeline files
-// under workspace/.pipelines/** load via native ESM `await import(url)`
-// (engine/loader.js). Both import this file by the same file:// URL, but
-// jiti and native ESM do not share a module registry — each produces its
-// OWN separate instance of this module, each with its own plain `const`
-// Maps. A jiti-loaded tool wrote a pending result that a natively-loaded
-// apply() could never see: same process, two disconnected copies of "the
-// same" module. globalThis is the one thing both loaders actually share,
-// so the real Maps live there — every export below is a
-// thin wrapper over a lazily-initialized globalThis slot.
+// tool implementations and pipeline definitions may load through different
+// module registries in the same process (transpiled plugin code vs native
+// ESM imports), which do not share module state — each produces its OWN
+// separate instance of this module, each with its own plain `const` Maps.
+// A tool that wrote a pending result through one registry copy would be
+// invisible to an apply() reading through the other: same process, two
+// disconnected copies of "the same" module. globalThis is the one thing
+// all loaders in the process actually share, so the real Maps live there —
+// every export below is a thin wrapper over a lazily-initialized globalThis
+// slot.
 //
-// Lifecycle:
+// Lifecycle (tool side: harness tools; engine side: the executor loop):
 //   registerDispatch(sessionKey, invocationId) — dispatchAgentEntry
 //     (executor-nodes.js), right before spawning the subagent session
 //   resolveInvocationId(sessionKey)            — a tool's execute(), to
@@ -55,11 +54,10 @@
 // relevant tool call completes; runSubagentTurn races waitForRun against
 // waitForToolSignal(runId) so it can proceed the moment the real answer
 // exists instead of waiting on — or timing out against — the rest of the
-// turn. runId (not invocationId/sessionKey) is the correlation key here
-// because it's what before_tool_call/after_tool_call events carry natively
-// (see hooks/profile-write-lock.js's identical event.runId usage) and it's
-// already returned by subagent.run() before the wait even starts — no
-// extra registration/resolution step needed the way invocationId requires.
+// runId is the correlation key here because tool-call events carry it
+// natively, and subagent.run() already returned it before the wait even
+// starts — no extra registration/resolution step needed the way
+// invocationId requires.
 
 const GLOBAL_KEY = "__manifold_tool_handoff_state__";
 
