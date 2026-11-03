@@ -1,5 +1,5 @@
-// `openclaw lineage <subcommand>` — operator-facing CLI for inspection,
-// stats, and trigger-edge backfill. Overlaps with the http-cost.js endpoints
+// `openclaw lineage <subcommand>` — operator-facing CLI for inspection
+// and stats. Overlaps with the http-cost.js endpoints
 // that back the dashboard/companion-app views; useful standalone for debugging.
 
 import { execAll, execGet } from "./http-helpers.js";
@@ -221,17 +221,6 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       console.log(`\nCost rows: ${costRows.n}  total: $${costRows.total.toFixed(4)}`);
       console.log(`By root kind:`);
       for (const r of byRootCost) console.log(`  ${r.root_kind.padEnd(22)} calls=${String(r.calls).padStart(6)}  cost=$${(r.cost ?? 0).toFixed(4)}`);
-    });
-
-  cmd.command("backfill")
-    .description("Rebuild missing child-flow trigger edges in the lineage table from runtime.sqlite")
-    .option("--force", "Re-write lineage rows even when they already exist (does not touch hook-written rows)")
-    .action(async (opts) => {
-      const store = await getStore(); const resolver = await getResolver();
-      if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
-      const { runBackfill } = await import("./backfill.js");
-      const summary = await runBackfill({ store, resolver, logger, force: !!opts.force });
-      console.log(JSON.stringify(summary, null, 2));
     });
 
   cmd.command("cost")
