@@ -27,7 +27,7 @@ concurrency:
 jobs:
   release:
     name: Verify + publish GitHub release
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
       contents: write  # create the GitHub release
@@ -98,8 +98,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        # No `gh` on self-hosted runners — the releases API directly.
-        # generate_release_notes keeps the auto-notes; humans edit after.
+        # Direct API call (works on any runner); generate_release_notes keeps
+        # the auto-notes — humans edit after.
         run: |
           if curl -sf -H "Authorization: Bearer $GH_TOKEN" \
               "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$TAG" >/dev/null; then
