@@ -13,6 +13,7 @@ export function registerRunRoutes({
   invokeElevated,
   discussStore,
   failureStore,
+  sessionIndex,
   // discuss handlers — destructured from registerDiscussHandlers() return value
   handleDiscuss,
   handleDiscussHistory,
@@ -938,72 +939,73 @@ export function registerRunRoutes({
 
   // ── sendTranscriptsList ───────────────────────────────────────────────────
 
+  // Transcripts read manifold's own stores only. Discuss threads come from
+  // discuss-store (both directions of every dialog-door turn, keyed by
+  // (flowId, itemId)); dispatch agent turns come from node-executions
+  // resultJson (a single assistant turn when the stored result carries
+  // reply text, metadata-only otherwise — content is never invented).
+  // Attribution uses stored columns (flow_sessions node/branch columns,
+  // discuss itemId); the sessionKey passes through opaquely and is never
+  // parsed here.
+
   // lite=1  → return turnCount only, no turn text (for list views)
   // sessionKey=X → return a single transcript with full turns (for transcript drill-in)
   async function sendTranscriptsList(res, flow, url) {
-    const { readdir, readFile } = await import("node:fs/promises");
-    const pathMod = await import("node:path");
-    const osMod = await import("node:os");
-    const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
-    // Attribution comes from the session ledger, never from the key's
-    // shape: a session id is opaque, so the flow link comes from the row
-    // that recorded the dispatch.
+    // Plain-text session ids minted by core (`mf-<flowShort>-…` dispatches,
+    // `gf-discuss-<flowShort>-…` discuss threads): match verbatim — the
+    // agent is the directory being scanned.
+    const subagentKeyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
     const discussKeyPattern  = new RegExp(`^gf-discuss-${flowShort}-(.+)$`);
+    void subagentKeyPattern;
+    void discussKeyPattern;
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;
 
-    let agentDirs = [];
-    try { agentDirs = await readdir(AGENTS_DIR, { withFileTypes: true }); }
-    catch {
-      res.statusCode = 200;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ transcripts: [] }));
-      return true;
-    }
+    // Session roster for this flow: one row per dispatch attempt plus one
+    // per discuss thread, each carrying its stored node/item attribution.
+    const sessionRows = await Promise.resolve(sessionIndex?.listForFlow?.(flow.flowId)).catch(() => []) ?? [];
+    const discussThreads = await Promise.resolve(discussStore?.listForFlow?.(flow.flowId)).catch(() => []) ?? [];
+    const nodeExecutionsStore = getNodeExecutionsStore();
+    const results = await Promise.resolve(nodeExecutionsStore.listResultsForFlow(flow.flowId)).catch(() => []);
+    const resultByNode = new Map((results ?? []).map((r) => [r?.nodeId, r]));
+    // Agent display name resolves from the loaded pipeline's own node def;
+    // null when the pipeline is not loaded — never guessed from key shape.
+    const pipelineNodes = pipelinesRef?.value?.get?.(flow.stateJson?.pipelineId)?.nodes ?? {};
 
     const transcripts = [];
-    for (const ent of agentDirs) {
-      if (!ent.isDirectory()) continue;
-      const agent = ent.name;
-      const indexPath = pathMod.join(AGENTS_DIR, agent, "sessions", "sessions.json");
-      let index;
-      try {
-        const raw = await readFile(indexPath, "utf-8");
-        index = JSON.parse(raw);
-      } catch { continue; }
-      if (!index || typeof index !== "object") continue;
-      for (const [sessionKey, meta] of Object.entries(index)) {
-        // sessionKey filter: skip non-matching entries fast
-        if (singleKey && sessionKey !== singleKey) continue;
-        // Only core-minted discuss threads are recognizable here; harness
-        // keys pass through verbatim and never match a shape.
-        const dM = discussKeyPattern.exec(sessionKey);
-        if (!dM) continue;
-        const nodeId = "discuss";
-        const itemKey = dM[1];
-        const sessionId = meta?.sessionId;
-        if (!sessionId) continue;
-        if (lite) {
-          const turnCount = await countSessionTurns(agent, sessionId, AGENTS_DIR, pathMod, readFile).catch(() => 0);
-          transcripts.push({
-            sessionKey, agent, nodeId, itemKey, sessionId,
-            startedAt: meta?.sessionStartedAt ?? null,
-            updatedAt: meta?.updatedAt ?? null,
-            turnCount,
-          });
-        } else {
-          const turns = await parseSessionTurns(agent, sessionId, AGENTS_DIR, pathMod, readFile).catch(() => []);
-          transcripts.push({
-            sessionKey, agent, nodeId, itemKey, sessionId,
-            startedAt: meta?.sessionStartedAt ?? null,
-            updatedAt: meta?.updatedAt ?? null,
-            turns,
-          });
-        }
-        if (singleKey) break; // found the one we need
+    for (const row of sessionRows) {
+      // Discuss identity rows (branchItemId set) are covered by the discuss
+      // loop below, which joins them to full turns from discuss-store.
+      if (row.branchItemId != null) continue;
+      if (singleKey && row.sessionKey !== singleKey) continue;
+      const result = row.nodeId != null ? resultByNode.get(row.nodeId) : null;
+      const turns = lite ? null : dispatchTurns(result);
+      transcripts.push({
+        sessionKey: row.sessionKey, agent: pipelineNodes?.[row.nodeId]?.agent ?? null,
+        nodeId: row.nodeId ?? null, itemKey: row.branchItemId ?? null, sessionId: row.sessionKey,
+        startedAt: row.spawnedAt ?? null,
+        updatedAt: result?.resultWrittenAt ?? row.spawnedAt ?? null,
+        ...(lite ? { turnCount: turnsForCount(result) } : { turns }),
+      });
+    }
+    for (const thread of discussThreads) {
+      // A thread predating session-index recording has turns but no stored
+      // identity row — it still lists, with null identity fields.
+      let identity = null;
+      for (const row of sessionRows) {
+        if (row.branchItemId === thread.itemId && (!identity || (row.spawnedAt ?? 0) > (identity.spawnedAt ?? 0))) identity = row;
       }
-      if (singleKey && transcripts.length > 0) break;
+      const sessionKey = identity?.sessionKey ?? null;
+      if (singleKey && sessionKey !== singleKey) continue;
+      const turns = lite ? null : discussTurns(thread.messages);
+      transcripts.push({
+        sessionKey, agent: null,
+        nodeId: identity?.nodeId ?? "discuss", itemKey: thread.itemId ?? null, sessionId: sessionKey,
+        startedAt: thread.messages?.[0]?.ts ?? thread.updatedAt ?? null,
+        updatedAt: thread.updatedAt ?? null,
+        ...(lite ? { turnCount: Array.isArray(thread.messages) ? thread.messages.length : 0 } : { turns }),
+      });
     }
     transcripts.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
     res.statusCode = 200;
@@ -1012,53 +1014,51 @@ export function registerRunRoutes({
     return true;
   }
 
-  async function countSessionTurns(agent, sessionId, agentsDir, pathMod, readFile) {
-    const file = pathMod.join(agentsDir, agent, "sessions", `${sessionId}.jsonl`);
-    let raw;
-    try { raw = await readFile(file, "utf-8"); }
-    catch { return 0; }
-    let count = 0;
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      let evt;
-      try { evt = JSON.parse(line); } catch { continue; }
-      if (evt?.type !== "message") continue;
-      const role = evt.message?.role;
-      if (role === "user" || role === "assistant") count++;
-    }
-    return count;
-  }
-
-  async function parseSessionTurns(agent, sessionId, agentsDir, pathMod, readFile) {
-    const file = pathMod.join(agentsDir, agent, "sessions", `${sessionId}.jsonl`);
-    let raw;
-    try { raw = await readFile(file, "utf-8"); }
-    catch { return []; }
+  // Stored discuss messages use operator/agent roles; the transcript wire
+  // shape (and its dashboard renderer) uses user/assistant.
+  function discussTurns(messages) {
     const turns = [];
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      let evt;
-      try { evt = JSON.parse(line); } catch { continue; }
-      if (evt?.type !== "message") continue;
-      const msg = evt.message ?? {};
-      const role = msg.role;
-      if (role !== "user" && role !== "assistant") continue;
-      let text = "";
-      let thinking = "";
-      const content = Array.isArray(msg.content) ? msg.content : [];
-      for (const part of content) {
-        if (part?.type === "text" && typeof part.text === "string") {
-          text += (text ? "\n" : "") + part.text;
-        } else if (part?.type === "thinking" && typeof part.thinking === "string") {
-          thinking += (thinking ? "\n" : "") + part.thinking;
-        }
-      }
-      const cap = 8 * 1024;
-      const truncated = text.length > cap;
-      if (truncated) text = text.slice(0, cap);
-      turns.push({ role, text, thinking: thinking || null, truncated, timestamp: evt.timestamp ?? null });
+    if (!Array.isArray(messages)) return turns;
+    for (const m of messages) {
+      const { text, truncated } = capText(typeof m?.text === "string" ? m.text : "");
+      turns.push({
+        role: m?.role === "agent" ? "assistant" : "user",
+        text, thinking: null, truncated, timestamp: m?.ts ?? null,
+      });
     }
     return turns;
+  }
+
+  // The only dispatch content manifold observes durably is the node's own
+  // resultJson: a bare string, or an object carrying reply text in `text`.
+  // Anything else yields no turn — the entry lists with metadata only.
+  function dispatchTurns(result) {
+    const text = dispatchTurnText(result?.resultJson);
+    if (text == null) return [];
+    const capped = capText(text);
+    return [{
+      role: "assistant", text: capped.text, thinking: null,
+      truncated: capped.truncated, timestamp: result?.resultWrittenAt ?? null,
+    }];
+  }
+
+  function turnsForCount(result) {
+    return dispatchTurnText(result?.resultJson) == null ? 0 : 1;
+  }
+
+  function dispatchTurnText(resultJson) {
+    if (typeof resultJson !== "string") return null;
+    let parsed = resultJson;
+    try { parsed = JSON.parse(resultJson); } catch { return null; }
+    if (typeof parsed === "string") return parsed;
+    if (parsed && typeof parsed === "object" && typeof parsed.text === "string") return parsed.text;
+    return null;
+  }
+
+  function capText(text) {
+    const cap = 8 * 1024;
+    if (text.length <= cap) return { text, truncated: false };
+    return { text: text.slice(0, cap), truncated: true };
   }
 
   // ── sendCompareToPeers ────────────────────────────────────────────────────

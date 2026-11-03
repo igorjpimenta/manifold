@@ -225,9 +225,36 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     return result;
   }
 
+  // Every discuss thread for one flow, oldest activity first.
+  // Transcript listing builds its discuss entries from these rows so both
+  // directions of every dialog-door turn come from this store, keyed by
+  // (flowId, itemId) — never from harness session files.
+  async function listForFlow(flowId) {
+    if (!flowId) return [];
+    const rows = await db.select().from(discussState)
+      .where(eq(discussState.flowId, flowId));
+    // One entry per itemId: ensureRow has no conflict target on this
+    // table, so repeated appends leave convergent duplicate rows behind.
+    // getState reads rows[0] for the same reason; keep the latest write.
+    const latest = new Map();
+    for (const row of rows) {
+      const entry = {
+        itemId: row.itemId,
+        messages: tryParse(row.messagesJson, []),
+        turnStatus: row.turnStatus ?? "idle",
+        updatedAt: Number(row.updatedAt),
+      };
+      if (!latest.has(row.itemId) || entry.updatedAt > latest.get(row.itemId).updatedAt) {
+        latest.set(row.itemId, entry);
+      }
+    }
+    return [...latest.values()].sort((a, b) => a.updatedAt - b.updatedAt);
+  }
+
   return {
     getState,
     getBulkSummaries,
+    listForFlow,
     appendMessage,
     stampMessageError,
     setTurnStatus,

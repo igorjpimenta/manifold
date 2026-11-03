@@ -29,7 +29,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
   } catch (err) {
     logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);
     // Return a no-op shim so callers don't need to null-check.
-    return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, close() {} };
+    return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, async listForFlow() { return []; }, close() {} };
   }
 
   // `agent` is accepted and ignored (kept for call-site compatibility).
@@ -86,10 +86,38 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
+  // Every session key ever recorded for one flow, in spawn order.
+  // Transcript listing joins these rows to per-node results (dispatches)
+  // and discuss threads (branchItemId = itemId) so attribution comes from
+  // stored columns, never from parsing the key itself.
+  async function listForFlow(flowId) {
+    if (!flowId) return [];
+    try {
+      const rows = await db.select({
+        sessionKey: flowSessions.sessionKey,
+        nodeId: flowSessions.nodeId,
+        branchItemId: flowSessions.branchItemId,
+        spawnedAt: flowSessions.spawnedAt,
+      }).from(flowSessions)
+        .where(eq(flowSessions.flowId, flowId))
+        .orderBy(flowSessions.spawnedAt);
+      return rows.map((r) => ({
+        sessionKey: r.sessionKey,
+        nodeId: r.nodeId ?? null,
+        branchItemId: r.branchItemId ?? null,
+        spawnedAt: Number(r.spawnedAt),
+      }));
+    } catch (err) {
+      logger?.warn?.(`manifold session-index: listForFlow failed: ${err?.message ?? err}`);
+      return [];
+    }
+  }
+
   return {
     record,
     hasSessionForNode,
     flowIdForSessionKey,
+    listForFlow,
     close() { try { client.close(); } catch { /* ignore */ } },
     _db: client,
   };

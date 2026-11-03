@@ -757,3 +757,31 @@ describe("cross-method integration", () => {
     assert.equal(stateB.pending, null);
   });
 });
+
+// ─── listForFlow() ────────────────────────────────────────────────────────────
+
+describe("listForFlow()", () => {
+  test("returns every thread for the flow with parsed messages", async () => {
+    const store = await makeStore();
+    const flowId = randomUUID();
+    const item1 = randomUUID();
+    const item2 = randomUUID();
+    await store.appendMessage(flowId, item1, { role: "operator", text: "first" });
+    await store.appendMessage(flowId, item1, { role: "agent", text: "reply" });
+    await store.appendMessage(flowId, item2, { role: "operator", text: "other item" });
+    await store.appendMessage(randomUUID(), randomUUID(), { role: "operator", text: "other flow" });
+    const rows = await store.listForFlow(flowId);
+    assert.equal(rows.length, 2);
+    const byItem = new Map(rows.map((r) => [r.itemId, r]));
+    assert.equal(byItem.get(item1).messages.length, 2);
+    assert.equal(byItem.get(item1).messages[0].text, "first");
+    assert.equal(byItem.get(item1).turnStatus, "idle");
+    assert.equal(byItem.get(item2).messages.length, 1);
+    assert.ok(typeof byItem.get(item1).updatedAt === "number");
+  });
+
+  test("unknown flow returns an empty list", async () => {
+    const store = await makeStore();
+    assert.deepEqual(await store.listForFlow(randomUUID()), []);
+  });
+});

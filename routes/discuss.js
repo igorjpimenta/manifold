@@ -54,6 +54,7 @@ export function registerDiscussHandlers({
   // the harness (sessions.newDiscussSessionId), never minted here — core
   // never imports the gateway's session store (same seam as operator.js).
   sessions,
+  sessionIndex,
 }) {
 
   // ── Resolve discuss target ────────────────────────────────────────────────
@@ -220,6 +221,11 @@ export function registerDiscussHandlers({
       stampDiscussSession(sourceFlow.flowId, target.gateNodeId ?? "", target.itemId, target.agent, target.sessionId);
       api.runtime?.lineage?.recordSpawn?.({ childSessionKey: target.sessionKey, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
     }
+    // Transcript roster lives in flow_sessions alongside dispatch rows, so
+    // the transcripts endpoint attributes this thread from stored columns
+    // (nodeId, branchItemId) instead of parsing the session key. Best-effort:
+    // the discuss turn itself is already durable in discuss-store above.
+    try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, sessionKey: target.sessionKey, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null, agent: target.agent ?? null }); } catch {}
 
     setImmediate(async () => {
       try {
