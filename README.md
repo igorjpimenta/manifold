@@ -987,10 +987,9 @@ one here would silently diverge from the harness's id. Discuss threads
 mint `gf-discuss-<flowId.slice(0,8)>-<gateNodeId>-<itemId>` internally
 (core-owned, no harness involved).
 
-Transcript lookup by id shape (`mf-<flow8>-…`, `gf-discuss-<flow8>-…`)
-therefore only covers pre-harness-owned ids and discuss threads: a
-harness-owned dispatch key carries no flow prefix, so the directory scan
-does not find it.
+Transcript lookup matches keys by shape (`mf-<flow8>-…`,
+`gf-discuss-<flow8>-…`); a key with no flow prefix is invisible to the
+directory scan.
 
 Each session corresponds to a file:
 `~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`. The
