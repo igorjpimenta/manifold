@@ -17,17 +17,16 @@
 // just vanishes with it instead of becoming an orphaned file.
 //
 // State lives on globalThis, NOT as plain module-scope `const` bindings:
-// extensions/manifold/** loads through jiti's CJS transpilation
-// (engine/executor-subagent.js, agent/tools/submit-score.js — see
-// extensions/manifold/node_modules/.cache/jiti/*.cjs), while pipeline files
+// the plugin's tool files load through jiti's CJS transpilation
+// (engine/executor-subagent.js, agent/tools/*.js), while pipeline files
 // under workspace/.pipelines/** load via native ESM `await import(url)`
 // (engine/loader.js). Both import this file by the same file:// URL, but
 // jiti and native ESM do not share a module registry — each produces its
 // OWN separate instance of this module, each with its own plain `const`
-// Maps. submit-score.js (jiti) wrote a pending result that score-llm.js's
-// apply() (native ESM) could never see: same process, two disconnected
-// copies of "the same" module. globalThis is the one thing both loaders
-// actually share, so the real Maps live there — every export below is a
+// Maps. A jiti-loaded tool wrote a pending result that a natively-loaded
+// apply() could never see: same process, two disconnected copies of "the
+// same" module. globalThis is the one thing both loaders actually share,
+// so the real Maps live there — every export below is a
 // thin wrapper over a lazily-initialized globalThis slot.
 //
 // Lifecycle:

@@ -90,14 +90,12 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef: { value: new Map() },
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
-    normalizePendingFields: async () => ({}),
     discussStore: {
       readPending: async () => null,
       mergePendingFields: async () => {},
       setPending: async () => {},
       clearPending: async () => {},
     },
-    componentEmitter: async () => {},
     sessions: {
       resolveSessionFile: () => "",
       sessionFileExists: () => false,

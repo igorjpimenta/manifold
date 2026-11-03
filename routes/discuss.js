@@ -864,6 +864,5 @@ export function registerDiscussHandlers({
     handleDiscussHistory,
     handleDiscussApplyDraft,
     resolveDiscussTarget,
-    normalizePendingFields,
   };
 }

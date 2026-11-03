@@ -193,8 +193,7 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
   }
 
   // Shallow-merge `fields` into the pending proposal's fields object.
-  // Lets propose_draft_meta accumulate changes across multiple calls
-  // without resetting earlier ones.
+  // Lets repeated field writes accumulate without resetting earlier ones.
   async function mergePendingFields(flowId, itemId, fields) {
     await ensureRow(flowId, itemId);
     const row = await getRow(flowId, itemId);
