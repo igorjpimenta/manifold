@@ -9,9 +9,21 @@
 import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
+import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { tmpdir } from "node:os";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
+
+// Isolated store home for every sidecar write in this file (session stamps,
+// audio uploads). Resolution is per call, so setting the env here — after
+// the imports above — still relocates the store. node:test runs each file
+// in its own process, so the override never leaks into other files.
+const ISOLATED_DATA_DIR = mkdtempSync(path.join(tmpdir(), "manifold-discuss-test-"));
+process.env.MANIFOLD_DATA_DIR = ISOLATED_DATA_DIR;
+after(async () => {
+  rmSync(ISOLATED_DATA_DIR, { recursive: true, force: true });
+});
 
 // B2.5 — handleDiscuss/handleDiscussAudio build their promptBuilder ctx via
 // assembleState() instead of trusting sourceFlow.stateJson directly. Mocked
@@ -126,7 +138,7 @@ describe("registerDiscussHandlers — handleDiscuss builds ctx.state via assembl
   const testFlowId = `unit-test-discuss-${Date.now()}`;
 
   after(async () => {
-    await rm(path.join(os.homedir(), ".openclaw", "discuss-sessions"), { recursive: true, force: true }).catch(() => {});
+    await rm(path.join(ISOLATED_DATA_DIR, "discuss-sessions"), { recursive: true, force: true }).catch(() => {});
     await rm(path.join(os.homedir(), ".openclaw", "discuss-turns", testFlowId), { recursive: true, force: true }).catch(() => {});
   });
 
@@ -228,7 +240,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
   const itemId = "item-1";
 
   after(async () => {
-    await rm(path.join(os.homedir(), ".openclaw", "discuss-audio", testFlowId), { recursive: true, force: true }).catch(() => {});
+    await rm(path.join(ISOLATED_DATA_DIR, "discuss-audio", testFlowId), { recursive: true, force: true }).catch(() => {});
   });
 
   const sourceFlow = {

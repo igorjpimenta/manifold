@@ -42,6 +42,14 @@ export function pipelinesDir(dataDir) {
   return path.join(dataDir, "workspace", ".pipelines");
 }
 
+export function discussSessionsDir(dataDir) {
+  return path.join(dataDir, "discuss-sessions");
+}
+
+export function discussAudioDir(dataDir) {
+  return path.join(dataDir, "discuss-audio");
+}
+
 export function stateFile(dataDir) {
   return path.join(dataDir, "state", "manifold-paused.json");
 }
@@ -169,5 +177,7 @@ export function resolveStorePaths({ paths = null, dataDir = null, env = process.
     pendingDir: paths?.pendingDir ?? env.MANIFOLD_PENDING_DIR ?? pendingDir(dir),
     locksDir: paths?.locksDir ?? env.MANIFOLD_LOCKS_DIR ?? locksDir(dir),
     pipelinesDir: paths?.pipelinesDir ?? env.MANIFOLD_PIPELINES_DIR ?? pipelinesDir(dir),
+    discussSessionsDir: paths?.discussSessionsDir ?? env.MANIFOLD_DISCUSS_SESSIONS_DIR ?? discussSessionsDir(dir),
+    discussAudioDir: paths?.discussAudioDir ?? env.MANIFOLD_DISCUSS_AUDIO_DIR ?? discussAudioDir(dir),
   };
 }

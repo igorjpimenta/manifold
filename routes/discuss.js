@@ -1,11 +1,10 @@
 import path from "node:path";
-import os from "node:os";
 import { mkdirSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { looksLikeMetaNarration, normalizePendingFields } from "./discuss-helpers.js";
 import { stampDiscussSession, readDiscussSession } from "./discuss-session.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
-import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, loadAudioMetasForFlow } from "./discuss-audio.js";
+import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
 
 // ── Factory ─────────────────────────────────────────────────────────────────
@@ -583,23 +582,24 @@ export function registerDiscussHandlers({
     }
     const ext = audioFileName.split(".").pop().toLowerCase();
     const { readdir, readFile, stat } = await import("node:fs/promises");
-    const flowRoot = path.join(os.homedir(), ".openclaw", "discuss-audio", sourceFlow.flowId);
-    let entries;
-    try { entries = await readdir(flowRoot); }
-    catch { res.statusCode = 404; res.end("not found"); return true; }
-    for (const itemDir of entries) {
-      const candidate = path.join(flowRoot, itemDir, audioFileName);
-      try {
-        const st = await stat(candidate);
-        if (!st.isFile()) continue;
-        const bytes = await readFile(candidate);
-        res.statusCode = 200;
-        res.setHeader("Content-Type", EXT_TO_MIME[ext] ?? "application/octet-stream");
-        res.setHeader("Content-Length", String(bytes.length));
-        res.setHeader("Cache-Control", "private, max-age=86400");
-        res.end(bytes);
-        return true;
-      } catch { /* try next */ }
+    for (const flowRoot of audioRootsForFlow(sourceFlow.flowId)) {
+      let entries;
+      try { entries = await readdir(flowRoot); }
+      catch { continue; }
+      for (const itemDir of entries) {
+        const candidate = path.join(flowRoot, itemDir, audioFileName);
+        try {
+          const st = await stat(candidate);
+          if (!st.isFile()) continue;
+          const bytes = await readFile(candidate);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", EXT_TO_MIME[ext] ?? "application/octet-stream");
+          res.setHeader("Content-Length", String(bytes.length));
+          res.setHeader("Cache-Control", "private, max-age=86400");
+          res.end(bytes);
+          return true;
+        } catch { /* try next */ }
+      }
     }
     res.statusCode = 404;
     res.end("not found");
