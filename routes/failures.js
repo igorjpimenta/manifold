@@ -75,7 +75,10 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         if (retryMatch) {
           const id = decodeURIComponent(retryMatch[1]);
           try {
-            const elev = await invokeElevated("/manifold/_elev/retry-failure", { id, via });
+            const elev = await invokeElevated("/manifold/_elev/retry-failure", {
+              id, via,
+              sessionKey: body?.sessionKey, sessionId: body?.sessionId, agentId: body?.agentId,
+            });
             res.statusCode = elev.status || 500;
             res.setHeader("Content-Type", "application/json");
             res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));

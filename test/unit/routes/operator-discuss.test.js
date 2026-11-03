@@ -8,6 +8,7 @@ import {
   stringifyMessageContent,
   filterDiscussHistoryMessages,
   selectDiscussProvider,
+  createDiscussHandler,
   createDiscussHistoryHandler,
 } from "../../../routes/operator-discuss.js";
 import { createMockApi } from "../../helpers/mock-api.js";
@@ -210,6 +211,30 @@ describe("selectDiscussProvider", () => {
   it("returns null provider for empty primarySpec and empty chain", () => {
     const result = selectDiscussProvider({ primarySpec: "", chain: [], isCooldown: () => false });
     assert.equal(result.provider, null);
+  });
+});
+
+// ── stamped caller identity — kept guards ───────────────────────────────────
+// The elevated discuss routes refuse unstamped calls before touching the
+// agent runtime or the session file: missing/empty identity → 400.
+
+describe("elev discuss handlers — stamped caller identity", () => {
+  it("handleDiscuss: missing identity → 400 invalid_body", async () => {
+    const { api } = createMockApi();
+    const { handleDiscuss } = createDiscussHandler({ api, sessions: makeSessionsStub() });
+    const { status, body } = await handleDiscuss({ flowId: "flow-1", text: "hi" });
+    assert.equal(status, 400);
+    assert.equal(body.code, "invalid_body");
+    assert.match(body.error, /sessionKey, sessionId, agentId/);
+  });
+
+  it("handleDiscussHistory: missing identity → 400 invalid_body", async () => {
+    const { api } = createMockApi();
+    const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
+    const { status, body } = await handleDiscussHistory({ flowId: "flow-1" });
+    assert.equal(status, 400);
+    assert.equal(body.code, "invalid_body");
+    assert.match(body.error, /sessionKey, sessionId/);
   });
 });
 

@@ -34,6 +34,9 @@ function createMockReqWithBody(method, path, body) {
   };
 }
 
+// Stamped harness caller identity every elevated route now requires.
+const STAMP = { sessionKey: "agent:main:k1", sessionId: "sess-1", agentId: "main" };
+
 // Mock the external deps that operator.js statically imports:
 //   1. openclaw/plugin-sdk/agent-runtime  (resolveAgentEffectiveModelPrimary)
 //   2. state/state-store.js               (createStateStore) — spied, not
@@ -197,7 +200,7 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
     const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app",
+      flowId: "f1", itemId: "i1", decision: "approve", source: "app", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -208,6 +211,9 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     assert.equal(body.flowId, "f1");
     assert.equal(body.itemId, "i1");
     assert.equal(body.decision, "approve");
+    assert.equal(body.sessionKey, STAMP.sessionKey);
+    assert.equal(body.sessionId, STAMP.sessionId);
+    assert.equal(body.agentId, STAMP.agentId);
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.body).echo.path, "/manifold/_elev/gate-resolve");
   });
@@ -220,7 +226,7 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     registerOperatorRoutes(makeDeps(api, { invokeElevated }));
     const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
     const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app",
+      flowId: "f1", itemId: "i1", decision: "approve", source: "app", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -238,7 +244,7 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
     const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
     const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app", editedText: "revised",
+      flowId: "f1", itemId: "i1", decision: "approve", source: "app", editedText: "revised", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -258,7 +264,7 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
       gateResolver: { recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }) },
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
-    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "app" });
+    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "app", ...STAMP });
     const res = createMockRes();
     await handler(req, res);
     assert.equal(res.statusCode, 404);
@@ -271,6 +277,109 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     const res = createMockRes();
     await handler(createMockReq("GET", "/manifold/_elev/gate-resolve"), res);
     assert.equal(res.statusCode, 405);
+  });
+});
+
+// ── elevated identity guards ────────────────────────────────────────────────
+//
+// Every _elev route refuses calls without the harness-stamped caller identity
+// (sessionKey/sessionId/agentId, plus flowId where the operation is flow-bound)
+// with 400 + missing_identity before touching any store or executor.
+
+describe("registerOperatorRoutes — elevated identity guards", { skip: SKIP_MSG }, () => {
+  async function elevRes(path, body) {
+    const { api, routes } = createMockApi();
+    const recordItemDecision = mock.fn(async () => { throw new Error("must not run unstamped"); });
+    registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
+    const { handler } = routes.find((r) => r.path === path);
+    const req = createMockReqWithBody("POST", path, body);
+    const res = createMockRes();
+    await handler(req, res);
+    return { res, recordItemDecision };
+  }
+
+  test("_elev/gate-resolve: missing identity → 400 missing_identity, no side effects", async () => {
+    const { res, recordItemDecision } = await elevRes("/manifold/_elev/gate-resolve", {
+      flowId: "f1", itemId: "i1", decision: "approve",
+    });
+    assert.equal(res.statusCode, 400);
+    assert.deepEqual(JSON.parse(res.body), {
+      ok: false, code: "missing_identity",
+      error: "sessionKey, sessionId, agentId required",
+    });
+    assert.equal(recordItemDecision.mock.calls.length, 0);
+  });
+
+  test("_elev/gate-resolve: empty identity fields are missing too", async () => {
+    const { res } = await elevRes("/manifold/_elev/gate-resolve", {
+      flowId: "f1", sessionKey: "  ", sessionId: "", agentId: "main",
+    });
+    assert.equal(res.statusCode, 400);
+    const body = JSON.parse(res.body);
+    assert.equal(body.code, "missing_identity");
+    assert.ok(body.error.includes("sessionKey") && body.error.includes("sessionId"), body.error);
+  });
+
+  test("_elev/start: missing identity → 400 missing_identity", async () => {
+    const { res } = await elevRes("/manifold/_elev/start", { pipelineId: "p1" });
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).code, "missing_identity");
+  });
+
+  test("_elev/start: stamped call passes the guard (reaches the pipeline check)", async () => {
+    const { res } = await elevRes("/manifold/_elev/start", { pipelineId: "p1", ...STAMP });
+    assert.equal(res.statusCode, 404);
+    assert.match(JSON.parse(res.body).error, /unknown pipeline/);
+  });
+
+  test("_elev/rerun: missing identity → 400 missing_identity", async () => {
+    const { res } = await elevRes("/manifold/_elev/rerun", { sourceFlowId: "s1" });
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).code, "missing_identity");
+  });
+
+  test("_elev/rerun: stamped call passes the guard (reaches the source-flow read)", async () => {
+    const { res } = await elevRes("/manifold/_elev/rerun", { sourceFlowId: "s1", ...STAMP });
+    assert.equal(res.statusCode, 404);
+    assert.match(JSON.parse(res.body).error, /source flow not found/);
+  });
+
+  test("_elev/retry-failure: missing identity → 400 missing_identity", async () => {
+    const { res } = await elevRes("/manifold/_elev/retry-failure", { id: "f1" });
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).code, "missing_identity");
+  });
+
+  test("_elev/retry-failure: stamped call passes the guard (reaches the failure read)", async () => {
+    const { res } = await elevRes("/manifold/_elev/retry-failure", { id: "f1", ...STAMP });
+    assert.equal(res.statusCode, 404);
+  });
+});
+
+// ── /manifold/start loopback forwards the stamp ─────────────────────────────
+
+describe("registerOperatorRoutes — start handler", { skip: SKIP_MSG }, () => {
+  test("forwards stamped caller identity to _elev/start", async () => {
+    const { api, routes } = createMockApi();
+    const invokeElevated = mock.fn(async () => ({
+      ok: true, status: 200, body: JSON.stringify({ ok: true }),
+    }));
+    registerOperatorRoutes(makeDeps(api, {
+      invokeElevated,
+      pipelinesRef: { value: new Map([["p1", {}]]) },
+    }));
+    const { handler } = routes.find((r) => r.path === "/manifold/start");
+    const req = createMockReqWithBody("POST", "/manifold/start", { pipelineId: "p1", ...STAMP });
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(invokeElevated.mock.calls.length, 1);
+    const [path, body] = invokeElevated.mock.calls[0].arguments;
+    assert.equal(path, "/manifold/_elev/start");
+    assert.equal(body.pipelineId, "p1");
+    assert.equal(body.sessionKey, STAMP.sessionKey);
+    assert.equal(body.sessionId, STAMP.sessionId);
+    assert.equal(body.agentId, STAMP.agentId);
+    assert.equal(res.statusCode, 200);
   });
 });
 

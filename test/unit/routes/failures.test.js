@@ -6,7 +6,7 @@
  *   - Method guards fire before the bearer check.
  *   - Happy-path handler returns failure list JSON (bearer-authenticated).
  */
-import { test, describe, after } from "node:test";
+import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
@@ -108,6 +108,34 @@ describe("registerFailureRoutes — list handler", () => {
     assert.ok(Array.isArray(body.rows), "body.rows is an array");
     assert.equal(body.count, 0);
   });
+
+// ── retry handler: stamped identity forwarding ───────────────────────────────
+
+describe("registerFailureRoutes — retry handler", () => {
+  test("forwards stamped caller identity to _elev/retry-failure", async () => {
+    const { api, routes } = createMockApi();
+    const invokeElevated = mock.fn(async () => ({
+      status: 200, body: JSON.stringify({ ok: true }),
+    }));
+    registerFailureRoutes(makeDeps(api, { invokeElevated }));
+    const { handler } = routes.find((r) => r.match === "prefix");
+    const body = { via: "app", sessionKey: "agent:main:k1", sessionId: "s1", agentId: "main" };
+    const req = {
+      ...authedReq("POST", "/manifold/failures/f1/retry"),
+      [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body)); },
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(invokeElevated.mock.calls.length, 1);
+    const [path, payload] = invokeElevated.mock.calls[0].arguments;
+    assert.equal(path, "/manifold/_elev/retry-failure");
+    assert.equal(payload.id, "f1");
+    assert.equal(payload.sessionKey, "agent:main:k1");
+    assert.equal(payload.sessionId, "s1");
+    assert.equal(payload.agentId, "main");
+    assert.equal(res.statusCode, 200);
+  });
+});
 
   test("returns failure records from store in body.rows", async () => {
     const { api, routes } = createMockApi();
