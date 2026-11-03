@@ -29,7 +29,6 @@ const UPSERT_LINEAGE_SQL = `
     node_id            = COALESCE(excluded.node_id, session_lineage.node_id),
     item_key           = COALESCE(excluded.item_key, session_lineage.item_key),
     source             = excluded.source
-  WHERE session_lineage.source = 'backfill' OR excluded.source != 'backfill'
 `;
 
 const GET_LINEAGE_SQL = `SELECT * FROM session_lineage WHERE child_session_key = ?`;
