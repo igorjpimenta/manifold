@@ -951,14 +951,6 @@ export function registerRunRoutes({
   // lite=1  → return turnCount only, no turn text (for list views)
   // sessionKey=X → return a single transcript with full turns (for transcript drill-in)
   async function sendTranscriptsList(res, flow, url) {
-    const flowShort = flow.flowId.slice(0, 8);
-    // Plain-text session ids minted by core (`mf-<flowShort>-…` dispatches,
-    // `gf-discuss-<flowShort>-…` discuss threads): match verbatim — the
-    // agent is the directory being scanned.
-    const subagentKeyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
-    const discussKeyPattern  = new RegExp(`^gf-discuss-${flowShort}-(.+)$`);
-    void subagentKeyPattern;
-    void discussKeyPattern;
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;
 
