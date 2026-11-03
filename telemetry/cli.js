@@ -1,5 +1,5 @@
 // `openclaw lineage <subcommand>` — operator-facing CLI for inspection,
-// stats, and one-shot backfill. Overlaps with the http-cost.js endpoints
+// stats, and trigger-edge backfill. Overlaps with the http-cost.js endpoints
 // that back the dashboard/companion-app views; useful standalone for debugging.
 
 import { execAll, execGet } from "./http-helpers.js";
@@ -8,11 +8,11 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
   const cmd = program.command("lineage").description("Session lineage + cost attribution");
 
   cmd.command("lookup <sessionKeyOrId>")
-    .description("Walk lineage for a sessionKey (or sessionId — looked up via trajectory)")
+    .description("Walk lineage for a sessionKey (or sessionId — looked up via cost_by_call)")
     .action(async (target) => {
       const store = await getStore(); const resolver = await getResolver();
       if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
-      const key = target.startsWith("agent:") ? target : await sessionIdToKey(target);
+      const key = target.startsWith("agent:") ? target : await sessionIdToKey(store._client, target);
       if (!key) { console.error(`could not resolve ${target} to a sessionKey`); process.exitCode = 1; return; }
       const chain = await resolver.walk(key);
       for (let i = 0; i < chain.length; i++) {
@@ -47,7 +47,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       //   • cost_by_call.msg_id — for "I have this LLM call's id from a log
       //     line, show me the whole tree it lived in"
       //   • cost_by_call.session_id (rare — usually identical to a sessionKey)
-      //   • sessionId from a trajectory file (legacy lookup)
+      //   • sessionId via cost_by_call.session_id (hook-written rows)
       let key = await resolveTreeTarget(target, client, opts.kind);
       if (!key) {
         console.error(`could not resolve ${target} via --kind ${opts.kind}`);
@@ -224,14 +224,13 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
     });
 
   cmd.command("backfill")
-    .description("Walk every trajectory.jsonl, populate lineage table for sessions not yet recorded")
-    .option("--cost", "Also extract assistant-message cost rows into cost_by_call")
+    .description("Rebuild missing child-flow trigger edges in the lineage table from runtime.sqlite")
     .option("--force", "Re-write lineage rows even when they already exist (does not touch hook-written rows)")
     .action(async (opts) => {
       const store = await getStore(); const resolver = await getResolver();
       if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
       const { runBackfill } = await import("./backfill.js");
-      const summary = await runBackfill({ store, resolver, logger, includeCost: !!opts.cost, force: !!opts.force });
+      const summary = await runBackfill({ store, resolver, logger, force: !!opts.force });
       console.log(JSON.stringify(summary, null, 2));
     });
 
@@ -289,24 +288,13 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
     });
 }
 
-// Look up a sessionId by reading the first line of its trajectory.jsonl (which
-// carries the sessionKey). Mirrors what cost.js does. Best-effort.
-async function sessionIdToKey(sessionId) {
-  const fs = await import("node:fs/promises");
-  const os = await import("node:os");
-  const path = await import("node:path");
-  const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
-  const agents = await fs.readdir(AGENTS_DIR, { withFileTypes: true });
-  for (const ent of agents) {
-    if (!ent.isDirectory()) continue;
-    const trajPath = path.join(AGENTS_DIR, ent.name, "sessions", `${sessionId}.trajectory.jsonl`);
-    try {
-      const first = (await fs.readFile(trajPath, "utf8")).split("\n", 1)[0];
-      const d = JSON.parse(first);
-      if (d?.sessionKey) return d.sessionKey;
-    } catch { /* not in this agent's dir */ }
-  }
-  return null;
+// Look up a sessionId via the hook-written cost_by_call rows, which carry
+// both the harness session_id and the manifold session_key. Best-effort.
+async function sessionIdToKey(client, sessionId) {
+  const hit = await execGet(client,
+    `SELECT session_key FROM cost_by_call WHERE session_id = ? AND session_key IS NOT NULL ORDER BY ts DESC LIMIT 1`,
+    [sessionId]);
+  return hit?.session_key ?? null;
 }
 
 // Resolve `lineage tree <target>` into a sessionKey via an explicit --kind.
@@ -321,7 +309,7 @@ async function resolveTreeTarget(target, client, kind) {
       const hit = await execGet(client, `SELECT 1 FROM session_lineage WHERE child_session_key = ? LIMIT 1`, [t]);
       return hit ? t : null;
     },
-    "session-id":  () => sessionIdToKey(t),
+    "session-id":  () => sessionIdToKey(client, t),
     "msg": async () => {
       const r = await execGet(client, `SELECT session_key FROM cost_by_call WHERE msg_id = ? AND session_key IS NOT NULL LIMIT 1`, [t]);
       return r?.session_key ?? null;
