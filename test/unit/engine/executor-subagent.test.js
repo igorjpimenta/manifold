@@ -81,8 +81,9 @@ describe("runSubagentTurn — successful turn", () => {
 //
 // Fixes the 788-occurrence "parse error: no valid score" failure class:
 // waitForRun only settles when the WHOLE run reaches its own natural end,
-// even when the one tool call a node cares about already landed. A hook (e.g. hooks/score-tool-wake.js) calls notifyToolFired(runId)
-// the instant that tool fires; runSubagentTurn races waitForRun against
+// even when the one tool call a node cares about already landed. The
+// after_tool_call hook layer calls notifyToolFired(runId) the instant that
+// tool fires; runSubagentTurn races waitForRun against
 // waitForToolSignal(runId) so it can return early instead of waiting for —
 // or timing out against — the rest of the turn.
 

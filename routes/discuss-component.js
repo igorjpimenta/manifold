@@ -1,4 +1,4 @@
-// routes/discuss-component.js — proposal-artifact fan-out for gate discuss.
+// routes/discuss-component.js — component fan-out for gate discuss.
 //
 // componentEmitter persists the component, then emits the canonical
 // discuss.component.proposed plus the derived discuss.pending.updated

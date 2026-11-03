@@ -87,10 +87,9 @@ export async function persistRevisedDraft({ flowId, itemId, newDraft, source, st
 
 // Field `type`s that a gate-layout.js declares for genuinely numeric data
 // (currency amounts, day counts). A value destined for one of these MUST
-// arrive as a real JS number — propose_draft_meta already sends budget/
-// period that way; a numeric string (e.g. from a lenient client) is
-// rejected outright rather than silently coerced, so a malformed edit
-// fails loudly instead of writing a value nothing validated.
+// arrive as a real JS number — a numeric string (e.g. from a lenient
+// client) is rejected outright rather than silently coerced, so a malformed
+// edit fails loudly instead of writing a value nothing validated.
 const NUMERIC_FIELD_TYPES = new Set(["money", "number"]);
 
 function collectLayoutFieldTypes(layout) {

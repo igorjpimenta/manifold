@@ -802,8 +802,8 @@ GATE: {
         `flowId: ${flowId}   itemId: ${itemId}`,
         draft ? `Current draft:\n${draft}` : "",
         `When the operator asks for a revision, spawn Cyrano (content-writer)`,
-        `with the task and instruct them to call propose_draft(flowId, itemId, text)`,
-        `directly. End your turn immediately — do NOT call sessions_yield.`,
+        `with the task and instruct them to propose through the pipeline's`,
+        `discuss tooling (oc-config). End your turn immediately — do NOT call sessions_yield.`,
       ].filter(Boolean).join("\n");
     },
   },
@@ -822,16 +822,16 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Session key | the harness's own session id, passed through verbatim — locked on the first turn and kept for the gate's lifetime. |
 | Session stamp | Recorded in the session roster (`discuss_threads`: flow, gate, item → agent + session key) on first turn, so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
-| Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires a `discuss.component` event immediately; a connected client surfaces an Apply affordance. |
-| Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` event; updates the chip row on connected clients. `budget` must be a positive integer. |
+| Draft proposal | A `discuss.component` event carrying a draft payload — a connected client surfaces an Apply affordance. |
+| Meta proposal | A `discuss.component` event carrying a fields payload — updates the chip row on connected clients. |
 | subflow (sub-node gate) | Gates inside `flow.nodes` opt in identically. `resolveDiscussTarget` walks `subflow` parents and picks the first `kind: "human-gate"` sub-node with a `discuss` block. |
 | Resolution order | Stamped session → node `discuss.agent` → `discuss.defaultAgent` in openclaw.json. |
 | History | `GET /manifold/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
 
 **Pipeline authors:** `promptBuilder` is your contract surface. Inline the
 listing context, current draft, and orchestration rules the agent needs.
-Point the agent at `propose_draft` / `propose_draft_meta` — not at
-`<draft>` tags or `subagent_run`. Keep the prompt under ~2 KB.
+Point the agent at oc-config's discuss tooling — not at `<draft>` tags or
+`subagent_run`. Keep the prompt under ~2 KB.
 
 ### needs-info: free-text vs button choices
 
@@ -1096,17 +1096,15 @@ Declared in `openclaw.plugin.json`, one tool per file under `agent/tools/`
 | Tool                      | File                                    | Signature input fields        | Purpose                                             |
 | ------------------------- | ---------------------------------------- | ------------------------------ | ---------------------------------------------------- |
 | `manifold_start`          | `agent/tools/manifold-start.js`          | `pipelineId`, optional `args` | Start a flow. Returns `flowId`.                     |
-| `propose_draft`           | `agent/tools/propose-draft.js`           | `text` (required); `flowId`/`itemId` auto-resolved from session context | Propose a revised draft during a discuss session.   |
-| `propose_draft_meta`      | `agent/tools/propose-draft-meta.js`      | `fields` (required); `flowId`/`itemId` auto-resolved from session context | Propose budget/timeframe/language changes.          |
-| `submit_draft`            | `agent/tools/submit-draft.js`            | `outPath`, `body`, `language`, `budget`, `timeframe` (required); `jobId` auto-resolved | Write a structured draft to disk (stamps YAML frontmatter deterministically instead of a hand-typed heredoc). |
-| `report_draft_blocked`    | `agent/tools/report-draft-blocked.js`    | `outPath`, `questions` (required); `jobId` auto-resolved | Report that drafting is blocked on missing profile/portfolio evidence, structured instead of free-text. |
+
+Pipeline-specific tools (`propose_*`, `submit_*`, `report_*`) live in
+oc-config, not here — core keeps only the harness-agnostic surface.
 
 **Removed (2026-07 tool deprecation):** `manifold_respond`,
 `manifold_notify_block`, `manifold_list_blocked` — no longer registered;
 don't reflexively restore them if you see stale references elsewhere.
 
-Shared helpers (`toolErr`, `META_FIELD_WHITELIST`, `normalizePendingFields`)
-live in `agent/tools/shared.js`.
+Shared helpers (`toolErr`) live in `agent/tools/shared.js`.
 
 ### Adding a new tool
 

@@ -2,9 +2,9 @@
 
 OpenClaw companion for [manifold](https://github.com/igorjpimenta/manifold). Three jobs:
 
-1. **Tools** — registers the pipeline agent tools (`manifold_start`,
-   `propose_draft`, `submit_draft`, …) so agents can start runs and settle
-   human gates without touching the CLI.
+1. **Tools** — registers manifold's own agent tool (`manifold_start`) so
+   agents can start runs without touching the CLI. Pipeline-specific tools
+   live in oc-config.
 2. **Discuss surface** — serves the operator discuss routes and the WS dialog
    door (message transport into open discuss sessions; bearer-guarded).
 3. **Boot services** — pipeline loader + watcher, flow revival, gateway

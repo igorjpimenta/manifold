@@ -103,9 +103,8 @@ describe("registerDiscussHandlers — return shape", () => {
   ];
 
   const REQUIRED_HELPERS = [
-  "resolveDiscussTarget",
-  "normalizePendingFields",
-];
+    "resolveDiscussTarget",
+  ];
 
   for (const name of [...REQUIRED_HANDLERS, ...REQUIRED_HELPERS]) {
     test(`returns function: ${name}`, () => {

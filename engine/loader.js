@@ -53,10 +53,10 @@ function registerSubflowChildren(pipelineId, nodes, { result, indexPath, pipelin
       // never on a subflow's .flow — but a per-item agent node dispatched
       // from inside that subflow resolves its OWN pipelineId as this
       // synthetic child's id (e.g. "freelance_freelancer-proposal::PROPOSE"),
-      // not the root's. Without carrying it through here, a tool like
-      // submit_draft that keys off pipelinesRef.value.get(pipelineId) would
-      // silently miss the root's config for every such dispatch. Threaded
-      // recursively so it survives arbitrarily deep nesting too.
+      // not the root's. Without carrying it through here, a tool that keys
+      // off pipelinesRef.value.get(pipelineId) would silently miss the
+      // root's config for every such dispatch. Threaded recursively so it
+      // survives arbitrarily deep nesting too.
       result.set(syntheticId, {
         ...synthetic,
         _filepath: indexPath, _dir: pipelineDir, _fleet: null, _synthetic: true,
