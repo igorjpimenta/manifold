@@ -9,7 +9,8 @@ import {
   EXT_TO_MIME,
   audioDirForFlow,
   audioRootForFlow,
-  discussAudioDir,
+  audioHarness,
+  harnessAudioDir,
   loadAudioMetasForFlow,
 } from "../../../routes/discuss-audio.js";
 
@@ -51,10 +52,25 @@ describe("EXT_TO_MIME", () => {
 // ── audioDirForFlow ───────────────────────────────────────────────────────────
 
 describe("audioDirForFlow", () => {
-  it("builds path under <store-home>/discuss-audio/<flowId>/<itemId>", () => {
+  it("builds path under <store-home>/media/audio/<harness>/<flowId>/<itemId>", () => {
     const dir = audioDirForFlow("flow-abc", "item-1");
-    assert.equal(dir, path.join(dataDir, "discuss-audio", "flow-abc", "item-1"));
-    assert.equal(discussAudioDir(), path.join(dataDir, "discuss-audio"));
+    assert.equal(dir, path.join(dataDir, "media", "audio", "openclaw", "flow-abc", "item-1"));
+    assert.equal(harnessAudioDir(), path.join(dataDir, "media", "audio", "openclaw"));
+  });
+
+  it("namespaces by MANIFOLD_HARNESS", () => {
+    const prev = process.env.MANIFOLD_HARNESS;
+    try {
+      process.env.MANIFOLD_HARNESS = "winch";
+      assert.equal(audioHarness(), "winch");
+      assert.equal(
+        audioDirForFlow("flow-abc", "item-1", "winch"),
+        path.join(dataDir, "media", "audio", "winch", "flow-abc", "item-1"),
+      );
+    } finally {
+      if (prev === undefined) delete process.env.MANIFOLD_HARNESS;
+      else process.env.MANIFOLD_HARNESS = prev;
+    }
   });
 
   it("sanitizes special chars in itemId", () => {

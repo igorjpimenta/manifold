@@ -1,6 +1,6 @@
 // Audio constants and filesystem helpers for discuss audio upload/serve/history.
 import path from "node:path";
-import { resolveStorePaths } from "../state/paths.js";
+import { resolveStorePaths, harnessMediaAudioDir } from "../state/paths.js";
 
 export const AUDIO_MIME_EXT = {
   "audio/m4a":   "m4a",
@@ -23,31 +23,39 @@ export const EXT_TO_MIME = {
   ogg:  "audio/ogg",
 };
 
-// Store-home audio root, resolved per call so a MANIFOLD_DATA_DIR change
-// between import and first use still relocates the store.
-export function discussAudioDir() {
-  return resolveStorePaths().discussAudioDir;
+// Harness namespace for stored audio, resolved per call like the store
+// home itself. Single-harness deployments take the "openclaw" default;
+// MANIFOLD_HARNESS relocates it without touching code.
+export function audioHarness(env = process.env) {
+  return String(env?.MANIFOLD_HARNESS ?? "").trim() || "openclaw";
 }
 
-export function audioRootForFlow(flowId) {
-  return path.join(discussAudioDir(), flowId);
+// Media root for this harness: <store-home>/media/audio/<harness>.
+// Resolved per call so a MANIFOLD_DATA_DIR change between import and first
+// use still relocates the store.
+export function harnessAudioDir(harness = audioHarness()) {
+  return harnessMediaAudioDir(resolveStorePaths().dataDir, harness ?? audioHarness());
 }
 
-// Single search root: the store home. Pre-store-home audio is not read.
-export function audioRootsForFlow(flowId) {
-  return [audioRootForFlow(flowId)];
+export function audioRootForFlow(flowId, harness) {
+  return path.join(harnessAudioDir(harness), flowId);
 }
 
-export function audioDirForFlow(flowId, itemId) {
+// Single search root: this harness's media dir. No cross-harness reads.
+export function audioRootsForFlow(flowId, harness) {
+  return [audioRootForFlow(flowId, harness)];
+}
+
+export function audioDirForFlow(flowId, itemId, harness) {
   const safeItem = String(itemId).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "_";
-  return path.join(audioRootForFlow(flowId), safeItem);
+  return path.join(audioRootForFlow(flowId, harness), safeItem);
 }
 
-// Read all .meta.json sidecars under <store-home>/discuss-audio/<flowId>/
+// Read all .meta.json sidecars under <store-home>/media/audio/<harness>/<flowId>/
 // across every item sub-directory. Returns a flat array of parsed meta objects,
 // [] when the root is absent.
-export async function loadAudioMetasForFlow(flowId) {
-  return (await readMetasUnder(audioRootForFlow(flowId))) ?? [];
+export async function loadAudioMetasForFlow(flowId, harness) {
+  return (await readMetasUnder(audioRootForFlow(flowId, harness))) ?? [];
 }
 
 // Null when the root is absent; an array otherwise.

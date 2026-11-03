@@ -46,8 +46,16 @@ export function discussSessionsDir(dataDir) {
   return path.join(dataDir, "discuss-sessions");
 }
 
-export function discussAudioDir(dataDir) {
-  return path.join(dataDir, "discuss-audio");
+// Media root for harness-delivered blobs (voice messages today). The store
+// home is the root; the harness name namespaces it so two harnesses sharing
+// one store never collide. Layout: <dataDir>/media/audio/<harness>/<flow>.
+export function mediaAudioDir(dataDir) {
+  return path.join(dataDir, "media", "audio");
+}
+
+export function harnessMediaAudioDir(dataDir, harness) {
+  const safe = String(harness ?? "").replace(/[^A-Za-z0-9._-]+/g, "_") || "openclaw";
+  return path.join(mediaAudioDir(dataDir), safe);
 }
 
 export function stateFile(dataDir) {
@@ -178,6 +186,6 @@ export function resolveStorePaths({ paths = null, dataDir = null, env = process.
     locksDir: paths?.locksDir ?? env.MANIFOLD_LOCKS_DIR ?? locksDir(dir),
     pipelinesDir: paths?.pipelinesDir ?? env.MANIFOLD_PIPELINES_DIR ?? pipelinesDir(dir),
     discussSessionsDir: paths?.discussSessionsDir ?? env.MANIFOLD_DISCUSS_SESSIONS_DIR ?? discussSessionsDir(dir),
-    discussAudioDir: paths?.discussAudioDir ?? env.MANIFOLD_DISCUSS_AUDIO_DIR ?? discussAudioDir(dir),
+    mediaAudioDir: paths?.mediaAudioDir ?? env.MANIFOLD_MEDIA_AUDIO_DIR ?? mediaAudioDir(dir),
   };
 }
