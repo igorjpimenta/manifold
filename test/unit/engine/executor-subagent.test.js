@@ -1,8 +1,18 @@
-import { describe, it } from "node:test";
+import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+import os from "node:os";
+import { mkdtempSync } from "node:fs";
 import { createSubagentDispatch } from "../../../engine/executor-subagent.js";
 import { GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
-import { notifyToolFired } from "../../../state/tool-handoff.js";
+import { writePendingResult, clearPendingResult, readPendingResult } from "../../../state/tool-handoff.js";
+
+// Isolated store home: the poll-based waiter reads the real sqlite store,
+// so point it at a tmp dir — never the developer's ~/.manifold.
+before(() => {
+  process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-executor-subagent-"));
+});
 
 const logger = { info: () => {}, warn: () => {} };
 
@@ -77,74 +87,74 @@ describe("runSubagentTurn — successful turn", () => {
   });
 });
 
-// ── runSubagentTurn — tool-fired race (tool-handoff.js notifyToolFired) ────
+// ── runSubagentTurn — tool-result race (tool-handoff.js sqlite row) ─────
 //
-// Fixes the 788-occurrence "parse error: no valid score" failure class:
-// waitForRun only settles when the WHOLE run reaches its own natural end,
-// even when the one tool call a node cares about already landed. The
-// after_tool_call hook layer calls notifyToolFired(runId) the instant that
-// tool fires; runSubagentTurn races waitForRun against
-// waitForToolSignal(runId) so it can return early instead of waiting for —
-// or timing out against — the rest of the turn.
+// A deliver_result write for this session resolves the race before
+// waitForRun settles: same early-exit as the old in-process wake-up, but
+// the rendezvous is a store row, so the writer may live in another
+// process (MCP server) than this waiter.
 
-describe("runSubagentTurn — tool-fired race", () => {
-  it("returns early with empty text when notifyToolFired fires before waitForRun settles", async () => {
+describe("runSubagentTurn — tool-result race", () => {
+  it("returns early with empty text + toolResult when a row lands before waitForRun settles", async () => {
+    const sessionKey = `sk-race-${randomUUID()}`;
     let getSessionMessagesCalled = false;
     const sub = makeSubagent({
       run: async () => ({ runId: "run-race-1" }),
-      // Never settles on its own within the test — only the tool-fired
-      // signal should resolve this race.
+      // Never settles on its own within the test — only the tool-result
+      // row should resolve this race.
       waitForRun: () => new Promise(() => {}),
       getSessionMessages: async () => { getSessionMessagesCalled = true; return { messages: [] }; },
     });
     const { runSubagentTurn } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger });
-    const pending = runSubagentTurn({ sessionKey: "k", message: "x" });
-    // runSubagentTurn doesn't call waitForToolSignal until AFTER `await
-    // subagent.run(...)` resolves (at least one microtask later) — calling
-    // notifyToolFired synchronously here would fire before anything is
-    // listening (passing locally on timing, hanging for the full default
-    // test timeout in CI). setImmediate flushes
-    // the whole microtask queue first, guaranteeing the waiter is
-    // registered before we notify it.
+    const pending = runSubagentTurn({ sessionKey, message: "x" });
+    // runSubagentTurn doesn't start polling until AFTER `await
+    // subagent.run(...)` resolves (at least one microtask later). The
+    // waiter checks the store once on entry, so a pre-existing row still
+    // resolves; the setImmediate below just mirrors the realistic
+    // write-after-start ordering.
     await new Promise((resolve) => setImmediate(resolve));
-    notifyToolFired("run-race-1");
+    await writePendingResult({ sessionKey, runId: "run-race-1", kind: "score", payload: { score: 9 } });
     const result = await pending;
-    assert.deepEqual(result, { text: "", runId: "run-race-1" });
-    assert.equal(getSessionMessagesCalled, false, "tool-fired path must skip fetching the model's own wrap-up reply");
+    assert.deepEqual(result, {
+      text: "",
+      runId: "run-race-1",
+      toolResult: { kind: "score", payload: { score: 9 } },
+    });
+    assert.equal(getSessionMessagesCalled, false, "tool-result path must skip fetching the model's own wrap-up reply");
+    await clearPendingResult(sessionKey);
   });
 
-  it("a notifyToolFired call for a DIFFERENT runId does not resolve this dispatch's race", async () => {
+  it("a row for a DIFFERENT session does not resolve this dispatch's race", async () => {
+    const otherKey = `sk-other-${randomUUID()}`;
     const sub = makeSubagent({
       run: async () => ({ runId: "run-race-2" }),
       waitForRun: async () => ({ status: "ok" }), // settles quickly, normal path
     });
     const { runSubagentTurn } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger });
-    notifyToolFired("some-other-run-id");
-    const result = await runSubagentTurn({ sessionKey: "k", message: "x" });
-    assert.equal(result.text, "reply text", "must take the normal waitForRun path, unaffected by an unrelated notify");
+    await writePendingResult({ sessionKey: otherKey, payload: { v: 1 } });
+    const result = await runSubagentTurn({ sessionKey: `sk-race-${randomUUID()}`, message: "x" });
+    assert.equal(result.text, "reply text", "must take the normal waitForRun path, unaffected by an unrelated row");
+    await clearPendingResult(otherKey);
   });
 
-  it("when waitForRun settles first (ok), the normal message-fetch path runs and the tool signal is left cancelled", async () => {
+  it("when waitForRun settles first (ok), the normal message-fetch path runs and the poller is left cancelled", async () => {
     const sub = makeSubagent({ run: async () => ({ runId: "run-race-3" }) });
     const { runSubagentTurn } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger });
-    const result = await runSubagentTurn({ sessionKey: "k", message: "x" });
+    const result = await runSubagentTurn({ sessionKey: `sk-race-${randomUUID()}`, message: "x" });
     assert.equal(result.text, "reply text");
-    // A late notify for this now-finished dispatch must not throw or affect
-    // anything — the waiter was already cancelled once the race was decided.
-    assert.doesNotThrow(() => notifyToolFired("run-race-3"));
+    assert.equal(result.toolResult ?? null, null, "normal path carries no tool result");
   });
 
-  it("when waitForRun rejects, the tool signal is cancelled and the rejection still propagates", async () => {
+  it("when waitForRun rejects, the poller is cancelled and the rejection still propagates", async () => {
     const sub = makeSubagent({
       run: async () => ({ runId: "run-race-4" }),
       waitForRun: async () => { throw new Error("transport error"); },
     });
     const { runSubagentTurn } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger });
     await assert.rejects(
-      () => runSubagentTurn({ sessionKey: "k", message: "x" }),
+      () => runSubagentTurn({ sessionKey: `sk-race-${randomUUID()}`, message: "x" }),
       (err) => err.message === "transport error",
     );
-    assert.doesNotThrow(() => notifyToolFired("run-race-4"));
   });
 });
 
@@ -323,26 +333,30 @@ describe("dispatchAgentWithRetry — session.transcript.completed", () => {
     });
   });
 
-  it("skips emission on the tool-fired path (no reply text)", async () => {
+  it("skips emission on the tool-fired path (no reply text), and apply() receives the tool result", async () => {
+    const sessionKey = `sk-emit-skip-${randomUUID()}`;
     const sub = makeSubagent({
       run: async () => ({ runId: "run-emit-skip-1" }),
       waitForRun: () => new Promise(() => {}),
     });
     const emit = makeEmit();
     const { dispatchAgentWithRetry } = createSubagentDispatch({ getSubagent: () => sub, sessionIndex: null, logger, emit });
+    let applySaw = null;
     const node = {
       agent: "cyrano",
-      apply: (state, output) => ({ text: output.text }),
+      apply: (state, output) => { applySaw = output?.toolResult ?? null; return { text: output.text }; },
     };
     const pending = dispatchAgentWithRetry({
-      node, nodeId: "DRAFT", sessionKey: "sk-emit-skip", initialMessage: "go",
+      node, nodeId: "DRAFT", sessionKey, initialMessage: "go",
       applyCtx: { pipelineId: "p" }, applyExtraArg: undefined, flowId: "flow-emit-skip",
     });
     await new Promise((resolve) => setImmediate(resolve));
-    notifyToolFired("run-emit-skip-1");
+    await writePendingResult({ sessionKey, runId: "run-emit-skip-1", kind: "draft", payload: { text: "hello" } });
     const result = await pending;
     assert.deepEqual(result, { text: "" });
+    assert.deepEqual(applySaw, { kind: "draft", payload: { text: "hello" } }, "apply() receives the delivered result");
     assert.equal(emit.calls.length, 0, "tool-fired path carries no transcript — nothing emitted");
+    assert.equal(await readPendingResult(sessionKey), null, "consumed rows do not linger for the next turn");
   });
 
   it("dispatch without an emitter emits nothing and is otherwise identical", async () => {

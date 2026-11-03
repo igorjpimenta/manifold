@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6a4f0384-e3a1-4510-ace0-fb4f67ba0538",
-  "prevId": "84b4f404-fac4-4688-8d73-9dde6b49abcd",
+  "id": "4a5f1bfe-4899-4c1b-b2f4-24fc63416ef6",
+  "prevId": "ac10bd54-ba6b-475d-98ec-d393051ea24a",
   "tables": {
     "discuss_state": {
       "name": "discuss_state",
@@ -74,6 +74,14 @@
             "updated_at"
           ],
           "isUnique": false
+        },
+        "idx_discuss_state_unique": {
+          "name": "idx_discuss_state_unique",
+          "columns": [
+            "flow_id",
+            "item_id"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {},
@@ -1261,6 +1269,58 @@
           "where": "\"pipeline_versions\".\"retired_at\" IS NULL"
         }
       },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "tool_results": {
+      "name": "tool_results",
+      "columns": {
+        "session_key": {
+          "name": "session_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
       "foreignKeys": {},
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},

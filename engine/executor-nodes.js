@@ -4,7 +4,6 @@ import os from "node:os";
 import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
 import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
-import { registerDispatch, clearDispatch } from "../state/tool-handoff.js";
 import { registerSessionOwner, clearSessionOwner, runWithLockOwner } from "../locks/lock.js";
 
 // The lock owner for work done on behalf of one node invocation: held locks
@@ -169,12 +168,6 @@ export function createNodeRunner({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
     });
-    // tool-handoff.js: lets a tool this session calls mid-turn resolve its
-    // own invocationId from ctx.sessionKey and hand structured data back
-    // to this node's apply() — see that module's header comment. Cleared
-    // in the finally below once the dispatch settles, so the sessionKey ->
-    // invocationId map doesn't grow unbounded over gateway uptime.
-    registerDispatch(sessionKey, invocationId);
     // Browser tool calls this session makes lock as this invocation
     // (extensions/browser-lease), the same owner the node-level
     // crossProcessLock uses — so the node's own lock and its agent's tool
@@ -198,7 +191,6 @@ export function createNodeRunner({
       }
       throw err;
     } finally {
-      clearDispatch(sessionKey);
       clearSessionOwner(sessionKey);
     }
   }
