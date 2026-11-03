@@ -1,6 +1,5 @@
-// `openclaw lineage <subcommand>` — operator-facing CLI for inspection
-// and stats. Overlaps with the http-cost.js endpoints
-// that back the dashboard/companion-app views; useful standalone for debugging.
+// Mirrors the http-cost.js endpoints that back the dashboard views — a query
+// change here must land there too, or CLI and dashboard diverge.
 
 import { execAll, execGet } from "./http-helpers.js";
 
