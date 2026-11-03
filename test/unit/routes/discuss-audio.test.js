@@ -29,18 +29,6 @@ afterEach(() => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-async function withTmpHome(fn) {
-  const prevHome = process.env.HOME;
-  const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-audio-home-"));
-  process.env.HOME = tmpHome;
-  try {
-    return await fn(tmpHome);
-  } finally {
-    process.env.HOME = prevHome;
-    rmSync(tmpHome, { recursive: true, force: true });
-  }
-}
-
 // ── constants ─────────────────────────────────────────────────────────────────
 
 describe("AUDIO_MIME_EXT", () => {
@@ -130,31 +118,9 @@ describe("loadAudioMetasForFlow", () => {
     assert.equal(metas[0].turnId, "t1");
   });
 
-  it("falls back to the harness-home root when the store-home root is absent", async () => {
+  it("returns [] when the store-home root is absent — pre-store-home audio is not read", async () => {
     const flowId = "test-flow-" + randomUUID().slice(0, 8);
-    const meta = { turnId: "turn-fb", itemId: "item-1", audioUrl: "/a/fb.m4a", status: "completed", transcript: "hi" };
-    await withTmpHome(async (tmpHome) => {
-      const dir = path.join(tmpHome, ".openclaw", "discuss-audio", flowId, "item-1");
-      mkdirSync(dir, { recursive: true });
-      writeFileSync(path.join(dir, "turn-fb.meta.json"), JSON.stringify(meta));
-      const metas = await loadAudioMetasForFlow(flowId);
-      assert.equal(metas.length, 1);
-      assert.equal(metas[0].turnId, "turn-fb");
-    });
-  });
-
-  it("prefers the store-home root when both homes have metas", async () => {
-    const flowId = "test-flow-" + randomUUID().slice(0, 8);
-    const dir = audioDirForFlow(flowId, "item-1");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, "turn-new.meta.json"), JSON.stringify({ turnId: "turn-new", status: "completed" }));
-    await withTmpHome(async (tmpHome) => {
-      const oldDir = path.join(tmpHome, ".openclaw", "discuss-audio", flowId, "item-1");
-      mkdirSync(oldDir, { recursive: true });
-      writeFileSync(path.join(oldDir, "turn-old.meta.json"), JSON.stringify({ turnId: "turn-old", status: "completed" }));
-      const metas = await loadAudioMetasForFlow(flowId);
-      assert.equal(metas.length, 1);
-      assert.equal(metas[0].turnId, "turn-new");
-    });
+    const metas = await loadAudioMetasForFlow(flowId);
+    assert.deepEqual(metas, []);
   });
 });

@@ -3,20 +3,13 @@
 // The sidecar locks the agent id + session id at first-turn creation time so
 // that pipeline config changes don't orphan an in-progress conversation.
 import path from "node:path";
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { resolveStorePaths } from "../state/paths.js";
 
 // Store-home sidecar dir, resolved per call so a MANIFOLD_DATA_DIR change
 // between import and first use still relocates the store.
 export function discussSessionsDir() {
   return resolveStorePaths().discussSessionsDir;
-}
-
-// Read-only fallback for sidecars written under the harness home. Writes
-// always go to discussSessionsDir() above; reads consult the legacy dir
-// (state/paths.js) only when the store-home file is absent.
-function fallbackSessionsDir() {
-  return resolveStorePaths().legacyDiscussSessionsDir;
 }
 
 function sidecarFileName(flowId, gateNodeId, itemId) {
@@ -55,7 +48,5 @@ export function stampDiscussSession(flowId, gateNodeId, itemId, agentId, session
 }
 
 export function readDiscussSession(flowId, gateNodeId, itemId) {
-  const sidecarPath = _discussSidecarPath(flowId, gateNodeId, itemId);
-  if (existsSync(sidecarPath)) return readSidecarFile(sidecarPath);
-  return readSidecarFile(_fallbackSidecarPath(flowId, gateNodeId, itemId));
+  return readSidecarFile(_discussSidecarPath(flowId, gateNodeId, itemId));
 }

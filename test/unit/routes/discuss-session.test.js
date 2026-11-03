@@ -104,43 +104,8 @@ describe("stampDiscussSession / readDiscussSession", () => {
     }
   });
 
-  it("falls back to the harness-home sidecar when the store-home file is absent", () => {
-    const prevHome = process.env.HOME;
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-session-home-"));
-    try {
-      process.env.HOME = tmpHome;
-      const fileName = path.basename(_discussSidecarPath(flowId, nodeId, itemId + "-fb"));
-      const fallbackDir = path.join(tmpHome, ".openclaw", "discuss-sessions");
-      mkdirSync(fallbackDir, { recursive: true });
-      writeFileSync(path.join(fallbackDir, fileName), JSON.stringify({ agent, sessionId: session }), "utf8");
-      const result = readDiscussSession(flowId, nodeId, itemId + "-fb");
-      assert.equal(result?.agent, agent);
-      assert.equal(result?.sessionId, session);
-    } finally {
-      process.env.HOME = prevHome;
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
-  });
-
-  it("prefers the store-home sidecar when both homes have one", () => {
-    const prevHome = process.env.HOME;
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-session-home-"));
-    try {
-      process.env.HOME = tmpHome;
-      stampDiscussSession(flowId, nodeId, itemId + "-both", "agent-new", "session-new");
-      const fileName = path.basename(_discussSidecarPath(flowId, nodeId, itemId + "-both"));
-      const fallbackDir = path.join(tmpHome, ".openclaw", "discuss-sessions");
-      mkdirSync(fallbackDir, { recursive: true });
-      writeFileSync(path.join(fallbackDir, fileName), JSON.stringify({ agent: "agent-old", sessionId: "session-old" }), "utf8");
-      try {
-        const result = readDiscussSession(flowId, nodeId, itemId + "-both");
-        assert.equal(result?.agent, "agent-new");
-      } finally {
-        try { unlinkSync(_discussSidecarPath(flowId, nodeId, itemId + "-both")); } catch {}
-      }
-    } finally {
-      process.env.HOME = prevHome;
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
+  it("returns null when no store-home sidecar exists — pre-store-home files are not read", () => {
+    const result = readDiscussSession(flowId, nodeId, itemId + "-missing");
+    assert.equal(result, null);
   });
 });

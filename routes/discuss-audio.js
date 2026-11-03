@@ -29,27 +29,13 @@ export function discussAudioDir() {
   return resolveStorePaths().discussAudioDir;
 }
 
-// Read-only fallback for audio written under the harness home. Writes always
-// go under discussAudioDir() above; reads consult the legacy dir
-// (state/paths.js) only when the store-home root is absent.
-function fallbackAudioDir() {
-  return resolveStorePaths().legacyDiscussAudioDir;
-}
-
 export function audioRootForFlow(flowId) {
   return path.join(discussAudioDir(), flowId);
 }
 
-function fallbackAudioRootForFlow(flowId) {
-  return path.join(fallbackAudioDir(), flowId);
-}
-
-// Flow audio roots to search, store home first. Serve paths consult each in
-// order and stop at the first file hit.
+// Single search root: the store home. Pre-store-home audio is not read.
 export function audioRootsForFlow(flowId) {
-  const root = audioRootForFlow(flowId);
-  const fallback = fallbackAudioRootForFlow(flowId);
-  return fallback === root ? [root] : [root, fallback];
+  return [audioRootForFlow(flowId)];
 }
 
 export function audioDirForFlow(flowId, itemId) {
@@ -58,15 +44,13 @@ export function audioDirForFlow(flowId, itemId) {
 }
 
 // Read all .meta.json sidecars under <store-home>/discuss-audio/<flowId>/
-// across every item sub-directory. Returns a flat array of parsed meta objects.
+// across every item sub-directory. Returns a flat array of parsed meta objects,
+// [] when the root is absent.
 export async function loadAudioMetasForFlow(flowId) {
-  const metas = await readMetasUnder(audioRootForFlow(flowId));
-  if (metas !== null) return metas;
-  return (await readMetasUnder(fallbackAudioRootForFlow(flowId))) ?? [];
+  return (await readMetasUnder(audioRootForFlow(flowId))) ?? [];
 }
 
-// Null when the root is absent (caller falls back); an array otherwise, so
-// an existing-but-empty root never consults the fallback.
+// Null when the root is absent; an array otherwise.
 async function readMetasUnder(root) {
   const { readdir, readFile } = await import("node:fs/promises");
   let itemDirs;
