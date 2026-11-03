@@ -1,6 +1,5 @@
 // Audio constants and filesystem helpers for discuss audio upload/serve/history.
 import path from "node:path";
-import os from "node:os";
 import { resolveStorePaths } from "../state/paths.js";
 
 export const AUDIO_MIME_EXT = {
@@ -31,10 +30,10 @@ export function discussAudioDir() {
 }
 
 // Read-only fallback for audio written under the harness home. Writes always
-// go under discussAudioDir() above; reads consult this root only when the
-// store-home root is absent.
+// go under discussAudioDir() above; reads consult the legacy dir
+// (state/paths.js) only when the store-home root is absent.
 function fallbackAudioDir() {
-  return path.join(os.homedir(), ".openclaw", "discuss-audio");
+  return resolveStorePaths().legacyDiscussAudioDir;
 }
 
 export function audioRootForFlow(flowId) {

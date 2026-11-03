@@ -3,7 +3,6 @@
 // The sidecar locks the agent id + session id at first-turn creation time so
 // that pipeline config changes don't orphan an in-progress conversation.
 import path from "node:path";
-import os from "node:os";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { resolveStorePaths } from "../state/paths.js";
 
@@ -14,10 +13,10 @@ export function discussSessionsDir() {
 }
 
 // Read-only fallback for sidecars written under the harness home. Writes
-// always go to discussSessionsDir() above; reads consult this dir only when
-// the store-home file is absent.
+// always go to discussSessionsDir() above; reads consult the legacy dir
+// (state/paths.js) only when the store-home file is absent.
 function fallbackSessionsDir() {
-  return path.join(os.homedir(), ".openclaw", "discuss-sessions");
+  return resolveStorePaths().legacyDiscussSessionsDir;
 }
 
 function sidecarFileName(flowId, gateNodeId, itemId) {

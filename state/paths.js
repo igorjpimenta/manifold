@@ -50,6 +50,18 @@ export function discussAudioDir(dataDir) {
   return path.join(dataDir, "discuss-audio");
 }
 
+// Pre-store-home locations, read-only migration fallback: sidecars written
+// before the store-home move live here. Never written to — the only writer
+// is the store-home dir above. Centralized here so no other file joins the
+// harness home to its own path.
+export function legacyDiscussSessionsDir(home = os.homedir()) {
+  return path.join(home, ".openclaw", "discuss-sessions");
+}
+
+export function legacyDiscussAudioDir(home = os.homedir()) {
+  return path.join(home, ".openclaw", "discuss-audio");
+}
+
 export function stateFile(dataDir) {
   return path.join(dataDir, "state", "manifold-paused.json");
 }
@@ -179,5 +191,7 @@ export function resolveStorePaths({ paths = null, dataDir = null, env = process.
     pipelinesDir: paths?.pipelinesDir ?? env.MANIFOLD_PIPELINES_DIR ?? pipelinesDir(dir),
     discussSessionsDir: paths?.discussSessionsDir ?? env.MANIFOLD_DISCUSS_SESSIONS_DIR ?? discussSessionsDir(dir),
     discussAudioDir: paths?.discussAudioDir ?? env.MANIFOLD_DISCUSS_AUDIO_DIR ?? discussAudioDir(dir),
+    legacyDiscussSessionsDir: paths?.legacyDiscussSessionsDir ?? legacyDiscussSessionsDir(),
+    legacyDiscussAudioDir: paths?.legacyDiscussAudioDir ?? legacyDiscussAudioDir(),
   };
 }
