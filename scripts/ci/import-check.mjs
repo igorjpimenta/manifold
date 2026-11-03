@@ -56,18 +56,20 @@ console.log(
 // Own-store readers (manifold's own DBs/logs/config) are grandfathered per
 // file below — each entry names what it reads, so a new reach stands out.
 // Test files are exempt: they isolate homes via tmp dirs on purpose.
-const HOME_RE = /\bos\.homedir\s*\(|process\.env\.HOME\b|process\.env\[\s*['"]HOME['"]\s*\]/;
+const HOME_RE = /\bhomedir\s*\(|process\.env\.HOME\b|process\.env\[\s*['"]HOME['"]\s*\]/;
 const HOME_ALLOW = new Set([
   "state/paths.js", // the seam itself
   "plugins/openclaw/manifold/sessions.js", // harness adapter edge
-  "bin/cli.js", // own pipelines dir
+  // NOTE: bin/cli.js (pipelines dir) and locks/browser-tabs.js (harness
+  // config) are deliberately NOT here — S9/S10 move them behind the plugin
+  // seam, and this gate stays red on them until then.
   "budget/index.js", // own store dir
   "dashboard/cost.js", // own ops.sqlite
   "dashboard/event-log.js", // own runtime.sqlite
   "drizzle.config.js", // own runtime.sqlite (migrations)
   "drizzle.config.ops.js", // own ops.sqlite (migrations)
   "graphql/schema.js", // own runtime/ops.sqlite defaults
-  "locks/browser-tabs.js", // own openclaw.json tab lease
+  "state/db-guard.js", // own corruption-alert log
   "plugins/openclaw/manifold/hooks/profile-read-gate.js", // harness workspace profile (read)
   "plugins/openclaw/manifold/hooks/profile-write-lock.js", // harness workspace profile (write)
   "state/db-guard.js", // own corruption-alert log
