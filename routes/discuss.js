@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { looksLikeMetaNarration, normalizePendingFields } from "./discuss-helpers.js";
 import { stampDiscussSession, readDiscussSession } from "./discuss-session.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
-import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow } from "./discuss-audio.js";
+import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow, resolveAudioHarness } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
 
 // ── Factory ─────────────────────────────────────────────────────────────────
@@ -414,7 +414,23 @@ export function registerDiscussHandlers({
 
   // ── handleDiscussAudio ────────────────────────────────────────────────────
 
+  // Connection-declared harness for audio file paths (X-Manifold-Harness,
+  // same declaration the MCP transport requires). Refuses before any
+  // filesystem touch — audio is namespaced per harness, never defaulted.
+  function requireAudioHarness(req, res) {
+    try {
+      return resolveAudioHarness(req);
+    } catch {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: false, code: "missing_harness", error: "missing or reserved X-Manifold-Harness" }));
+      return null;
+    }
+  }
+
   async function handleDiscussAudio(req, res, sourceFlow) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     let raw = "";
     for await (const chunk of req) raw += chunk;
     let body;
@@ -447,7 +463,7 @@ export function registerDiscussHandlers({
     }
     const turnId = randomUUID();
     const flowIdShort = sourceFlow.flowId.slice(0, 8);
-    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId);
+    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId, harness);
     const audioPath = path.join(audioDir, `${turnId}.${ext}`);
     try {
       const { mkdir, writeFile } = await import("node:fs/promises");
@@ -494,6 +510,8 @@ export function registerDiscussHandlers({
   // transcript events rather than creating a new turn.
 
   async function handleDiscussAudioRetry(req, res, sourceFlow) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     let raw = "";
     for await (const chunk of req) raw += chunk;
     let body;
@@ -522,7 +540,7 @@ export function registerDiscussHandlers({
       return true;
     }
     const flowIdShort = sourceFlow.flowId.slice(0, 8);
-    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId);
+    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId, harness);
     const metaPath = path.join(audioDir, `${turnId}.meta.json`);
     let meta;
     try {
@@ -575,6 +593,8 @@ export function registerDiscussHandlers({
   // ── handleDiscussAudioGet ─────────────────────────────────────────────────
 
   async function handleDiscussAudioGet(req, res, sourceFlow, audioFileName) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     if (!/^[a-zA-Z0-9-]{8,64}\.[a-zA-Z0-9]{1,8}$/.test(audioFileName)) {
       res.statusCode = 400;
       res.end("invalid audio file name");
@@ -582,7 +602,7 @@ export function registerDiscussHandlers({
     }
     const ext = audioFileName.split(".").pop().toLowerCase();
     const { readdir, readFile, stat } = await import("node:fs/promises");
-    for (const flowRoot of audioRootsForFlow(sourceFlow.flowId)) {
+    for (const flowRoot of audioRootsForFlow(sourceFlow.flowId, harness)) {
       let entries;
       try { entries = await readdir(flowRoot); }
       catch { continue; }
@@ -609,6 +629,8 @@ export function registerDiscussHandlers({
   // ── handleDiscussHistory ──────────────────────────────────────────────────
 
   async function handleDiscussHistory(req, res, sourceFlow) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const wantItemId = url.searchParams.get("itemId");
     const offsetParam = Number(url.searchParams.get("offset"));
@@ -688,7 +710,7 @@ export function registerDiscussHandlers({
     try {
       if (parsed && parsed.ok) {
         parsed.messages = Array.isArray(parsed.messages) ? parsed.messages : [];
-        const audioMetas = await loadAudioMetasForFlow(sourceFlow.flowId);
+        const audioMetas = await loadAudioMetasForFlow(sourceFlow.flowId, harness);
         if (audioMetas.length > 0) {
           const matchedTurnIds = new Set();
           for (const msg of parsed.messages) {

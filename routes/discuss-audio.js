@@ -1,6 +1,7 @@
 // Audio constants and filesystem helpers for discuss audio upload/serve/history.
 import path from "node:path";
 import { resolveStorePaths, harnessMediaAudioDir } from "../state/paths.js";
+import { assertDeclaration } from "../mcp/identity.js";
 
 export const AUDIO_MIME_EXT = {
   "audio/m4a":   "m4a",
@@ -23,18 +24,22 @@ export const EXT_TO_MIME = {
   ogg:  "audio/ogg",
 };
 
-// Harness namespace for stored audio, resolved per call like the store
-// home itself. Single-harness deployments take the "openclaw" default;
-// MANIFOLD_HARNESS relocates it without touching code.
-export function audioHarness(env = process.env) {
-  return String(env?.MANIFOLD_HARNESS ?? "").trim() || "openclaw";
+// Harness namespace for stored audio, declared per connection like every
+// other harness identity (mcp/identity.js): the X-Manifold-Harness header
+// on the request that delivered the audio. Never env, never defaulted —
+// an undeclared harness refuses before any filesystem touch.
+export function resolveAudioHarness(req) {
+  const header = req?.headers?.["x-manifold-harness"];
+  const { harness } = assertDeclaration({ harness: Array.isArray(header) ? header[0] : header });
+  return harness;
 }
 
-// Media root for this harness: <store-home>/media/audio/<harness>.
+// Media root for the given harness: <store-home>/media/audio/<harness>.
 // Resolved per call so a MANIFOLD_DATA_DIR change between import and first
-// use still relocates the store.
-export function harnessAudioDir(harness = audioHarness()) {
-  return harnessMediaAudioDir(resolveStorePaths().dataDir, harness ?? audioHarness());
+// use still relocates the store. The harness is required — callers pass
+// the connection-declared value (resolveAudioHarness), never a default.
+export function harnessAudioDir(harness) {
+  return harnessMediaAudioDir(resolveStorePaths().dataDir, harness);
 }
 
 export function audioRootForFlow(flowId, harness) {

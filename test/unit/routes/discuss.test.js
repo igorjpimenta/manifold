@@ -47,10 +47,10 @@ const { registerDiscussHandlers } = await import("../../../routes/discuss.js");
 // the harness-owned path, not a stub.
 const sessions = await import("../../../plugins/openclaw/manifold/sessions.js");
 
-function createMockReqWithBody(method, path_, body) {
+function createMockReqWithBody(method, path_, body, headers = {}) {
   const chunks = body != null ? [Buffer.from(typeof body === "string" ? body : JSON.stringify(body))] : [];
   return {
-    ...createMockReq(method, path_),
+    ...createMockReq(method, path_, headers),
     [Symbol.asyncIterator]: async function* () { for (const c of chunks) yield c; },
   };
 }
@@ -218,7 +218,7 @@ describe("registerDiscussHandlers — handleDiscussHistory awaits discussStore.g
     });
     const { handleDiscussHistory } = registerDiscussHandlers(deps);
 
-    const req = createMockReq("GET", `/manifold/runs/${sourceFlow.flowId}/discuss/history`);
+    const req = createMockReq("GET", `/manifold/runs/${sourceFlow.flowId}/discuss/history`, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussHistory(req, res, sourceFlow);
 
@@ -255,7 +255,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
 
   test("re-transcribes an existing audio file and updates its meta sidecar in place", async () => {
     const { audioDirForFlow } = await import("../../../routes/discuss-audio.js");
-    const audioDir = audioDirForFlow(testFlowId, itemId);
+    const audioDir = audioDirForFlow(testFlowId, itemId, "test-harness");
     const { mkdir, writeFile, readFile } = await import("node:fs/promises");
     await mkdir(audioDir, { recursive: true });
     const turnId = "11111111-1111-1111-1111-111111111111";
@@ -284,7 +284,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 
-    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
 
@@ -330,7 +330,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
   });
 
   test("canonical path: retry emits session.transcript.* with scope=discuss", async () => {    const { audioDirForFlow } = await import("../../../routes/discuss-audio.js");
-    const audioDir = audioDirForFlow(testFlowId, itemId);
+    const audioDir = audioDirForFlow(testFlowId, itemId, "test-harness");
     const { mkdir, writeFile } = await import("node:fs/promises");
     await mkdir(audioDir, { recursive: true });
     const turnId = "22222222-2222-2222-2222-222222222222";
@@ -359,7 +359,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 
-    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId });
+    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 202);
@@ -387,7 +387,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     api.runtime = { mediaUnderstanding: { transcribeAudioFile: async () => ({ text: "x" }) } };
     const deps = makeDeps(api, { pipelinesRef });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
-    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId: "does-not-exist", itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId: "does-not-exist", itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 404);
@@ -398,11 +398,22 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     const { api } = createMockApi();
     const deps = makeDeps(api, { pipelinesRef });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
-    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 400);
     assert.equal(JSON.parse(res.body).code, "missing_turn_id");
+  });
+
+  test("refuses audio without a declared harness, before any store touch", async () => {
+    const { api } = createMockApi();
+    const deps = makeDeps(api, { pipelinesRef });
+    const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId: "t", itemId });
+    const res = createMockRes();
+    await handleDiscussAudioRetry(req, res, sourceFlow);
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).code, "missing_harness");
   });
 });
 

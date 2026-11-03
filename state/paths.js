@@ -54,7 +54,8 @@ export function mediaAudioDir(dataDir) {
 }
 
 export function harnessMediaAudioDir(dataDir, harness) {
-  const safe = String(harness ?? "").replace(/[^A-Za-z0-9._-]+/g, "_") || "openclaw";
+  const safe = String(harness ?? "").replace(/[^A-Za-z0-9._-]+/g, "_");
+  if (!safe) throw new Error("manifold: harness is required to resolve the media dir (declare it on the connection)");
   return path.join(mediaAudioDir(dataDir), safe);
 }
 
