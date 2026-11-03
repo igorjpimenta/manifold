@@ -438,17 +438,19 @@ export async function withLock(name, fn, opts = {}) {
   nextHeld.add(name);
   const runHeld = () => heldLockNames.run(nextHeld, () => fn());
   // wrapBrowserTabLifecycle only wraps when `name` is "browser:<profile>"
-  // (a no-op passthrough for every other lock) — applied on the real
-  // acquire/release path only, never for a re-entry, so a nested acquirer
-  // never opens/closes its own tabs mid-way through the outer holder's
-  // critical section. This is the single point of enforcement for every
-  // "browser:*" lock consumer, whether it's a pipeline node's declarative
-  // `crossProcessLock` field (dispatched through executor.js) or application
-  // code calling withLock directly (e.g. freelance_workana-poll-inbox's
-  // scan-and-probe.js, which acquires "browser:freelance" inline, multiple
-  // times, with no node-level declaration at all) — see browser-tabs.js for
-  // what/why. isOwned keeps a holder whose lock was taken over from closing
-  // the new holder's tabs.
+  // for a profile in opts.browserProfiles (a no-op passthrough for every
+  // other lock, and for every "browser:" name when the caller injects no
+  // profiles) — applied on the real acquire/release path only, never for
+  // a re-entry, so a nested acquirer never opens/closes its own tabs
+  // mid-way through the outer holder's critical section. This is the
+  // single point of enforcement for every "browser:*" lock consumer,
+  // whether it's a pipeline node's declarative `crossProcessLock` field
+  // (dispatched through executor.js, which threads the harness config's
+  // browser.profiles in) or application code calling withLock directly
+  // (e.g. freelance_workana-poll-inbox's scan-and-probe.js, which acquires
+  // "browser:freelance" inline, multiple times, with no node-level
+  // declaration at all) — see browser-tabs.js for what/why. isOwned keeps
+  // a holder whose lock was taken over from closing the new holder's tabs.
   const guardedFn = lock.reentrant
     ? runHeld
     : wrapBrowserTabLifecycle(name, runHeld, { ...opts, isOwned: lock.isOwned });

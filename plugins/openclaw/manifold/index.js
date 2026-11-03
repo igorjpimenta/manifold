@@ -182,6 +182,11 @@ export default definePluginEntry({
     }).dir;
     const ownerSessionKey = userCfg.ownerSessionKey || DEFAULT_OWNER_SESSION_KEY;
     const discussDefaultAgent = typeof userCfg.discuss?.defaultAgent === "string" ? userCfg.discuss.defaultAgent : null;
+    // Harness-owned browser profile list — read from the harness config
+    // this plugin already sees and passed into core explicitly. Core never
+    // touches the harness config file on disk; without this, tab scoping
+    // would silently stay off.
+    const browserProfiles = Object.keys(api.config?.browser?.profiles ?? {});
     const dashboardEnabled = userCfg.dashboardEnabled !== false;
     const dashboardPort = Number.isInteger(userCfg.dashboardPort) ? userCfg.dashboardPort : DEFAULT_DASHBOARD_PORT;
     const dashboardHost = userCfg.dashboardHost || DEFAULT_DASHBOARD_HOST;
@@ -299,6 +304,7 @@ export default definePluginEntry({
     const executor = createExecutor({
       api,
       config: api.config,
+      browserProfiles,
       pipelinesDir,
       store,
       pipelinesRef,

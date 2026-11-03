@@ -3,25 +3,16 @@
 // Mocks node:child_process's spawn() (not fetch — the implementation
 // shells out to the `openclaw browser` CLI, not the plugin's HTTP control
 // server; see browser-tabs.js's header comment for why) via
-// mock.module(), the same pattern lock.test.js uses for node:os.
+// mock.module().
 
 import { describe, it, mock, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import os from "node:os";
 
-// browser-profile validation reads ~/.openclaw/openclaw.json via
-// os.homedir() at first use. Pin it to a fixture home with the profiles the
-// assertions below expect ("freelance") — the real home directory is not
-// guaranteed on CI.
-const TEST_HOME = mkdtempSync(join(os.tmpdir(), "gf-browser-tabs-test-"));
-mkdirSync(join(TEST_HOME, ".openclaw"), { recursive: true });
-writeFileSync(
-  join(TEST_HOME, ".openclaw", "openclaw.json"),
-  JSON.stringify({ browser: { profiles: { freelance: {} } } }),
-);
+// The configured profile set is injected per call (opts.browserProfiles) —
+// no fixture home, no openclaw.json anywhere. PROFILES is the injected set
+// every scoping test below passes explicitly.
+const PROFILES = ["freelance"];
 
 // Drives canned CLI responses keyed by the subcommand (tabs/open/close),
 // and records every invocation's full argv for assertions.
@@ -75,16 +66,6 @@ let wrapBrowserTabLifecycle;
 
 beforeEach(async () => {
   mock.restoreAll();
-  // mock.restoreAll() also unregisters module mocks, so the node:os fixture
-  // has to be re-registered on every test — it must be live whenever a test
-  // loads browser-tabs.js (the module captures os.homedir() only lazily,
-  // at first profile lookup, but once loaded its binding never changes).
-  await mock.module("node:os", {
-    exports: {
-      ...os,
-      homedir: () => TEST_HOME,
-    },
-  });
 });
 
 afterEach(() => {
@@ -116,6 +97,14 @@ describe("wrapBrowserTabLifecycle — pass-through", () => {
     const fn = async () => "result";
     assert.equal(wrap("browser:", fn), fn);
   });
+
+  it("returns fn unchanged for a browser:<profile> name when no profiles are injected (empty default)", async () => {
+    const { spawnImpl, calls } = makeFakeSpawn({ tabsBefore: [] });
+    const wrap = await loadWithFakeSpawn(spawnImpl);
+    const fn = async () => "result";
+    assert.equal(wrap("browser:freelance", fn), fn);
+    assert.equal(calls.length, 0);
+  });
 });
 
 describe("wrapBrowserTabLifecycle — readiness (open-if-empty)", () => {
@@ -124,7 +113,7 @@ describe("wrapBrowserTabLifecycle — readiness (open-if-empty)", () => {
     const wrap = await loadWithFakeSpawn(spawnImpl);
 
     const fn = async () => "ok";
-    const result = await wrap("browser:freelance", fn)();
+    const result = await wrap("browser:freelance", fn, { browserProfiles: PROFILES })();
 
     assert.equal(result, "ok");
     const opens = calls.filter((a) => a[4] === "open");
@@ -136,7 +125,7 @@ describe("wrapBrowserTabLifecycle — readiness (open-if-empty)", () => {
     const { spawnImpl, calls } = makeFakeSpawn({ tabsBefore: [{ targetId: "existing-1", type: "page" }] });
     const wrap = await loadWithFakeSpawn(spawnImpl);
 
-    await wrap("browser:freelance", async () => "ok")();
+    await wrap("browser:freelance", async () => "ok", { browserProfiles: PROFILES })();
 
     assert.equal(calls.filter((a) => a[4] === "open").length, 0);
   });
@@ -150,7 +139,7 @@ describe("wrapBrowserTabLifecycle — readiness (open-if-empty)", () => {
     });
     const wrap = await loadWithFakeSpawn(spawnImpl);
 
-    await wrap("browser:freelance", async () => "ok")();
+    await wrap("browser:freelance", async () => "ok", { browserProfiles: PROFILES })();
 
     // Only background_page/service_worker exist — that still counts as
     // zero real page tabs, so a seed tab must be opened.
@@ -164,7 +153,7 @@ describe("wrapBrowserTabLifecycle — cleanup (diff-based close)", () => {
     const { spawnImpl } = makeFakeSpawn({ tabsBefore: [], onOpen: () => ({ targetId: "opened-1", type: "page" }), onClose: (id) => closed.push(id) });
     const wrap = await loadWithFakeSpawn(spawnImpl);
 
-    await wrap("browser:freelance", async () => "ok")();
+    await wrap("browser:freelance", async () => "ok", { browserProfiles: PROFILES })();
 
     assert.deepEqual(closed, ["opened-1"]);
   });
@@ -189,7 +178,7 @@ describe("wrapBrowserTabLifecycle — cleanup (diff-based close)", () => {
       );
       return "ok";
     };
-    await wrap("browser:freelance", fn)();
+    await wrap("browser:freelance", fn, { browserProfiles: PROFILES })();
 
     assert.deepEqual(closed.sort(), ["parallel-1", "parallel-2", "parallel-3"]);
   });
@@ -202,7 +191,7 @@ describe("wrapBrowserTabLifecycle — cleanup (diff-based close)", () => {
     });
     const wrap = await loadWithFakeSpawn(spawnImpl);
 
-    await wrap("browser:freelance", async () => "ok")();
+    await wrap("browser:freelance", async () => "ok", { browserProfiles: PROFILES })();
 
     assert.equal(closed.includes("human-tab"), false);
   });
@@ -212,7 +201,7 @@ describe("wrapBrowserTabLifecycle — cleanup (diff-based close)", () => {
     const { spawnImpl } = makeFakeSpawn({ tabsBefore: [], onOpen: () => ({ targetId: "opened-1", type: "page" }), onClose: (id) => closed.push(id) });
     const wrap = await loadWithFakeSpawn(spawnImpl);
 
-    await assert.rejects(wrap("browser:freelance", async () => { throw new Error("script blew up"); })(), /script blew up/);
+    await assert.rejects(wrap("browser:freelance", async () => { throw new Error("script blew up"); }, { browserProfiles: PROFILES })(), /script blew up/);
     assert.deepEqual(closed, ["opened-1"]);
   });
 });
@@ -233,7 +222,7 @@ describe("wrapBrowserTabLifecycle — degrades gracefully on plugin failure", ()
     const wrap = await loadWithFakeSpawn(spawnImpl);
     const logger = { warn: mock.fn() };
 
-    const result = await wrap("browser:freelance", async () => "ok", { logger })();
+    const result = await wrap("browser:freelance", async () => "ok", { logger, browserProfiles: PROFILES })();
 
     assert.equal(result, "ok");
     assert.ok(logger.warn.mock.callCount() > 0);
@@ -266,7 +255,7 @@ describe("wrapBrowserTabLifecycle — degrades gracefully on plugin failure", ()
     const wrap = await loadWithFakeSpawn(spawnImpl);
     const logger = { warn: mock.fn() };
 
-    const result = await wrap("browser:freelance", async () => "ok", { logger })();
+    const result = await wrap("browser:freelance", async () => "ok", { logger, browserProfiles: PROFILES })();
 
     assert.equal(result, "ok");
   });
@@ -284,7 +273,7 @@ describe("tab cleanup is skipped once the lock is no longer ours", () => {
       });
       return "ok";
     };
-    await wrap("browser:freelance", fn, { isOwned: () => false })();
+    await wrap("browser:freelance", fn, { isOwned: () => false, browserProfiles: PROFILES })();
     assert.equal(calls.filter((a) => a[4] === "close").length, 0);
   });
 
@@ -297,7 +286,7 @@ describe("tab cleanup is skipped once the lock is no longer ours", () => {
         child.on("exit", resolve);
       });
     };
-    await wrap("browser:freelance", fn, { isOwned: () => true })();
+    await wrap("browser:freelance", fn, { isOwned: () => true, browserProfiles: PROFILES })();
     assert.deepEqual(calls.filter((a) => a[4] === "close").map((a) => a[5]), ["opened-1"]);
   });
 
@@ -314,11 +303,22 @@ describe("tab cleanup is skipped once the lock is no longer ours", () => {
     assert.deepEqual(calls.filter((a) => a[4] === "close").map((a) => a[5]), ["opened-1"]);
   });
 
-  it("browserProfileForLock: only configured browser:<profile> names map to a profile", async () => {
+  it("browserProfileForLock: only injected browser:<profile> names map to a profile", async () => {
     const { browserProfileForLock } = await import("../../../locks/browser-tabs.js");
-    assert.equal(browserProfileForLock("browser:freelance"), "freelance");
-    assert.equal(browserProfileForLock("browser:not-a-profile"), null);
-    assert.equal(browserProfileForLock("db:sqlite"), null);
-    assert.equal(browserProfileForLock(undefined), null);
+    const configured = new Set(["freelance"]);
+    assert.equal(browserProfileForLock("browser:freelance", configured), "freelance");
+    assert.equal(browserProfileForLock("browser:not-a-profile", configured), null);
+    assert.equal(browserProfileForLock("db:sqlite", configured), null);
+    assert.equal(browserProfileForLock(undefined, configured), null);
+  });
+
+  it("browserProfileForLock: accepts an array or a browser.profiles map, defaults to empty", async () => {
+    const { browserProfileForLock } = await import("../../../locks/browser-tabs.js");
+    assert.equal(browserProfileForLock("browser:freelance", ["freelance"]), "freelance");
+    assert.equal(browserProfileForLock("browser:freelance", { freelance: {} }), "freelance");
+    assert.equal(browserProfileForLock("browser:freelance"), null);
+    assert.equal(browserProfileForLock("browser:freelance", undefined), null);
+    assert.equal(browserProfileForLock("browser:freelance", []), null);
+    assert.equal(browserProfileForLock("browser:freelance", {}), null);
   });
 });

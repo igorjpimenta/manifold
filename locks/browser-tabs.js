@@ -42,8 +42,9 @@
 // spawn at the per-invocation cost above, so nothing about the code shape
 // implies the parallelism is what keeps it flat.
 //
-// Scoped to profiles actually configured in openclaw.json's
-// browser.profiles map, not any string after "browser:" — "browser:" is not
+// Scoped to the configured profile set the caller injects (the harness
+// passes its browser.profiles down through withLock opts), not any string
+// after "browser:" — "browser:" is not
 // a reserved prefix, and a crossProcessLock value of "browser:linkedin" is
 // a legal arbitrary lock name with no real linkedin profile behind it
 // (test/unit/engine/executor-subflow-children-fetch-profiles-e2e.test.js
@@ -51,26 +52,17 @@
 // shell out to the real CLI for a profile that doesn't exist — breaking
 // test isolation and adding multi-second latency for nothing.
 
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-import os from "node:os";
+import { existsSync } from "node:fs";
 
-// Memoized for the life of the process — openclaw.json's profile list
-// doesn't change mid-run, and this avoids a disk read on every lock
-// acquisition. Re-imports of this module (e.g. per-test in an isolated
-// mock context) get a fresh cache, which is exactly what tests want.
-let _configuredProfilesCache = null;
-
-function configuredBrowserProfiles() {
-  if (_configuredProfilesCache) return _configuredProfilesCache;
-  try {
-    const cfgPath = path.join(os.homedir(), ".openclaw", "openclaw.json");
-    const cfg = JSON.parse(readFileSync(cfgPath, "utf-8"));
-    _configuredProfilesCache = new Set(Object.keys(cfg?.browser?.profiles ?? {}));
-  } catch {
-    _configuredProfilesCache = new Set();
-  }
-  return _configuredProfilesCache;
+// The configured profile set arrives as an injected parameter — a Set, an
+// array of names, or the harness config's browser.profiles map — and is
+// never read from disk here. Anything else (including unprovided) means
+// no scoping: every "browser:" name stays inert.
+function normalizeConfiguredProfiles(input) {
+  if (input instanceof Set) return input;
+  if (Array.isArray(input)) return new Set(input.filter((p) => typeof p === "string" && p.length > 0));
+  if (input && typeof input === "object") return new Set(Object.keys(input));
+  return new Set();
 }
 
 function resolveOpenclawBin() {
@@ -153,11 +145,11 @@ async function closeTabs(profile, targetIds) {
 
 // The configured profile a "browser:<profile>" lock name refers to, or null
 // for any other lock name — including "browser:" names that don't match a
-// real profile in openclaw.json, which stay inert.
-export function browserProfileForLock(lockName) {
+// real profile in the injected set, which stay inert.
+export function browserProfileForLock(lockName, configuredProfiles) {
   if (typeof lockName !== "string" || !lockName.startsWith("browser:")) return null;
   const profile = lockName.slice("browser:".length);
-  if (!profile || !configuredBrowserProfiles().has(profile)) return null;
+  if (!profile || !normalizeConfiguredProfiles(configuredProfiles).has(profile)) return null;
   return profile;
 }
 
@@ -210,8 +202,8 @@ export async function endTabSession(session, { logger, isOwned } = {}) {
 // layered on top of the lock, not a new failure mode the lock didn't
 // already have. Worst case on a plugin hiccup is the script doing its own
 // CDP dance, not a newly-broken node.
-export function wrapBrowserTabLifecycle(lockName, fn, { logger, isOwned } = {}) {
-  const profile = browserProfileForLock(lockName);
+export function wrapBrowserTabLifecycle(lockName, fn, { logger, isOwned, browserProfiles } = {}) {
+  const profile = browserProfileForLock(lockName, browserProfiles);
   if (!profile) return fn;
 
   return async () => {

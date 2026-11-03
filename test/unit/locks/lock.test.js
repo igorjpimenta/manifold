@@ -17,19 +17,12 @@ import { EventEmitter } from "node:events";
 const TEST_HOME = mkdtempSync(join(os.tmpdir(), "gf-lock-test-"));
 const LOCKS_DIR = join(TEST_HOME, ".manifold", "locks");
 mkdirSync(LOCKS_DIR, { recursive: true });
-mkdirSync(join(TEST_HOME, ".openclaw"), { recursive: true });
 
-// browser-tabs.js (imported by lock.js) reads openclaw.json's
-// browser.profiles map, via the same mocked os.homedir() below, to decide
-// whether a "browser:<profile>" lock name is real (and should shell out to
-// the CLI) or just an unrelated lock name that happens to share the
-// prefix. Two fixture profile names here, "integration-test" and
-// "reentrant-test", exist solely for the withLock browser-lifecycle
-// integration tests further down this file.
-writeFileSync(
-  join(TEST_HOME, ".openclaw", "openclaw.json"),
-  JSON.stringify({ browser: { profiles: { "integration-test": {}, "reentrant-test": {} } } }),
-);
+// Whether a "browser:<profile>" lock name shells out to the CLI is decided
+// by the profiles each withLock call injects via opts.browserProfiles —
+// the integration tests below pass ["integration-test"] /
+// ["reentrant-test"] explicitly. Nothing here reads the harness config.
+
 
 // Install the os mock before any test can trigger a lock.js import.
 await mock.module("node:os", {
@@ -527,11 +520,20 @@ describe("withLock — browser:* tab lifecycle integration", () => {
     const { spawnImpl, calls } = makeFakeSpawn();
     await mock.module("node:child_process", { exports: { spawn: spawnImpl } });
 
-    await withLock("browser:integration-test", async () => "ok", {});
+    await withLock("browser:integration-test", async () => "ok", { browserProfiles: ["integration-test"] });
 
     const subcommands = calls.map((a) => a[4]);
     assert.ok(subcommands.includes("tabs"), "should have listed tabs");
     assert.ok(subcommands.includes("open"), "should have opened a seed tab (zero tabs before)");
+  });
+
+  test("a browser:* lock name with no injected profiles never touches the CLI (empty default)", async () => {
+    const { spawnImpl, calls } = makeFakeSpawn();
+    await mock.module("node:child_process", { exports: { spawn: spawnImpl } });
+
+    await withLock("browser:integration-test", async () => "ok", {});
+
+    assert.equal(calls.length, 0);
   });
 
   test("a non-browser lock name never touches the CLI at all", async () => {
@@ -550,8 +552,8 @@ describe("withLock — browser:* tab lifecycle integration", () => {
     await withLock("browser:reentrant-test", async () => {
       // Nested call for the SAME name — must hit the reentrancy early
       // return (heldLockNames), not acquire/wrap again.
-      return withLock("browser:reentrant-test", async () => "nested-done", {});
-    }, {});
+      return withLock("browser:reentrant-test", async () => "nested-done", { browserProfiles: ["reentrant-test"] });
+    }, { browserProfiles: ["reentrant-test"] });
 
     const opens = calls.filter((a) => a[4] === "open");
     // Exactly one open — from the OUTER acquire. A double-wrap bug would

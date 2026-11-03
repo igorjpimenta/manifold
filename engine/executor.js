@@ -37,10 +37,15 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+export function createExecutor({ api, config, browserProfiles, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
   // Explicit params win; api is the legacy fallback the adapter still
   // supplies during cutover (tests construct with api only).
   const _config = config ?? api?.config ?? null;
+  // Harness-owned browser profile list — explicit param wins, the injected
+  // harness config is the fallback. Core never reads the harness config
+  // file itself; the plugin passes it in (plugins/openclaw/manifold).
+  // Absent everywhere means no tab scoping, never a crash.
+  const _browserProfiles = browserProfiles ?? Object.keys(_config?.browser?.profiles ?? {});
   const _lineage = api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? _config?.pipelinesDir ?? resolveStorePaths().pipelinesDir;
   // Every agent dispatch resolves its subagent here, so gating here covers
@@ -126,6 +131,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       cooldownMs,
       cooldownJitterMs,
       logger,
+      browserProfiles: _browserProfiles,
       onWouldBlock: async () => {
         wasQueued = true;
         const before = await store.get(flowId);
