@@ -75,7 +75,6 @@ describe("registerDiscussHandlers — return shape", () => {
   const REQUIRED_HELPERS = [
     "stampDiscussSession",
     "resolveDiscussTarget",
-    "normalizePendingFields",
   ];
 
   for (const name of [...REQUIRED_HANDLERS, ...REQUIRED_HELPERS]) {

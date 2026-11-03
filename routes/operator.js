@@ -22,13 +22,8 @@ export function registerOperatorRoutes({
   resumeParentRef,
   // from discuss.js
   stampDiscussSession,
-  normalizePendingFields,
   // from pending-store.js
   readPending,
-  mergePendingFields,
-  setPendingText,
-  // component emitter for child-session proposal apply
-  componentEmitter,
   getBroadcast,
   // Injected gateway adapter, not core state: session reads go through
   // here so core never imports the gateway's session store.
@@ -42,8 +37,7 @@ export function registerOperatorRoutes({
   });
 
   const { handleDiscuss } = createDiscussHandler({
-    api, stampDiscussSession, normalizePendingFields, readPending, mergePendingFields,
-    setPendingText, componentEmitter, sessions,
+    api, stampDiscussSession, readPending, sessions,
   });
 
   const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions });

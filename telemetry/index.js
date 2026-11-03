@@ -23,9 +23,8 @@ let SHARED_STORE = null;
 let SHARED_RESOLVER = null;
 
 // Live accessor for manifold modules that need to resolve a session's
-// flow/item lineage (e.g. propose_draft's gate-context auto-resolve)
-// without opening their own resolver instance. Returns null until the
-// lineage-service's start() hook has run.
+// flow/item lineage without opening their own resolver instance. Returns
+// null until the lineage-service's start() hook has run.
 export function getSharedResolver() {
   return SHARED_RESOLVER;
 }

@@ -164,12 +164,11 @@ export function createNodeRunner({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
     });
-    // tool-handoff.js: lets a tool this session calls mid-turn (e.g.
-    // submit_score) resolve its own invocationId from ctx.sessionKey and
-    // hand structured data back to this node's apply() — see that module's
-    // header comment. Cleared in the finally below once the dispatch
-    // settles, so the sessionKey -> invocationId map doesn't grow
-    // unbounded over gateway uptime.
+    // tool-handoff.js: lets a tool this session calls mid-turn resolve its
+    // own invocationId from ctx.sessionKey and hand structured data back
+    // to this node's apply() — see that module's header comment. Cleared
+    // in the finally below once the dispatch settles, so the sessionKey ->
+    // invocationId map doesn't grow unbounded over gateway uptime.
     registerDispatch(sessionKey, invocationId);
     // Browser tool calls this session makes lock as this invocation
     // (extensions/browser-lease), the same owner the node-level

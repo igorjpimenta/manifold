@@ -813,6 +813,5 @@ export function registerDiscussHandlers({
     handleDiscussApplyDraft,
     stampDiscussSession,
     resolveDiscussTarget,
-    normalizePendingFields,
   };
 }

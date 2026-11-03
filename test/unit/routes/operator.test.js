@@ -88,11 +88,7 @@ function makeDeps(api, overrides = {}) {
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
     stampDiscussSession: async () => {},
-    normalizePendingFields: async () => ({}),
     readPending: () => null,
-    mergePendingFields: () => {},
-    setPendingText: () => {},
-    componentEmitter: async () => {},
     sessions: {
       resolveSessionFile: () => "",
       sessionFileExists: () => false,
