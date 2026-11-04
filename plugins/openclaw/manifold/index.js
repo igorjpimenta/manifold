@@ -540,6 +540,7 @@ export default definePluginEntry({
       // Harness adapter: discuss thread ids come from here
       // (sessions.newDiscussSessionId), never minted in core.
       sessions,
+      sessionIndex,
     });
 
     // ── Route modules ────────────────────────────────────────────────────────
@@ -554,6 +555,7 @@ export default definePluginEntry({
       invokeElevated,
       discussStore,
       failureStore,
+      sessionIndex,
       handleDiscuss:           discussHandlers.handleDiscuss,
       handleDiscussHistory:    discussHandlers.handleDiscussHistory,
       handleDiscussApplyDraft: discussHandlers.handleDiscussApplyDraft,
