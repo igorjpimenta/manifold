@@ -3,7 +3,7 @@
 // value through verbatim and never invents one.
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { newDiscussSessionId } from "../../../plugins/openclaw/manifold/sessions.js";
+import { newDiscussSessionId } from "./sessions.js";
 
 describe("newDiscussSessionId", () => {
   it("mints in the harness namespace, deterministic in (flow, gate, item)", () => {
