@@ -279,9 +279,10 @@ describe('Option B "needs:" — entry-based hops:2 read (root\'s own runId, real
     const seed = await store.get(record.flowId);
     await store.setRunning({ flowId: record.flowId, expectedRevision: seed.revision, lastStep: seed.lastStep, stateJson: { ...seed.stateJson, shortlist: [{ id: "x" }] } });
     await executor.runFlow(record.flowId, "fresh");
-    await flush(120); // two levels of fire-and-forget child dispatch to settle
-
-    const parent = await runStore.get(record.flowId);
+    // Two levels of fire-and-forget child dispatch to settle: wait for the
+    // parent to reach a terminal state instead of sleeping a fixed interval
+    // (a sleep is too short on a loaded CI runner and too long elsewhere).
+    const parent = await waitForStatus(runStore, record.flowId, (r) => r.status === "succeeded" || r.status === "failed");
     assert.equal(parent.status, "succeeded");
     assert.equal(submitCalls.length, 1, "SUBMIT_CODE's run() must have been called exactly once");
     assert.equal(submitCalls[0], realRunId, "resolved value must be the TRUE ROOT's runId, reached by walking 2 hops from the doubly-nested SUBMIT_CODE");
