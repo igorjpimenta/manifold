@@ -527,21 +527,21 @@ describe("registerDiscussHandlers — resolveDiscussTarget harness-owned ids", (
     };
   }
 
-  test("new thread takes the harness adapter id verbatim — never gf-discuss", () => {
+  test("new thread takes the harness adapter id verbatim — never gf-discuss", async () => {
     const { api } = createMockApi();
     const deps = makeDeps(api, { pipelinesRef: gatePipelines() });
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
-    const target = resolveDiscussTarget(gateFlow(), "item-1");
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, true);
     assert.equal(target.sessionId, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
     assert.equal(target.sessionKey, target.sessionId, "the key IS the session id");
   });
 
-  test("refuses loudly when the harness provides no session id", () => {
+  test("refuses loudly when the harness provides no session id", async () => {
     const { api } = createMockApi();
     const deps = makeDeps(api, { pipelinesRef: gatePipelines(), sessions: {} });
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
-    const target = resolveDiscussTarget(gateFlow(), "item-1");
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, false);
     assert.equal(target.code, "discuss_session_unavailable");
     assert.equal(target.status, 503);
