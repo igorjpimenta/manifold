@@ -41,7 +41,10 @@ export function resolveSessionFileForKey(agentId, session) {
   } catch {
     // Unreadable index falls through to the conventional path below.
   }
-  return path.join(sessionsDir(agentId), `${session}.jsonl`);
+  // A session is an opaque harness string, so it is never used as a path
+  // segment: only the last segment, sanitized, may name a file.
+  const leaf = String(session ?? "").split(":").pop().replace(/[^A-Za-z0-9._-]+/g, "_");
+  return path.join(sessionsDir(agentId), `${leaf}.jsonl`);
 }
 
 // existsSync-shaped predicate: false on any filesystem error, never throws.
