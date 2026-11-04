@@ -243,7 +243,7 @@ export default definePluginEntry({
       },
       findThread(flowId, gateNodeId, itemId) { return _sessionIndexPromise.then(si => si.findThread(flowId, gateNodeId, itemId)); },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
-      flowIdForSessionKey(sessionKey) { return _sessionIndexPromise.then(si => si.flowIdForSessionKey(sessionKey)); },
+      flowIdForSessionKey(session) { return _sessionIndexPromise.then(si => si.flowIdForSessionKey(session)); },
       close() { _sessionIndexPromise.then(si => si.close?.()).catch(() => {}); },
     };
 
@@ -586,9 +586,9 @@ export default definePluginEntry({
           host: process.env.MANIFOLD_DIALOG_HOST ?? "127.0.0.1",
           readFlow: (flowId) => readStore.get(flowId),
           resolveTarget: discussHandlers.resolveDiscussTarget,
-          runTurn: async ({ flowId, sessionKey, sessionId, agentId, gateNodeId, modelOverride, itemId, text, systemPrompt }) => {
+          runTurn: async ({ flowId, session, agentId, gateNodeId, modelOverride, itemId, text, systemPrompt }) => {
             const elev = await invokeElevated("/manifold/_elev/discuss", {
-              flowId, sessionKey, sessionId, agentId, gateNodeId, modelOverride, text, itemId,
+              flowId, session, agentId, gateNodeId, modelOverride, text, itemId,
               systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,
             }, { timeoutMs: 360_000 });
             let payload;

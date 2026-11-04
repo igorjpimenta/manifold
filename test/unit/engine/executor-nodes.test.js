@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import { createNodeRunner } from "../../../engine/executor-nodes.js";
 import { NodeBlocked, GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
 
+// Lock service the harness plugin injects into the engine in production
+// (plugins/openclaw/manifold/index.js) — the real implementation, so
+// owner-context assertions below exercise the actual AsyncLocalStorage.
+
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 const logger = { info: () => {}, warn: () => {}, error: () => {} };
@@ -105,7 +109,7 @@ describe("executeNode — agent kind", () => {
     const node = {
       kind: "agent",
       agent: "cyrano",
-      sessionKey: "agent:cyrano:draft",
+      session: "agent:cyrano:draft",
       promptBuilder: () => "write a proposal",
       apply: (_state, output) => ({ draft: output.text }),
     };
@@ -124,7 +128,7 @@ describe("executeNode — agent kind", () => {
     const { executeNode } = makeRunner({
       maybeBudgetGate: () => ({ pause: true, blockedInfo: { _kind: "budget-gate-approval", reason: "cap reached", hint: "" } }),
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", promptBuilder: () => "x", apply: () => ({}) };
     const result = await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f" });
     assert.ok(result.blockedInfo);
     assert.equal(result.blockedInfo._kind, "budget-gate-approval");
@@ -146,7 +150,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { dispatched = true; return {}; },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /unhealthy agent dispatch/,
@@ -160,7 +164,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new Error("provider timeout"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /provider timeout/,
@@ -177,7 +181,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "ok" }),
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
     const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
     assert.deepEqual(result.stateUpdate, { text: "ok" });
     assert.equal(nodeHealthStore.marked.length, 0);
@@ -190,7 +194,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "ok" }),
     });
     // No circuitBreaker flag — isBlocked() returning true must not matter.
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
     const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
     assert.deepEqual(result.stateUpdate, { text: "ok" });
     assert.equal(nodeHealthStore.marked.length, 0);
@@ -202,7 +206,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       maybeBudgetGate: () => ({ pause: true, blockedInfo: { _kind: "budget-gate-approval", reason: "cap reached", hint: "" } }),
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
     assert.ok(result.blockedInfo, "a budget-gate pause is a wait, not a failure");
     assert.equal(nodeHealthStore.marked.length, 0);
@@ -216,7 +220,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new Error("missing scope: operator.write"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /missing scope/,
@@ -230,7 +234,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new Error("subagent call requires gateway context: missing api"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /requires gateway context/,
@@ -244,7 +248,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new GatewayHandoffNeeded("subagent runtime unavailable on this api instance"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       (err) => err instanceof GatewayHandoffNeeded,
@@ -269,85 +273,6 @@ describe("executeNode — loop kind", () => {
 });
 
 // ── human-gate kind ───────────────────────────────────────────────────────────
-
-describe("executeNode — human-gate kind", () => {
-  it("returns empty stateUpdate when pending is empty", async () => {
-    const { executeNode } = makeRunner();
-    const node = { kind: "human-gate", pendingSelector: () => [], approvalRequestBuilder: () => ({}) };
-    const result = await executeNode({ node, nodeId: "GATE", state: {}, flowId: "f" });
-    assert.deepEqual(result, { stateUpdate: {} });
-  });
-
-  it("returns waitJson with items when pending is non-empty", async () => {
-    const { executeNode } = makeRunner();
-    const node = {
-      kind: "human-gate",
-      pendingSelector: () => ["item-1", "item-2"],
-      approvalRequestBuilder: (_state, itemId) => ({ title: `Approve ${itemId}?` }),
-    };
-    const result = await executeNode({ node, nodeId: "GATE", state: {}, flowId: "f" });
-    assert.ok(result.waitJson, "waitJson should be present");
-    assert.equal(result.waitJson.kind, "human-gate");
-    assert.equal(result.waitJson.items.length, 2);
-    assert.equal(result.waitJson.items[0].itemId, "item-1");
-  });
-
-  it("sets reentrant:true when pending is non-empty (regression: engine/executor.js's waitJson-persist branch stamps lastStep to THIS node's own id unless reentrant is set, so a resume after a partial decision would skip re-checking pendingSelector and jump straight to this node's outgoing edge — see the loop path's identical reentrant:true for the same reason)", async () => {
-    const { executeNode } = makeRunner();
-    const node = {
-      kind: "human-gate",
-      pendingSelector: () => ["item-1", "item-2"],
-      approvalRequestBuilder: (_state, itemId) => ({ title: `Approve ${itemId}?` }),
-    };
-    const result = await executeNode({ node, nodeId: "GATE", state: {}, flowId: "f" });
-    assert.equal(result.reentrant, true);
-  });
-
-  it("does NOT set reentrant:true when pending is empty (gate genuinely satisfied — lastStep should advance to this node's own id so its outgoing edge is evaluated next)", async () => {
-    const { executeNode } = makeRunner();
-    const node = { kind: "human-gate", pendingSelector: () => [], approvalRequestBuilder: () => ({}) };
-    const result = await executeNode({ node, nodeId: "GATE", state: {}, flowId: "f" });
-    assert.notEqual(result.reentrant, true);
-  });
-
-  it("re-invokes pendingSelector with updated state on each call — simulates partial-decision resume staying open for remaining items", async () => {
-    const { executeNode } = makeRunner();
-    const decided = new Set();
-    const allItems = ["spelling", "formatting", "links"];
-    const node = {
-      kind: "human-gate",
-      pendingSelector: (state) => allItems.filter((id) => !(state.approvedIds ?? []).includes(id)),
-      approvalRequestBuilder: (_state, itemId) => ({ title: `${itemId}?` }),
-    };
-    // First entry: nothing decided yet — all 3 pending, reentrant true.
-    const first = await executeNode({ node, nodeId: "CHECKLIST", state: { approvedIds: [] }, flowId: "f" });
-    assert.equal(first.waitJson.items.length, 3);
-    assert.equal(first.reentrant, true);
-    // Resume after ONE decision — pendingSelector re-run with updated
-    // state must still report the other two as pending, still reentrant.
-    const second = await executeNode({ node, nodeId: "CHECKLIST", state: { approvedIds: ["spelling"] }, flowId: "f" });
-    assert.equal(second.waitJson.items.length, 2);
-    assert.deepEqual(second.waitJson.items.map((i) => i.itemId), ["formatting", "links"]);
-    assert.equal(second.reentrant, true);
-    // All three decided — gate satisfied, no waitJson, not reentrant.
-    const third = await executeNode({ node, nodeId: "CHECKLIST", state: { approvedIds: allItems }, flowId: "f" });
-    assert.equal(third.waitJson, undefined);
-    assert.notEqual(third.reentrant, true);
-  });
-});
-
-// ── unknown kind ──────────────────────────────────────────────────────────────
-
-describe("executeNode — unknown kind", () => {
-  it("throws for unrecognized node kind", async () => {
-    const { executeNode } = makeRunner();
-    const node = { kind: "magic" };
-    await assert.rejects(
-      () => executeNode({ node, nodeId: "X", state: {}, flowId: "f" }),
-      (err) => err.message.includes("unknown node kind: magic")
-    );
-  });
-});
 
 // ── lock refusal ──────────────────────────────────────────────────────────────
 

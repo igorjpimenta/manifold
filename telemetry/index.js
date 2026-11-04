@@ -94,11 +94,12 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     const store = SHARED_STORE, resolver = SHARED_RESOLVER;
     try {
       if (!store || !resolver) return;
-      const key = event?.sessionKey || ctx?.sessionKey;
-      if (!key) return;
-      const existing = await store.getLineage(key);
+      // Core `session`; the harness names these wire fields `sessionKey`.
+      const session = event?.sessionKey || ctx?.sessionKey;
+      if (!session) return;
+      const existing = await store.getLineage(session);
       if (existing && existing.source === "spawn_hook") return;
-      const row = await resolver.resolve(key, { source: "start_hook" });
+      const row = await resolver.resolve(session, { source: "start_hook" });
       if (!row) return;
       row.agent_id = row.agent_id || event?.agentId || ctx?.agentId || null;
       if (ctx?.requesterSessionKey) row.parent_session_key = ctx.requesterSessionKey;
@@ -115,12 +116,13 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     const store = SHARED_STORE, resolver = SHARED_RESOLVER;
     try {
       if (!store || !resolver) return;
-      const childKey = event?.childSessionKey;
+      // Core `session`; the harness names this wire field `childSessionKey`.
+      const childSession = event?.childSessionKey;
       const parentKey = ctx?.requesterSessionKey || null;
-      if (!childKey) return;
+      if (!childSession) return;
 
-      const row = (await resolver.resolve(childKey, { source: "spawn_hook" })) || {};
-      row.child_session_key = childKey;
+      const row = (await resolver.resolve(childSession, { source: "spawn_hook" })) || {};
+      row.child_session_key = childSession;
       row.parent_session_key = parentKey || row.parent_session_key || null;
       row.agent_id = row.agent_id || event.agentId || null;
 
@@ -135,7 +137,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
       }
       row.kind = row.kind || "unknown";
       row.root_kind = row.root_kind || row.kind;
-      row.root_session_key = row.root_session_key || childKey;
+      row.root_session_key = row.root_session_key || childSession;
       row.source = "spawn_hook";
       await store.upsertLineage(row);
     } catch (err) {
@@ -150,11 +152,12 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     const store = SHARED_STORE, resolver = SHARED_RESOLVER;
     try {
       if (!store || !resolver) return;
-      const key = event?.sessionKey || ctx?.sessionKey;
-      if (!key) return;
-      const existing = await store.getLineage(key);
+      // Core `session`; the harness names these wire fields `sessionKey`.
+      const session = event?.sessionKey || ctx?.sessionKey;
+      if (!session) return;
+      const existing = await store.getLineage(session);
       if (existing && existing.source === "spawn_hook") return;
-      const row = await resolver.resolve(key, { source: "session_start_hook" });
+      const row = await resolver.resolve(session, { source: "session_start_hook" });
       if (!row) return;
       row.agent_id = row.agent_id || event.agentId || ctx?.agentId || null;
       await store.upsertLineage(row);
@@ -180,14 +183,15 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
       const cost = resolveCost({ provider, model, usage });
       if (!cost || typeof cost.total !== "number") return;
 
-      const sessionKey = event.sessionKey ?? ctx?.sessionKey ?? null;
-      const sessionId = ctx?.sessionId ?? msg.sessionId ?? sessionKey ?? "unknown";
+      // Core `session`; the harness names these wire fields `sessionKey`.
+      const session = event.sessionKey ?? ctx?.sessionKey ?? null;
+      const sessionId = ctx?.sessionId ?? msg.sessionId ?? session ?? "unknown";
       const msgId = msg.id ?? msg.messageId ?? `${sessionId}-${msg.timestamp ?? Date.now()}`;
       const ts = parseTs(msg.timestamp) ?? Date.now();
 
-      let lineage = sessionKey ? await store.getLineage(sessionKey) : null;
-      if (!lineage && sessionKey) {
-        const row = await resolver.resolve(sessionKey, { source: "lazy_resolve" });
+      let lineage = session ? await store.getLineage(session) : null;
+      if (!lineage && session) {
+        const row = await resolver.resolve(session, { source: "lazy_resolve" });
         if (row) { await store.upsertLineage(row); lineage = row; }
       }
 
@@ -206,9 +210,9 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         cost_cache_read: cost.cacheRead ?? null,
         cost_cache_write: cost.cacheWrite ?? null,
         cost_total: cost.total,
-        session_key: sessionKey,
+        session_key: session,
         agent_id: lineage?.agent_id ?? ctx?.agentId ?? null,
-        root_session_key: lineage?.root_session_key ?? sessionKey,
+        root_session_key: lineage?.root_session_key ?? session,
         root_kind: lineage?.root_kind ?? lineage?.kind ?? null,
         root_label: lineage?.root_label ?? null,
         pipeline_id: lineage?.pipeline_id ?? null,
@@ -304,14 +308,14 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
       }
     },
 
-    async recordSpawn({ childSessionKey, flowId, nodeId, itemKey, pipelineId, agentId, kind, source = "spawn_hook" }) {
+    async recordSpawn({ childSession, flowId, nodeId, itemKey, pipelineId, agentId, kind, source = "spawn_hook" }) {
       try {
         const store = SHARED_STORE, resolver = SHARED_RESOLVER;
         if (!store) {
-          PENDING_CALLS.push({ type: "spawn", args: { childSessionKey, flowId, nodeId, itemKey, pipelineId, agentId, kind, source } });
+          PENDING_CALLS.push({ type: "spawn", args: { childSession, flowId, nodeId, itemKey, pipelineId, agentId, kind, source } });
           return { ok: false, reason: "not_ready", queued: true };
         }
-        if (!childSessionKey || !flowId) return { ok: false, reason: "missing_args" };
+        if (!childSession || !flowId) return { ok: false, reason: "missing_args" };
 
         // Resolve the real root by walking the flow's own trigger edge
         // (flow:<flowId>) instead of hardcoding "flow-node" — a flow-node
@@ -322,7 +326,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         // recordTrigger) — the HTTP-layer ATTR_JOIN re-attribution still
         // recovers those.
         const parentKey = `flow:${flowId}`;
-        let rootKind = kind ?? "flow-node", rootLabel = null, rootSessionKey = childSessionKey;
+        let rootKind = kind ?? "flow-node", rootLabel = null, rootSessionKey = childSession;
         if (resolver) {
           const chain = await resolver.walk(parentKey);
           const rootFrame = chain[chain.length - 1];
@@ -334,7 +338,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         }
 
         await store.upsertLineage({
-          child_session_key:  childSessionKey,
+          child_session_key:  childSession,
           parent_session_key: parentKey,
           root_session_key:   rootSessionKey,
           kind:               kind ?? "flow-node",

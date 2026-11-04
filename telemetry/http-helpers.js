@@ -24,7 +24,7 @@ export const ATTR_JOIN = `
 export const ATTR_ROOT_KIND  = `COALESCE(sl.root_kind,  cbc.root_kind)`;
 export const ATTR_ROOT_LABEL = `COALESCE(sl.root_label, cbc.root_label)`;
 
-export function formatSessionLabel(sessionKey, tsFirstMs) {
+export function formatSessionLabel(session, tsFirstMs) {
   if (tsFirstMs != null) {
     const d = new Date(tsFirstMs);
     const mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()];
@@ -33,18 +33,18 @@ export function formatSessionLabel(sessionKey, tsFirstMs) {
     const mm  = String(d.getMinutes()).padStart(2, "0");
     return `${mon} ${day} ${hh}:${mm}`;
   }
-  const tail = (sessionKey ?? "").split(":").pop() ?? sessionKey;
-  return (tail || sessionKey || "").slice(0, 24);
+  const tail = (session ?? "").split(":").pop() ?? session;
+  return (tail || session || "").slice(0, 24);
 }
 
-export function sessionKindForRoot(rootKind, sessionKey) {
-  if (typeof sessionKey === "string") {
-    if (sessionKey.startsWith("agent:operator:cli:"))     return "cli-trigger";
-    if (sessionKey.startsWith("agent:operator:"))         return "operator-trigger";
+export function sessionKindForRoot(rootKind, session) {
+  if (typeof session === "string") {
+    if (session.startsWith("agent:operator:cli:"))     return "cli-trigger";
+    if (session.startsWith("agent:operator:"))         return "operator-trigger";
   }
   switch (rootKind) {
     case "cron-owner":
-      return (typeof sessionKey === "string" && sessionKey.includes(":run:"))
+      return (typeof session === "string" && session.includes(":run:"))
         ? "cron-tick"
         : "cron-job-session";
     case "explicit":           return "operator-run";

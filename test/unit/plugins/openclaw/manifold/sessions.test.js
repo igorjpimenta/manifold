@@ -1,9 +1,67 @@
-// openclaw-sessions.test.js — harness-owned discuss session ids: the
-// harness mints in its own `agent:<agentId>:…` namespace, core passes the
-// value through verbatim and never invents one.
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { newDiscussSessionId } from "../../../../../plugins/openclaw/manifold/sessions.js";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  resolveSessionFile,
+  resolveSessionFileForKey,
+  newDiscussSessionId,
+} from "../../../../../plugins/openclaw/manifold/sessions.js";
+
+let prevHome;
+let home;
+
+beforeEach(() => {
+  prevHome = process.env.HOME;
+  home = mkdtempSync(path.join(tmpdir(), "manifold-sessions-test-"));
+  process.env.HOME = home;
+});
+
+afterEach(() => {
+  process.env.HOME = prevHome;
+  rmSync(home, { recursive: true, force: true });
+});
+
+function sessionsDir(agentId) {
+  const dir = path.join(home, ".openclaw", "agents", agentId, "sessions");
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+describe("resolveSessionFileForKey", () => {
+  it("resolves the KEY through the index entry's sessionId, not the key string", () => {
+    const dir = sessionsDir("main");
+    writeFileSync(path.join(dir, "file-abc123.jsonl"), "{}\n");
+    writeFileSync(path.join(dir, "sessions.json"), JSON.stringify({
+      "agent:main:discuss:deadbeef-GATE-i1": { sessionId: "file-abc123" },
+    }));
+    const file = resolveSessionFileForKey("main", "agent:main:discuss:deadbeef-GATE-i1");
+    assert.equal(file, path.join(dir, "file-abc123.jsonl"));
+  });
+
+  it("prefers an explicit sessionFile on the index entry", () => {
+    const dir = sessionsDir("main");
+    writeFileSync(path.join(dir, "sessions.json"), JSON.stringify({
+      "agent:main:subagent:x": { sessionId: "other", sessionFile: "/tmp/custom.jsonl" },
+    }));
+    assert.equal(resolveSessionFileForKey("main", "agent:main:subagent:x"), "/tmp/custom.jsonl");
+  });
+
+  it("falls back to the conventional filename when the index has no entry", () => {
+    const dir = sessionsDir("main");
+    writeFileSync(path.join(dir, "sessions.json"), JSON.stringify({}));
+    assert.equal(
+      resolveSessionFileForKey("main", "agent:main:missing"),
+      path.join(dir, "agent:main:missing.jsonl")
+    );
+  });
+
+  it("resolveSessionFile stays harness-internal (sessionId as filename)", () => {
+    const dir = sessionsDir("main");
+    assert.equal(resolveSessionFile("main", "file-abc123"), path.join(dir, "file-abc123.jsonl"));
+  });
+});
 
 describe("newDiscussSessionId", () => {
   it("mints in the harness namespace, deterministic in (flow, gate, item)", () => {

@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 function seed() {
-  return stream.append({ event: "agent.dispatched", flow: { id: "F1", nodeId: "n1" }, session: { harness: "h", agent: "a", sessionKey: "k" } });
+  return stream.append({ event: "agent.dispatched", flow: { id: "F1", nodeId: "n1" }, session: { harness: "h", agent: "a", session: "k" } });
 }
 
 // The inbox is attached at connect time and never replaced: with several

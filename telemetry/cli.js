@@ -6,13 +6,13 @@ import { execAll, execGet } from "./http-helpers.js";
 export function registerCliCommands({ program, logger, getStore, getResolver, dbPath }) {
   const cmd = program.command("lineage").description("Session lineage + cost attribution");
 
-  cmd.command("lookup <sessionKeyOrId>")
-    .description("Walk lineage for a sessionKey (or sessionId — looked up via cost_by_call)")
+  cmd.command("lookup <sessionOrId>")
+    .description("Walk lineage for a session (or sessionId — looked up via cost_by_call)")
     .action(async (target) => {
       const store = await getStore(); const resolver = await getResolver();
       if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
-      const key = target.startsWith("agent:") ? target : await sessionIdToKey(store._client, target);
-      if (!key) { console.error(`could not resolve ${target} to a sessionKey`); process.exitCode = 1; return; }
+      const key = target.startsWith("agent:") ? target : await sessionIdToSession(store._client, target);
+      if (!key) { console.error(`could not resolve ${target} to a session`); process.exitCode = 1; return; }
       const chain = await resolver.walk(key);
       for (let i = 0; i < chain.length; i++) {
         const f = chain[i];
@@ -29,8 +29,8 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       if (root) console.log(`\nROOT: ${root.rootLabel ?? root.key} (kind=${root.kind})`);
     });
 
-  cmd.command("tree <sessionKeyOrId>")
-    .description("Genealogy tree — descendants of a sessionKey with per-node $cost. By default starts at the root of the chain; pass --from-here to root at the given node instead.")
+  cmd.command("tree <sessionOrId>")
+    .description("Genealogy tree — descendants of a session with per-node $cost. By default starts at the root of the chain; pass --from-here to root at the given node instead.")
     .option("--from-here", "Root the tree at the given key, not at its chain's root")
     .option("--depth <n>", "Max descendant depth (default 12)", "12")
     .option("--show-zero", "Include zero-cost subtrees (default: collapse them)")
@@ -41,11 +41,11 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
       const client = store._client;
       // Resolve the target. Accept any of:
-      //   • sessionKey (starts with agent: / flow:)
+      //   • session (starts with agent: / flow:)
       //   • flowId (UUID) — looked up via session_lineage.flow_id
       //   • cost_by_call.msg_id — for "I have this LLM call's id from a log
       //     line, show me the whole tree it lived in"
-      //   • cost_by_call.session_id (rare — usually identical to a sessionKey)
+      //   • cost_by_call.session_id (rare — usually identical to a session)
       //   • sessionId via cost_by_call.session_id (hook-written rows)
       let key = await resolveTreeTarget(target, client, opts.kind);
       if (!key) {
@@ -148,9 +148,9 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
         if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
         return String(n);
       }
-      function renderCalls(sessionKey, prefix) {
+      function renderCalls(session, prefix) {
         if (!withCalls) return;
-        const calls = callsBySession.get(sessionKey) ?? [];
+        const calls = callsBySession.get(session) ?? [];
         calls.forEach((c, i) => {
           const isLast = i === calls.length - 1;
           const t = new Date(c.ts).toISOString().slice(11, 19);
@@ -276,16 +276,16 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
     });
 }
 
-// Look up a sessionId via the hook-written cost_by_call rows, which carry
-// both the harness session_id and the manifold session_key. Best-effort.
-async function sessionIdToKey(client, sessionId) {
+// Look up a harness sessionId via the hook-written cost_by_call rows, which
+// carry both the harness session_id and the manifold session. Best-effort.
+async function sessionIdToSession(client, sessionId) {
   const hit = await execGet(client,
     `SELECT session_key FROM cost_by_call WHERE session_id = ? AND session_key IS NOT NULL ORDER BY ts DESC LIMIT 1`,
     [sessionId]);
   return hit?.session_key ?? null;
 }
 
-// Resolve `lineage tree <target>` into a sessionKey via an explicit --kind.
+// Resolve `lineage tree <target>` into a session via an explicit --kind.
 // No shape-sniffing — the caller has to declare what they're handing in.
 // Predictable, no ambiguous matches across the table.
 async function resolveTreeTarget(target, client, kind) {
@@ -297,7 +297,7 @@ async function resolveTreeTarget(target, client, kind) {
       const hit = await execGet(client, `SELECT 1 FROM session_lineage WHERE child_session_key = ? LIMIT 1`, [t]);
       return hit ? t : null;
     },
-    "session-id":  () => sessionIdToKey(client, t),
+    "session-id":  () => sessionIdToSession(client, t),
     "msg": async () => {
       const r = await execGet(client, `SELECT session_key FROM cost_by_call WHERE msg_id = ? AND session_key IS NOT NULL LIMIT 1`, [t]);
       return r?.session_key ?? null;

@@ -53,13 +53,13 @@ describe("createSessionIndex — DB setup", () => {
 describe("record() — no-op when required fields missing", () => {
   test("record() is a no-op when flowId is missing", async () => {
     const idx = await makeIndex();
-    await idx.record({ sessionKey: "sess-abc" });
+    await idx.record({ session: "sess-abc" });
     const { rows } = await idx._db.execute("SELECT * FROM flow_sessions");
     assert.equal(rows.length, 0);
     idx.close();
   });
 
-  test("record() is a no-op when sessionKey is missing", async () => {
+  test("record() is a no-op when session is missing", async () => {
     const idx = await makeIndex();
     await idx.record({ flowId: "flow-abc" });
     const { rows } = await idx._db.execute("SELECT * FROM flow_sessions");
@@ -67,7 +67,7 @@ describe("record() — no-op when required fields missing", () => {
     idx.close();
   });
 
-  test("record() is a no-op when both flowId and sessionKey are missing", async () => {
+  test("record() is a no-op when both flowId and session are missing", async () => {
     const idx = await makeIndex();
     await idx.record({});
     const { rows } = await idx._db.execute("SELECT * FROM flow_sessions");
@@ -87,15 +87,15 @@ describe("record() — no-op when required fields missing", () => {
 // ─── record() — correct insertion ───────────────────────────────────────────
 
 describe("record() — successful insertion", () => {
-  test("inserts a row with correct flowId, sessionKey, nodeId, branchItemId, and a numeric spawned_at", async () => {
+  test("inserts a row with correct flowId, session, nodeId, branchItemId, and a numeric spawned_at", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    const sessionKey = `sess-${randomUUID()}`;
+    const session = `sess-${randomUUID()}`;
     const nodeId = "SOME_NODE";
     const branchItemId = "item-42";
 
     const before = Date.now();
-    await idx.record({ flowId, sessionKey, nodeId, branchItemId });
+    await idx.record({ flowId, session, nodeId, branchItemId });
     const after = Date.now();
 
     const { rows } = await idx._db.execute({
@@ -105,7 +105,7 @@ describe("record() — successful insertion", () => {
     assert.equal(rows.length, 1);
     const row = rows[0];
     assert.equal(row.flow_id, flowId);
-    assert.equal(row.session_key, sessionKey);
+    assert.equal(row.session_key, session);
     assert.equal(row.node_id, nodeId);
     assert.equal(row.branch_item_id, branchItemId);
     assert.equal(typeof Number(row.spawned_at), "number");
@@ -117,7 +117,7 @@ describe("record() — successful insertion", () => {
   test("nodeId defaults to null when not provided", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-1" });
+    await idx.record({ flowId, session: "sess-1" });
     const { rows } = await idx._db.execute({
       sql: "SELECT * FROM flow_sessions WHERE flow_id = ?",
       args: [flowId],
@@ -130,7 +130,7 @@ describe("record() — successful insertion", () => {
   test("branchItemId defaults to null when not provided", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-2" });
+    await idx.record({ flowId, session: "sess-2" });
     const { rows } = await idx._db.execute({
       sql: "SELECT * FROM flow_sessions WHERE flow_id = ?",
       args: [flowId],
@@ -143,8 +143,8 @@ describe("record() — successful insertion", () => {
   test("generates a unique UUID primary key per call", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-A" });
-    await idx.record({ flowId, sessionKey: "sess-B" });
+    await idx.record({ flowId, session: "sess-A" });
+    await idx.record({ flowId, session: "sess-B" });
     const { rows } = await idx._db.execute({
       sql: "SELECT id FROM flow_sessions WHERE flow_id = ?",
       args: [flowId],
@@ -161,12 +161,12 @@ describe("record() — successful insertion", () => {
 // ─── record() — UNIQUE constraint / INSERT OR IGNORE ────────────────────────
 
 describe("record() — deduplication via UNIQUE(flow_id, session_key)", () => {
-  test("recording the same (flowId, sessionKey) pair twice is a no-op (INSERT OR IGNORE)", async () => {
+  test("recording the same (flowId, session) pair twice is a no-op (INSERT OR IGNORE)", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    const sessionKey = "sess-dup";
-    await idx.record({ flowId, sessionKey, nodeId: "NODE_A" });
-    await idx.record({ flowId, sessionKey, nodeId: "NODE_B" }); // should be silently ignored
+    const session = "sess-dup";
+    await idx.record({ flowId, session, nodeId: "NODE_A" });
+    await idx.record({ flowId, session, nodeId: "NODE_B" }); // should be silently ignored
     const { rows } = await idx._db.execute({
       sql: "SELECT * FROM flow_sessions WHERE flow_id = ?",
       args: [flowId],
@@ -176,13 +176,13 @@ describe("record() — deduplication via UNIQUE(flow_id, session_key)", () => {
     idx.close();
   });
 
-  test("same sessionKey with different flowId creates two separate rows", async () => {
+  test("same session with different flowId creates two separate rows", async () => {
     const idx = await makeIndex();
-    const sessionKey = "shared-sess";
+    const session = "shared-sess";
     const flowId1 = randomUUID();
     const flowId2 = randomUUID();
-    await idx.record({ flowId: flowId1, sessionKey });
-    await idx.record({ flowId: flowId2, sessionKey });
+    await idx.record({ flowId: flowId1, session });
+    await idx.record({ flowId: flowId2, session });
     const { rows: all } = await idx._db.execute(
       "SELECT flow_id FROM flow_sessions ORDER BY spawned_at ASC"
     );
@@ -197,8 +197,8 @@ describe("record() — deduplication via UNIQUE(flow_id, session_key)", () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
     await assert.doesNotReject(async () => {
-      await idx.record({ flowId, sessionKey: "dup-sess" });
-      await idx.record({ flowId, sessionKey: "dup-sess" });
+      await idx.record({ flowId, session: "dup-sess" });
+      await idx.record({ flowId, session: "dup-sess" });
     });
     idx.close();
   });
@@ -239,7 +239,7 @@ describe("no-op shim — DB open failure", () => {
 
   test("no-op shim record() does not throw", async () => {
     const shim = await createSessionIndex({ dbPath: makeCorruptDbPath() });
-    await assert.doesNotReject(() => shim.record({ flowId: "f", sessionKey: "s" }));
+    await assert.doesNotReject(() => shim.record({ flowId: "f", session: "s" }));
   });
 
   test("no-op shim record() with no args does not throw", async () => {
@@ -268,7 +268,7 @@ describe("no-op shim — DB open failure", () => {
 describe("logger integration", () => {
   test("does not throw when no logger is provided (default)", async () => {
     const idx = await makeIndex();
-    await assert.doesNotReject(() => idx.record({ flowId: "f1", sessionKey: "s1" }));
+    await assert.doesNotReject(() => idx.record({ flowId: "f1", session: "s1" }));
     idx.close();
   });
 
@@ -276,7 +276,7 @@ describe("logger integration", () => {
     const warnings = [];
     const logger = { warn: (msg) => warnings.push(msg) };
     const idx = await makeIndex({ logger });
-    await assert.doesNotReject(() => idx.record({ flowId: "f2", sessionKey: "s2" }));
+    await assert.doesNotReject(() => idx.record({ flowId: "f2", session: "s2" }));
     idx.close();
     assert.equal(warnings.length, 0);
   });
@@ -294,7 +294,7 @@ describe("hasSessionForNode()", () => {
   test("returns true once record() has been called for that exact (flowId, nodeId) pair", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-1", nodeId: "SCORE_LLM" });
+    await idx.record({ flowId, session: "sess-1", nodeId: "SCORE_LLM" });
     assert.equal(await idx.hasSessionForNode(flowId, "SCORE_LLM"), true);
     idx.close();
   });
@@ -302,7 +302,7 @@ describe("hasSessionForNode()", () => {
   test("returns false for the same flowId but a different nodeId", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-1", nodeId: "SCORE_LLM" });
+    await idx.record({ flowId, session: "sess-1", nodeId: "SCORE_LLM" });
     assert.equal(await idx.hasSessionForNode(flowId, "OTHER_NODE"), false);
     idx.close();
   });
@@ -310,7 +310,7 @@ describe("hasSessionForNode()", () => {
   test("returns false for the same nodeId but a different flowId", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-1", nodeId: "SCORE_LLM" });
+    await idx.record({ flowId, session: "sess-1", nodeId: "SCORE_LLM" });
     assert.equal(await idx.hasSessionForNode(randomUUID(), "SCORE_LLM"), false);
     idx.close();
   });
@@ -326,7 +326,7 @@ describe("hasSessionForNode()", () => {
   test("a record with nodeId=null does not satisfy a hasSessionForNode lookup for a real nodeId", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-1" }); // nodeId defaults to null
+    await idx.record({ flowId, session: "sess-1" }); // nodeId defaults to null
     assert.equal(await idx.hasSessionForNode(flowId, "SOME_NODE"), false);
     idx.close();
   });
@@ -355,7 +355,7 @@ describe("flowIdForSessionKey()", () => {
   test("returns the flowId once record() has been called for that session key", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "agent:scorer:subagent:mf-abcdef12-score_llm", nodeId: "SCORE_LLM" });
+    await idx.record({ flowId, session: "agent:scorer:subagent:mf-abcdef12-score_llm", nodeId: "SCORE_LLM" });
     assert.equal(await idx.flowIdForSessionKey("agent:scorer:subagent:mf-abcdef12-score_llm"), flowId);
     idx.close();
   });
@@ -382,9 +382,9 @@ describe("record persistence roundtrip", () => {
   test("multiple sessions for one flow are all persisted", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "s1", nodeId: "NODE_1" });
-    await idx.record({ flowId, sessionKey: "s2", nodeId: "NODE_2" });
-    await idx.record({ flowId, sessionKey: "s3", nodeId: "NODE_3" });
+    await idx.record({ flowId, session: "s1", nodeId: "NODE_1" });
+    await idx.record({ flowId, session: "s2", nodeId: "NODE_2" });
+    await idx.record({ flowId, session: "s3", nodeId: "NODE_3" });
     const { rows } = await idx._db.execute({
       sql: "SELECT * FROM flow_sessions WHERE flow_id = ?",
       args: [flowId],
@@ -401,9 +401,9 @@ describe("record persistence roundtrip", () => {
     const idx = await makeIndex();
     const flowA = randomUUID();
     const flowB = randomUUID();
-    await idx.record({ flowId: flowA, sessionKey: "sa1" });
-    await idx.record({ flowId: flowA, sessionKey: "sa2" });
-    await idx.record({ flowId: flowB, sessionKey: "sb1" });
+    await idx.record({ flowId: flowA, session: "sa1" });
+    await idx.record({ flowId: flowA, session: "sa2" });
+    await idx.record({ flowId: flowB, session: "sb1" });
 
     const { rows: rowsA } = await idx._db.execute({
       sql: "SELECT * FROM flow_sessions WHERE flow_id = ?",
@@ -423,7 +423,7 @@ describe("record persistence roundtrip", () => {
     const dbPath = tmpDb();
     const idx1 = await createSessionIndex({ dbPath });
     const flowId = randomUUID();
-    await idx1.record({ flowId, sessionKey: "persistent-sess", nodeId: "N1" });
+    await idx1.record({ flowId, session: "persistent-sess", nodeId: "N1" });
     idx1.close();
 
     const idx2 = await createSessionIndex({ dbPath });

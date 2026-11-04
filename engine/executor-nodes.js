@@ -5,6 +5,7 @@ import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./e
 import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
 
+
 /**
  * Factory for the node-execution dispatcher: code, agent, subflow, human-gate.
  * The subflow branch is delegated to `executeSubflowNode`, a thin wrapper around
@@ -19,6 +20,7 @@ export function createNodeRunner({
   maybeBudgetGate,
   dispatchAgentWithRetry,
   executeSubflowNode,
+  locks,
   getNodeCtx,
   api,
   config,
@@ -34,6 +36,8 @@ export function createNodeRunner({
   // supplies during cutover (tests construct with api only).
   const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
+  // threaded through). Without a service there is no lock to own, so owner
+  // plumbing is inert; an actual lock acquisition still refuses loudly in
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
   // "agent" branches in executeNodeBody — this function has no fallback-
@@ -136,23 +140,24 @@ export function createNodeRunner({
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
     // Session ids belong to the harness, not manifold: pass a declared
-    // entry.sessionKey / entry.sessionKeyBuilder through verbatim, and
+    // entry.session / entry.sessionBuilder through verbatim, and
     // refuse an agent node that declares neither — tool-handoff and the
     // lineage ledger both key off this value, so inventing one here would
     // silently diverge from the harness's own id.
-    const sessionKey = entry.sessionKey
-      ?? entry.sessionKeyBuilder?.(state, flowId)
+    const session = entry.session
+      ?? entry.sessionBuilder?.(state, flowId)
       ?? null;
-    if (!sessionKey) {
-      throw new Error(`manifold: refusing dispatch of node "${nodeId}" with no sessionKey (set entry.sessionKey or entry.sessionKeyBuilder)`);
+    if (!session) {
+      throw new Error(`manifold: refusing dispatch of node "${nodeId}" with no session (set entry.session or entry.sessionBuilder)`);
     }
     _lineage?.recordSpawn?.({
-      childSessionKey: sessionKey, flowId, nodeId,
+      childSession: session, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
     });
+
     try {
       return await dispatchAgentWithRetry({
-        node: entry, nodeId, sessionKey, initialMessage: message,
+        node: entry, nodeId, session, initialMessage: message,
         applyCtx: state, applyExtraArg: undefined, flowId,
         applyMeta: { flowId, nodeId, invocationId },
         // apply() gets the same lazy ctx.needs() accessor every other
@@ -166,9 +171,9 @@ export function createNodeRunner({
         await nodeHealthStore?.markUnhealthy(pipelineId, nodeId, { reason: err?.message ?? String(err), flowId });
       }
       throw err;
+    } finally {
     }
   }
-
   /**
    * Run the node body. A node that declares `crossProcessLock` is refused:
    * the lock mechanism is gone, and a node that silently lost its mutual

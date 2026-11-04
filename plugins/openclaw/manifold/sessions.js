@@ -21,8 +21,27 @@ function authPaths(agentId) {
 
 // Session-file path for an agent's JSONL transcript. Pure join, never throws
 // on string input — callers validate agentId/sessionId before reaching here.
+// Harness-internal: the harness names its own file id `sessionId`.
 export function resolveSessionFile(agentId, sessionId) {
   return path.join(sessionsDir(agentId), `${sessionId}.jsonl`);
+}
+
+// Transcript file for a manifold session (the index KEY). Core hands over
+// its single `session` handle; the harness owns the index, so the entry
+// for that key names the file — the key itself is never a filename.
+export function resolveSessionFileForKey(agentId, session) {
+  try {
+    const index = readSessionsIndex(agentId);
+    const entry = index?.[session];
+    if (entry?.sessionFile) return entry.sessionFile;
+    const sessionId = entry?.sessionId;
+    if (typeof sessionId === "string" && sessionId) {
+      return path.join(sessionsDir(agentId), `${sessionId}.jsonl`);
+    }
+  } catch {
+    // Unreadable index falls through to the conventional path below.
+  }
+  return path.join(sessionsDir(agentId), `${session}.jsonl`);
 }
 
 // existsSync-shaped predicate: false on any filesystem error, never throws.
