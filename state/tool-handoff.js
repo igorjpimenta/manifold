@@ -10,9 +10,8 @@
 //
 // This is deliberately durable, not in-memory: the delivering side (an MCP
 // tool call) and the consuming side (the engine's executor loop) may live
-// in different processes — an in-process Map would silently drop results
-// across that boundary the way it already did across dual module
-// registries. A `tool_results` row keyed by the harness-stamped session key
+// in different processes, and an in-process Map would silently drop results
+// across that boundary. A `tool_results` row keyed by the harness-stamped
 // is the rendezvous both sides can reach: the agent knows its session key,
 // the dispatch knows it too, neither needs the other's invocationId.
 //
