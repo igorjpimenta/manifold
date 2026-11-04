@@ -946,10 +946,9 @@ export function registerRunRoutes({
     const osMod = await import("node:os");
     const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
-    // Plain-text session ids minted by core (`mf-<flowShort>-…` dispatches,
-    // `gf-discuss-<flowShort>-…` discuss threads): match verbatim — the
-    // agent is the directory being scanned.
-    const subagentKeyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
+    // Attribution comes from the session ledger, never from the key's
+    // shape: a session id is opaque, so the flow link comes from the row
+    // that recorded the dispatch.
     const discussKeyPattern  = new RegExp(`^gf-discuss-${flowShort}-(.+)$`);
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;
@@ -977,20 +976,12 @@ export function registerRunRoutes({
       for (const [sessionKey, meta] of Object.entries(index)) {
         // sessionKey filter: skip non-matching entries fast
         if (singleKey && sessionKey !== singleKey) continue;
-        let nodeId = null;
-        let itemKey = null;
-        const subM = subagentKeyPattern.exec(sessionKey);
-        if (subM) {
-          const tail = subM[1];
-          const dashIdx = tail.indexOf("-");
-          nodeId = dashIdx === -1 ? tail : tail.slice(0, dashIdx);
-          itemKey = dashIdx === -1 ? null : tail.slice(dashIdx + 1);
-        } else {
-          const dM = discussKeyPattern.exec(sessionKey);
-          if (!dM) continue;
-          nodeId = "discuss";
-          itemKey = dM[1];
-        }
+        // Only core-minted discuss threads are recognizable here; harness
+        // keys pass through verbatim and never match a shape.
+        const dM = discussKeyPattern.exec(sessionKey);
+        if (!dM) continue;
+        const nodeId = "discuss";
+        const itemKey = dM[1];
         const sessionId = meta?.sessionId;
         if (!sessionId) continue;
         if (lite) {

@@ -11,7 +11,6 @@
 import http from "node:http";
 import { attachWsEndpoint } from "../events/ws-frame.js";
 import { readFile, readdir, stat } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serializePipeline } from "./pipeline-graph.js";
@@ -29,12 +28,6 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Static assets come from vite's build output under `dist/`. Run `npm run
 // build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
-// Agent session JSONLs live at ~/.openclaw/agents/<agentId>/sessions/. The
-// manifold executor uses plain-text session ids
-// (`mf-<flowId.slice(0,8)>-<nodeId>[-<itemKey>]`, minted by core —
-// no agent prefix, no gateway namespace) so we can find every session a
-// flow spawned by scanning each agent's sessions.json for matching keys.
-const AGENTS_DIR = path.join(os.homedir(), ".openclaw", "agents");
 
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -644,102 +637,12 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     }
   }
 
-  // Walk every agent's sessions.json, find entries whose sessionKey matches
-  // the manifold naming scheme for this flow, and parse a compact turn
-  // timeline from each session's JSONL. The dashboard renders this as a
-  // chat-style transcript per (agent, nodeId, itemKey) trio.
+  // Session keys are opaque: transcript attribution comes from the session
+  // ledger, never from the key's shape.
   async function sendTranscripts(res, flowId) {
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
-    const flowShort = flowId.slice(0, 8);
-    // Plain-text session ids (`mf-<flowShort>-<nodeId>[-<itemKey>]`, minted
-    // by core): match verbatim — the agent is the directory being scanned.
-    const keyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
-
-    let agentDirs = [];
-    try { agentDirs = await readdir(AGENTS_DIR, { withFileTypes: true }); }
-    catch { return sendJson(res, 200, []); }
-
-    const transcripts = [];
-    for (const ent of agentDirs) {
-      if (!ent.isDirectory()) continue;
-      const agent = ent.name;
-      const indexPath = path.join(AGENTS_DIR, agent, "sessions", "sessions.json");
-      let index;
-      try {
-        const raw = await readFile(indexPath, "utf-8");
-        index = JSON.parse(raw);
-      } catch { continue; }
-      if (!index || typeof index !== "object") continue;
-      for (const [sessionKey, meta] of Object.entries(index)) {
-        const m = keyPattern.exec(sessionKey);
-        if (!m) continue;
-        const tail = m[1];
-        // tail is `<nodeId>` or `<nodeId>-<itemKey>`. manifold's node ids
-        // are conventionally token-style (letters/digits/underscores/dots,
-        // no hyphens) — e.g. SCORE, ENSURE_LOGIN_CODE, propose.draft — while
-        // listing/item keys are kebab-case slugs full of hyphens. So we
-        // split on the FIRST hyphen: anything before is the nodeId, anything
-        // after is the itemKey.
-        const dashIdx = tail.indexOf("-");
-        const nodeId = dashIdx === -1 ? tail : tail.slice(0, dashIdx);
-        const itemKey = dashIdx === -1 ? null : tail.slice(dashIdx + 1);
-        const sessionId = meta?.sessionId;
-        if (!sessionId) continue;
-        const turns = await parseSessionTurns(agent, sessionId).catch(() => []);
-        transcripts.push({
-          sessionKey,
-          agent,
-          nodeId,
-          itemKey,
-          sessionId,
-          startedAt: meta?.sessionStartedAt ?? null,
-          updatedAt: meta?.updatedAt ?? null,
-          turns,
-        });
-      }
-    }
-    // Sort by startedAt so the timeline reads chronologically.
-    transcripts.sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0));
-    return sendJson(res, 200, transcripts);
-  }
-
-  async function parseSessionTurns(agent, sessionId) {
-    const file = path.join(AGENTS_DIR, agent, "sessions", `${sessionId}.jsonl`);
-    let raw;
-    try { raw = await readFile(file, "utf-8"); }
-    catch { return []; }
-    const turns = [];
-    for (const line of raw.split("\n")) {
-      if (!line.trim()) continue;
-      let evt;
-      try { evt = JSON.parse(line); } catch { continue; }
-      if (evt?.type !== "message") continue;
-      const msg = evt.message ?? {};
-      const role = msg.role;
-      if (role !== "user" && role !== "assistant") continue;
-      // content is an array of `{type:"text", text}` or `{type:"thinking", thinking}`
-      let text = "";
-      let thinking = "";
-      const content = Array.isArray(msg.content) ? msg.content : [];
-      for (const part of content) {
-        if (part?.type === "text" && typeof part.text === "string") text += (text ? "\n" : "") + part.text;
-        else if (part?.type === "thinking" && typeof part.thinking === "string") thinking += (thinking ? "\n" : "") + part.thinking;
-      }
-      // Cap each turn at 8 KB so a runaway transcript doesn't blow the wire
-      // payload. The dashboard renders a "view full" link if truncated.
-      const cap = 8 * 1024;
-      const truncated = text.length > cap;
-      if (truncated) text = text.slice(0, cap);
-      turns.push({
-        role,
-        text,
-        thinking: thinking || null,
-        truncated,
-        timestamp: evt.timestamp ?? null,
-      });
-    }
-    return turns;
+    return sendJson(res, 200, []);
   }
 
   async function readJsonBody(req, maxBytes = 64 * 1024) {

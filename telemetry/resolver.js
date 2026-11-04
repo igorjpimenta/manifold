@@ -309,7 +309,6 @@ export function rootLabelOf(frame) {
     case "memory-synth-chunk": return `memory-synth:${frame.memorySynthRun || ""}`;
     case "flow-prime":         return `flow-prime:${frame.primeRef || ""}`;
     case "bare-subagent":      return `bare-subagent:${frame.bareUuid?.slice(0, 8) || ""}`;
-    case "manifold-subagent":   return `manifold:${frame.flowShort || ""}`;
     default:                   return frame.key;
   }
 }

@@ -62,6 +62,6 @@ export function createNodeCostReader({ dbPath = defaultDbPath() } = {}) {
   return { nodeCallStats };
 }
 
-// Default singleton backed by ~/.openclaw/ops.sqlite
+// Default singleton backed by the store home's ops.sqlite
 const _default = createNodeCostReader();
 export const { nodeCallStats } = _default;

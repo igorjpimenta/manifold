@@ -7,7 +7,6 @@ import {
   isQueued,
   mergeForConflict,
   withEditableTextDefault,
-  mintAgentSessionKey,
   shortSummary,
   deepClone,
   detectBlockedSentinel,
@@ -204,20 +203,6 @@ describe("withEditableTextDefault", () => {
 
   it("returns payload unchanged when payload is null", () => {
     assert.equal(withEditableTextDefault(null, {}), null);
-  });
-});
-
-// ── mintAgentSessionKey ───────────────────────────────────────────────────────
-
-describe("mintAgentSessionKey", () => {
-  it("mints an opaque core handle without gateway namespace", () => {
-    const key = mintAgentSessionKey("12345678-aabb-ccdd-eeff-000000000000", "PROPOSE");
-    assert.equal(key, "mf-12345678-propose");
-  });
-
-  it("appends itemKey", () => {
-    const key = mintAgentSessionKey("12345678-0000-0000-0000-000000000000", "DRAFT", "item-1");
-    assert.ok(key.includes("draft-item-1"), key);
   });
 });
 

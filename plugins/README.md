@@ -12,15 +12,16 @@ callbacks, no receiver sessions.
 | --------- | ------ | --------- |
 | harness   | per-call declaration (`MANIFOLD_HARNESS` / `X-Manifold-Harness`; `openclaw` default for pipelines-dir resolution) | core: logs, pipelines-dir resolution |
 | agent     | pipeline node `entry.agent` (**required** — anonymous dispatch is refused loudly) | core: session attribution |
-| session   | plain-text session id (`mf-…` dispatches minted by core, `gf-discuss-…` discuss threads); `entry.sessionKey` or `sessionKeyBuilder` overrides pass through verbatim | core: turn identity |
+| session   | declared by the node (`entry.sessionKey` / `entry.sessionKeyBuilder`), passed through verbatim; `gf-discuss-…` discuss threads are core-owned | core: turn identity |
 
 ## Session-key conventions
 
-Core speaks only its own namespace: `dispatchAgentEntry` mints a plain-text
-session id `mf-<flow8>-<node>[-<item>]` (`mintAgentSessionKey`); a node may
-override via `entry.sessionKey` or `entry.sessionKeyBuilder(state, flowId)`,
-honored verbatim. `entry.agent` is required — anonymous dispatch is refused
-loudly. No env fallback, ever.
+Core does not mint session ids: the harness owns the format, so an agent
+node declares `entry.sessionKey` (static) or
+`entry.sessionKeyBuilder(state, flowId)` (derived) and `dispatchAgentEntry`
+passes it through verbatim. A node that declares neither is refused
+loudly — tool-handoff and the lineage ledger both key off this value.
+`entry.agent` is required too; no env fallback, ever.
 
 The adapter passes session ids through verbatim (`session-keys.js`,
 wrapping `runtime.subagent` once where it is injected): only runIds

@@ -2,7 +2,7 @@ import { describe, it, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createExecutor } from "../../../engine/executor.js";
 import { NodeFailure } from "../../../engine/executor-errors.js";
-import { mintAgentSessionKey, assembleState } from "../../../engine/executor-helpers.js";
+import { assembleState } from "../../../engine/executor-helpers.js";
 import { REVIVAL_MSG } from "../../../engine/revival-messages.js";
 import { nodeEmitter } from "../../../events.js";
 import { getGlobalConcurrencyLimit, _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
@@ -1415,7 +1415,7 @@ function makeFakeNodeHealthStore() {
 }
 
 function makeCircuitBreakerAgentNode(overrides = {}) {
-  return { kind: "agent", agent: "scout", circuitBreaker: true, promptBuilder: () => "hi", apply: (s, o) => ({ reply: o }), ...overrides };
+  return { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", circuitBreaker: true, promptBuilder: () => "hi", apply: (s, o) => ({ reply: o }), ...overrides };
 }
 
 describe("runFlow — agent circuit breaker: check", () => {
@@ -1454,7 +1454,7 @@ describe("runFlow — agent circuit breaker: check", () => {
 
   it("does not gate a plain agent node without circuitBreaker:true, even if the store has an entry under its id", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
@@ -1489,7 +1489,7 @@ describe("runFlow — agent circuit breaker: mark", () => {
 
   it("does not mark unhealthy for a plain agent node without circuitBreaker:true", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
@@ -1565,7 +1565,7 @@ describe("reviveAgentKindOrphan", () => {
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout",
+          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
           promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },
@@ -1589,7 +1589,7 @@ describe("reviveAgentKindOrphan", () => {
     await executor.reviveAgentKindOrphan(flow);
 
     assert.equal(capturedMessage, REVIVAL_MSG, "must send the continuation prompt, not promptBuilder's output");
-    assert.equal(capturedSessionKey, mintAgentSessionKey(flow.flowId, "AGENT"), "must resume the SAME session the original dispatch used");
+    assert.equal(capturedSessionKey, "agent:scout:orphan-session", "must resume the SAME session the original dispatch used");
     const final = store.get(flow.flowId);
     assert.equal(final.status, "succeeded", "flow continues past AGENT to __end__");
     // B4: state_json is entry-only — agentReply (AGENT's own apply() output)
@@ -1612,7 +1612,7 @@ describe("reviveAgentKindOrphan", () => {
 
   it("fails the flow when the revival dispatch throws", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
     const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent });
@@ -1635,7 +1635,7 @@ describe("reviveAgentKindOrphan", () => {
     // is always a continuation of the exact node that crashed, not a fresh
     // dispatch decision — this proves the hardcode is actually load-bearing.
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
     const spy = makeSpyNodeExecutionsStore();
@@ -1652,7 +1652,7 @@ describe("reviveAgentKindOrphan", () => {
 
   it("thrown revival dispatch: threads write()'s returned ids into recordEngineFailure", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
     const spy = makeSpyNodeExecutionsStore();
@@ -1673,7 +1673,7 @@ describe("reviveAgentKindOrphan", () => {
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout", promptBuilder: () => "unused",
+          kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused",
           apply: () => ({ _blocked: { reason: "needs review" } }),
         },
       },
@@ -1702,7 +1702,7 @@ describe("reviveAgentKindOrphan", () => {
 
   it("blocks with needs-gateway-handoff instead of failing when the dispatch is still request-scoped", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     // No getWorkingSubagent and api.runtime.subagent is undefined — runSubagentTurn
     // throws GatewayHandoffNeeded ("subagent runtime unavailable on this api instance").
@@ -1736,7 +1736,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout",
+          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
           promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },
@@ -1812,7 +1812,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout",
+          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
           promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },
@@ -1857,8 +1857,8 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout",
-          promptBuilder: () => "unused",
+          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
+          promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },
       },

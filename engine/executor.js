@@ -53,7 +53,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
 
   // Injectable for tests (defaults to the real singleton in production).
   // A test constructing a real createExecutor() without this override would
-  // write its fixture rows into the real ~/.openclaw/runtime.sqlite; store/
+  // write its fixture rows into the real store's runtime.sqlite; store/
   // branchService/failureStore etc. above already follow this DI pattern.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
 

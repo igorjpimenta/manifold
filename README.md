@@ -671,21 +671,21 @@ One lock primitive:
 
 | Field                       | Scope                | Acquired before  | Released after           |
 | --------------------------- | --------------------- | ---------------- | ------------------------ |
-| `crossProcessLock: "kind:id"` | Filesystem, cross-process | node body runs | node body returns/throws |
+| `crossProcessLock: "kind:id"` | cross-process      | node body runs | node body returns/throws |
 
-Filesystem-backed, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name — the lock file at `~/.openclaw/locks/<name>.lock` is honored across processes.
+The lock name is manifold's contract; whoever runs the flow provides the mechanism behind it. A holder's lock file (`<name>.lock`) is honored across processes, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name.
 
 ```js
 SUBMIT_CODE: {
   kind: "code",
-  crossProcessLock: "browser:freelance",   // cross-process filesystem mutex
+  crossProcessLock: "browser:freelance",   // cross-process mutex on a named resource
   run: async (state, ctx) => { /* ... */ }
 }
 ```
 
 No script should self-lock internally (`withLock(...)` wrapping its own `main()`) — that only creates a deadlock risk against a pipeline node holding the same lock name across the spawn boundary (a child OS process can't see the parent's held lock). The pipeline node that spawns the script should declare `crossProcessLock` itself, for the full duration of the dispatch.
 
-The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. See `locks/lock.js` for the helper used standalone by ad-hoc scripts.
+The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name.
 
 ### Code-node `ctx` argument
 
@@ -819,8 +819,8 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Concern | Behavior |
 |---|---|
 | Channel | the WS dialog door — no channel plugin. Operator messages arrive as `{type:"message", flowId, itemId, text}` frames; the door answers `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`). |
-| Session key | the plain-text session id itself (`mf-…` dispatches, `gf-discuss-…` discuss threads) — locked on the first turn and kept for the gate's lifetime. |
-| Session stamp | Written to `~/.openclaw/discuss-sessions/<flowId8>__<gateNodeId>__<itemId>.json` on first turn so agent/config changes never break a live chat. |
+| Session key | the harness's own session id, passed through verbatim — locked on the first turn and kept for the gate's lifetime. |
+| Session stamp | Recorded on the first turn against the thread's coordinates, so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
 | Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires a `discuss.component` event immediately; a connected client surfaces an Apply affordance. |
 | Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` event; updates the chip row on connected clients. `budget` must be a positive integer. |
@@ -917,11 +917,10 @@ subflow-internal group compounds inside their subflow node).
 **Rule:** Node ids match `[A-Za-z0-9_.]+`. Use UPPER_SNAKE, `lowercase`,
 or `parent.child` for subflow members. **Never use hyphens.**
 
-**Why:** Session keys are plain-text `mf-<flowShort>-<nodeId>-<itemKey>`
-ids and item keys are kebab-case slugs (hyphenated). Telemetry and the
-dashboard split the opaque tail on the **first hyphen** to recover
-`(nodeId, itemKey)`. A node id with a hyphen would silently get
-misattributed to the item key.
+**Why:** Node ids surface verbatim in synthetic `${pipelineId}::${nodeId}`
+addresses, lineage labels, and human-readable contexts — next to
+hyphenated kebab-case item keys. Keeping hyphens out of node ids keeps
+those compound names unambiguous to both readers and tooling.
 
 **Examples:** ✅ `SCORE`, `ENSURE_LOGIN_CODE`, `propose.draft`
 ❌ `ensure-login`, `score-listing`
@@ -973,27 +972,27 @@ serialization is doing real work there.
 
 ## Session keys (subagents spawned by manifold)
 
+Manifold does not mint session ids: the harness owns the id format, so an
+agent node declares its own key and manifold passes it through verbatim.
+
 ```
-mf-<flowId.slice(0,8)>-<seed>
-seed = nodeId.toLowerCase() [-<itemKey>]
+node.sessionKey                          // static
+node.sessionKeyBuilder(state, flowId)    // derived
 ```
 
-Built by `mintAgentSessionKey` in `engine/executor-helpers.js`. Discuss
-threads use `gf-discuss-<flowId.slice(0,8)>-<gateNodeId>-<itemId>` instead.
-Both are plain-text session ids — no agent prefix, no gateway namespace —
-so any harness can use them verbatim. Override by setting
-`node.sessionKey` (static) or `node.sessionKeyBuilder(state, flowId, itemKey?)`.
+`dispatchAgentEntry` refuses an agent node that declares neither —
+tool-handoff and the lineage ledger both key off this value, so inventing
+one here would silently diverge from the harness's id. A discuss thread
+carries its own session id, locked on the first turn and re-used for every
+later turn of that thread.
 
-Reverse-parsing (dashboard): split the segment after `gf-<flowShort>-`
-on the **first hyphen**. `dashboard/server.js: sendTranscripts`.
+Transcript attribution comes from the session ledger, never from the key's
+shape.
 
-Each session corresponds to a file:
-`~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`. The
-sessionId is looked up via the agent's `sessions/sessions.json` index.
-Session JSONL line types: `message` (carries `message.role` +
-`message.content`), `model_change`, `prompt.submitted`,
-`model.completed`, `session.ended`. Only `message` lines with
-`role in {user, assistant}` form the visible transcript.
+A session is one conversation the harness owns; manifold addresses it by
+id and never opens its files. Transcript content comes from the harness's
+own surfaces (and, for discuss threads, from the messages manifold
+persisted itself).
 
 ## State conventions
 
@@ -1593,7 +1592,7 @@ inspection — it's the safe default; only reach for raw `sqlite3` when you
 actually intend to write.
 
 ```
-file: ~/.openclaw/runtime.sqlite   ← manifold read/write store (use this)
+file: <store home>/runtime.sqlite   ← manifold read/write store (use this)
 table: flow_runs
 
 flow_id             TEXT PRIMARY KEY

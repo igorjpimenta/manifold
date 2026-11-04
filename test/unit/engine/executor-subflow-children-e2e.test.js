@@ -170,14 +170,14 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     assert.equal(parent.waitJson.kind, "children-pending");
 
     // The child's own runFlow is fire-and-forget dispatched via setImmediate
-    // from dispatchLoopChildren — give it a tick to reach its own GATE
-    // before asserting on its state.
-    await flush();
+    // from dispatchLoopChildren — poll until it reaches its own GATE. A
+    // fixed flush() flakes under full-suite CI load (the assertion fires
+    // while the child is still running); the state store already announces
+    // the transition, so wait for the condition that matters.
     const kids = await childFlowIds(harness, record.flowId);
     assert.equal(kids.length, 1);
-    const child = await runStore.get(kids[0]);
+    const child = await waitForStatus(runStore, kids[0], (r) => r.status === "blocked");
     assert.equal(child.pipelineId, "test_parent::CONNECT");
-    assert.equal(child.status, "blocked");
     assert.equal(child.waitJson.kind, "human-gate");
     assert.equal(child.waitJson.items[0].itemId, "abc");
   });

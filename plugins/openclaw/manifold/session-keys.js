@@ -1,14 +1,8 @@
-// session-keys.js — adapter-owned session identity helpers. Session ids
-// are plain text, harness-neutral strings minted by core (`mf-<flow8>-…`
-// dispatches, `gf-discuss-<flow8>-…` discuss threads): no `agent:` prefix,
-// no `subagent` infix, no gateway namespace anywhere in the contract.
-// The gateway stores exactly the string it is given, so reads (session
-// transcripts, trajectories) key off the same plain id the dispatch used.
+// session-keys.js — adapter-owned session identity helpers.
 //
-// No gateway-shaped keys are minted or matched anywhere: session ids pass
-// through verbatim, and runIds map below.
-// runId mapping is untouched: gateway runIds are native gateway
-// events, so the dispatch-lifecycle registry stays regardless of key shape.
+// Run ids are a separate namespace: gateway runIds are native gateway
+// events, so the dispatch-lifecycle registry maps them independently of
+// whatever shape a session key carries.
 
 import { randomBytes } from "node:crypto";
 
