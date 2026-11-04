@@ -143,6 +143,20 @@ export const discussThreads = sqliteTable('discuss_threads', {
   uniqueIndex('idx_discuss_threads_unique').on(table.flowId, table.gateNodeId, table.itemId),
 ]);
 
+// Pending operator proposal: one row per (flow, item) holding the draft body
+// plus accumulated frontmatter fields. Keyed by the coordinates so a text
+// write and a fields merge land on the same row regardless of order.
+export const pendingProposals = sqliteTable('pending_proposals', {
+  flowId:     text('flow_id').notNull(),
+  itemId:     text('item_id').notNull(),
+  text:       text('text'),
+  fieldsJson: text('fields_json'),
+  draftId:    text('draft_id'),
+  updatedAt:  integer('updated_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.flowId, table.itemId] }),
+]);
+
 export const nodeHealth = sqliteTable('node_health', {
   id:              text('id').primaryKey(),
   pipelineId:      text('pipeline_id').notNull(),
