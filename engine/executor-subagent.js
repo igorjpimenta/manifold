@@ -36,19 +36,19 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit
     // run can sit silently in the gateway's own lane queue
     // (agents.defaults.maxConcurrent) for arbitrarily long, and neither
     // silence nor wall-clock time there means the run is hung.
-    const toolSignal = waitForToolResult(sessionKey);
+    const toolWait = waitForToolResult(sessionKey);
     let waitResult;
     try {
       waitResult = await Promise.race([
         subagent.waitForRun({ runId: runResult.runId, timeoutMs: WAIT_UNTIL_RUN_ENDS_MS }),
-        toolSignal.promise.then((row) => ({ status: "ok", toolFired: true, toolRow: row })),
+        toolWait.promise.then((row) => ({ status: "ok", toolFired: true, toolRow: row })),
       ]);
     } catch (err) {
-      toolSignal.cancel();
+      toolWait.cancel();
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;
     }
-    toolSignal.cancel();
+    toolWait.cancel();
     if (waitResult.status !== "ok") {
       const errDetail = waitResult.error ?? (await fetchSessionError(sessionKey)) ?? "no error message";
       throw new Error(`subagent ${waitResult.status}: ${errDetail}`);
