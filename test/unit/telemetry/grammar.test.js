@@ -26,32 +26,18 @@ describe("classify", () => {
     assert.equal(r.parentHint, null);
   });
 
-  it("classifies manifold-subagent with a flow parent hint", () => {
-    const r = classify("mf-12345678-propose");
-    assert.equal(r.kind, "manifold-subagent");
-    assert.equal(r.agentId, null);
-    assert.equal(r.flowShort, "12345678");
-    assert.equal(r.nodeId, "propose");
-    assert.equal(r.parentHint?.kind, "flow");
-    assert.equal(r.parentHint?.flowShort, "12345678");
-  });
-
-  it("stops resolving legacy gateway-shaped keys to flows", () => {
-    // Pre-cutover session files keep their gateway keys; they degrade to
-    // the generic buckets instead of the flow walk — no crash, no lineage.
-    assert.equal(classify("agent:cyrano:subagent:mf-12345678-propose").kind, "unknown");
+  it("leaves gateway-shaped subagent keys out of the flow walk", () => {
+    // No shape rule matches these; they degrade to the generic buckets
+    // instead of the flow walk — no crash, no lineage.
+    assert.equal(classify("agent:cyrano:subagent:9f2c1a7b-propose").kind, "unknown");
     assert.equal(classify("agent:main:gf-discuss-a700a3ea-propose-x").kind, "explicit");
   });
 
-  it("classifies plain-text manifold ids with null agent and the same flow hint", () => {
+  it("leaves plain-text session ids unmatched; attribution comes from stores", () => {
     const r = classify("mf-12345678-propose-item-1");
-    assert.equal(r.kind, "manifold-subagent");
+    assert.equal(r.kind, "unknown");
     assert.equal(r.agentId, null);
-    assert.equal(r.flowShort, "12345678");
-    assert.equal(r.nodeId, "propose");
-    assert.equal(r.itemKey, "item-1");
-    assert.equal(r.parentHint?.kind, "flow");
-    assert.equal(r.parentHint?.flowShort, "12345678");
+    assert.equal(r.parentHint, null);
   });
 
   it("leaves the legacy gf- dispatch shape unmatched", () => {

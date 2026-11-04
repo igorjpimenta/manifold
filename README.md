@@ -819,7 +819,7 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Concern | Behavior |
 |---|---|
 | Channel | the WS dialog door — no channel plugin. Operator messages arrive as `{type:"message", flowId, itemId, text}` frames; the door answers `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`). |
-| Session key | the plain-text session id itself (`mf-…` dispatches, `gf-discuss-…` discuss threads) — locked on the first turn and kept for the gate's lifetime. |
+| Session key | the session id itself — the harness's own id for dispatches (passed through verbatim), `gf-discuss-…` for discuss threads — locked on the first turn and kept for the gate's lifetime. |
 | Session stamp | Written to `~/.openclaw/discuss-sessions/<flowId8>__<gateNodeId>__<itemId>.json` on first turn so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
 | Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires a `discuss.component` event immediately; a connected client surfaces an Apply affordance. |
@@ -917,11 +917,10 @@ subflow-internal group compounds inside their subflow node).
 **Rule:** Node ids match `[A-Za-z0-9_.]+`. Use UPPER_SNAKE, `lowercase`,
 or `parent.child` for subflow members. **Never use hyphens.**
 
-**Why:** Session keys are plain-text `mf-<flowShort>-<nodeId>-<itemKey>`
-ids and item keys are kebab-case slugs (hyphenated). Telemetry and the
-dashboard split the opaque tail on the **first hyphen** to recover
-`(nodeId, itemKey)`. A node id with a hyphen would silently get
-misattributed to the item key.
+**Why:** Node ids surface verbatim in synthetic `${pipelineId}::${nodeId}`
+addresses, lineage labels, and human-readable contexts — next to
+hyphenated kebab-case item keys. Keeping hyphens out of node ids keeps
+those compound names unambiguous to both readers and tooling.
 
 **Examples:** ✅ `SCORE`, `ENSURE_LOGIN_CODE`, `propose.draft`
 ❌ `ensure-login`, `score-listing`
@@ -987,9 +986,9 @@ one here would silently diverge from the harness's id. Discuss threads
 mint `gf-discuss-<flowId.slice(0,8)>-<gateNodeId>-<itemId>` internally
 (core-owned, no harness involved).
 
-Transcript lookup matches keys by shape (`mf-<flow8>-…`,
-`gf-discuss-<flow8>-…`); a key with no flow prefix is invisible to the
-directory scan.
+Transcript lookup matches core-minted `gf-discuss-<flow8>-…` threads by
+shape; a harness-owned id carries no flow prefix, so it is invisible to
+the directory scan — look those up via the session ledger instead.
 
 Each session corresponds to a file:
 `~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`. The

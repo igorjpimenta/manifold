@@ -946,9 +946,9 @@ export function registerRunRoutes({
     const osMod = await import("node:os");
     const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
-    // Match `mf-<flowShort>-…` and `gf-discuss-<flowShort>-…` keys by shape;
-    // a key with no flow prefix is invisible to this scan.
-    const subagentKeyPattern = new RegExp(`^mf-${flowShort}-(.+)$`);
+    // Match only core-minted `gf-discuss-<flowShort>-…` threads by shape.
+    // Harness-owned session ids carry no flow prefix and are invisible to
+    // this scan — find those through the session ledger instead.
     const discussKeyPattern  = new RegExp(`^gf-discuss-${flowShort}-(.+)$`);
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;
@@ -976,20 +976,12 @@ export function registerRunRoutes({
       for (const [sessionKey, meta] of Object.entries(index)) {
         // sessionKey filter: skip non-matching entries fast
         if (singleKey && sessionKey !== singleKey) continue;
-        let nodeId = null;
-        let itemKey = null;
-        const subM = subagentKeyPattern.exec(sessionKey);
-        if (subM) {
-          const tail = subM[1];
-          const dashIdx = tail.indexOf("-");
-          nodeId = dashIdx === -1 ? tail : tail.slice(0, dashIdx);
-          itemKey = dashIdx === -1 ? null : tail.slice(dashIdx + 1);
-        } else {
-          const dM = discussKeyPattern.exec(sessionKey);
-          if (!dM) continue;
-          nodeId = "discuss";
-          itemKey = dM[1];
-        }
+        // Only core-minted discuss threads are recognizable here; harness
+        // keys pass through verbatim and never match a shape.
+        const dM = discussKeyPattern.exec(sessionKey);
+        if (!dM) continue;
+        const nodeId = "discuss";
+        const itemKey = dM[1];
         const sessionId = meta?.sessionId;
         if (!sessionId) continue;
         if (lite) {

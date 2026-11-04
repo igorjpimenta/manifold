@@ -14,9 +14,6 @@ const REGEX = {
   CRON_RUN:  /^agent:([^:]+):cron:([0-9a-f-]{36}):run:([0-9a-f-]+)$/,
   CRON_OWN:  /^agent:([^:]+):cron-(.+)$/,
   BARE_SUB:  /^agent:([^:]+):subagent:([0-9a-f-]{36})$/,
-  // `mf-<flow8>-<node>[-<item>]` keys: resolve the embedded flow8 via
-  // the "flow" parentHint branch, same as GF_DISCUSS.
-  MF_SUB:    /^(mf-[0-9a-f]{8}-.+)$/,
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
@@ -74,18 +71,6 @@ export function classify(sessionKey) {
     const [, flowShort] = m;
     return {
       kind: "flow-gate-discuss", agentId: null, flowShort,
-      parentHint: { kind: "flow", flowShort },
-    };
-  }
-  if ((m = REGEX.MF_SUB.exec(sessionKey))) {
-    const [, opaque] = m;
-    const flowShort = opaque.slice(3, 11);
-    const tail = opaque.slice(12);
-    const dash = tail.indexOf("-");
-    return {
-      kind: "manifold-subagent", agentId: null, opaque, flowShort,
-      nodeId: dash === -1 ? tail : tail.slice(0, dash),
-      itemKey: dash === -1 ? null : tail.slice(dash + 1),
       parentHint: { kind: "flow", flowShort },
     };
   }
