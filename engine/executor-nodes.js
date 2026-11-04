@@ -4,7 +4,6 @@ import os from "node:os";
 import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
 import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
-import { registerDispatch, clearDispatch } from "../state/tool-handoff.js";
 
 // The lock owner for work done on behalf of one node invocation: held locks
 // stay held until the invocation resolves (see the harness plugin's
