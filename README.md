@@ -671,21 +671,21 @@ One lock primitive:
 
 | Field                       | Scope                | Acquired before  | Released after           |
 | --------------------------- | --------------------- | ---------------- | ------------------------ |
-| `crossProcessLock: "kind:id"` | Filesystem, cross-process | node body runs | node body returns/throws |
+| `crossProcessLock: "kind:id"` | cross-process      | node body runs | node body returns/throws |
 
-Filesystem-backed, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name — the lock file in the store home's locks dir (`<name>.lock`) is honored across processes.
+The lock name is manifold's contract; whoever runs the flow provides the mechanism behind it. A holder's lock file (`<name>.lock`) is honored across processes, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name.
 
 ```js
 SUBMIT_CODE: {
   kind: "code",
-  crossProcessLock: "browser:freelance",   // cross-process filesystem mutex
+  crossProcessLock: "browser:freelance",   // cross-process mutex on a named resource
   run: async (state, ctx) => { /* ... */ }
 }
 ```
 
 No script should self-lock internally (`withLock(...)` wrapping its own `main()`) — that only creates a deadlock risk against a pipeline node holding the same lock name across the spawn boundary (a child OS process can't see the parent's held lock). The pipeline node that spawns the script should declare `crossProcessLock` itself, for the full duration of the dispatch.
 
-The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. See `locks/lock.js` for the helper used standalone by ad-hoc scripts.
+The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name.
 
 ### Code-node `ctx` argument
 
