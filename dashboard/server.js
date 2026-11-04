@@ -638,9 +638,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
   }
 
   // Transcripts live with the harness sessions, keyed by harness-owned ids
-  // that carry no manifold shape — there is nothing here to match on, so
-  // this endpoint intentionally returns an empty list. The store-backed
-  // transcript lookup replaces it (see routes/runs.js on the main line).
+  // that carry no manifold prefix — there is nothing here to match on, so
+  // this endpoint returns an empty list. Attribution comes from the session
+  // ledger, never from the key's shape.
   async function sendTranscripts(res, flowId) {
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
