@@ -1,7 +1,6 @@
 import path from "node:path";
 import os from "node:os";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 
 function agentsRoot() {
   return path.join(os.homedir(), ".openclaw", "agents");
@@ -150,10 +149,4 @@ export function resolveChildSessionFile(agentId, entry, childKey) {
 // already handles that as a child-session skip, same as before.
 export function readSessionFileSync(file) {
   return readFileSync(file, "utf8");
-}
-
-// Async variant for the history handler (gateway event-loop friendly).
-// Throws on unreadable files — the handler maps that to a 500, same as before.
-export function readSessionFileText(file) {
-  return readFile(file, "utf-8");
 }
