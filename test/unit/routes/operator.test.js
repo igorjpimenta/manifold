@@ -106,7 +106,6 @@ function makeDeps(api, overrides = {}) {
       readSessionsIndex: () => null,
       resolveChildSessionFile: () => "",
       readSessionFileSync: () => "",
-      readSessionFileText: async () => "",
     },
     ...overrides,
   };
@@ -145,7 +144,6 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
     "/manifold/_elev/rerun",
     "/manifold/_elev/retry-failure",
     "/manifold/_elev/discuss",
-    "/manifold/_elev/discuss_history",
   ]) {
     test(`${path}: auth=gateway, match=exact`, () => {
       const { api, routes } = createMockApi();
