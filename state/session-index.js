@@ -49,9 +49,9 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Was a subagent dispatch ever actually ATTEMPTED for this (flowId, nodeId)?
+  // Was an agent dispatch ever actually ATTEMPTED for this (flowId, nodeId)?
   // record() (above) is called at the top of dispatchAgentWithRetry, always
-  // before subagent.run() is awaited. This answers "did dispatch
+  // before the turn is run. This answers "did dispatch
   // start" independent of whether it finished, blocked, or is still in
   // flight. Used by boot/flow-revival.js to distinguish a flow that crashed
   // mid-turn (revive via continuation prompt) from one that was merely queued

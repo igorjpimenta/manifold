@@ -22,7 +22,7 @@ export class NodeBlocked extends Error {
 }
 
 /**
- * Thrown internally when a node's subagent call hits
+ * Thrown internally when a node's agent dispatch hits
  * `RequestScopedSubagentRuntimeError` — the executor is running outside a
  * gateway request context and can't dispatch agents. The flow gets blocked
  * with `wait_json.kind="needs-gateway-handoff"`.
@@ -37,7 +37,7 @@ export class NodeBlocked extends Error {
  */
 export class GatewayHandoffNeeded extends Error {
   constructor(originalMessage) {
-    super(`subagent call requires gateway context: ${originalMessage}`);
+    super(`agent dispatch requires gateway context: ${originalMessage}`);
     this.name = "GatewayHandoffNeeded";
   }
 }
@@ -65,7 +65,7 @@ export class NodeFailure extends Error {
 
 // The gateway's startup refusal ("<method> unavailable during gateway
 // startup") is deliberately NOT matched below: it is transient, and
-// engine/gateway-subagent.js holds every call until the gateway is ready.
+// the harness's run-turn gate holds every call until the gateway is ready.
 // Matching it would park flows in needs-gateway-handoff, which nothing ever
 // resumes.
 export function isRequestScopedSubagentError(err) {
@@ -74,15 +74,15 @@ export function isRequestScopedSubagentError(err) {
   const msg = err.message ?? String(err);
   if (msg.includes("only available during a gateway request")) return true;
   if (msg.includes("requires a gateway request scope")) return true;
-  // A subagent dispatch triggered from a detached continuation (e.g.
+  // An agent dispatch triggered from a detached continuation (e.g.
   // executor.resume() firing via setImmediate after a gate resolves) has no
   // live HTTP request to inherit operator scope from — the gateway RPC
   // layer rejects it with "missing scope: operator.write", a differently-
   // shaped error than the ones above but the exact same underlying cause
   // (no live gateway-request context). Scoped to "operator.write"
   // specifically, not a bare "missing scope:" match — this function is
-  // only ever consulted on errors from the three subagent.run/waitForRun/
-  // getSessionMessages calls in executor-subagent.js, never on unrelated
+  // only ever consulted on errors from the three runtime calls a turn makes
+  // getSessionMessages calls in the harness's run-turn.js, never on unrelated
   // RPC scope failures (operator.pairing, operator.admin, etc.) from
   // elsewhere in the gateway, so a narrower-than-it-looks match is safe.
   if (msg.includes("missing scope: operator.write")) return true;
@@ -100,7 +100,7 @@ export function isRequestScopedSubagentError(err) {
 // remedy.
 //
 // Matched on message text because these originate in different layers (tool
-// permission resolution, the gateway handoff contract, the subagent bridge)
+// permission resolution, the gateway handoff contract, the agent bridge)
 // and share no error class. Deliberately narrow: an unrecognised error is
 // treated as a symptom and DOES trip, so this list can only under-block,
 // never silently swallow a genuine health signal.
