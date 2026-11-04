@@ -679,24 +679,10 @@ export function registerDiscussHandlers({
           updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
         };
       } else {
-        const elev = await invokeElevated("/manifold/_elev/discuss_history", {
-          flowId: sourceFlow.flowId,
-          session: target.session,
-          agentId: target.agent,
-        });
-        try {
-          parsed = JSON.parse(elev.body || "{}");
-        } catch { parsed = { ok: false, code: "elevation_no_body" }; }
-        if (parsed && parsed.ok) {
-          const pending = await discussStore.readPending(sourceFlow.flowId, target.itemId);
-          if (pending && (pending.text || (pending.fields && Object.keys(pending.fields).length > 0))) {
-            parsed.pending = {
-              text: typeof pending.text === "string" ? pending.text : null,
-              fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
-              updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
-            };
-          }
-        }
+        // No recorded turn yet — the thread is empty. Discuss history is the
+        // discuss store's own record (both directions of every turn); the
+        // harness's session files are not a source for it.
+        parsed = { ok: true, messages: [] };
       }
       parsed.turnStatus = dsState?.turnStatus ?? "idle";
       parsed.activeTurnId = dsState?.activeTurnId ?? null;

@@ -1,5 +1,5 @@
 import { createRetryFailure } from "./operator-retry.js";
-import { createDiscussHandler, createDiscussHistoryHandler } from "./operator-discuss.js";
+import { createDiscussHandler } from "./operator-discuss.js";
 import { createStateStore } from "../state/state-store.js";
 import { completeCancellation } from "../engine/executor-cancel.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
@@ -50,8 +50,6 @@ export function registerOperatorRoutes({
     const { handleDiscuss } = createDiscussHandler({
       api, discussStore, sessions,
     });
-
-  const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions });
 
   // ── POST /manifold/gate/resolve ───────────────────────────────────────────
 
@@ -539,26 +537,4 @@ export function registerOperatorRoutes({
     },
   });
 
-  // ── POST /manifold/_elev/discuss_history ──────────────────────────────────
-
-  api.registerHttpRoute({
-    path: "/manifold/_elev/discuss_history",
-    auth: "gateway",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
-      }
-      let raw = "";
-      for await (const chunk of req) raw += chunk;
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; }
-      catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const { status, body: responseBody } = await handleDiscussHistory(body);
-      res.statusCode = status;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(responseBody));
-      return true;
-    },
-  });
 }
