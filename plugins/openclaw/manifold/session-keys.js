@@ -1,11 +1,5 @@
 // session-keys.js — adapter-owned session identity helpers.
 //
-// Session ids are harness-owned plain-text strings passed through verbatim:
-// nothing here mints or matches a session key shape, and no `agent:`
-// prefix, `subagent` infix or gateway namespace is added at this edge. The
-// gateway stores exactly the string it is given, so reads (session
-// transcripts, trajectories) key off the same id the dispatch used.
-//
 // Run ids are a separate namespace: gateway runIds are native gateway
 // events, so the dispatch-lifecycle registry maps them independently of
 // whatever shape a session key carries.
