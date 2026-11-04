@@ -1120,6 +1120,9 @@ export function registerRunRoutes({
       const elev = await invokeElevated("/manifold/_elev/rerun", {
         sourceFlowId: sourceFlow.flowId,
         args: argsOverride,
+        sessionKey: body.sessionKey,
+        sessionId: body.sessionId,
+        agentId: body.agentId,
       });
       res.statusCode = elev.status || 500;
       res.setHeader("Content-Type", "application/json");

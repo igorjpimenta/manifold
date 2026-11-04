@@ -6,6 +6,19 @@ import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { resumeFlowFromGate } from "./operator-resume.js";
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
+// Elevated handlers run with ambient operator scope, so the stamped harness
+// identity in the body is the only per-call check available: refuse unstamped
+// calls here rather than letting them run unauthenticated.
+function elevIdentityMissing(body, fields) {
+  return fields.filter((f) => typeof body?.[f] !== "string" || !body[f].trim());
+}
+
+function refuseElevIdentity(res, missing) {
+  res.statusCode = 400;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify({ ok: false, code: "missing_identity", error: `${missing.join(", ")} required` }));
+}
+
 export function registerOperatorRoutes({
   api,
   store,
@@ -79,6 +92,9 @@ export function registerOperatorRoutes({
           source: body.source,
           editedText: body.editedText,
           reason: body.reason,
+          sessionKey: body.sessionKey,
+          sessionId: body.sessionId,
+          agentId: body.agentId,
         });
         res.statusCode = elev.status || 500;
         res.setHeader("Content-Type", "application/json");
@@ -108,6 +124,8 @@ export function registerOperatorRoutes({
       let body;
       try { body = raw ? JSON.parse(raw) : {}; }
       catch { res.statusCode = 400; res.end("invalid json"); return true; }
+      const missingGateIdentity = elevIdentityMissing(body, ["flowId", "sessionKey", "sessionId", "agentId"]);
+      if (missingGateIdentity.length > 0) { refuseElevIdentity(res, missingGateIdentity); return true; }
       try {
         const result = await gateResolver.recordItemDecision({
           flowId: body.flowId,
@@ -259,7 +277,10 @@ export function registerOperatorRoutes({
           return true;
         }
         const args = (body.args && typeof body.args === "object") ? body.args : {};
-        const elev = await invokeElevated("/manifold/_elev/start", { pipelineId, args, via: authz.via });
+        const elev = await invokeElevated("/manifold/_elev/start", {
+          pipelineId, args, via: authz.via,
+          sessionKey: body.sessionKey, sessionId: body.sessionId, agentId: body.agentId,
+        });
         res.statusCode = elev.status || 500;
         res.setHeader("Content-Type", "application/json");
         res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
@@ -299,6 +320,8 @@ export function registerOperatorRoutes({
         res.end(JSON.stringify({ ok: false, error: "pipelineId required" }));
         return true;
       }
+      const missingStartIdentity = elevIdentityMissing(body, ["sessionKey", "sessionId", "agentId"]);
+      if (missingStartIdentity.length > 0) { refuseElevIdentity(res, missingStartIdentity); return true; }
       try {
         await ensurePipelinesLoaded?.();
         if (!pipelinesRef.value.has(pipelineId)) {
@@ -440,6 +463,8 @@ export function registerOperatorRoutes({
         res.statusCode = 400; res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: "args must be a JSON object" })); return true;
       }
+      const missingRerunIdentity = elevIdentityMissing(body, ["sessionKey", "sessionId", "agentId"]);
+      if (missingRerunIdentity.length > 0) { refuseElevIdentity(res, missingRerunIdentity); return true; }
       const sourceFlow = await readStore.get(sourceFlowId);
       if (!sourceFlow) {
         res.statusCode = 404; res.setHeader("Content-Type", "application/json");
@@ -488,6 +513,8 @@ export function registerOperatorRoutes({
         res.statusCode = 400; res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: "id required" })); return true;
       }
+      const missingRetryIdentity = elevIdentityMissing(body, ["sessionKey", "sessionId", "agentId"]);
+      if (missingRetryIdentity.length > 0) { refuseElevIdentity(res, missingRetryIdentity); return true; }
       const via = typeof body.via === "string" ? body.via : "elev";
       const result = await retryFailureBranch({ id, via });
       res.statusCode = result.code === "ok" ? 200 : result.code === "not_found" ? 404 : result.code === "conflict" ? 409 : 500;

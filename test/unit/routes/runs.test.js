@@ -547,3 +547,33 @@ describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () =>
     assert.deepEqual(body.stateJson.SCAN, { listings: ["a", "b"] }, "resultJson replay merges the node's own output in");
   });
 });
+
+// ── rerun handler: stamped identity forwarding ──────────────────────────────
+
+describe("registerRunRoutes — rerun handler", () => {
+  test("forwards stamped caller identity to _elev/rerun", async () => {
+    const { api, routes } = createMockApi();
+    const invokeElevated = mock.fn(async () => ({
+      status: 200, body: JSON.stringify({ ok: true, flowId: "flow-2" }),
+    }));
+    registerRunRoutes(makeDeps(api, {
+      invokeElevated,
+      readStore: { listStatusCounts: () => ({}), listRunsPage: () => [], listCostSnapshot: () => [], get: (id) => id === "flow-1" ? { flowId: "flow-1" } : null, listQueued: () => [] },
+    }));
+    const body = { sessionKey: "agent:main:k1", sessionId: "s1", agentId: "main" };
+    const req = {
+      ...authReq("POST", "/manifold/runs/flow-1/rerun"),
+      [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body)); },
+    };
+    const res = createMockRes();
+    await prefixHandler(routes)(req, res);
+    assert.equal(invokeElevated.mock.calls.length, 1);
+    const [path, payload] = invokeElevated.mock.calls[0].arguments;
+    assert.equal(path, "/manifold/_elev/rerun");
+    assert.equal(payload.sourceFlowId, "flow-1");
+    assert.equal(payload.sessionKey, "agent:main:k1");
+    assert.equal(payload.sessionId, "s1");
+    assert.equal(payload.agentId, "main");
+    assert.equal(res.statusCode, 200);
+  });
+});
