@@ -122,13 +122,13 @@ export const discussState = sqliteTable('discuss_state', {
 export const flowSessions = sqliteTable('flow_sessions', {
   id:           text('id').primaryKey(),
   flowId:       text('flow_id').notNull(),
-  sessionKey:   text('session_key').notNull(),
+  session:     text('session_key').notNull(),
   nodeId:       text('node_id'),
   branchItemId: text('branch_item_id'),
   spawnedAt:    integer('spawned_at').notNull(),
 }, (table) => [
   index('idx_flow_sessions_flow_id').on(table.flowId),
-  uniqueIndex('idx_flow_sessions_uniq').on(table.flowId, table.sessionKey),
+  uniqueIndex('idx_flow_sessions_uniq').on(table.flowId, table.session),
 ]);
 
 // Gate discuss thread identity: one row per (flow, gate, item), keyed by
@@ -139,7 +139,7 @@ export const discussThreads = sqliteTable('discuss_threads', {
   gateNodeId:  text('gate_node_id').notNull(),
   itemId:      text('item_id').notNull(),
   agentId:     text('agent_id'),
-  sessionKey:  text('session_key').notNull(),
+  session:     text('session_key').notNull(),
   updatedAt:   integer('updated_at').notNull(),
 }, (table) => [
   uniqueIndex('idx_discuss_threads_unique').on(table.flowId, table.gateNodeId, table.itemId),

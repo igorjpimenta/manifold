@@ -1,6 +1,7 @@
-// session-keys.test.js — plain-text session identity: every key passes
-// through verbatim in both directions; only runIds translate (mapped for
-// the dispatch lifecycle, forgotten when the wait settles).
+// session-keys.test.js — core `session` maps to the harness `sessionKey`
+// field on the way out (and back on echo); only runIds translate
+// symmetrically (mapped for the dispatch lifecycle, forgotten when the
+// wait settles).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -26,10 +27,10 @@ describe("wrapSubagentKeys", () => {
     assert.equal(wrapSubagentKeys(null), null);
   });
 
-  it("passes session keys through verbatim and maps runIds both ways, then forgets", async () => {
+  it("maps core session to the harness sessionKey field and runIds both ways, then forgets", async () => {
     const log = [];
     const w = wrapSubagentKeys(makeRaw(log));
-    const out = await w.run({ sessionKey: "mf-12345678-propose", agentId: "cyrano", message: "hi" });
+    const out = await w.run({ session: "mf-12345678-propose", agentId: "cyrano", message: "hi" });
     assert.ok(out.runId.startsWith("mf-run-"), out.runId);
     assert.equal(log[0][1], "mf-12345678-propose");
     assert.equal(coreRunIdForGateway("gw-run-1"), out.runId);
@@ -38,14 +39,21 @@ describe("wrapSubagentKeys", () => {
     assert.equal(coreRunIdForGateway("gw-run-1"), null);
   });
 
-  it("passes every key shape through on getSessionMessages", async () => {
+  it("maps core session to the harness field on getSessionMessages", async () => {
     const log = [];
     const w = wrapSubagentKeys(makeRaw(log));
-    await w.run({ sessionKey: "mf-12345678-propose", agentId: "cyrano", message: "hi" });
-    await w.getSessionMessages({ sessionKey: "mf-12345678-propose" });
+    await w.run({ session: "mf-12345678-propose", agentId: "cyrano", message: "hi" });
+    await w.getSessionMessages({ session: "mf-12345678-propose" });
     assert.equal(log[1][1], "mf-12345678-propose");
-    await w.getSessionMessages({ sessionKey: "gf-discuss-12345678-gate-i1" });
+    await w.getSessionMessages({ session: "gf-discuss-12345678-gate-i1" });
     assert.equal(log[2][1], "gf-discuss-12345678-gate-i1");
+  });
+
+  it("maps a harness sessionKey echo back to core session", async () => {
+    const raw = { getSessionMessages: async () => ({ messages: [{ sessionKey: "agent:c:1", content: "x" }] }) };
+    const w = wrapSubagentKeys(raw);
+    const res = await w.getSessionMessages({ session: "agent:c:1" });
+    assert.equal(res.messages[0].session, "agent:c:1");
   });
 
   it("maps gateway runIds back to core runIds inside message payloads", async () => {
@@ -56,8 +64,8 @@ describe("wrapSubagentKeys", () => {
       }),
     };
     const w = wrapSubagentKeys(raw);
-    const out = await w.run({ sessionKey: "mf-1", agentId: "c", message: "hi" });
-    const res = await w.getSessionMessages({ sessionKey: "mf-1" });
+    const out = await w.run({ session: "mf-1", agentId: "c", message: "hi" });
+    const res = await w.getSessionMessages({ session: "mf-1" });
     assert.equal(res.messages[0].runId, out.runId);
     assert.equal(res.messages[1].run_id, out.runId);
   });

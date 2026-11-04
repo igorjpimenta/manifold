@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -16,11 +16,26 @@ import { createMockApi } from "../../helpers/mock-api.js";
 // No mocking required — the pure helpers carry no external static imports.
 
 // Filesystem-backed stub for the injected `sessions` gateway dep, rooted at
-// process.env.HOME so the tmp-HOME fixtures below keep working.
+// process.env.HOME so the tmp-HOME fixtures below keep working. Mirrors the
+// production adapter: the file is resolved through the agent's sessions.json
+// index by the manifold session KEY, never by treating the key as a filename.
 function makeSessionsStub() {
+  const calls = { resolve: [] };
   return {
-    resolveSessionFile: (agentId, sessionId) =>
-      path.join(process.env.HOME, ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`),
+    calls,
+    resolveSessionFileForKey: (agentId, session) => {
+      calls.resolve.push({ agentId, session });
+      const dir = path.join(process.env.HOME, ".openclaw", "agents", agentId, "sessions");
+      try {
+        const index = JSON.parse(readFileSync(path.join(dir, "sessions.json"), "utf8"));
+        const entry = index?.[session];
+        if (entry?.sessionFile) return entry.sessionFile;
+        if (typeof entry?.sessionId === "string" && entry.sessionId) {
+          return path.join(dir, `${entry.sessionId}.jsonl`);
+        }
+      } catch {}
+      return path.join(dir, `${session}.jsonl`);
+    },
     sessionFileExists: (file) => {
       try { return existsSync(file); } catch { return false; }
     },
@@ -244,10 +259,18 @@ describe("elev discuss handlers — stamped caller identity", () => {
 // past the client's (much tighter) history-load timeout.
 
 describe("createDiscussHistoryHandler — bounded JSONL read", () => {
-  const writeSession = (homeDir, agentId, sessionId, lines) => {
+  // Writes the transcript under the harness file id and registers it in
+  // sessions.json under the manifold session KEY — the index entry, not
+  // the filename, is what the handler resolves.
+  const writeSession = (homeDir, agentId, session, sessionId, lines) => {
     const dir = path.join(homeDir, ".openclaw", "agents", agentId, "sessions");
     mkdirSync(dir, { recursive: true });
     writeFileSync(path.join(dir, `${sessionId}.jsonl`), lines.join("\n"));
+    const indexPath = path.join(dir, "sessions.json");
+    let index = {};
+    try { index = JSON.parse(readFileSync(indexPath, "utf8")); } catch {}
+    index[session] = { sessionId };
+    writeFileSync(indexPath, JSON.stringify(index));
   };
   const entryLine = (role, text, ts) =>
     JSON.stringify({ timestamp: ts, message: { role, content: text } });
@@ -261,16 +284,21 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
         entryLine("user", "hi", 1),
         entryLine("assistant", "hello back", 2),
       ];
-      writeSession(tmpHome, "main", "sess-small", lines);
+      writeSession(tmpHome, "main", "sess-key-1", "sess-file-small", lines);
       const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
+      const stub = makeSessionsStub();
+      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: stub });
       const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-small",
+        flowId: "flow-1", session: "sess-key-1", agentId: "main",
       });
       assert.equal(status, 200);
       assert.equal(body.ok, true);
       assert.equal(body.messages.length, 2);
       assert.equal(body.hasMore, false);
+      // Resolved from the index entry, not from the key string: no file
+      // named after the key exists, and the resolver saw the key itself.
+      assert.deepEqual(stub.calls.resolve, [{ agentId: "main", session: "sess-key-1" }]);
+      assert.equal(existsSync(path.join(tmpHome, ".openclaw", "agents", "main", "sessions", "sess-key-1.jsonl")), false);
     } finally {
       process.env.HOME = prevHome;
       rmSync(tmpHome, { recursive: true, force: true });
@@ -289,11 +317,11 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       for (let i = 0; i < 600; i++) {
         lines.push(entryLine(i % 2 === 0 ? "user" : "assistant", `turn-${i}`, i));
       }
-      writeSession(tmpHome, "main", "sess-huge", lines);
+      writeSession(tmpHome, "main", "sess-key-1", "sess-file-huge", lines);
       const { api } = createMockApi();
       const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge",
+        flowId: "flow-1", session: "sess-key-1", agentId: "main",
       });
       assert.equal(status, 200);
       assert.equal(body.messages.length, 500);
@@ -317,15 +345,15 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       for (let i = 0; i < 600; i++) {
         lines.push(entryLine(i % 2 === 0 ? "user" : "assistant", `turn-${i}`, i));
       }
-      writeSession(tmpHome, "main", "sess-huge-2", lines);
+      writeSession(tmpHome, "main", "sess-key-1", "sess-file-huge-2", lines);
       const { api } = createMockApi();
       const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const first = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge-2",
+        flowId: "flow-1", session: "sess-key-1", agentId: "main",
       });
       assert.equal(first.body.hasMore, true);
       const second = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge-2",
+        flowId: "flow-1", session: "sess-key-1", agentId: "main",
         offset: first.body.nextOffset,
       });
       assert.equal(second.status, 200);
@@ -351,7 +379,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       const { api } = createMockApi();
       const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-missing",
+        flowId: "flow-1", session: "sess-key-1", agentId: "main",
       });
       assert.equal(status, 200);
       assert.deepEqual(body.messages, []);

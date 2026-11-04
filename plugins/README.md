@@ -12,23 +12,24 @@ callbacks, no receiver sessions.
 | --------- | ------ | --------- |
 | harness   | per-call declaration (`MANIFOLD_HARNESS` / `X-Manifold-Harness`; `openclaw` default for pipelines-dir resolution) | core: logs, pipelines-dir resolution |
 | agent     | pipeline node `entry.agent` (**required** — anonymous dispatch is refused loudly) | core: session attribution |
-| session   | harness-owned throughout: dispatch keys declared by the node (`entry.sessionKey` / `entry.sessionKeyBuilder`), discuss ids minted by the harness adapter (`sessions.newDiscussSessionId`) — both pass through verbatim | core: turn identity |
+| session   | harness-owned throughout: dispatch sessions declared by the node (`entry.session` / `entry.sessionBuilder`), discuss ids minted by the harness adapter (`sessions.newDiscussSessionId`) — both pass through verbatim | core: turn identity |
 
-## Session-key conventions
+## Session conventions
 
-Core does not mint session ids: the harness owns the format, so an agent
-node declares `entry.sessionKey` (static) or
-`entry.sessionKeyBuilder(state, flowId)` (derived) and `dispatchAgentEntry`
+Core does not mint sessions: the harness owns the format, so an agent
+node declares `entry.session` (static) or
+`entry.sessionBuilder(state, flowId)` (derived) and `dispatchAgentEntry`
 passes it through verbatim. A node that declares neither is refused
 loudly — tool-handoff and the lineage ledger both key off this value.
 `entry.agent` is required too; no env fallback, ever.
 
-The adapter passes session ids through verbatim (`session-keys.js`,
-wrapping `runtime.subagent` once where it is injected): only runIds
-translate (core `mf-run-…` ↔ gateway runId, in memory for the dispatch
-lifecycle); revival re-attaches by session key, never by runId. The
-session index stores the same plain-text ids the dispatch used, so any
-harness can read them without knowing a gateway namespace.
+The adapter maps core's `session` to the harness `sessionKey` field on the
+way out (`session-keys.js`, wrapping `runtime.subagent` once where it is
+injected): only runIds translate symmetrically (core `mf-run-…` ↔ gateway
+runId, in memory for the dispatch lifecycle); a harness `sessionKey` echo
+maps back to core `session`. Revival re-attaches by session, never by
+runId. The session index stores the same plain-text ids the dispatch
+used, so any harness can read them without knowing a gateway namespace.
 
 ## Pipeline directories
 
