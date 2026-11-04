@@ -12,8 +12,9 @@
 // tool call) and the consuming side (the engine's executor loop) may live
 // in different processes, and an in-process Map would silently drop results
 // across that boundary. A `tool_results` row keyed by the harness-stamped
-// is the rendezvous both sides can reach: the agent knows its session key,
-// the dispatch knows it too, neither needs the other's invocationId.
+// session is the rendezvous both sides can reach: the agent knows its
+// session, the dispatch knows it too, neither needs the other's
+// invocationId.
 //
 // Writes upsert (latest wins per session); the dispatch consumes its row
 // and clears it, so a retry never reads a stale result from a prior
@@ -21,12 +22,12 @@
 // at most, so the table cannot grow unbounded over gateway uptime.
 //
 // Lifecycle (tool side: MCP deliver_result; engine side: the executor loop):
-//   writePendingResult({ sessionKey, runId?, agentId?, kind?, payload })
-//   readPendingResult(sessionKey)        — the row, or null
-//   clearPendingResult(sessionKey)       — the dispatch, once apply() has
+//   writePendingResult({ session, runId?, agentId?, kind?, payload })
+//   readPendingResult(session)        — the row, or null
+//   clearPendingResult(session)       — the dispatch, once apply() has
 //     consumed the payload (also covers the failure path — a failed turn
 //     never retries into a stale row)
-//   waitForToolResult(sessionKey, { pollMs? }) — { promise, cancel }; the
+//   waitForToolResult(session, { pollMs? }) — { promise, cancel }; the
 //     promise resolves with the row the moment one exists (checked once up
 //     front, then polled), so a result written before the waiter starts is
 //     never missed
@@ -67,7 +68,7 @@ function toRow(r) {
   let payload = null;
   try { payload = JSON.parse(r.payloadJson); } catch { payload = null; }
   return {
-    sessionKey: r.sessionKey,
+    session: r.session,
     runId: r.runId ?? null,
     agentId: r.agentId ?? null,
     kind: r.kind ?? null,
@@ -76,18 +77,18 @@ function toRow(r) {
 }
 
 /** Latest-wins upsert for one session. No session key, no write. */
-export async function writePendingResult({ sessionKey, runId = null, agentId = null, kind = null, payload, dbPath = null } = {}) {
-  if (!sessionKey || payload === undefined) return;
+export async function writePendingResult({ session, runId = null, agentId = null, kind = null, payload, dbPath = null } = {}) {
+  if (!session || payload === undefined) return;
   const path = dbPath ?? storeDbPath();
   const { db } = await toolDb(path);
   let payloadJson;
   try { payloadJson = JSON.stringify(payload); } catch { return; }
   await withSharedWrite(path, () =>
     db.insert(toolResults).values({
-      sessionKey, runId: runId ?? null, agentId: agentId ?? null,
+      session, runId: runId ?? null, agentId: agentId ?? null,
       kind: kind ?? null, payloadJson, updatedAt: Date.now(),
     }).onConflictDoUpdate({
-      target: toolResults.sessionKey,
+      target: toolResults.session,
       set: {
         runId: runId ?? null, agentId: agentId ?? null, kind: kind ?? null,
         payloadJson, updatedAt: Date.now(),
@@ -97,21 +98,21 @@ export async function writePendingResult({ sessionKey, runId = null, agentId = n
 }
 
 /** The unconsumed result for one session, or null. */
-export async function readPendingResult(sessionKey, { dbPath = null } = {}) {
-  if (!sessionKey) return null;
+export async function readPendingResult(session, { dbPath = null } = {}) {
+  if (!session) return null;
   const path = dbPath ?? storeDbPath();
   const { db } = await toolDb(path);
-  const rows = await db.select().from(toolResults).where(eq(toolResults.sessionKey, sessionKey)).limit(1);
+  const rows = await db.select().from(toolResults).where(eq(toolResults.session, session)).limit(1);
   return toRow(rows[0] ?? null);
 }
 
 /** Forget one session's result. Idempotent — unknown keys are a no-op. */
-export async function clearPendingResult(sessionKey, { dbPath = null } = {}) {
-  if (!sessionKey) return;
+export async function clearPendingResult(session, { dbPath = null } = {}) {
+  if (!session) return;
   const path = dbPath ?? storeDbPath();
   const { db } = await toolDb(path);
   await withSharedWrite(path, () =>
-    db.delete(toolResults).where(eq(toolResults.sessionKey, sessionKey))
+    db.delete(toolResults).where(eq(toolResults.session, session))
   );
 }
 
@@ -120,7 +121,7 @@ export async function clearPendingResult(sessionKey, { dbPath = null } = {}) {
 // starts is never missed). Returns { promise, cancel } — the caller MUST
 // call cancel() once the race is decided, or the interval keeps the event
 // loop alive for nothing.
-export function waitForToolResult(sessionKey, { pollMs = 250, dbPath = null } = {}) {
+export function waitForToolResult(session, { pollMs = 250, dbPath = null } = {}) {
   let timer = null;
   let settled = false;
   let resolveFn;
@@ -138,11 +139,11 @@ export function waitForToolResult(sessionKey, { pollMs = 250, dbPath = null } = 
   };
   (async () => {
     try {
-      const first = await readPendingResult(sessionKey, { dbPath });
+      const first = await readPendingResult(session, { dbPath });
       if (first) { finish(first); return; }
       timer = setInterval(async () => {
         try {
-          const row = await readPendingResult(sessionKey, { dbPath });
+          const row = await readPendingResult(session, { dbPath });
           if (row) finish(row);
         } catch { /* transient read failure: keep polling */ }
       }, Math.max(10, pollMs));

@@ -86,10 +86,10 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Every session key ever recorded for one flow, in spawn order.
+  // Every session ever recorded for one flow, in spawn order.
   // Transcript listing joins these rows to per-node results (dispatches)
   // and discuss threads (branchItemId = itemId) so attribution comes from
-  // stored columns, never from parsing the key itself.
+  // stored columns, never from parsing the session itself.
   async function listForFlow(flowId) {
     if (!flowId) return [];
     try {

@@ -77,7 +77,7 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
           try {
             const elev = await invokeElevated("/manifold/_elev/retry-failure", {
               id, via,
-              sessionKey: body?.sessionKey, sessionId: body?.sessionId, agentId: body?.agentId,
+              session: body?.session, agentId: body?.agentId,
             });
             res.statusCode = elev.status || 500;
             res.setHeader("Content-Type", "application/json");

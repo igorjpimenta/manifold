@@ -79,15 +79,14 @@ export function createDiscussHandler({
 }) {
   async function handleDiscuss(body) {
     const flowId = typeof body.flowId === "string" ? body.flowId : "";
-    const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : "";
-    const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
+    const session = typeof body.session === "string" ? body.session : "";
     const agentId = typeof body.agentId === "string" ? body.agentId : "";
     const modelOverride = typeof body.modelOverride === "string" && body.modelOverride.trim()
       ? body.modelOverride.trim()
       : null;
     const text = typeof body.text === "string" ? body.text : "";
-    if (!flowId || !sessionKey || !sessionId || !agentId || !text) {
-      return { status: 400, body: { ok: false, code: "invalid_body", error: "flowId, sessionKey, sessionId, agentId, text required" } };
+    if (!flowId || !session || !agentId || !text) {
+      return { status: 400, body: { ok: false, code: "invalid_body", error: "flowId, session, agentId, text required" } };
     }
     const agentRuntime = api.runtime?.agent;
     if (!agentRuntime?.runEmbeddedAgent) {
@@ -96,7 +95,9 @@ export function createDiscussHandler({
     const itemIdForDraft = typeof body.itemId === "string" ? body.itemId : null;
     const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : null;
     const startedAt = Date.now();
-    const sessionFile = sessions.resolveSessionFile(agentId, sessionId);
+    // Core `session` resolves to a transcript file through the harness index,
+    // not by treating the id as a filename.
+    const sessionFile = sessions.resolveSessionFileForKey(agentId, session);
     const isFirstTurn = !sessions.sessionFileExists(sessionFile);
     if (isFirstTurn) {
       // Touch only — thread identity lives in core's session roster
@@ -126,7 +127,9 @@ export function createDiscussHandler({
         api.logger.info(`manifold discuss: billing cooldown on ${primarySpec.split("/")[0]}, routing to ${activeProvider}/${activeModel}`);
       }
       const _runParams = {
-        sessionId, sessionKey, agentId, trigger: "manual", sessionFile, workspaceDir,
+      // Adapter edge: the harness runtime names its own fields `sessionId` /
+      // `sessionKey`; core passes its single `session` as both.
+      sessionId: session, sessionKey: session, agentId, trigger: "manual", sessionFile, workspaceDir,
         config: api.config, prompt: text, timeoutMs: 300_000,
         ...(systemPrompt ? { extraSystemPrompt: systemPrompt } : {}),
       };
@@ -201,71 +204,4 @@ export function createDiscussHandler({
   }
 
   return { handleDiscuss };
-}
-
-// ── Discuss-history handler factory ───────────────────────────────────────────
-
-// Caps the synchronous per-line JSON.parse work below to a bounded amount
-// regardless of session length. Without this, a long-running discuss session's
-// JSONL grows unbounded and this handler's parse loop — running on the same
-// single-threaded gateway event loop as every other elevated route, including
-// long-running discuss-turn calls — can stall long enough for the client's
-// (much tighter) discuss-history GET timeout to fire first. Discuss is a chat
-// view; the most recent turns are what matters, so tailing is an acceptable
-// trade rather than a silent correctness loss.
-const MAX_HISTORY_LINES = 500;
-
-export function createDiscussHistoryHandler({ api, sessions }) {
-  async function handleDiscussHistory(body) {
-    const flowId = typeof body.flowId === "string" ? body.flowId : "";
-    const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : "";
-    const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-    // The agent travels as its own field: session ids are harness-owned and
-    // carry no shape core may read. Without it there is no agent whose
-    // transcript to read.
-    const agentId = typeof body.agentId === "string" ? body.agentId : "";
-    if (!flowId || !sessionKey || !sessionId || !agentId) {
-      return { status: 400, body: { ok: false, code: "invalid_body", error: "flowId, sessionKey, sessionId, agentId required" } };
-    }
-    // Lines already delivered to the caller from the tail of the file, on a
-    // prior page. 0 (or omitted) means "give me the most recent page."
-    // Passed straight back as `nextOffset` so a "load earlier messages" tap
-    // can page further back without the caller needing to track anything
-    // beyond the number this handler already gave it.
-    const offset = Number.isFinite(body.offset) && body.offset > 0 ? Math.floor(body.offset) : 0;
-    try {
-      const sessionFile = sessions.resolveSessionFile(agentId, sessionId);
-      let msgs = [];
-      let hasMore = false;
-      let nextOffset = offset;
-      if (sessions.sessionFileExists(sessionFile)) {
-        const rawContent = await sessions.readSessionFileText(sessionFile);
-        const lines = rawContent.split("\n");
-        const end = Math.max(0, lines.length - offset);
-        const start = Math.max(0, end - MAX_HISTORY_LINES);
-        hasMore = start > 0;
-        nextOffset = lines.length - start;
-        const scanLines = lines.slice(start, end);
-        if (hasMore) {
-          api.logger.info(`manifold discuss_history (elev) [${sessionId.slice(0, 8)}]: page [${start},${end}) of ${lines.length} lines, more remain before it`);
-        }
-        for (const line of scanLines) {
-          if (!line.trim()) continue;
-          try {
-            const entry = JSON.parse(line);
-            const m = entry?.message;
-            if (m && (m.role === "user" || m.role === "assistant")) {
-              msgs.push({ role: m.role, content: m.content, timestamp: entry.timestamp });
-            }
-          } catch { /* skip malformed lines */ }
-        }
-      }
-      return { status: 200, body: { ok: true, messages: filterDiscussHistoryMessages(msgs), hasMore, nextOffset } };
-    } catch (err) {
-      api.logger.warn(`manifold discuss_history (elev) handler error: ${err?.message ?? err}`);
-      return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
-    }
-  }
-
-  return { handleDiscussHistory };
 }

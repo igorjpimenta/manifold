@@ -25,13 +25,13 @@ before(() => {
   process.env.MANIFOLD_DATA_DIR = tmpDir;
 });
 
-function sessionKey() {
+function session() {
   return `agent:test:${randomUUID()}`;
 }
 
 describe("writePendingResult / readPendingResult", () => {
   test("readPendingResult returns null when nothing was written", async () => {
-    assert.equal(await readPendingResult(sessionKey()), null);
+    assert.equal(await readPendingResult(session()), null);
   });
 
   test("readPendingResult returns null for a falsy session key", async () => {
@@ -40,11 +40,11 @@ describe("writePendingResult / readPendingResult", () => {
   });
 
   test("write then read round-trips kind, agent, runId and payload", async () => {
-    const key = sessionKey();
+    const key = session();
     const payload = { score: 78, reasons: ["stack overlap"], nested: { ok: true } };
-    await writePendingResult({ sessionKey: key, runId: "run-1", agentId: "scout", kind: "score", payload });
+    await writePendingResult({ session: key, runId: "run-1", agentId: "scout", kind: "score", payload });
     const row = await readPendingResult(key);
-    assert.equal(row.sessionKey, key);
+    assert.equal(row.session, key);
     assert.equal(row.runId, "run-1");
     assert.equal(row.agentId, "scout");
     assert.equal(row.kind, "score");
@@ -53,24 +53,24 @@ describe("writePendingResult / readPendingResult", () => {
   });
 
   test("write is latest-wins per session", async () => {
-    const key = sessionKey();
-    await writePendingResult({ sessionKey: key, payload: { v: 1 } });
-    await writePendingResult({ sessionKey: key, payload: { v: 2 } });
+    const key = session();
+    await writePendingResult({ session: key, payload: { v: 1 } });
+    await writePendingResult({ session: key, payload: { v: 2 } });
     assert.deepEqual((await readPendingResult(key)).payload, { v: 2 });
     await clearPendingResult(key);
   });
 
   test("write is a no-op without a session key or with an undefined payload", async () => {
-    await writePendingResult({ sessionKey: null, payload: { v: 1 } });
-    await writePendingResult({ sessionKey: sessionKey(), payload: undefined });
+    await writePendingResult({ session: null, payload: { v: 1 } });
+    await writePendingResult({ session: session(), payload: undefined });
     // Nothing observable to assert beyond "did not throw".
   });
 
   test("sessions are independent", async () => {
-    const k1 = sessionKey();
-    const k2 = sessionKey();
-    await writePendingResult({ sessionKey: k1, payload: { v: "one" } });
-    await writePendingResult({ sessionKey: k2, payload: { v: "two" } });
+    const k1 = session();
+    const k2 = session();
+    await writePendingResult({ session: k1, payload: { v: "one" } });
+    await writePendingResult({ session: k2, payload: { v: "two" } });
     assert.deepEqual((await readPendingResult(k1)).payload, { v: "one" });
     assert.deepEqual((await readPendingResult(k2)).payload, { v: "two" });
     await clearPendingResult(k1);
@@ -80,8 +80,8 @@ describe("writePendingResult / readPendingResult", () => {
 
 describe("clearPendingResult", () => {
   test("removes the row so a retry never rereads it", async () => {
-    const key = sessionKey();
-    await writePendingResult({ sessionKey: key, payload: { v: 1 } });
+    const key = session();
+    await writePendingResult({ session: key, payload: { v: 1 } });
     await clearPendingResult(key);
     assert.equal(await readPendingResult(key), null);
   });
@@ -93,12 +93,12 @@ describe("clearPendingResult", () => {
 
 describe("waitForToolResult", () => {
   test("resolves immediately when the row already exists", async () => {
-    const key = sessionKey();
-    await writePendingResult({ sessionKey: key, kind: "score", payload: { v: 9 } });
+    const key = session();
+    await writePendingResult({ session: key, kind: "score", payload: { v: 9 } });
     const { promise, cancel } = waitForToolResult(key, { pollMs: 5 });
     try {
       const row = await promise;
-      assert.equal(row.sessionKey, key);
+      assert.equal(row.session, key);
       assert.deepEqual(row.payload, { v: 9 });
     } finally {
       cancel();
@@ -107,12 +107,12 @@ describe("waitForToolResult", () => {
   });
 
   test("resolves when the row lands after the waiter starts", async () => {
-    const key = sessionKey();
+    const key = session();
     const { promise, cancel } = waitForToolResult(key, { pollMs: 5 });
     try {
       const pending = promise.then((row) => row);
       await new Promise((r) => setTimeout(r, 20));
-      await writePendingResult({ sessionKey: key, payload: { late: true } });
+      await writePendingResult({ session: key, payload: { late: true } });
       const row = await pending;
       assert.deepEqual(row.payload, { late: true });
     } finally {
@@ -122,7 +122,7 @@ describe("waitForToolResult", () => {
   });
 
   test("cancel is safe to call twice and on an unknown session", async () => {
-    const { cancel } = waitForToolResult(sessionKey(), { pollMs: 5 });
+    const { cancel } = waitForToolResult(session(), { pollMs: 5 });
     cancel();
     cancel();
   });
