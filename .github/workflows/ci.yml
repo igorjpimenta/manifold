@@ -4,16 +4,20 @@ on:
   push:
     branches: [main]
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Same-repo only: this job consumes OC_CONTRACTS_TOKEN, which must never
+  # be handed to fork code (secrets are withheld from fork PRs anyway, so
+  # the presence check would fail closed). Fork PRs run in `js-fork` below.
   js:
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     name: JS — install and syntax
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     timeout-minutes: 10
 
     steps:
@@ -78,63 +82,40 @@ jobs:
           npx tsc -b
           npx vite build
 
-  # The ubuntu leg only runs when the `ci-ubuntu` label is present — self-hosted is the default because hosted minutes are exhausted.
-  js-ubuntu:
-    if: contains(github.event.pull_request.labels.*.name, 'ci-ubuntu')
-    name: JS — install and syntax — ubuntu parity
+  # Fork PRs: safe subset on GitHub-hosted runners, no secrets.
+  # The root package depends on the private oc-contracts repo, which forks
+  # cannot resolve (secrets are withheld from fork PRs), so this job runs
+  # only checks with no private deps: syntax sweep, import-check, and the
+  # dashboard build (dashboard/package.json has no private deps).
+  # Maintainers get the full suite by pulling the fork branch into a
+  # same-repo branch, which then runs the `js` job above.
+  js-fork:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    name: JS — fork-safe checks (no secrets)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
-          # No persisted credentials: the extraheader authenticates as this
-          # repo's GITHUB_TOKEN (oc-contracts-blind) and outranks the
-          # GIT_CONFIG rewrite on the npm step below.
           persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
           node-version: '25'
           cache: npm
-
-      # The oc-contracts git dependency is private. Presence check only —
-      # whether the token can actually read that repo is what npm ci proves.
-      - name: Authenticate private package resolution
-        env:
-          OC_CONTRACTS_TOKEN: ${{ secrets.OC_CONTRACTS_TOKEN }}
-        run: |
-          if [[ -z "$OC_CONTRACTS_TOKEN" ]]; then
-            echo "::error::OC_CONTRACTS_TOKEN is not set — cannot resolve the private oc-contracts package"
-            exit 1
-          fi
-
-      - name: Install dependencies
-        env:
-          GIT_CONFIG_COUNT: "3"
-          GIT_CONFIG_KEY_0: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
-          GIT_CONFIG_VALUE_0: "https://github.com/"
-          GIT_CONFIG_KEY_1: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
-          GIT_CONFIG_VALUE_1: "ssh://git@github.com/"
-          GIT_CONFIG_KEY_2: "url.https://x-access-token:${{ secrets.OC_CONTRACTS_TOKEN }}@github.com/.insteadOf"
-          GIT_CONFIG_VALUE_2: "git@github.com:"
-        run: npm ci --no-audit --no-fund
+          cache-dependency-path: dashboard/package-lock.json
 
       # `node --check` only ever inspects its FIRST argument — hence -n 1.
-      # Batching would report a green sweep while checking a twentieth of the
-      # files.
       - name: Syntax sweep
         run: git ls-files -z '*.js' '*.mjs' | xargs -0 -P 8 -n 1 node --check
 
-      - name: unit tests
-        if: '!cancelled()'
-        run: npm run test:unit
+      - name: Imports resolve from a clean checkout
+        run: node scripts/ci/import-check.mjs
 
-      - name: Dashboard deps
-        if: '!cancelled()'
+      - name: Dashboard deps (public only, no secrets)
         run: npm ci --no-audit --no-fund --prefix dashboard
 
       - name: Dashboard typecheck and build
-        if: '!cancelled()'
         working-directory: dashboard
         run: |
           npx tsc -b
