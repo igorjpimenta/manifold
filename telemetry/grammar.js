@@ -17,12 +17,6 @@ const REGEX = {
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
-  // Synthetic discuss-turn session ids for a gate's discuss thread —
-  // gf-discuss-<flow8>-<gateNodeId>-<itemId>. The embedded flow8 is a real
-  // flow_id prefix — resolves via the same "flow" parentHint branch a
-  // pipeline-node subagent's flow:<id> parent uses (classifyWithExternal
-  // below), never the EXPLICIT_BARE catch-all.
-  GF_DISCUSS: /^gf-discuss-([0-9a-f]{8})-(.+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
   // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
   // when a pipeline is started via CLI or another harness. Format:
@@ -65,13 +59,6 @@ export function classify(sessionKey) {
     return {
       kind: "memory-synth-chunk", agentId, memorySynthRun: runTs, chunk,
       parentHint: { kind: "memory-synth", runId: runTs, agentId },
-    };
-  }
-  if ((m = REGEX.GF_DISCUSS.exec(sessionKey))) {
-    const [, flowShort] = m;
-    return {
-      kind: "flow-gate-discuss", agentId: null, flowShort,
-      parentHint: { kind: "flow", flowShort },
     };
   }
   if ((m = REGEX.BARE_SUB.exec(sessionKey))) {

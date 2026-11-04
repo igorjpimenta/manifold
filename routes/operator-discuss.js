@@ -170,10 +170,12 @@ export function createDiscussHandler({
           }
         }
       }
-      if (isFirstTurn && itemIdForDraft) {
-        const gateNodeIdFromSession = sessionId.split("-")[3] ?? "";
-        try { stampDiscussSession(flowId, gateNodeIdFromSession, itemIdForDraft, agentId, sessionId); } catch {}
-      }
+    if (isFirstTurn && itemIdForDraft) {
+      // gateNodeId arrives explicitly from core (elev body) — never parsed
+      // out of the session id, whose shape belongs to the harness.
+      const gateNodeId = typeof body.gateNodeId === "string" ? body.gateNodeId : "";
+      try { stampDiscussSession(flowId, gateNodeId, itemIdForDraft, agentId, sessionId); } catch {}
+    }
       let replyText = result?.meta?.finalAssistantVisibleText
         ?? result?.meta?.finalAssistantRawText
         ?? (Array.isArray(result?.payloads)
@@ -333,8 +335,12 @@ export function createDiscussHistoryHandler({ api, sessions }) {
     const flowId = typeof body.flowId === "string" ? body.flowId : "";
     const sessionKey = typeof body.sessionKey === "string" ? body.sessionKey : "";
     const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-    if (!flowId || !sessionKey || !sessionId) {
-      return { status: 400, body: { ok: false, code: "invalid_body", error: "flowId, sessionKey, sessionId required" } };
+    // The agent travels as its own field: session ids are harness-owned and
+    // carry no shape core may read. Without it there is no agent whose
+    // transcript to read.
+    const agentId = typeof body.agentId === "string" ? body.agentId : "";
+    if (!flowId || !sessionKey || !sessionId || !agentId) {
+      return { status: 400, body: { ok: false, code: "invalid_body", error: "flowId, sessionKey, sessionId, agentId required" } };
     }
     // Lines already delivered to the caller from the tail of the file, on a
     // prior page. 0 (or omitted) means "give me the most recent page."
@@ -343,8 +349,6 @@ export function createDiscussHistoryHandler({ api, sessions }) {
     // beyond the number this handler already gave it.
     const offset = Number.isFinite(body.offset) && body.offset > 0 ? Math.floor(body.offset) : 0;
     try {
-      const keyMatch = /^agent:([^:]+):/.exec(sessionKey);
-      const agentId = keyMatch?.[1] ?? "main";
       const sessionFile = sessions.resolveSessionFile(agentId, sessionId);
       let msgs = [];
       let hasMore = false;

@@ -30,7 +30,10 @@
     "index.js",
     "meta.js",
     "openclaw.plugin.json",
-    "session-keys.js"
+    "session-keys.js",
+    "session-keys.test.js",
+    "sessions.js",
+    "sessions.test.js"
   ],
   "openclaw": {
     "extensions": [
@@ -42,5 +45,8 @@
   },
   "dependencies": {
     "@igorjpimenta/manifold": "^2026.10.26-beta.1"
+  },
+  "scripts": {
+    "test": "node --experimental-test-module-mocks --test-timeout=60000 --test '*.test.js' 'hooks/*.test.js'"
   }
 }

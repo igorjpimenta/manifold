@@ -12,7 +12,7 @@ callbacks, no receiver sessions.
 | --------- | ------ | --------- |
 | harness   | per-call declaration (`MANIFOLD_HARNESS` / `X-Manifold-Harness`; `openclaw` default for pipelines-dir resolution) | core: logs, pipelines-dir resolution |
 | agent     | pipeline node `entry.agent` (**required** — anonymous dispatch is refused loudly) | core: session attribution |
-| session   | declared by the node (`entry.sessionKey` / `entry.sessionKeyBuilder`), passed through verbatim; `gf-discuss-…` discuss threads are core-owned | core: turn identity |
+| session   | harness-owned throughout: dispatch keys declared by the node (`entry.sessionKey` / `entry.sessionKeyBuilder`), discuss ids minted by the harness adapter (`sessions.newDiscussSessionId`) — both pass through verbatim | core: turn identity |
 
 ## Session-key conventions
 

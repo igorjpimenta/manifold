@@ -76,6 +76,20 @@ export function isProviderCooldown(agentId, provider) {
   }
 }
 
+// Harness-native id for a gate discuss thread. Core never mints discuss
+// ids — it asks the harness, which owns the session namespace, and passes
+// the value through verbatim. Same `agent:<agentId>:…` family as the
+// cron/subagent/explicit ids (see telemetry/grammar.js), so history and
+// transcript lookups resolve the agent straight from the key.
+// Deterministic in (flow, gate, item): the thread's coordinates identify
+// it, so concurrent first-turns converge on one thread instead of forking.
+// The variable segments are sanitized for filesystem use — the harness
+// keeps one transcript file per session, named after the id.
+export function newDiscussSessionId({ agentId, flowId, gateNodeId, itemId }) {
+  const safe = (s) => String(s ?? "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "_";
+  return `agent:${safe(agentId)}:discuss:${String(flowId ?? "").slice(0, 8)}-${safe(gateNodeId)}-${safe(itemId)}`;
+}
+
 // Agent ids with a sessions registry on disk. Unreadable root yields [] —
 // the route treats that as "no child sessions", same as before.
 export function listSessionAgents() {

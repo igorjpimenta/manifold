@@ -86,22 +86,20 @@ describe("classify", () => {
     assert.equal(r.parentHint?.kind, "memory-synth");
   });
 
-  it("classifies flow-gate-discuss with a flow parent hint, not the explicit-bare catch-all", () => {
-    const r = classify("gf-discuss-a700a3ea-propose-some-item-slug");
-    assert.equal(r.kind, "flow-gate-discuss");
-    assert.equal(r.agentId, null);
-    assert.equal(r.flowShort, "a700a3ea");
-    assert.equal(r.parentHint?.kind, "flow");
-    assert.equal(r.parentHint?.flowShort, "a700a3ea");
+  it("does not flow-attribute harness-owned discuss ids — the ledger does", () => {
+    // No shape rule claims a discuss thread: the key degrades to the
+    // generic bucket, and the flow link comes from the stored row.
+    const r = classify("agent:scout:discuss:a700a3ea-propose-some-item-slug");
+    assert.equal(r.kind, "unknown");
+    assert.equal(r.agentId, "scout", "the agent is peeled generically, the scope is not recognized");
+    assert.equal(r.parentHint, null);
   });
 
-  it("classifies plain-text discuss ids with null agent and the same flow hint", () => {
+  it("leaves the legacy gf- thread shape unmatched — core no longer mints it", () => {
     const r = classify("gf-discuss-a700a3ea-propose-some-item-slug");
-    assert.equal(r.kind, "flow-gate-discuss");
+    assert.equal(r.kind, "unknown");
     assert.equal(r.agentId, null);
-    assert.equal(r.flowShort, "a700a3ea");
-    assert.equal(r.parentHint?.kind, "flow");
-    assert.equal(r.parentHint?.flowShort, "a700a3ea");
+    assert.equal(r.parentHint, null);
   });
 
   it("falls back to explicit for bare-shape key without known scope", () => {
