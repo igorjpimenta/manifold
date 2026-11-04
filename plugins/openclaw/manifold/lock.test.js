@@ -1,4 +1,4 @@
-// Unit tests for locks/lock.js — acquireLock, withLock, safeName, isPidAlive, reapStale semantics.
+// Unit tests for the harness lock service (plugins/openclaw/manifold/lock.js) — acquireLock, withLock, safeName, isPidAlive, reapStale semantics.
 
 import { test, describe, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +44,7 @@ await mock.module("node:os", {
 const {
   acquireLock, withLock, registerOwnerResolver, unregisterOwnerResolver,
   runWithLockOwner, currentLockOwner, registerSessionOwner, clearSessionOwner, sessionOwner, readLock,
-} = await import("../../../locks/lock.js");
+} = await import("../../../plugins/openclaw/manifold/lock.js");
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

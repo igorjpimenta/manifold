@@ -4,11 +4,12 @@ import os from "node:os";
 import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
 import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
-import { registerSessionOwner, clearSessionOwner, runWithLockOwner } from "../locks/lock.js";
+import { registerDispatch, clearDispatch } from "../state/tool-handoff.js";
 
 // The lock owner for work done on behalf of one node invocation: held locks
-// stay held until the invocation resolves (see locks/invocation-owner.js), not
-// for a fixed time. `node` supplies the browser lease cooldown it declares.
+// stay held until the invocation resolves (see the harness plugin's
+// invocation-owner.js), not for a fixed time. `node` supplies the browser
+// lease cooldown it declares.
 function invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId }) {
   if (!invocationId) return null;
   return {
@@ -37,6 +38,7 @@ export function createNodeRunner({
   dispatchAgentWithRetry,
   executeSubflowNode,
   withCrossProcessLockMaybe,
+  locks,
   getNodeCtx,
   api,
   config,
@@ -52,6 +54,13 @@ export function createNodeRunner({
   // supplies during cutover (tests construct with api only).
   const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
+  // Lock-service members injected by the harness (createExecutor's `locks`,
+  // threaded through). Without a service there is no lock to own, so owner
+  // plumbing is inert; an actual lock acquisition still refuses loudly in
+  // withCrossProcessLockMaybe rather than running unlocked.
+  const registerSessionOwner = locks?.registerSessionOwner ?? (() => {});
+  const clearSessionOwner = locks?.clearSessionOwner ?? (() => {});
+  const runWithLockOwner = locks?.runWithLockOwner ?? ((_owner, fn) => fn());
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
   // "agent" branches in executeNodeBody — this function has no fallback-

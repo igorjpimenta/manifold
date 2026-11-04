@@ -1,8 +1,8 @@
-// Unit tests for locks/invocation-owner.js — createInvocationOwnerResolver: isResolved, describe.
+// Unit tests for the harness invocation owner (plugins/openclaw/manifold/invocation-owner.js) — createInvocationOwnerResolver: isResolved, describe.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { createInvocationOwnerResolver } from "../../../locks/invocation-owner.js";
+import { createInvocationOwnerResolver } from "../../../plugins/openclaw/manifold/invocation-owner.js";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

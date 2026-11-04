@@ -18,7 +18,7 @@ import os from "node:os";
 const TEST_HOME = mkdtempSync(join(os.tmpdir(), "profile-write-lock-test-"));
 mkdirSync(join(TEST_HOME, ".openclaw", "locks"), { recursive: true });
 
-// LOCKS_DIR (locks/lock.js) is computed from os.homedir() at module-load
+// LOCKS_DIR (the harness lock.js) is computed from os.homedir() at module-load
 // time — mocking it before any import of lock.js keeps lock state inside
 // the temp tree instead of the real ~/.openclaw/locks.
 await mock.module("node:os", {
@@ -28,7 +28,7 @@ await mock.module("node:os", {
 const PROFILE_PATH = join(TEST_HOME, "fixture", "profile", "PROFILE.md");
 const RESULTS_DIR = join(TEST_HOME, "fixture", "profile-edit-results");
 
-const { lockNameForFile, acquireLock } = await import("../../../locks/lock.js");
+const { lockNameForFile, acquireLock } = await import("../../../plugins/openclaw/manifold/lock.js");
 const {
   registerProfileWriteLock,
   profileEditResultPathFor,

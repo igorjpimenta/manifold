@@ -4,7 +4,10 @@
   "description": "OpenClaw companion for manifold: registers pipeline agent tools, discuss routes, the WS dialog door, and boot services on the gateway.",
   "exports": {
     ".": "./index.js",
-    "./profile-lock": "./hooks/profile-write-lock.js"
+    "./profile-lock": "./hooks/profile-write-lock.js",
+    "./lock": "./lock.js",
+    "./browser-tabs": "./browser-tabs.js",
+    "./invocation-owner": "./invocation-owner.js"
   },
   "license": "UNLICENSED",
   "type": "module",
@@ -35,7 +38,10 @@
     "session-keys.js",
     "session-keys.test.js",
     "sessions.js",
-    "sessions.test.js"
+    "sessions.test.js",
+    "lock.js",
+    "browser-tabs.js",
+    "invocation-owner.js"
   ],
   "openclaw": {
     "extensions": [
