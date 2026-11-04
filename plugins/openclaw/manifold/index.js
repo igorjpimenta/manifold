@@ -25,6 +25,7 @@ import { createSessionIndex } from "../../../state/session-index.js";
 import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js";
 import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
 import { wrapSubagentKeys } from "./session-keys.js";
+import { createRunTurn } from "./run-turn.js";
 import { registerCliCommands } from "../../../bin/cli.js";
 import { registerGraphFlowTool } from "./agent/tools/index.js";
 import { checkDb } from "../../../state/db-health.js";
@@ -275,9 +276,20 @@ export default definePluginEntry({
 
     // Process-wide gateway readiness (engine/gateway-readiness.js): settled
     // by gateway_start; resolves at once in a process that never starts
-    // manifold's services (the CLI). Awaited only by the executor's subagent
-    // gate (engine/gateway-subagent.js), which every agent dispatch passes.
+    // manifold's services (the CLI). Awaited by this plugin's run-turn
+    // gate, which every agent dispatch passes.
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
+
+    // The harness half of an agent dispatch: core injects this function and
+    // never touches the gateway's agent runtime itself. The runtime is
+    // resolved per call — the gateway binds it during startup, and
+    // moduleState.workingSubagent captures the wrapped copy once that
+    // happens.
+    const { runTurn } = createRunTurn({
+      getRuntime: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null),
+      whenGatewayReady: () => gatewayReadiness.whenReady(),
+      logger: api.logger,
+    });
 
     // Assigned in the dashboard section below; the catalog publisher reads
     // it lazily so watcher reloads before dashboard boot stay WS-only.
@@ -301,11 +313,10 @@ export default definePluginEntry({
       runStore,
       nodeExecutionsStore,
       admissionQueueStore,
-      // Wrapped at the single injection edge: raw api.runtime.subagent never
-      // reaches core directly (wrapSubagentKeys memoizes, so repeated
+      // The harness owns the agent runtime: core receives a turn function,
+      // never the runtime object (wrapSubagentKeys memoizes, so repeated
       // resolves don't re-wrap).
-      getWorkingSubagent: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null),
-      whenGatewayReady: () => gatewayReadiness.whenReady(),
+      runTurn,
       emit: emitCanonical,
     });
     resumeParentRef.resume = executor.resume;
@@ -737,7 +748,7 @@ export default definePluginEntry({
           // Wrapped ONCE here: every core dispatch below resolves through
           // this reference, so runIds map back at exactly one edge.
           moduleState.workingSubagent = wrapSubagentKeys(api.runtime.subagent);
-          api.logger.info("manifold: captured working subagent runtime for executor use");
+          api.logger.info("manifold: captured working agent runtime for dispatch use");
         }
       },
       stop: async () => {},

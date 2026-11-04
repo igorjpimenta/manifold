@@ -1,5 +1,5 @@
-// gateway-readiness.js — manifold's one "the gateway serves subagent RPCs"
-// signal, awaited by the executor's subagent gate (engine/gateway-subagent.js)
+// gateway-readiness.js — manifold's one "the gateway serves agent RPCs"
+// signal, awaited by the harness's run-turn gate (plugins/openclaw/manifold/run-turn.js)
 // before every agent dispatch.
 //
 // For the first seconds after every start the gateway refuses the methods in
