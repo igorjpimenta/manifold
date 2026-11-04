@@ -48,13 +48,20 @@ describe("resolveSessionFileForKey", () => {
     assert.equal(resolveSessionFileForKey("main", "agent:main:subagent:x"), "/tmp/custom.jsonl");
   });
 
-  it("falls back to the conventional filename when the index has no entry", () => {
+  it("falls back to the last segment of the session when the index has no entry", () => {
     const dir = sessionsDir("main");
     writeFileSync(path.join(dir, "sessions.json"), JSON.stringify({}));
     assert.equal(
       resolveSessionFileForKey("main", "agent:main:missing"),
-      path.join(dir, "agent:main:missing.jsonl")
+      path.join(dir, "missing.jsonl"),
     );
+  });
+
+  it("never lets a session string escape the sessions dir", () => {
+    const dir = sessionsDir("main");
+    writeFileSync(path.join(dir, "sessions.json"), JSON.stringify({}));
+    const resolved = resolveSessionFileForKey("main", "agent:main:../../escape");
+    assert.equal(resolved.startsWith(dir + path.sep), true, resolved);
   });
 
   it("resolveSessionFile stays harness-internal (sessionId as filename)", () => {
