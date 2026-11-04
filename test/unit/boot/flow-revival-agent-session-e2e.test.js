@@ -10,7 +10,7 @@
  * against the real state_json / flow_sessions / flow_node_invocations
  * schema, not a hand-rolled mock of the classification logic.
  *
- * The one mock is the subagent runtime itself (`getWorkingSubagent`) — same
+ * The one mock is the agent runtime itself (`runTurn`) — same
  * convention as executor.test.js's fallback-circuit-breaker suite — since
  * we're proving flow-revival's classification and executor's dispatch
  * wiring, not exercising a real LLM call.
@@ -72,7 +72,7 @@ function makeFixturePipeline() {
   };
 }
 
-async function makeHarness({ fakeSubagent } = {}) {
+async function makeHarness({ runTurn } = {}) {
   const runStore = await createRunStore({ dbPath: tmpPath("fr-agent-e2e-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("fr-agent-e2e-execs"));
   const sessionIndex = await createSessionIndex({ dbPath: tmpPath("fr-agent-e2e-sessions") });
@@ -89,7 +89,7 @@ async function makeHarness({ fakeSubagent } = {}) {
     pipelinesRef,
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: () => fakeSubagent,
+    runTurn,
     failureStore: null,
     nodeHealthStore: null,
     notifyFlowEnteredWaiting: null,
@@ -121,20 +121,16 @@ describe("flow-revival + session-index — agent-node revival classification (fi
   test("a flow interrupted mid-turn (session already recorded) is revived with the continuation prompt, same session", async () => {
     const messagesReceived = [];
     let releaseHang = null;
-    const fakeSubagent = {
-      run: async ({ sessionKey, message }) => {
-        messagesReceived.push({ sessionKey, message });
-        // Hang here — simulating the gateway process dying mid-turn, after
-        // sessionIndex.record() already fired (confirmed ordering: record()
-        // happens before this await, at the top of dispatchAgentWithRetry)
-        // but before the turn ever resolves.
-        await new Promise((resolve) => { releaseHang = resolve; });
-        return { runId: "run-1" };
-      },
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }),
+    const runTurn = async ({ sessionKey, message }) => {
+      messagesReceived.push({ sessionKey, message });
+      // Hang here — simulating the gateway process dying mid-turn, after
+      // sessionIndex.record() already fired (confirmed ordering: record()
+      // happens before this await, at the top of dispatchAgentWithRetry)
+      // but before the turn ever resolves.
+      await new Promise((resolve) => { releaseHang = resolve; });
+      return { text: "done", runId: "run-1" };
     };
-    harness = await makeHarness({ fakeSubagent });
+    harness = await makeHarness({ runTurn });
     const { executor, runStore, sessionIndex } = harness;
 
     const record = await executor.start("test_agent_fixture", {}, { kind: "test" });
@@ -182,15 +178,11 @@ describe("flow-revival + session-index — agent-node revival classification (fi
 
   test("a flow only ever queued for a dispatch slot (no session recorded) gets a fresh dispatch instead", async () => {
     const messagesReceived = [];
-    const fakeSubagent = {
-      run: async ({ sessionKey, message }) => {
-        messagesReceived.push({ sessionKey, message });
-        return { runId: "run-1" };
-      },
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }),
+    const runTurn = async ({ sessionKey, message }) => {
+      messagesReceived.push({ sessionKey, message });
+      return { text: "done", runId: "run-1" };
     };
-    harness = await makeHarness({ fakeSubagent });
+    harness = await makeHarness({ runTurn });
     const { store, runStore, sessionIndex, executor } = harness;
 
     // Never went through executor.start()/runFlow() at all — the queued row

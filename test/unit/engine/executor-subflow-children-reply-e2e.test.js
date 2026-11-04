@@ -153,7 +153,7 @@ async function makeHarness({ sendFailsInfraPersistently = false } = {}) {
     pipelinesRef,
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: null,
+    runTurn: null,
     failureStore: null,
     nodeHealthStore: null,
     notifyFlowEnteredWaiting: null,

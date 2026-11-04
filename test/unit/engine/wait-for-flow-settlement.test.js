@@ -158,7 +158,7 @@ describe("waitForFlowSettlement", () => {
 
     const executor = createExecutor({
       api: { runtime: {}, config: {} }, store, pipelinesRef, ensurePipelinesLoaded: null, logger,
-      getWorkingSubagent: null, failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
+      runTurn: null, failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore, runStore,
     admissionQueueStore: makeAdmissionQueueStore(),
     });
