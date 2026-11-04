@@ -17,15 +17,6 @@ const REGEX = {
   TG_DM:     /^agent:([^:]+):telegram:direct:(.+)$/,
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
-  // Harness-owned discuss-thread ids (`agent:<id>:discuss:<tail>`, minted
-  // by sessions.newDiscussSessionId). The tail conventionally starts with
-  // the flow8 the thread belongs to — resolved to a flow parentHint only
-  // when it parses, never assumed.
-  DISCUSS:     /^agent:([^:]+):discuss:(.+)$/,
-  // `gf-discuss-<flow8>-<gate>-<item>` thread ids: the embedded flow8 is
-  // a real flow_id prefix — resolves via the same "flow" parentHint
-  // branch as the harness-shape ids above.
-  GF_DISCUSS: /^gf-discuss-([0-9a-f]{8})-(.+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
   // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
   // when a pipeline is started via CLI or another harness. Format:
@@ -68,21 +59,6 @@ export function classify(sessionKey) {
     return {
       kind: "memory-synth-chunk", agentId, memorySynthRun: runTs, chunk,
       parentHint: { kind: "memory-synth", runId: runTs, agentId },
-    };
-  }
-  if ((m = REGEX.DISCUSS.exec(sessionKey))) {
-    const [, agentId, tail] = m;
-    const flowShort = /^[0-9a-f]{8}-/.test(tail) ? tail.slice(0, 8) : null;
-    return {
-      kind: "discuss-thread", agentId, flowShort,
-      parentHint: flowShort ? { kind: "flow", flowShort } : null,
-    };
-  }
-  if ((m = REGEX.GF_DISCUSS.exec(sessionKey))) {
-    const [, flowShort] = m;
-    return {
-      kind: "flow-gate-discuss", agentId: null, flowShort,
-      parentHint: { kind: "flow", flowShort },
     };
   }
   if ((m = REGEX.BARE_SUB.exec(sessionKey))) {

@@ -149,8 +149,9 @@ export function registerDiscussHandlers({
         error: "harness did not provide a discuss session id (sessions.newDiscussSessionId missing or empty)",
       };
     }
-    // The key IS the session id — harness-namespaced (`agent:<id>:…`), so
-    // the agent rides on the key and history lookups resolve it directly.
+    // The key IS the session id: the harness's own id, in whatever shape it
+    // uses. The agent travels as its own field — core reads no shape out
+    // of a session key.
     const sessionKey = sessionId;
     return {
       ok: true,
@@ -659,6 +660,7 @@ export function registerDiscussHandlers({
           flowId: sourceFlow.flowId,
           sessionKey: target.sessionKey,
           sessionId: target.sessionId,
+          agentId: target.agent,
         });
         try {
           parsed = JSON.parse(elev.body || "{}");

@@ -240,7 +240,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       const { api } = createMockApi();
       const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-small",
+        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-small",
       });
       assert.equal(status, 200);
       assert.equal(body.ok, true);
@@ -268,7 +268,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       const { api } = createMockApi();
       const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-huge",
+        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge",
       });
       assert.equal(status, 200);
       assert.equal(body.messages.length, 500);
@@ -296,11 +296,11 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       const { api } = createMockApi();
       const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const first = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-huge-2",
+        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge-2",
       });
       assert.equal(first.body.hasMore, true);
       const second = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-huge-2",
+        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge-2",
         offset: first.body.nextOffset,
       });
       assert.equal(second.status, 200);
@@ -326,7 +326,7 @@ describe("createDiscussHistoryHandler — bounded JSONL read", () => {
       const { api } = createMockApi();
       const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
       const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "agent:main:x", sessionId: "sess-missing",
+        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-missing",
       });
       assert.equal(status, 200);
       assert.deepEqual(body.messages, []);
