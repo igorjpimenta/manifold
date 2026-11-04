@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { mkdtempSync } from "node:fs";
-import { createRunTurn, createGatewaySubagentGate } from "../../../plugins/openclaw/manifold/run-turn.js";
+import { createRunTurn, createGatewaySubagentGate } from "./run-turn.js";
 import { GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
 import { writePendingResult, clearPendingResult } from "../../../state/tool-handoff.js";
 

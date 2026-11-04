@@ -30,6 +30,11 @@
     "index.js",
     "meta.js",
     "openclaw.plugin.json",
+<<<<<<< HEAD
+=======
+    "run-turn.js",
+    "run-turn.test.js",
+>>>>>>> 465fc92 (refactor(plugin): the run-turn tests live with the adapter)
     "session-keys.js",
     "session-keys.test.js",
     "sessions.js",
