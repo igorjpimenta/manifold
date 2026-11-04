@@ -2,7 +2,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { createInvocationOwnerResolver } from "../../../plugins/openclaw/manifold/invocation-owner.js";
+import { createInvocationOwnerResolver } from "./invocation-owner.js";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
