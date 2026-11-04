@@ -21,14 +21,16 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
    * wrong is actually fixed — same rule for every agent node, no exceptions.
    * `node.retry` config, if still present on any node, is inert and ignored.
    */
-  async function dispatchAgentWithRetry({ node, nodeId, sessionKey, initialMessage, applyCtx, applyExtraArg, applyMeta, flowId, needsCtx }) {
+  async function dispatchAgentWithRetry({ node, nodeId, session, initialMessage, applyCtx, applyExtraArg, applyMeta, flowId, needsCtx }) {
     // The harness-owned session id stores verbatim.
-    if (sessionIndex?.record) await sessionIndex.record({ flowId, sessionKey, nodeId, agent: node.agent ?? null });
+    if (sessionIndex?.record) await sessionIndex.record({ flowId, session, nodeId, agent: node.agent ?? null });
     if (typeof runTurn !== "function") {
       throw new Error("manifold: no agent runtime bound — the harness must inject runTurn");
     }
+    // `session` is core's whole contract here — the harness adapter
+    // (run-turn.js) maps it to the runtime's own `sessionKey` field.
     const output = await runTurn({
-      sessionKey,
+      session,
       message: initialMessage,
       skill: node.skill,
       agentId: node.agent,
@@ -39,7 +41,7 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
     // Nullable like sessionIndex: callers without an emitter (CLI, tests)
     // dispatch exactly as before.
     if (emit && output?.text) {
-      try { await emit("session.transcript.completed", { scope: "node", nodeId, sessionKey, text: output.text }); } catch {}
+      try { await emit("session.transcript.completed", { scope: "node", nodeId, session, text: output.text }); } catch {}
     }
     // needsCtx is threaded through both calling conventions as a new field /
     // 5th positional arg. Additive: every existing apply() function ignores
@@ -54,7 +56,7 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
           ? await Promise.resolve(node.apply(applyCtx, output, applyExtraArg, applyMeta, needsCtx))
           : await Promise.resolve(node.apply(applyCtx, output, undefined, applyMeta, needsCtx));
     } finally {
-      if (output?.toolResult) await clearPendingResult(sessionKey).catch(() => {});
+      if (output?.toolResult) await clearPendingResult(session).catch(() => {});
     }
   }
 

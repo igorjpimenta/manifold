@@ -248,12 +248,12 @@ function SubflowDetail({
   groupId: string;
   transcripts: Transcript[] | null;
   openTranscriptKey: string | null;
-  onToggleTranscript: (sessionKey: string) => void;
+  onToggleTranscript: (session: string) => void;
 }) {
   const data = subflow?.data ?? {};
   const dataEntries = Object.entries(data);
   const errors = subflow?.errorEntries ?? [];
-  // Match transcripts whose itemKey is this subflow's id. The session-key
+  // Match transcripts whose itemKey is this subflow's id. The session
   // tail is `<nodeId>-<itemKey>`, parsed by the server; nodes inside a
   // subflow use `<parentId>.<childId>` so we also accept transcripts
   // whose nodeId starts with `${groupId.toLowerCase()}.` — belt and
@@ -302,10 +302,10 @@ function SubflowDetail({
               <div className="grid gap-1.5">
                 {subflowTranscripts.map((t) => (
                   <TranscriptRow
-                    key={t.sessionKey}
+                    key={t.session}
                     transcript={t}
-                    isOpen={openTranscriptKey === t.sessionKey}
-                    onToggle={() => onToggleTranscript(t.sessionKey)}
+                    isOpen={openTranscriptKey === t.session}
+                    onToggle={() => onToggleTranscript(t.session)}
                     hideItemKey
                   />
                 ))}

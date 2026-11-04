@@ -72,8 +72,15 @@ describe("createGatewaySubagentGate", () => {
 
 describe("createRunTurn — the turn", () => {
   test("returns the last assistant text with the run id", async () => {
-    const { runTurn } = createRunTurn({ getRuntime: () => makeRuntime(), logger });
-    const out = await runTurn({ sessionKey: "k", message: "hi" });
+    const seen = [];
+    const raw = makeRuntime({
+      run: async (args) => { seen.push(["run", args]); return { runId: "run-abc" }; },
+      getSessionMessages: async (args) => { seen.push(["msgs", args]); return { messages: [{ role: "assistant", content: "reply text" }] }; },
+    });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const out = await runTurn({ session: "k", message: "hi" });
+    assert.equal(seen[0][1].sessionKey, "k", "core session maps to the harness sessionKey at run");
+    assert.equal(seen[1][1].sessionKey, "k", "core session maps to the harness sessionKey at getSessionMessages");
     assert.equal(out.text, "reply text");
     assert.equal(out.runId, "run-abc");
     assert.equal(out.toolResult ?? null, null);
@@ -82,7 +89,7 @@ describe("createRunTurn — the turn", () => {
   test("refuses loudly when no runtime is bound", async () => {
     const { runTurn } = createRunTurn({ getRuntime: () => null, logger });
     await assert.rejects(
-      () => runTurn({ sessionKey: "k", message: "x" }),
+      () => runTurn({ session: "k", message: "x" }),
       (err) => err instanceof GatewayHandoffNeeded,
     );
   });
@@ -91,7 +98,7 @@ describe("createRunTurn — the turn", () => {
     const raw = makeRuntime({ waitForRun: async () => { throw STARTUP(); } });
     const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
     await assert.rejects(
-      () => runTurn({ sessionKey: "k", message: "x" }),
+      () => runTurn({ session: "k", message: "x" }),
       (err) => !(err instanceof GatewayHandoffNeeded) && /unavailable during gateway startup/.test(err.message),
     );
   });
@@ -100,7 +107,7 @@ describe("createRunTurn — the turn", () => {
     const raw = makeRuntime({ waitForRun: async () => ({ status: "timeout", error: "agent timed out" }) });
     const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
     await assert.rejects(
-      () => runTurn({ sessionKey: "k", message: "x" }),
+      () => runTurn({ session: "k", message: "x" }),
       /agent turn timeout: agent timed out/,
     );
   });
@@ -112,7 +119,7 @@ describe("createRunTurn — the turn", () => {
       }),
     });
     const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
-    const out = await runTurn({ sessionKey: "k", message: "x" });
+    const out = await runTurn({ session: "k", message: "x" });
     assert.ok(out.text.includes("part 1") && out.text.includes("part 2"), out.text);
   });
 
@@ -128,26 +135,26 @@ describe("createRunTurn — the turn", () => {
       }),
     });
     const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
-    const out = await runTurn({ sessionKey: "k", message: "x" });
+    const out = await runTurn({ session: "k", message: "x" });
     assert.equal(out.text, "final reply");
   });
 
   test("resolves early with the delivered tool result, skipping the wrap-up fetch", async () => {
-    const sessionKey = `sk-turn-${randomUUID()}`;
+    const session = `sk-turn-${randomUUID()}`;
     let fetched = false;
     const raw = makeRuntime({
       waitForRun: () => new Promise(() => {}), // only the tool row can settle this
       getSessionMessages: async () => { fetched = true; return { messages: [] }; },
     });
     const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
-    const pending = runTurn({ sessionKey, message: "x" });
+    const pending = runTurn({ session, message: "x" });
     await new Promise((r) => setImmediate(r));
-    await writePendingResult({ sessionKey, runId: "run-tool", kind: "score", payload: { score: 7 } });
+    await writePendingResult({ session, runId: "run-tool", kind: "score", payload: { score: 7 } });
     const out = await pending;
     assert.equal(out.text, "");
     assert.deepEqual(out.toolResult, { kind: "score", payload: { score: 7 } });
     assert.equal(fetched, false, "the tool-fired path must not fetch the model's wrap-up reply");
-    await clearPendingResult(sessionKey);
+    await clearPendingResult(session);
   });
 
   test("waits for gateway readiness before the first call", async () => {
@@ -159,7 +166,7 @@ describe("createRunTurn — the turn", () => {
       getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "drafted" }] }),
     };
     const { runTurn } = createRunTurn({ getRuntime: () => raw, whenGatewayReady: () => ready.promise, logger });
-    const turn = runTurn({ sessionKey: "k", message: "continue" });
+    const turn = runTurn({ session: "k", message: "continue" });
     await tick();
     assert.deepEqual(calls, [], "no run started inside the startup window");
     ready.resolve();

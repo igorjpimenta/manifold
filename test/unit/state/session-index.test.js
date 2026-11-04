@@ -444,16 +444,16 @@ describe("listForFlow()", () => {
   test("returns this flow's rows in spawn order with stored attribution", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, sessionKey: "sess-b", nodeId: "NODE_B" });
-    await idx.record({ flowId, sessionKey: "sess-a", nodeId: "NODE_A", branchItemId: "item-1" });
-    await idx.record({ flowId: "other-flow", sessionKey: "sess-x", nodeId: "NODE_X" });
+    await idx.record({ flowId, session: "sess-b", nodeId: "NODE_B" });
+    await idx.record({ flowId, session: "sess-a", nodeId: "NODE_A", branchItemId: "item-1" });
+    await idx.record({ flowId: "other-flow", session: "sess-x", nodeId: "NODE_X" });
     const rows = await idx.listForFlow(flowId);
     assert.equal(rows.length, 2);
-    const byKey = new Map(rows.map((r) => [r.sessionKey, r]));
-    assert.equal(byKey.get("sess-b").nodeId, "NODE_B");
-    assert.equal(byKey.get("sess-b").branchItemId, null);
-    assert.equal(byKey.get("sess-a").branchItemId, "item-1");
-    assert.ok(typeof byKey.get("sess-a").spawnedAt === "number");
+    const bySession = new Map(rows.map((r) => [r.session, r]));
+    assert.equal(bySession.get("sess-b").nodeId, "NODE_B");
+    assert.equal(bySession.get("sess-b").branchItemId, null);
+    assert.equal(bySession.get("sess-a").branchItemId, "item-1");
+    assert.ok(typeof bySession.get("sess-a").spawnedAt === "number");
     idx.close();
   });
 

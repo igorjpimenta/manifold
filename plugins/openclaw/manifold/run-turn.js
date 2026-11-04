@@ -66,12 +66,14 @@ export function createGatewaySubagentGate({ whenGatewayReady } = {}) {
 export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = null } = {}) {
   const gate = createGatewaySubagentGate({ whenGatewayReady });
 
-  async function runTurn({ sessionKey, message, skill, agentId }) {
+  async function runTurn({ session, message, skill, agentId }) {
     const runtime = gate(typeof getRuntime === "function" ? getRuntime() : getRuntime);
     if (!runtime?.run) throw new GatewayHandoffNeeded("agent runtime unavailable on this api instance");
     let runResult;
     try {
-      runResult = await runtime.run({ sessionKey, message, skill, agentId });
+      // Adapter edge: the harness runtime names its own field `sessionKey`;
+      // core passes its single `session` as that field.
+      runResult = await runtime.run({ sessionKey: session, message, skill, agentId });
     } catch (err) {
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;
@@ -87,7 +89,7 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     // run can sit silently in the gateway's own lane queue
     // (agents.defaults.maxConcurrent) for arbitrarily long, and neither
     // silence nor wall-clock time there means the run is hung.
-    const toolWait = waitForToolResult(sessionKey);
+    const toolWait = waitForToolResult(session);
     let waitResult;
     try {
       waitResult = await Promise.race([
@@ -101,7 +103,7 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     }
     toolWait.cancel();
     if (waitResult.status !== "ok") {
-      const errDetail = waitResult.error ?? (await fetchSessionError(sessionKey)) ?? "no error message";
+      const errDetail = waitResult.error ?? (await fetchSessionError(session)) ?? "no error message";
       throw new Error(`agent turn ${waitResult.status}: ${errDetail}`);
     }
     // Tool already delivered everything apply() needs (state/tool-handoff.js's
@@ -121,7 +123,7 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     }
     let msgsResult;
     try {
-      msgsResult = await runtime.getSessionMessages({ sessionKey, limit: 5 });
+      msgsResult = await runtime.getSessionMessages({ sessionKey: session, limit: 5 });
     } catch (err) {
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;

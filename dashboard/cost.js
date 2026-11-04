@@ -33,7 +33,7 @@ function getClient(dbPath) {
 //
 // byModel: { [model]: { total, calls, inputTokens, outputTokens } }
 // byNode:  { [nodeId]: { total, calls, items: { [itemKey]: { total, calls } } } }
-// bySession: { [sessionId]: { total, calls, inputTokens, outputTokens, model, agentId } }
+// bySession: { [session]: { total, calls, inputTokens, outputTokens, model, agentId } }
 export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPath = null } = {}, _sessionIndex = null) {
   const result = {
     flowId,
@@ -100,7 +100,7 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
     }
     result.byNode[nodeId] = nAcc;
 
-    // bySession
+    // bySession — keyed by the harness-written session_id column.
     const sid = row.session_id ?? "unknown";
     const sAcc = result.bySession[sid] ?? {
       total: 0, calls: 0, inputTokens: 0, outputTokens: 0,

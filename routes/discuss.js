@@ -221,7 +221,7 @@ export function registerDiscussHandlers({
     }
     // Transcript roster lives in flow_sessions alongside dispatch rows, so
     // the transcripts endpoint attributes this thread from stored columns
-    // (nodeId, branchItemId) instead of parsing the session key. Best-effort:
+    // (nodeId, branchItemId) instead of parsing the session. Best-effort:
     // the discuss turn itself is already durable in discuss-store above.
     try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, session: target.session, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null, agent: target.agent ?? null }); } catch {}
 

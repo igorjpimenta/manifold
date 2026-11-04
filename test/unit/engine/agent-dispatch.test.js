@@ -43,13 +43,13 @@ describe("dispatchAgentWithRetry — the injected turn", () => {
     let applyCalledWith = null;
     const node = makeNode({ apply: (state, output) => { applyCalledWith = output; return { text: output.text }; } });
     const result = await dispatchAgentWithRetry({
-      node, nodeId: "DRAFT", sessionKey: "sk", initialMessage: "go",
+      node, nodeId: "DRAFT", session: "sk", initialMessage: "go",
       applyCtx: { pipelineId: "p" }, applyExtraArg: undefined, flowId: "flow-x",
     });
     assert.ok(applyCalledWith !== null);
     assert.deepEqual(result, { text: "reply text" });
     assert.equal(turn.calls.length, 1);
-    assert.equal(turn.calls[0].sessionKey, "sk");
+    assert.equal(turn.calls[0].session, "sk");
     assert.equal(turn.calls[0].message, "go");
     assert.equal(turn.calls[0].agentId, "cyrano");
   });
@@ -58,7 +58,7 @@ describe("dispatchAgentWithRetry — the injected turn", () => {
     const turn = makeTurn();
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
     await dispatchAgentWithRetry({
-      node: makeNode({ skill: "writing" }), nodeId: "DRAFT", sessionKey: "sk", initialMessage: "go",
+      node: makeNode({ skill: "writing" }), nodeId: "DRAFT", session: "sk", initialMessage: "go",
       applyCtx: {}, flowId: "flow-x",
     });
     assert.equal(turn.calls[0].skill, "writing");
@@ -67,7 +67,7 @@ describe("dispatchAgentWithRetry — the injected turn", () => {
   it("refuses loudly when no turn function is bound", async () => {
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: null, sessionIndex: null, logger });
     await assert.rejects(
-      () => dispatchAgentWithRetry({ node: makeNode(), nodeId: "N", sessionKey: "sk", initialMessage: "go", applyCtx: {}, flowId: "f" }),
+      () => dispatchAgentWithRetry({ node: makeNode(), nodeId: "N", session: "sk", initialMessage: "go", applyCtx: {}, flowId: "f" }),
       /no agent runtime bound/,
     );
   });
@@ -82,7 +82,7 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
     const node = makeNode({ apply: (state, output, item, meta, needs) => { receivedNeeds = needs; return {}; } });
     const fakeNeedsCtx = async (varName) => `resolved-${varName}`;
     await dispatchAgentWithRetry({
-      node, nodeId: "DRAFT", sessionKey: "sk", initialMessage: "go",
+      node, nodeId: "DRAFT", session: "sk", initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x", needsCtx: fakeNeedsCtx,
     });
     assert.equal(receivedNeeds, fakeNeedsCtx);
@@ -94,7 +94,7 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
     const node = makeNode({ apply: ({ state, output, needs }) => { receivedNeeds = needs; return {}; } });
     const fakeNeedsCtx = async (varName) => `resolved-${varName}`;
     await dispatchAgentWithRetry({
-      node, nodeId: "DRAFT", sessionKey: "sk", initialMessage: "go",
+      node, nodeId: "DRAFT", session: "sk", initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x", needsCtx: fakeNeedsCtx,
     });
     assert.equal(receivedNeeds, fakeNeedsCtx);
@@ -103,7 +103,7 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
   it("an apply() that doesn't ask for needsCtx is unaffected", async () => {
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: makeTurn(), sessionIndex: null, logger });
     const result = await dispatchAgentWithRetry({
-      node: makeNode(), nodeId: "DRAFT", sessionKey: "sk", initialMessage: "go",
+      node: makeNode(), nodeId: "DRAFT", session: "sk", initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x", needsCtx: async () => "x",
     });
     assert.deepEqual(result, { text: "reply text" });
@@ -113,7 +113,7 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: makeTurn(), sessionIndex: null, logger });
     const node = makeNode({ apply: () => { throw new Error("no retry configured"); } });
     await assert.rejects(
-      () => dispatchAgentWithRetry({ node, nodeId: "N", sessionKey: "sk", initialMessage: "go", applyCtx: {}, flowId: "f" }),
+      () => dispatchAgentWithRetry({ node, nodeId: "N", session: "sk", initialMessage: "go", applyCtx: {}, flowId: "f" }),
       (err) => err.message === "no retry configured",
     );
   });
@@ -124,7 +124,7 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
     const node = makeNode({ retry: { attempts: 3, delayMs: 100 }, apply: () => ({ ok: true }) });
     await assert.rejects(
-      () => dispatchAgentWithRetry({ node, nodeId: "N", sessionKey: "sk", initialMessage: "go", applyCtx: {}, flowId: "f" }),
+      () => dispatchAgentWithRetry({ node, nodeId: "N", session: "sk", initialMessage: "go", applyCtx: {}, flowId: "f" }),
       (err) => err.message === "first attempt fails",
     );
     assert.equal(turn.calls.length, 1);
@@ -136,30 +136,30 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
 
 describe("dispatchAgentWithRetry — the delivered tool result", () => {
   it("passes output.toolResult to apply() and consumes the row afterwards", async () => {
-    const sessionKey = `sk-dispatch-${randomUUID()}`;
+    const session = `sk-dispatch-${randomUUID()}`;
     const turn = makeTurn({ result: { text: "", runId: "run-tool", toolResult: { kind: "draft", payload: { text: "hi" } } } });
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
     let saw = null;
     const node = makeNode({ apply: (state, output) => { saw = output.toolResult; return {}; } });
-    await writePendingResult({ sessionKey, payload: { text: "hi" } });
+    await writePendingResult({ session, payload: { text: "hi" } });
     await dispatchAgentWithRetry({
-      node, nodeId: "DRAFT", sessionKey, initialMessage: "go",
+      node, nodeId: "DRAFT", session, initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x",
     });
     assert.deepEqual(saw, { kind: "draft", payload: { text: "hi" } });
-    assert.equal(await readPendingResult(sessionKey), null, "consumed rows do not linger for the next turn");
+    assert.equal(await readPendingResult(session), null, "consumed rows do not linger for the next turn");
   });
 
   it("leaves the row alone when no tool result was delivered", async () => {
-    const sessionKey = `sk-dispatch-${randomUUID()}`;
-    await writePendingResult({ sessionKey, payload: { stale: true } });
+    const session = `sk-dispatch-${randomUUID()}`;
+    await writePendingResult({ session, payload: { stale: true } });
     const turn = makeTurn(); // no toolResult in the output
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
     await dispatchAgentWithRetry({
-      node: makeNode(), nodeId: "DRAFT", sessionKey, initialMessage: "go",
+      node: makeNode(), nodeId: "DRAFT", session, initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x",
     });
-    assert.ok(await readPendingResult(sessionKey), "a row this dispatch did not consume stays put");
+    assert.ok(await readPendingResult(session), "a row this dispatch did not consume stays put");
   });
 });
 
@@ -173,30 +173,30 @@ describe("dispatchAgentWithRetry — session transcript event", () => {
     return emit;
   }
 
-  it("emits scope=node with nodeId, sessionKey and reply text on success", async () => {
+  it("emits scope=node with nodeId, session and reply text on success", async () => {
     const emit = makeEmit();
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: makeTurn(), sessionIndex: null, logger, emit });
     const result = await dispatchAgentWithRetry({
-      node: makeNode(), nodeId: "DRAFT", sessionKey: "sk-emit-1", initialMessage: "go",
+      node: makeNode(), nodeId: "DRAFT", session: "sk-emit-1", initialMessage: "go",
       applyCtx: { pipelineId: "p" }, applyExtraArg: undefined, flowId: "flow-emit",
     });
     assert.equal(result.text, "reply text");
     assert.equal(emit.calls.length, 1);
     assert.equal(emit.calls[0].kind, "session.transcript.completed");
     assert.deepEqual(emit.calls[0].payload, {
-      scope: "node", nodeId: "DRAFT", sessionKey: "sk-emit-1", text: "reply text",
+      scope: "node", nodeId: "DRAFT", session: "sk-emit-1", text: "reply text",
     });
   });
 
   it("skips emission on the tool-fired path (no reply text), and apply() receives the tool result", async () => {
-    const sessionKey = `sk-emit-skip-${randomUUID()}`;
+    const session = `sk-emit-skip-${randomUUID()}`;
     const emit = makeEmit();
     const turn = makeTurn({ result: { text: "", runId: "run-emit-skip-1", toolResult: { kind: "draft", payload: { text: "hello" } } } });
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger, emit });
     let applySaw = null;
     const node = makeNode({ apply: (state, output) => { applySaw = output?.toolResult ?? null; return { text: output.text }; } });
     const result = await dispatchAgentWithRetry({
-      node, nodeId: "DRAFT", sessionKey, initialMessage: "go",
+      node, nodeId: "DRAFT", session, initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-emit-skip",
     });
     assert.deepEqual(result, { text: "" });
@@ -207,7 +207,7 @@ describe("dispatchAgentWithRetry — session transcript event", () => {
   it("dispatch without an emitter emits nothing and is otherwise identical", async () => {
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: makeTurn(), sessionIndex: null, logger });
     const result = await dispatchAgentWithRetry({
-      node: makeNode(), nodeId: "DRAFT", sessionKey: "sk", initialMessage: "go",
+      node: makeNode(), nodeId: "DRAFT", session: "sk", initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x",
     });
     assert.deepEqual(result, { text: "reply text" });
