@@ -121,8 +121,8 @@ describe("flow-revival + session-index — agent-node revival classification (fi
   test("a flow interrupted mid-turn (session already recorded) is revived with the continuation prompt, same session", async () => {
     const messagesReceived = [];
     let releaseHang = null;
-    const runTurn = async ({ sessionKey, message }) => {
-      messagesReceived.push({ sessionKey, message });
+    const runTurn = async ({ session, message }) => {
+      messagesReceived.push({ session, message });
       // Hang here — simulating the gateway process dying mid-turn, after
       // sessionIndex.record() already fired (confirmed ordering: record()
       // happens before this await, at the top of dispatchAgentWithRetry)
@@ -171,15 +171,15 @@ describe("flow-revival + session-index — agent-node revival classification (fi
     while (messagesReceived.length < 2 && Date.now() < deadline2) await sleep(10);
     assert.equal(messagesReceived.length, 2);
     assert.equal(messagesReceived[1].message, REVIVAL_MSG, "revival sends the continuation prompt, not a fresh promptBuilder call");
-    assert.equal(messagesReceived[1].sessionKey, messagesReceived[0].sessionKey, "same deterministic session — this IS the continuation, not a new conversation");
+    assert.equal(messagesReceived[1].session, messagesReceived[0].session, "same deterministic session — this IS the continuation, not a new conversation");
 
     releaseHang?.();
   });
 
   test("a flow only ever queued for a dispatch slot (no session recorded) gets a fresh dispatch instead", async () => {
     const messagesReceived = [];
-    const runTurn = async ({ sessionKey, message }) => {
-      messagesReceived.push({ sessionKey, message });
+    const runTurn = async ({ session, message }) => {
+      messagesReceived.push({ session, message });
       return { text: "done", runId: "run-1" };
     };
     harness = await makeHarness({ runTurn });

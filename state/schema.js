@@ -266,11 +266,11 @@ export const pipelineDirs = sqliteTable('pipeline_dirs', {
 });
 
 // Structured tool results delivered by agents over MCP
-// (manifold_deliver_result). Keyed by the harness-stamped session key the
+// (manifold_deliver_result). Keyed by the harness-stamped session the
 // agent and the waiting dispatch both know — no invocationId resolution.
 // Latest write wins; the dispatch consumes the row for its own turn.
 export const toolResults = sqliteTable('tool_results', {
-  sessionKey:  text('session_key').primaryKey(),
+  session:  text('session_key').primaryKey(),
   runId:       text('run_id'),
   agentId:     text('agent_id'),
   kind:        text('kind'),

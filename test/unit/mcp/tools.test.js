@@ -1,4 +1,4 @@
-// tools.test.js — manifold_deliver_result handler contract: the session key
+// tools.test.js — manifold_deliver_result handler contract: the session
 // comes from the stamped caller identity (never from args), payload is
 // required, and the write goes through the injected deliverResult op.
 import { test, describe } from "node:test";
@@ -15,21 +15,21 @@ function handlers(deliverCalls) {
 }
 
 describe("manifold_deliver_result", () => {
-  test("is registered with a payload-only schema (no session key arg)", () => {
+  test("is registered with a payload-only schema (no session arg)", () => {
     const def = TOOL_DEFS.find((d) => d.name === "manifold_deliver_result");
     assert.ok(def, "tool must be registered");
     assert.deepEqual(def.inputSchema.required, ["payload"]);
-    assert.ok(!("sessionKey" in (def.inputSchema.properties ?? {})), "session must not be caller-supplied");
+    assert.ok(!("session" in (def.inputSchema.properties ?? {})), "session must not be caller-supplied");
   });
 
   test("stamped call writes keyed by the identity session, not args", async () => {
     const deliverCalls = [];
     const { handle } = handlers(deliverCalls);
     const res = await handle("manifold_deliver_result", { payload: { score: 5 }, kind: "score", runId: "r1" }, identity);
-    assert.deepEqual(res.details, { status: "ok", sessionKey: "sess-9" });
+    assert.deepEqual(res.details, { status: "ok", session: "sess-9" });
     assert.equal(deliverCalls.length, 1);
     assert.deepEqual(deliverCalls[0], {
-      sessionKey: "sess-9",
+      session: "sess-9",
       runId: "r1",
       agentId: "a1",
       kind: "score",
@@ -45,10 +45,10 @@ describe("manifold_deliver_result", () => {
     assert.equal(deliverCalls.length, 0);
   });
 
-  test("a spoofed sessionKey in args is ignored — identity wins", async () => {
+  test("a spoofed session in args is ignored — identity wins", async () => {
     const deliverCalls = [];
     const { handle } = handlers(deliverCalls);
-    await handle("manifold_deliver_result", { payload: { v: 1 }, sessionKey: "attacker-key" }, identity);
-    assert.equal(deliverCalls[0].sessionKey, "sess-9");
+    await handle("manifold_deliver_result", { payload: { v: 1 }, session: "attacker-key" }, identity);
+    assert.equal(deliverCalls[0].session, "sess-9");
   });
 });

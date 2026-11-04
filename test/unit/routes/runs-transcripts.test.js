@@ -8,7 +8,7 @@
  *   - dispatch entries carry a single assistant turn taken from the node's
  *     stored resultJson when it holds reply text, and list metadata-only
  *     otherwise (content is never invented).
- *   - lite=1 returns turnCount without turn text; sessionKey=X drills into
+ *   - lite=1 returns turnCount without turn text; session=X drills into
  *     the exact stored transcript.
  */
 import { test, mock, describe, after } from "node:test";
@@ -95,13 +95,12 @@ describe("transcripts — discuss threads from discuss-store", () => {
         updatedAt: 2000,
       }] },
       sessionIndex: { listForFlow: async () => [
-        { sessionKey: "sk-discuss-1", nodeId: "PROPOSE.GATE", branchItemId: "item-1", spawnedAt: 500 },
+        { session: "sk-discuss-1", nodeId: "PROPOSE.GATE", branchItemId: "item-1", spawnedAt: 500 },
       ] },
     });
     assert.equal(body.transcripts.length, 1);
     const entry = body.transcripts[0];
-    assert.equal(entry.sessionKey, "sk-discuss-1");
-    assert.equal(entry.sessionId, "sk-discuss-1");
+    assert.equal(entry.session, "sk-discuss-1");
     assert.equal(entry.nodeId, "PROPOSE.GATE");
     assert.equal(entry.itemKey, "item-1");
     assert.deepEqual(entry.turns.map((x) => x.role), ["user", "assistant"]);
@@ -118,7 +117,7 @@ describe("transcripts — discuss threads from discuss-store", () => {
       }] },
     });
     assert.equal(body.transcripts.length, 1);
-    assert.equal(body.transcripts[0].sessionKey, null);
+    assert.equal(body.transcripts[0].session, null);
     assert.equal(body.transcripts[0].nodeId, "discuss");
     assert.equal(body.transcripts[0].itemKey, "item-9");
     assert.equal(body.transcripts[0].turns.length, 1);
@@ -136,7 +135,7 @@ describe("transcripts — discuss threads from discuss-store", () => {
         updatedAt: 2,
       }] },
       sessionIndex: { listForFlow: async () => [
-        { sessionKey: "sk-d", nodeId: "G", branchItemId: "item-1", spawnedAt: 1 },
+        { session: "sk-d", nodeId: "G", branchItemId: "item-1", spawnedAt: 1 },
       ] },
     });
     assert.equal(body.transcripts.length, 1);
@@ -149,7 +148,7 @@ describe("transcripts — discuss threads from discuss-store", () => {
 
 describe("transcripts — dispatch turns from resultJson", () => {
   const sessionRows = [
-    { sessionKey: "sk-m1", nodeId: "SUM", branchItemId: null, spawnedAt: 700 },
+    { session: "sk-m1", nodeId: "SUM", branchItemId: null, spawnedAt: 700 },
   ];
 
   test("stored reply text becomes a single assistant turn", async (t) => {
@@ -163,7 +162,7 @@ describe("transcripts — dispatch turns from resultJson", () => {
       });
       assert.equal(body.transcripts.length, 1);
       const entry = body.transcripts[0];
-      assert.equal(entry.sessionKey, "sk-m1");
+      assert.equal(entry.session, "sk-m1");
       assert.equal(entry.agent, "scout");
       assert.equal(entry.nodeId, "SUM");
       assert.equal(entry.itemKey, null);
@@ -185,7 +184,7 @@ describe("transcripts — dispatch turns from resultJson", () => {
       });
       assert.equal(body.transcripts.length, 1);
       assert.deepEqual(body.transcripts[0].turns, []);
-      assert.equal(body.transcripts[0].sessionKey, "sk-m1");
+      assert.equal(body.transcripts[0].session, "sk-m1");
     } finally {
       listResultsForFlowImpl = () => [];
     }
@@ -208,9 +207,9 @@ describe("transcripts — dispatch turns from resultJson", () => {
 
 // ── drill-in ─────────────────────────────────────────────────────────────────
 
-describe("transcripts — sessionKey drill-in", () => {
-  test("sessionKey=X returns only the matching stored transcript", async (t) => {
-    const body = await getTranscripts(t, "?sessionKey=sk-m1", {
+describe("transcripts — session drill-in", () => {
+  test("session=X returns only the matching stored transcript", async (t) => {
+    const body = await getTranscripts(t, "?session=sk-m1", {
       discussStore: { listForFlow: async () => [{
         itemId: "item-1",
         messages: [{ id: "m1", role: "operator", text: "q", ts: 1 }],
@@ -218,19 +217,19 @@ describe("transcripts — sessionKey drill-in", () => {
         updatedAt: 1,
       }] },
       sessionIndex: { listForFlow: async () => [
-        { sessionKey: "sk-m1", nodeId: "SUM", branchItemId: null, spawnedAt: 5 },
-        { sessionKey: "sk-d1", nodeId: "G", branchItemId: "item-1", spawnedAt: 6 },
+        { session: "sk-m1", nodeId: "SUM", branchItemId: null, spawnedAt: 5 },
+        { session: "sk-d1", nodeId: "G", branchItemId: "item-1", spawnedAt: 6 },
       ] },
     });
     assert.equal(body.transcripts.length, 1);
-    assert.equal(body.transcripts[0].sessionKey, "sk-m1");
+    assert.equal(body.transcripts[0].session, "sk-m1");
     assert.ok(Array.isArray(body.transcripts[0].turns));
   });
 
-  test("unknown sessionKey returns an empty list", async (t) => {
-    const body = await getTranscripts(t, "?sessionKey=nope", {
+  test("unknown session returns an empty list", async (t) => {
+    const body = await getTranscripts(t, "?session=nope", {
       sessionIndex: { listForFlow: async () => [
-        { sessionKey: "sk-m1", nodeId: "SUM", branchItemId: null, spawnedAt: 5 },
+        { session: "sk-m1", nodeId: "SUM", branchItemId: null, spawnedAt: 5 },
       ] },
     });
     assert.deepEqual(body.transcripts, []);

@@ -381,7 +381,7 @@ export interface RunCost {
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   byModel: Record<string, number>;
   byNode: Record<string, RunCostNodeEntry>;
-  bySession: { sessionKey: string; agent: string; nodeId: string; itemKey: string | null; sessionId: string; models: string[]; total: number; turns: number; durationMs: number }[];
+  bySession: { session: string; agent: string; nodeId: string; itemKey: string | null; models: string[]; total: number; turns: number; durationMs: number }[];
 }
 
 export interface PipelineCostNodeEntry {
@@ -500,11 +500,10 @@ export interface TranscriptTurn {
 }
 
 export interface Transcript {
-  sessionKey: string;
+  session: string;
   agent: string;
   nodeId: string;
   itemKey: string | null;
-  sessionId: string;
   startedAt: number | null;
   updatedAt: number | null;
   turns: TranscriptTurn[];

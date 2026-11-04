@@ -1571,9 +1571,9 @@ describe("reviveAgentKindOrphan", () => {
       },
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
-    let capturedSessionKey, capturedMessage;
-    const fakeRunTurn = async ({ sessionKey, message }) => {
-      capturedSessionKey = sessionKey;
+    let capturedSession, capturedMessage;
+    const fakeRunTurn = async ({ session, message }) => {
+      capturedSession = session;
       capturedMessage = message;
       return { text: "already submitted, done", runId: "run-1" };
     };
@@ -1584,7 +1584,7 @@ describe("reviveAgentKindOrphan", () => {
     await executor.reviveAgentKindOrphan(flow);
 
     assert.equal(capturedMessage, REVIVAL_MSG, "must send the continuation prompt, not promptBuilder's output");
-    assert.equal(capturedSessionKey, "agent:scout:orphan-session", "must resume the SAME session the original dispatch used");
+    assert.equal(capturedSession, "agent:scout:orphan-session", "must resume the SAME session the original dispatch used");
     const final = store.get(flow.flowId);
     assert.equal(final.status, "succeeded", "flow continues past AGENT to __end__");
     // B4: state_json is entry-only — agentReply (AGENT's own apply() output)
