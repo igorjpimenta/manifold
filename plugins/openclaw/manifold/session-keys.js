@@ -1,12 +1,12 @@
 // session-keys.js — adapter-owned session identity helpers. Session ids
-// are harness-owned plain-text strings passed through verbatim — manifold
-// no longer mints an `mf-…` shape. No `agent:` prefix, no `subagent` infix,
-// no gateway namespace is added at this edge.
+// are harness-owned plain-text strings passed through verbatim: no
+// `agent:` prefix, no `subagent` infix, no gateway namespace is added at
+// this edge.
 // The gateway stores exactly the string it is given, so reads (session
 // transcripts, trajectories) key off the same id the dispatch used.
 //
-// No gateway-shaped keys are minted or matched anywhere: session ids pass
-// through verbatim, and runIds map below.
+// Nothing here mints or matches a session key shape — ids pass through
+// verbatim, and runIds map below.
 // runId mapping is untouched: gateway runIds are native gateway
 // events, so the dispatch-lifecycle registry stays regardless of key shape.
 

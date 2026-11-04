@@ -1,6 +1,6 @@
 // node-health-store.js — circuit breaker for any node's agent dispatch.
 //
-// Storage: ~/.openclaw/runtime.sqlite (sibling of flow_branches, failure_events).
+// Storage: the store home's runtime.sqlite (sibling of flow_branches, failure_events).
 //
 // Any "agent"-kind node can opt in via node.circuitBreaker: true, checked by
 // the ordinary agent dispatch path regardless of which kind of flow it's

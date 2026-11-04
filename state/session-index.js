@@ -1,9 +1,8 @@
 // session-index.js — durable flowId→sessionKey index. Keys are the
-// harness-owned session ids the dispatch used (plus core-owned
-// `gf-discuss-…` thread ids) — stored and read verbatim, with no assumed
+// session ids the dispatch used — stored and read verbatim, with no assumed
 // shape.
 //
-// Storage: ~/.openclaw/runtime.sqlite (see defaultDbPath()).
+// Storage: the store home's runtime.sqlite (resolveStorePaths().runtimeDb).
 //
 // INSERT OR IGNORE via UNIQUE(flow_id, session_key) — recording the same
 // session key twice (e.g. on error-retry with the same key) is a no-op.

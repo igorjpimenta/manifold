@@ -637,9 +637,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     }
   }
 
-  // Transcripts live with the harness sessions, keyed by harness-owned ids
-  // that carry no manifold prefix — there is nothing here to match on, so
-  // this endpoint returns an empty list. Attribution comes from the session
+  // Session keys are opaque: transcript attribution comes from the session
   // ledger, never from the key's shape.
   async function sendTranscripts(res, flowId) {
     const flow = await fetchFlow(flowId);
