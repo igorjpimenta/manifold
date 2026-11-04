@@ -1,14 +1,14 @@
-// session-keys.js — adapter-owned session identity helpers. Session ids
-// are harness-owned plain-text strings passed through verbatim: no
-// `agent:` prefix, no `subagent` infix, no gateway namespace is added at
-// this edge.
-// The gateway stores exactly the string it is given, so reads (session
+// session-keys.js — adapter-owned session identity helpers.
+//
+// Session ids are harness-owned plain-text strings passed through verbatim:
+// nothing here mints or matches a session key shape, and no `agent:`
+// prefix, `subagent` infix or gateway namespace is added at this edge. The
+// gateway stores exactly the string it is given, so reads (session
 // transcripts, trajectories) key off the same id the dispatch used.
 //
-// Nothing here mints or matches a session key shape — ids pass through
-// verbatim, and runIds map below.
-// runId mapping is untouched: gateway runIds are native gateway
-// events, so the dispatch-lifecycle registry stays regardless of key shape.
+// Run ids are a separate namespace: gateway runIds are native gateway
+// events, so the dispatch-lifecycle registry maps them independently of
+// whatever shape a session key carries.
 
 import { randomBytes } from "node:crypto";
 

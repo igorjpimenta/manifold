@@ -3,7 +3,7 @@
 // the "Apply as draft" stripe for a proposal Cyrano made before the
 // app was opened (or before the gateway last bounced).
 //
-// One file per (flowId, itemId) under the store home's discuss-pending/.
+// One file per (flowId, itemId), in the store home's pending dir.
 // File shape:
 //   { flowId, itemId, text?: string, fields?: {...}, updatedAt: ms }
 //

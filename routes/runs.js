@@ -946,9 +946,9 @@ export function registerRunRoutes({
     const osMod = await import("node:os");
     const AGENTS_DIR = pathMod.join(osMod.homedir(), ".openclaw", "agents");
     const flowShort = flow.flowId.slice(0, 8);
-    // This scan can only recognise ids that carry a flow prefix — the ones
-    // core minted itself. Harness-owned ids carry none, so attribution for
-    // those comes from the session ledger, never from the key's shape.
+    // Attribution comes from the session ledger, never from the key's
+    // shape: a session id is opaque, so the flow link comes from the row
+    // that recorded the dispatch.
     const discussKeyPattern  = new RegExp(`^gf-discuss-${flowShort}-(.+)$`);
     const lite       = url.searchParams.get("lite") === "1";
     const singleKey  = url.searchParams.get("sessionKey") ?? null;

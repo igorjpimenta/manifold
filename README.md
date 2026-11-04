@@ -673,7 +673,7 @@ One lock primitive:
 | --------------------------- | --------------------- | ---------------- | ------------------------ |
 | `crossProcessLock: "kind:id"` | Filesystem, cross-process | node body runs | node body returns/throws |
 
-Filesystem-backed, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name — the lock file at `~/.openclaw/locks/<name>.lock` is honored across processes.
+Filesystem-backed, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name — the lock file in the store home's locks dir (`<name>.lock`) is honored across processes.
 
 ```js
 SUBMIT_CODE: {
@@ -819,8 +819,8 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Concern | Behavior |
 |---|---|
 | Channel | the WS dialog door — no channel plugin. Operator messages arrive as `{type:"message", flowId, itemId, text}` frames; the door answers `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`). |
-| Session key | the session id itself — the harness's own id for dispatches (passed through verbatim), `gf-discuss-…` for discuss threads — locked on the first turn and kept for the gate's lifetime. |
-| Session stamp | Written to `~/.openclaw/discuss-sessions/<flowId8>__<gateNodeId>__<itemId>.json` on first turn so agent/config changes never break a live chat. |
+| Session key | the harness's own session id, passed through verbatim — locked on the first turn and kept for the gate's lifetime. |
+| Session stamp | Recorded on the first turn against the thread's coordinates, so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
 | Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires a `discuss.component` event immediately; a connected client surfaces an Apply affordance. |
 | Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` event; updates the chip row on connected clients. `budget` must be a positive integer. |
@@ -982,21 +982,17 @@ node.sessionKeyBuilder(state, flowId)    // derived
 
 `dispatchAgentEntry` refuses an agent node that declares neither —
 tool-handoff and the lineage ledger both key off this value, so inventing
-one here would silently diverge from the harness's id. Discuss threads
-mint `gf-discuss-<flowId.slice(0,8)>-<gateNodeId>-<itemId>` internally
-(core-owned, no harness involved).
+one here would silently diverge from the harness's id. A discuss thread
+carries its own session id, locked on the first turn and re-used for every
+later turn of that thread.
 
-Transcript lookup matches core-minted `gf-discuss-<flow8>-…` threads by
-shape; a harness-owned id carries no flow prefix, so it is invisible to
-the directory scan — look those up via the session ledger instead.
+Transcript attribution comes from the session ledger, never from the key's
+shape.
 
-Each session corresponds to a file:
-`~/.openclaw/agents/<agentId>/sessions/<sessionId>.jsonl`. The
-sessionId is looked up via the agent's `sessions/sessions.json` index.
-Session JSONL line types: `message` (carries `message.role` +
-`message.content`), `model_change`, `prompt.submitted`,
-`model.completed`, `session.ended`. Only `message` lines with
-`role in {user, assistant}` form the visible transcript.
+A session is one conversation the harness owns; manifold addresses it by
+id and never opens its files. Transcript content comes from the harness's
+own surfaces (and, for discuss threads, from the messages manifold
+persisted itself).
 
 ## State conventions
 
@@ -1596,7 +1592,7 @@ inspection — it's the safe default; only reach for raw `sqlite3` when you
 actually intend to write.
 
 ```
-file: ~/.openclaw/runtime.sqlite   ← manifold read/write store (use this)
+file: <store home>/runtime.sqlite   ← manifold read/write store (use this)
 table: flow_runs
 
 flow_id             TEXT PRIMARY KEY
