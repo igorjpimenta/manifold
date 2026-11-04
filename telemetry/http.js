@@ -5,7 +5,7 @@
 //
 // Routes:
 //   /manifold/telemetry/cost/today                       — running total + top movers
-//   /manifold/telemetry/cost/by-root  [?since=&until=]   — group by root sessionKey
+//   /manifold/telemetry/cost/by-root  [?since=&until=]   — group by root session
 //   /manifold/telemetry/cost/by-trigger                  — group by root_kind (cron / telegram / explicit / ...)
 //   /manifold/telemetry/cost/by-cron-job                 — group by cron job name
 //   /manifold/telemetry/cost/by-pipeline                 — group by pipeline_id

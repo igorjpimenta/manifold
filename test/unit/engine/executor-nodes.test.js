@@ -113,7 +113,7 @@ describe("executeNode — agent kind", () => {
     const node = {
       kind: "agent",
       agent: "cyrano",
-      sessionKey: "agent:cyrano:draft",
+      session: "agent:cyrano:draft",
       promptBuilder: () => "write a proposal",
       apply: (_state, output) => ({ draft: output.text }),
     };
@@ -132,7 +132,7 @@ describe("executeNode — agent kind", () => {
     const { executeNode } = makeRunner({
       maybeBudgetGate: () => ({ pause: true, blockedInfo: { _kind: "budget-gate-approval", reason: "cap reached", hint: "" } }),
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", promptBuilder: () => "x", apply: () => ({}) };
     const result = await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f" });
     assert.ok(result.blockedInfo);
     assert.equal(result.blockedInfo._kind, "budget-gate-approval");
@@ -154,7 +154,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { dispatched = true; return {}; },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /unhealthy agent dispatch/,
@@ -168,7 +168,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new Error("provider timeout"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /provider timeout/,
@@ -185,7 +185,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "ok" }),
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
     const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
     assert.deepEqual(result.stateUpdate, { text: "ok" });
     assert.equal(nodeHealthStore.marked.length, 0);
@@ -198,7 +198,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "ok" }),
     });
     // No circuitBreaker flag — isBlocked() returning true must not matter.
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
     const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
     assert.deepEqual(result.stateUpdate, { text: "ok" });
     assert.equal(nodeHealthStore.marked.length, 0);
@@ -210,7 +210,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       maybeBudgetGate: () => ({ pause: true, blockedInfo: { _kind: "budget-gate-approval", reason: "cap reached", hint: "" } }),
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
     assert.ok(result.blockedInfo, "a budget-gate pause is a wait, not a failure");
     assert.equal(nodeHealthStore.marked.length, 0);
@@ -224,7 +224,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new Error("missing scope: operator.write"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /missing scope/,
@@ -238,7 +238,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new Error("subagent call requires gateway context: missing api"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       /requires gateway context/,
@@ -252,7 +252,7 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async () => { throw new GatewayHandoffNeeded("subagent runtime unavailable on this api instance"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:test", circuitBreaker: true, promptBuilder: () => "x", apply: () => ({}) };
     await assert.rejects(
       () => executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" }),
       (err) => err instanceof GatewayHandoffNeeded,
@@ -484,10 +484,10 @@ describe("executeNode — invocation lock owner", () => {
   it("an agent dispatch registers the invocation (with the node's lease cooldown) as its session's lock owner, cleared afterwards", async () => {
     let ownerDuringDispatch;
     const { executeNode } = makeRunner({
-      dispatchAgentWithRetry: async ({ sessionKey }) => { ownerDuringDispatch = sessionOwner(sessionKey); return {}; },
+      dispatchAgentWithRetry: async ({ session }) => { ownerDuringDispatch = sessionOwner(session); return {}; },
     });
     const node = {
-      kind: "agent", agent: "proposal-sender", sessionKey: "agent:proposal-sender:test-owner",
+      kind: "agent", agent: "proposal-sender", session: "agent:proposal-sender:test-owner",
       browserLeaseCooldownMs: 60_000, browserLeaseCooldownJitterMs: 5_000,
       promptBuilder: () => "go", apply: () => ({}),
     };
@@ -503,7 +503,7 @@ describe("executeNode — invocation lock owner", () => {
     const { executeNode } = makeRunner({
       dispatchAgentWithRetry: async () => { throw new Error("boom"); },
     });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:throws", promptBuilder: () => "go", apply: () => ({}) };
+    const node = { kind: "agent", agent: "a", session: "agent:a:throws", promptBuilder: () => "go", apply: () => ({}) };
     await assert.rejects(() => executeNode({ node, nodeId: "X", state: {}, flowId: "flow-3", invocationId: "inv-3" }));
     assert.equal(sessionOwner("agent:a:throws"), null);
   });

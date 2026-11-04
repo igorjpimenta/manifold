@@ -22,13 +22,13 @@ describe("REVISION_RETRY_LIMIT", () => {
 // homes) — fetchSessionError always resolves null and callers fall back to
 // their default detail.
 describe("fetchSessionError", () => {
-  it("returns null for null sessionKey", async () => {
+  it("returns null for null session", async () => {
     assert.equal(await fetchSessionError(null), null);
   });
-  it("returns null for undefined sessionKey", async () => {
+  it("returns null for undefined session", async () => {
     assert.equal(await fetchSessionError(undefined), null);
   });
-  it("returns null for any sessionKey — the tasks-DB fallback is gone", async () => {
+  it("returns null for any session — the tasks-DB fallback is gone", async () => {
     assert.equal(await fetchSessionError("no-such-session-key-" + Math.random()), null);
   });
 });

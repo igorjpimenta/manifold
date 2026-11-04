@@ -43,7 +43,7 @@ export const gateState = sqliteTable('gate_state', {
 });
 
 export const sessionLineage = sqliteTable('session_lineage', {
-  childSessionKey:  text('child_session_key').primaryKey(),
+  childSession:    text('child_session_key').primaryKey(),
   parentSessionKey: text('parent_session_key'),
   rootSessionKey:   text('root_session_key').notNull(),
   kind:             text('kind').notNull(),
@@ -82,7 +82,7 @@ export const costByCall = sqliteTable('cost_by_call', {
   costCacheRead:   real('cost_cache_read'),
   costCacheWrite:  real('cost_cache_write'),
   costTotal:       real('cost_total').notNull(),
-  sessionKey:      text('session_key'),
+  session:         text('session_key'),
   agentId:         text('agent_id'),
   rootSessionKey:  text('root_session_key'),
   rootKind:        text('root_kind'),

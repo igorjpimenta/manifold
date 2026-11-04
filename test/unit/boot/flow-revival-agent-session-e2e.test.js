@@ -63,7 +63,7 @@ function makeFixturePipeline() {
       AGENT_STEP: {
         kind: "agent",
         agent: "scout",
-        sessionKey: "agent:scout:fixture-session",
+        session: "agent:scout:fixture-session",
         promptBuilder: () => "FRESH_PROMPT: score this listing",
         apply: (state, reply) => ({ AGENT_STEP: { reply } }),
       },
@@ -166,12 +166,12 @@ describe("flow-revival + session-index — agent-node revival classification (fi
 
     // The revival's OWN dispatch attempt (reviveAgentKindOrphan) reaches the
     // subagent again, this time hanging on messagesReceived[1] — confirms it
-    // sent REVIVAL_MSG to the SAME sessionKey as the original attempt.
+    // sent REVIVAL_MSG to the SAME session as the original attempt.
     const deadline2 = Date.now() + 2000;
     while (messagesReceived.length < 2 && Date.now() < deadline2) await sleep(10);
     assert.equal(messagesReceived.length, 2);
     assert.equal(messagesReceived[1].message, REVIVAL_MSG, "revival sends the continuation prompt, not a fresh promptBuilder call");
-    assert.equal(messagesReceived[1].sessionKey, messagesReceived[0].sessionKey, "same deterministic session key — this IS the continuation, not a new conversation");
+    assert.equal(messagesReceived[1].sessionKey, messagesReceived[0].sessionKey, "same deterministic session — this IS the continuation, not a new conversation");
 
     releaseHang?.();
   });

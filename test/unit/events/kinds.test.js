@@ -95,7 +95,7 @@ describe("kinds — assertPayload", () => {
       /turnId/,
     );
     assert.doesNotThrow(() =>
-      assertPayload("session.transcript.completed", { scope: "node", nodeId: "n", sessionKey: "s", text: "t" }),
+      assertPayload("session.transcript.completed", { scope: "node", nodeId: "n", session: "s", text: "t" }),
     );
   });
 

@@ -139,10 +139,10 @@ export function createDialogServer({
       try {
         await sessionIndex.recordThread({
           flowId: flow.flowId, gateNodeId: target.gateNodeId ?? "",
-          itemId: target.itemId, agentId: target.agent ?? null, sessionKey: target.sessionKey,
+          itemId: target.itemId, agentId: target.agent ?? null, session: target.session,
         });
         await recordLineage?.({
-          childSessionKey: target.sessionKey, flowId: flow.flowId, nodeId: target.nodeId?.toLowerCase?.() ?? null,
+          childSession: target.session, flowId: flow.flowId, nodeId: target.nodeId?.toLowerCase?.() ?? null,
           itemKey: target.itemId, pipelineId: flow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null,
           kind: "flow-gate-discuss", source: "spawn_hook",
         });
@@ -155,7 +155,7 @@ export function createDialogServer({
     let result;
     try {
       result = await runTurn({
-        flowId: flow.flowId, sessionKey: target.sessionKey, sessionId: target.sessionId, agentId: target.agent,
+        flowId: flow.flowId, session: target.session, agentId: target.agent,
         gateNodeId: target.gateNodeId,
         modelOverride: target.modelOverride ?? null, itemId: target.itemId, text,
         systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,

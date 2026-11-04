@@ -536,8 +536,8 @@ describe("registerDiscussHandlers — resolveDiscussTarget harness-owned ids", (
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
     const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, true);
-    assert.equal(target.sessionId, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
-    assert.equal(target.sessionKey, target.sessionId, "the key IS the session id");
+    assert.equal(target.session, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
+    assert.ok(!("sessionKey" in target) && !("sessionId" in target), "core exposes one session term");
   });
 
   test("refuses loudly when the harness provides no session id", async () => {

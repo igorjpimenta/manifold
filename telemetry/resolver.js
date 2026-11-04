@@ -1,8 +1,8 @@
-// resolver — given a sessionKey, return its parent + root + breadcrumbs.
+// resolver — given a session, return its parent + root + breadcrumbs.
 //
 // Three resolution layers tried in order:
 //   1. lineage table (fastest; populated by hooks)
-//   2. sessionKey grammar (parses scope kind out of the key string)
+//   2. session grammar (parses scope kind out of the session string)
 //   3. external joins (flow_runs sqlite, cron jobs.json)
 //
 // `resolve(key)` returns a fully-populated row ready for `store.upsertLineage`,
@@ -78,7 +78,7 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
 
   // ─── Single-step resolution: given a key, who is its parent? ───────────────
 
-  async function classifyWithExternal(sessionKey, opts = {}) {
+  async function classifyWithExternal(session, opts = {}) {
     // `flow:<uuid>` is a synthetic key minted by THIS resolver (below) as the
     // parent node for all flow subagents. The grammar only knows `agent:*`
     // keys so classify() returns "unknown" for it. Short-circuit here: read
@@ -86,9 +86,9 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
     // If the row is there, return its root directly and stop walking. If not
     // yet written, emit a "flow-triggered" placeholder so the walk stops
     // gracefully instead of returning "unknown".
-    if (typeof sessionKey === "string" && sessionKey.startsWith("flow:") && store) {
-      const flowId = sessionKey.slice("flow:".length);
-      const edge = await store.getLineage(sessionKey);
+    if (typeof session === "string" && session.startsWith("flow:") && store) {
+      const flowId = session.slice("flow:".length);
+      const edge = await store.getLineage(session);
       if (edge) {
         return {
           kind: edge.kind ?? "flow-triggered",
@@ -120,7 +120,7 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
       };
     }
 
-    const g = classify(sessionKey);
+    const g = classify(session);
     // Forward every scope-specific field from the grammar (cronName,
     // telegramChatId, explicitPurpose, memorySynthRun, etc.) so downstream
     // rootLabelOf can produce a human label without re-parsing.
@@ -181,14 +181,14 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
   }
 
   /**
-   * Walk up from `sessionKey` to the root. Returns an array of frames
+   * Walk up from `session` to the root. Returns an array of frames
    * (leaf-to-root). Stops on cycle or depth limit. Uses the lineage table
    * as a short-circuit cache.
    */
-  async function walk(sessionKey, { maxDepth = 16, useCache = true } = {}) {
+  async function walk(session, { maxDepth = 16, useCache = true } = {}) {
     const chain = [];
     const seen = new Set();
-    let cur = sessionKey;
+    let cur = session;
     while (cur && chain.length < maxDepth) {
       if (seen.has(cur)) { chain.push({ key: cur, kind: "cycle" }); break; }
       seen.add(cur);
@@ -246,11 +246,11 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
   }
 
   /**
-   * Compute the storeable row for a single sessionKey (full lineage stamp).
+   * Compute the storeable row for a single session (full lineage stamp).
    * Used by the hooks.
    */
-  async function resolve(sessionKey, opts = {}) {
-    const chain = await walk(sessionKey, opts);
+  async function resolve(session, opts = {}) {
+    const chain = await walk(session, opts);
     if (!chain.length) return null;
     const leaf = chain[0], root = chain[chain.length - 1];
     // Inherit pipeline/flow/node/item from the nearest ancestor that
