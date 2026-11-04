@@ -390,10 +390,13 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
     const { api, routes } = createMockApi();
     registerOperatorRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/cancel");
-    const req = { ...createMockReq("POST", "/manifold/cancel", { authorization: `Bearer ${TEST_BEARER}` }), body: "{}" };
+    // The handler reads the body as a stream, like every other route here.
+    const req = {
+      ...createMockReq("POST", "/manifold/cancel", { authorization: `Bearer ${TEST_BEARER}` }),
+      body: "{}",
+      [Symbol.asyncIterator]: async function* () { yield Buffer.from("{}"); },
+    };
     const res = createMockRes();
-    // Simulate the gateway providing a parsed body (empty object)
-    req.json = async () => ({});
     await handler(req, res);
     assert.ok(res.statusCode === 400 || res.statusCode === 422, `expected 4xx, got ${res.statusCode}`);
   });
