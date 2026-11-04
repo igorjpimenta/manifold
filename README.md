@@ -685,7 +685,7 @@ SUBMIT_CODE: {
 
 No script should self-lock internally (`withLock(...)` wrapping its own `main()`) — that only creates a deadlock risk against a pipeline node holding the same lock name across the spawn boundary (a child OS process can't see the parent's held lock). The pipeline node that spawns the script should declare `crossProcessLock` itself, for the full duration of the dispatch.
 
-The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name.
+The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name (`@igorjpimenta/manifold-openclaw/lock`).
 
 ### Code-node `ctx` argument
 
