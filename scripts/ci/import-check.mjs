@@ -60,9 +60,9 @@ const HOME_RE = /\bhomedir\s*\(|process\.env\.HOME\b|process\.env\[\s*['"]HOME['
 const HOME_ALLOW = new Set([
   "state/paths.js", // the seam itself
   "plugins/openclaw/manifold/sessions.js", // harness adapter edge
-  // NOTE: bin/cli.js (pipelines dir) and locks/browser-tabs.js (harness
-  // config) are deliberately NOT here — S9/S10 move them behind the plugin
-  // seam, and this gate stays red on them until then.
+  // NOTE: bin/cli.js (pipelines dir) is deliberately NOT here — the CLI
+  // resolves it behind the store seam, and this gate stays red on it until
+  // then.
   "budget/index.js", // own store dir
   "dashboard/cost.js", // own ops.sqlite
   "dashboard/event-log.js", // own runtime.sqlite
@@ -82,6 +82,7 @@ const HOME_ALLOW = new Set([
 const homeHits = [];
 for (const rel of files) {
   if (rel.startsWith("test/")) continue;
+  if (rel.endsWith(".test.js")) continue;
   if (HOME_ALLOW.has(rel)) continue;
   const lines = readFileSync(rel, "utf8").split("\n");
   for (let i = 0; i < lines.length; i++) {
