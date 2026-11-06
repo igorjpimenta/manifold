@@ -136,37 +136,6 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
 
     if (!g.parentHint) return out;             // already-root scopes
 
-    if (g.parentHint.kind === "flow") {
-      const fr = await flowFor(g.parentHint.flowShort);
-      if (fr) {
-        // Link the child to the flow's TRIGGER EDGE (synthetic `flow:<id>`
-        // row in session_lineage), not the flow's owner_key. The trigger
-        // edge carries the genuine root (cron-tick / operator-trigger /
-        // etc.); owner_key is always graph-flow-owner and would mis-
-        // attribute every discuss session and gate-spawned subagent to
-        // the "Operator runs" instance.
-        out.parentKey = `flow:${fr.flow_id}`;
-        out.flowId = fr.flow_id;
-        out.pipelineId = fr.pipeline_id;
-      } else if (store) {
-        // Flow pruned from flow_runs — probe session_lineage for the trigger
-        // edge directly. The edge key is 'flow:<full-uuid>' but we only have
-        // the 8-char prefix, so use a LIKE prefix match.
-        const edge = await execAll(store._client,
-          `SELECT child_session_key FROM session_lineage
-           WHERE child_session_key LIKE ?
-             AND source IN ('trigger_hook', 'trigger_backfill')
-           LIMIT 1`,
-          [`flow:${g.parentHint.flowShort}%`]
-        ).then((rows) => rows[0] ?? null);
-        if (edge) {
-          const fullFlowId = edge.child_session_key.slice(5); // strip 'flow:'
-          out.parentKey = edge.child_session_key;
-          out.flowId = fullFlowId;
-        }
-      }
-      return out;
-    }
     if (g.parentHint.kind === "cron-id") {
       const job = cronFor(g.parentHint.cronId);
       out.parentKey = job?.sessionKey || null;

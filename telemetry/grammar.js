@@ -1,7 +1,6 @@
 // sessionKey scope grammar — every sessionKey shape we know about,
 // with a single `classify` entry point that returns the parent breadcrumb (or
 // null for roots). The breadcrumb might be:
-//   { parentKind: "flow", flow8: "..." }   → resolver joins to flow_runs
 //   { parentKind: "session-key", key: "..." } → resolver walks up
 //   { parentKind: "cron-id", cronId: "..." }  → resolver joins to cron jobs
 //   { parentKind: "memory-synth", runId: "..." } → root (no on-disk session)
@@ -32,7 +31,7 @@ const REGEX = {
   EXPLICIT_BARE: /^agent:([^:]+):([^:]+)$/,
 };
 
-/** Returns { kind, agentId, pipelineId?, flowShort?, nodeId?, itemKey?, parentHint } */
+/** Returns { kind, agentId, pipelineId?, nodeId?, itemKey?, parentHint } */
 export function classify(sessionKey) {
   if (typeof sessionKey !== "string" || !sessionKey) {
     return { kind: "unknown", agentId: null, parentHint: null };

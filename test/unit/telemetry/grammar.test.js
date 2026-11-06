@@ -30,11 +30,11 @@ describe("classify", () => {
     // No shape rule matches these; they degrade to the generic buckets
     // instead of the flow walk — no crash, no lineage.
     assert.equal(classify("agent:cyrano:subagent:9f2c1a7b-propose").kind, "unknown");
-    assert.equal(classify("agent:main:gf-discuss-a700a3ea-propose-x").kind, "explicit");
+    assert.equal(classify("agent:main:ops-review-note").kind, "explicit");
   });
 
   it("leaves plain-text session ids unmatched; attribution comes from stores", () => {
-    const r = classify("mf-12345678-propose-item-1");
+    const r = classify("dispatch-propose-item-1");
     assert.equal(r.kind, "unknown");
     assert.equal(r.agentId, null);
     assert.equal(r.parentHint, null);
@@ -101,6 +101,7 @@ describe("classify", () => {
     assert.equal(r.agentId, null);
     assert.equal(r.parentHint, null);
   });
+
 
   it("falls back to explicit for bare-shape key without known scope", () => {
     const r = classify("agent:main:some-custom-scope");
