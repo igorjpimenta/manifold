@@ -473,23 +473,23 @@ describe("recordThread / findThread", () => {
     idx.close();
   });
 
-  test("recordThread then findThread round-trips agent + session key", async () => {
+  test("recordThread then findThread round-trips agent + session", async () => {
     const idx = await makeIndex();
-    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "scout", sessionKey: "agent:scout:t1" });
+    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "scout", session: "agent:scout:t1" });
     assert.deepEqual(
       await idx.findThread("flow-1", "GATE", "item-1"),
-      { sessionKey: "agent:scout:t1", agentId: "scout" },
+      { session: "agent:scout:t1", agentId: "scout" },
     );
     idx.close();
   });
 
   test("recordThread upserts on (flow, gate, item) — one row per thread", async () => {
     const idx = await makeIndex();
-    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "a1", sessionKey: "k1" });
-    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "a2", sessionKey: "k2" });
+    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "a1", session: "k1" });
+    await idx.recordThread({ flowId: "flow-1", gateNodeId: "GATE", itemId: "item-1", agentId: "a2", session: "k2" });
     assert.deepEqual(
       await idx.findThread("flow-1", "GATE", "item-1"),
-      { sessionKey: "k2", agentId: "a2" },
+      { session: "k2", agentId: "a2" },
     );
     const { rows } = await idx._db.execute({
       sql: "SELECT * FROM discuss_threads WHERE flow_id = ?",

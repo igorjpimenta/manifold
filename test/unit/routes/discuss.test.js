@@ -77,8 +77,8 @@ function makeDeps(api, overrides = {}) {
       clearPending: async () => {},
     },
     sessionIndex: {
-      async recordThread({ flowId, gateNodeId, itemId, agentId, sessionKey }) {
-        threads.set(key(flowId, gateNodeId, itemId), { sessionKey, agentId: agentId ?? null });
+      async recordThread({ flowId, gateNodeId, itemId, agentId, session }) {
+        threads.set(key(flowId, gateNodeId, itemId), { session, agentId: agentId ?? null });
       },
       async findThread(flowId, gateNodeId, itemId) {
         return threads.get(key(flowId, gateNodeId, itemId)) ?? null;
@@ -176,7 +176,7 @@ describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identit
     assert.equal(target.ok, true);
     assert.equal(target.needsStamp, true);
     assert.equal(target.agent, "config-agent");
-    assert.equal(typeof target.sessionId, "string");
+    assert.equal(typeof target.session, "string");
   });
 
   test("stamped thread resolves verbatim, roster agent wins over config", async () => {
@@ -185,13 +185,12 @@ describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identit
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
     await deps.sessionIndex.recordThread({
       flowId: testFlowId, gateNodeId: "GATE", itemId: "item-1",
-      agentId: "roster-agent", sessionKey: "agent:test:thread-1",
+      agentId: "roster-agent", session: "agent:test:thread-1",
     });
     const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, true);
     assert.equal(target.needsStamp, false);
-    assert.equal(target.sessionId, "agent:test:thread-1");
-    assert.equal(target.sessionKey, "agent:test:thread-1");
+    assert.equal(target.session, "agent:test:thread-1");
     assert.equal(target.agent, "roster-agent");
   });
 });
