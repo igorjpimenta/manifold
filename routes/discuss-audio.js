@@ -1,6 +1,7 @@
 // Audio constants and filesystem helpers for discuss audio upload/serve/history.
 import path from "node:path";
-import os from "node:os";
+import { resolveStorePaths, harnessMediaAudioDir } from "../state/paths.js";
+import { assertDeclaration } from "../mcp/identity.js";
 
 export const AUDIO_MIME_EXT = {
   "audio/m4a":   "m4a",
@@ -23,19 +24,51 @@ export const EXT_TO_MIME = {
   ogg:  "audio/ogg",
 };
 
-export function audioDirForFlow(flowId, itemId) {
-  const safeItem = String(itemId).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "_";
-  return path.join(os.homedir(), ".openclaw", "discuss-audio", flowId, safeItem);
+// Harness namespace for stored audio, declared per connection like every
+// other harness identity (mcp/identity.js): the X-Manifold-Harness header
+// on the request that delivered the audio. Never env, never defaulted —
+// an undeclared harness refuses before any filesystem touch.
+export function resolveAudioHarness(req) {
+  const header = req?.headers?.["x-manifold-harness"];
+  const { harness } = assertDeclaration({ harness: Array.isArray(header) ? header[0] : header });
+  return harness;
 }
 
-// Read all .meta.json sidecars under ~/.openclaw/discuss-audio/<flowId>/
-// across every item sub-directory. Returns a flat array of parsed meta objects.
-export async function loadAudioMetasForFlow(flowId) {
+// Media root for the given harness: <store-home>/media/audio/<harness>.
+// Resolved per call so a MANIFOLD_DATA_DIR change between import and first
+// use still relocates the store. The harness is required — callers pass
+// the connection-declared value (resolveAudioHarness), never a default.
+export function harnessAudioDir(harness) {
+  return harnessMediaAudioDir(resolveStorePaths().dataDir, harness);
+}
+
+export function audioRootForFlow(flowId, harness) {
+  return path.join(harnessAudioDir(harness), flowId);
+}
+
+// Single search root: this harness's media dir. No cross-harness reads.
+export function audioRootsForFlow(flowId, harness) {
+  return [audioRootForFlow(flowId, harness)];
+}
+
+export function audioDirForFlow(flowId, itemId, harness) {
+  const safeItem = String(itemId).replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 120) || "_";
+  return path.join(audioRootForFlow(flowId, harness), safeItem);
+}
+
+// Read all .meta.json sidecars under <store-home>/media/audio/<harness>/<flowId>/
+// across every item sub-directory. Returns a flat array of parsed meta objects,
+// [] when the root is absent.
+export async function loadAudioMetasForFlow(flowId, harness) {
+  return (await readMetasUnder(audioRootForFlow(flowId, harness))) ?? [];
+}
+
+// Null when the root is absent; an array otherwise.
+async function readMetasUnder(root) {
   const { readdir, readFile } = await import("node:fs/promises");
-  const root = path.join(os.homedir(), ".openclaw", "discuss-audio", flowId);
   let itemDirs;
   try { itemDirs = await readdir(root); }
-  catch { return []; }
+  catch { return null; }
   const metas = [];
   for (const itemDir of itemDirs) {
     let files;

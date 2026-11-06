@@ -1,11 +1,9 @@
 import path from "node:path";
-import os from "node:os";
 import { mkdirSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { looksLikeMetaNarration, normalizePendingFields } from "./discuss-helpers.js";
-import { stampDiscussSession, readDiscussSession } from "./discuss-session.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
-import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, loadAudioMetasForFlow } from "./discuss-audio.js";
+import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow, resolveAudioHarness } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
 
 // ── Factory ─────────────────────────────────────────────────────────────────
@@ -54,12 +52,13 @@ export function registerDiscussHandlers({
   // the harness (sessions.newDiscussSessionId), never minted here — core
   // never imports the gateway's session store (same seam as operator.js).
   sessions,
+  // The roster records what each thread was given, keyed by its coordinates.
   sessionIndex,
 }) {
 
   // ── Resolve discuss target ────────────────────────────────────────────────
 
-  function resolveDiscussTarget(sourceFlow, wantItemId) {
+  async function resolveDiscussTarget(sourceFlow, wantItemId) {
     const items = Array.isArray(sourceFlow.waitJson?.items) ? sourceFlow.waitJson.items : [];
     let normalizedItemId = null;
     let gateNodeId = null;
@@ -130,14 +129,13 @@ export function registerDiscussHandlers({
         error: "this gate's pipeline hasn't opted into discussion (set `discuss: { agent, promptBuilder }` on the gate node, or set `discuss.defaultAgent` in the manifold plugin config in openclaw.json)",
       };
     }
-    const stamp = readDiscussSession(sourceFlow.flowId, gateNodeId, normalizedItemId);
-    const resolvedAgent = stamp?.agent ?? effectiveDiscuss.agent;
-    // Discuss thread identity comes from the harness, never from core: a
-    // stamped thread keeps its id verbatim whatever its shape; a new
-    // thread asks the harness adapter for one. No minted fallback — a
-    // harness that cannot name its own sessions cannot host a discuss
-    // thread.
-    const sessionId = stamp?.sessionId
+    // Thread identity: the roster (keyed by flow, gate, item) holds what
+    // earlier turns used; a thread with no row asks the harness for an id,
+    // because the harness owns the session namespace. A missing row means
+    // no turn ran yet — the caller records the new thread.
+    const stamp = await sessionIndex?.findThread?.(sourceFlow.flowId, gateNodeId, normalizedItemId);
+    const resolvedAgent = stamp?.agentId ?? effectiveDiscuss.agent;
+    const sessionId = stamp?.sessionKey
       ?? sessions?.newDiscussSessionId?.({
         agentId: resolvedAgent, flowId: sourceFlow.flowId,
         gateNodeId, itemId: normalizedItemId,
@@ -161,9 +159,9 @@ export function registerDiscussHandlers({
       itemId: normalizedItemId,
       agent: resolvedAgent,
       needsStamp: !stamp,
-      // Coarse node id the discuss session itself is keyed/stamped under
-      // (readDiscussSession/stampDiscussSession above) — the loop's own id
-      // for a branch-mode gate, not the fine-grained per-sub-node id below.
+      // Coarse node id the discuss thread itself is keyed under in the
+      // roster — the loop's own id for a branch-mode gate, not the
+      // fine-grained per-sub-node id below.
       gateNodeId,
       // Specific node this discuss session is actually about, for cost/
       // lineage attribution — "PROPOSE.GATE", not just "PROPOSE", when the
@@ -194,7 +192,7 @@ export function registerDiscussHandlers({
       return true;
     }
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -218,7 +216,12 @@ export function registerDiscussHandlers({
     }
 
     if (target.needsStamp) {
-      stampDiscussSession(sourceFlow.flowId, target.gateNodeId ?? "", target.itemId, target.agent, target.sessionId);
+      try {
+        await sessionIndex?.recordThread?.({
+          flowId: sourceFlow.flowId, gateNodeId: target.gateNodeId ?? "",
+          itemId: target.itemId, agentId: target.agent ?? null, sessionKey: target.sessionKey,
+        });
+      } catch {}
       api.runtime?.lineage?.recordSpawn?.({ childSessionKey: target.sessionKey, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
     }
     // Transcript roster lives in flow_sessions alongside dispatch rows, so
@@ -415,7 +418,23 @@ export function registerDiscussHandlers({
 
   // ── handleDiscussAudio ────────────────────────────────────────────────────
 
+  // Connection-declared harness for audio file paths (X-Manifold-Harness,
+  // same declaration the MCP transport requires). Refuses before any
+  // filesystem touch — audio is namespaced per harness, never defaulted.
+  function requireAudioHarness(req, res) {
+    try {
+      return resolveAudioHarness(req);
+    } catch {
+      res.statusCode = 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify({ ok: false, code: "missing_harness", error: "missing or reserved X-Manifold-Harness" }));
+      return null;
+    }
+  }
+
   async function handleDiscussAudio(req, res, sourceFlow) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     let raw = "";
     for await (const chunk of req) raw += chunk;
     let body;
@@ -432,7 +451,7 @@ export function registerDiscussHandlers({
     }
     const ext = AUDIO_MIME_EXT[contentType] ?? "m4a";
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -448,7 +467,7 @@ export function registerDiscussHandlers({
     }
     const turnId = randomUUID();
     const flowIdShort = sourceFlow.flowId.slice(0, 8);
-    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId);
+    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId, harness);
     const audioPath = path.join(audioDir, `${turnId}.${ext}`);
     try {
       const { mkdir, writeFile } = await import("node:fs/promises");
@@ -495,6 +514,8 @@ export function registerDiscussHandlers({
   // transcript events rather than creating a new turn.
 
   async function handleDiscussAudioRetry(req, res, sourceFlow) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     let raw = "";
     for await (const chunk of req) raw += chunk;
     let body;
@@ -508,7 +529,7 @@ export function registerDiscussHandlers({
       return true;
     }
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -523,7 +544,7 @@ export function registerDiscussHandlers({
       return true;
     }
     const flowIdShort = sourceFlow.flowId.slice(0, 8);
-    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId);
+    const audioDir = audioDirForFlow(sourceFlow.flowId, target.itemId, harness);
     const metaPath = path.join(audioDir, `${turnId}.meta.json`);
     let meta;
     try {
@@ -576,6 +597,8 @@ export function registerDiscussHandlers({
   // ── handleDiscussAudioGet ─────────────────────────────────────────────────
 
   async function handleDiscussAudioGet(req, res, sourceFlow, audioFileName) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     if (!/^[a-zA-Z0-9-]{8,64}\.[a-zA-Z0-9]{1,8}$/.test(audioFileName)) {
       res.statusCode = 400;
       res.end("invalid audio file name");
@@ -583,23 +606,24 @@ export function registerDiscussHandlers({
     }
     const ext = audioFileName.split(".").pop().toLowerCase();
     const { readdir, readFile, stat } = await import("node:fs/promises");
-    const flowRoot = path.join(os.homedir(), ".openclaw", "discuss-audio", sourceFlow.flowId);
-    let entries;
-    try { entries = await readdir(flowRoot); }
-    catch { res.statusCode = 404; res.end("not found"); return true; }
-    for (const itemDir of entries) {
-      const candidate = path.join(flowRoot, itemDir, audioFileName);
-      try {
-        const st = await stat(candidate);
-        if (!st.isFile()) continue;
-        const bytes = await readFile(candidate);
-        res.statusCode = 200;
-        res.setHeader("Content-Type", EXT_TO_MIME[ext] ?? "application/octet-stream");
-        res.setHeader("Content-Length", String(bytes.length));
-        res.setHeader("Cache-Control", "private, max-age=86400");
-        res.end(bytes);
-        return true;
-      } catch { /* try next */ }
+    for (const flowRoot of audioRootsForFlow(sourceFlow.flowId, harness)) {
+      let entries;
+      try { entries = await readdir(flowRoot); }
+      catch { continue; }
+      for (const itemDir of entries) {
+        const candidate = path.join(flowRoot, itemDir, audioFileName);
+        try {
+          const st = await stat(candidate);
+          if (!st.isFile()) continue;
+          const bytes = await readFile(candidate);
+          res.statusCode = 200;
+          res.setHeader("Content-Type", EXT_TO_MIME[ext] ?? "application/octet-stream");
+          res.setHeader("Content-Length", String(bytes.length));
+          res.setHeader("Cache-Control", "private, max-age=86400");
+          res.end(bytes);
+          return true;
+        } catch { /* try next */ }
+      }
     }
     res.statusCode = 404;
     res.end("not found");
@@ -609,11 +633,13 @@ export function registerDiscussHandlers({
   // ── handleDiscussHistory ──────────────────────────────────────────────────
 
   async function handleDiscussHistory(req, res, sourceFlow) {
+    const harness = requireAudioHarness(req, res);
+    if (!harness) return true;
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
     const wantItemId = url.searchParams.get("itemId");
     const offsetParam = Number(url.searchParams.get("offset"));
     const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? Math.floor(offsetParam) : 0;
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -688,7 +714,7 @@ export function registerDiscussHandlers({
     try {
       if (parsed && parsed.ok) {
         parsed.messages = Array.isArray(parsed.messages) ? parsed.messages : [];
-        const audioMetas = await loadAudioMetasForFlow(sourceFlow.flowId);
+        const audioMetas = await loadAudioMetasForFlow(sourceFlow.flowId, harness);
         if (audioMetas.length > 0) {
           const matchedTurnIds = new Set();
           for (const msg of parsed.messages) {
@@ -763,7 +789,7 @@ export function registerDiscussHandlers({
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
     // Resolve target first so we can use target.itemId for the sidecar
     // lookup before checking whether payload is present.
-    const target = resolveDiscussTarget(sourceFlow, wantItemId);
+    const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
       res.setHeader("Content-Type", "application/json");
@@ -841,7 +867,6 @@ export function registerDiscussHandlers({
     handleDiscussAudioRetry,
     handleDiscussHistory,
     handleDiscussApplyDraft,
-    stampDiscussSession,
     resolveDiscussTarget,
     normalizePendingFields,
   };

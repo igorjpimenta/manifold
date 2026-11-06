@@ -820,7 +820,7 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 |---|---|
 | Channel | the WS dialog door — no channel plugin. Operator messages arrive as `{type:"message", flowId, itemId, text}` frames; the door answers `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`). |
 | Session key | the harness's own session id, passed through verbatim — locked on the first turn and kept for the gate's lifetime. |
-| Session stamp | Recorded on the first turn against the thread's coordinates, so agent/config changes never break a live chat. |
+| Session stamp | Recorded in the session roster (`discuss_threads`: flow, gate, item → agent + session key) on first turn, so agent/config changes never break a live chat. |
 | First-turn prompt | `promptBuilder` output is injected as a system prompt for the session; called on every turn (not just first). Return a non-string to skip it. |
 | Draft proposal | Agent (or its spawned specialist) calls `propose_draft(flowId, itemId, text)` — fires a `discuss.component` event immediately; a connected client surfaces an Apply affordance. |
 | Meta proposal | `propose_draft_meta(flowId, itemId, { budget, timeframe, language })` — fires a separate `discuss.component` event; updates the chip row on connected clients. `budget` must be a positive integer. |

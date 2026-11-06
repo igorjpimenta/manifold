@@ -90,7 +90,6 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef: { value: new Map() },
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
-    stampDiscussSession: async () => {},
     normalizePendingFields: async () => ({}),
     readPending: () => null,
     mergePendingFields: () => {},

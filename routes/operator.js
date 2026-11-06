@@ -34,7 +34,6 @@ export function registerOperatorRoutes({
   admissionQueueStore,
   resumeParentRef,
   // from discuss.js
-  stampDiscussSession,
   normalizePendingFields,
   // from pending-store.js
   readPending,
@@ -55,7 +54,7 @@ export function registerOperatorRoutes({
   });
 
   const { handleDiscuss } = createDiscussHandler({
-    api, stampDiscussSession, normalizePendingFields, readPending, mergePendingFields,
+    api, normalizePendingFields, readPending, mergePendingFields,
     setPendingText, componentEmitter, sessions,
   });
 

@@ -42,6 +42,19 @@ export function pipelinesDir(dataDir) {
   return path.join(dataDir, "workspace", ".pipelines");
 }
 
+// Media root for harness-delivered blobs (voice messages today). The store
+// home is the root; the harness name namespaces it so two harnesses sharing
+// one store never collide. Layout: <dataDir>/media/audio/<harness>/<flow>.
+export function mediaAudioDir(dataDir) {
+  return path.join(dataDir, "media", "audio");
+}
+
+export function harnessMediaAudioDir(dataDir, harness) {
+  const safe = String(harness ?? "").replace(/[^A-Za-z0-9._-]+/g, "_");
+  if (!safe) throw new Error("manifold: harness is required to resolve the media dir (declare it on the connection)");
+  return path.join(mediaAudioDir(dataDir), safe);
+}
+
 export function stateFile(dataDir) {
   return path.join(dataDir, "state", "manifold-paused.json");
 }
@@ -169,5 +182,6 @@ export function resolveStorePaths({ paths = null, dataDir = null, env = process.
     pendingDir: paths?.pendingDir ?? env.MANIFOLD_PENDING_DIR ?? pendingDir(dir),
     locksDir: paths?.locksDir ?? env.MANIFOLD_LOCKS_DIR ?? locksDir(dir),
     pipelinesDir: paths?.pipelinesDir ?? env.MANIFOLD_PIPELINES_DIR ?? pipelinesDir(dir),
+    mediaAudioDir: paths?.mediaAudioDir ?? env.MANIFOLD_MEDIA_AUDIO_DIR ?? mediaAudioDir(dir),
   };
 }

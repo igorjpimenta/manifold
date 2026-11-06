@@ -46,7 +46,6 @@ import { createPipelinesWatcher } from "../../../engine/pipelines-watcher.js";
 import { flushAll as flushBatchWriter } from "../../../state/batch-writer.js";
 import { invokeElevated } from "../../../elevation.js";
 import { createDialogServer } from "../../../events/ws-dialog.js";
-import { stampDiscussSession } from "../../../routes/discuss-session.js";
 
 // Route modules extracted from this file.
 import { flowStateEmitter, gateEmitter } from "../../../events.js";
@@ -272,11 +271,15 @@ export default definePluginEntry({
     // classification, which runs while the gateway is still starting).
     const _sessionIndexPromise = createSessionIndex({ logger: api.logger, dbPath: runtimeDbPath });
     const sessionIndex = {
-      // Session ids are harness-owned plain text, passed through verbatim —
-      // no edge translation on the record path.
+      // Harness-owned session ids pass through verbatim — stored and read
+      // with no edge translation on either path.
       record(data) {
         return _sessionIndexPromise.then((si) => si.record({ ...data }));
       },
+      recordThread(data) {
+        return _sessionIndexPromise.then((si) => si.recordThread({ ...data }));
+      },
+      findThread(flowId, gateNodeId, itemId) { return _sessionIndexPromise.then(si => si.findThread(flowId, gateNodeId, itemId)); },
       hasSessionForNode(flowId, nodeId) { return _sessionIndexPromise.then(si => si.hasSessionForNode(flowId, nodeId)); },
       flowIdForSessionKey(sessionKey) { return _sessionIndexPromise.then(si => si.flowIdForSessionKey(sessionKey)); },
       close() { _sessionIndexPromise.then(si => si.close?.()).catch(() => {}); },
@@ -578,7 +581,6 @@ export default definePluginEntry({
       runStore,
       admissionQueueStore,
       resumeParentRef,
-      stampDiscussSession:  discussHandlers.stampDiscussSession,
       normalizePendingFields: discussHandlers.normalizePendingFields,
       readPending,
       mergePendingFields,
@@ -648,7 +650,7 @@ export default definePluginEntry({
             };
           },
           discussStore,
-          stampSession: stampDiscussSession,
+          sessionIndex,
           recordLineage: (entry) => api.runtime?.lineage?.recordSpawn?.(entry),
           runStore,
           nodeExecutionsStore,

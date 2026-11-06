@@ -72,7 +72,7 @@ export function createDialogServer({
   resolveTarget,
   runTurn,
   discussStore,
-  stampSession,
+  sessionIndex,
   recordLineage = null,
   runStore = null,
   nodeExecutionsStore = null,
@@ -83,7 +83,7 @@ export function createDialogServer({
   if (typeof resolveTarget !== "function") throw new Error("ws-dialog: resolveTarget(flow, itemId) is required");
   if (typeof runTurn !== "function") throw new Error("ws-dialog: runTurn(turn) is required");
   if (!discussStore) throw new Error("ws-dialog: discussStore is required");
-  if (typeof stampSession !== "function") throw new Error("ws-dialog: stampSession is required");
+  if (!sessionIndex?.recordThread) throw new Error("ws-dialog: sessionIndex.recordThread is required");
   const listenPort = port ?? DEFAULT_DIALOG_PORT;
   let server = null;
   let door = null;
@@ -119,7 +119,7 @@ export function createDialogServer({
       send(socket, { type: "error", id: msg.id ?? null, code: "flow_not_found", error: `flow not found: ${flowId}` });
       return;
     }
-    const target = resolveTarget(flow, itemId);
+    const target = await resolveTarget(flow, itemId);
     if (!target?.ok) {
       send(socket, { type: "error", id: msg.id ?? null, code: target?.code ?? "no_target", error: target?.error ?? "no discuss target" });
       return;
@@ -137,7 +137,10 @@ export function createDialogServer({
     }
     if (target.needsStamp) {
       try {
-        stampSession(flow.flowId, target.gateNodeId ?? "", target.itemId, target.agent, target.sessionId);
+        await sessionIndex.recordThread({
+          flowId: flow.flowId, gateNodeId: target.gateNodeId ?? "",
+          itemId: target.itemId, agentId: target.agent ?? null, sessionKey: target.sessionKey,
+        });
         await recordLineage?.({
           childSessionKey: target.sessionKey, flowId: flow.flowId, nodeId: target.nodeId?.toLowerCase?.() ?? null,
           itemKey: target.itemId, pipelineId: flow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null,

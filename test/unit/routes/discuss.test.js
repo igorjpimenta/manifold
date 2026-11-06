@@ -9,9 +9,21 @@
 import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
+import { mkdtempSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { tmpdir } from "node:os";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
+
+// Isolated store home for every sidecar write in this file (session stamps,
+// audio uploads). Resolution is per call, so setting the env here — after
+// the imports above — still relocates the store. node:test runs each file
+// in its own process, so the override never leaks into other files.
+const ISOLATED_DATA_DIR = mkdtempSync(path.join(tmpdir(), "manifold-discuss-test-"));
+process.env.MANIFOLD_DATA_DIR = ISOLATED_DATA_DIR;
+after(async () => {
+  rmSync(ISOLATED_DATA_DIR, { recursive: true, force: true });
+});
 
 // B2.5 — handleDiscuss/handleDiscussAudio build their promptBuilder ctx via
 // assembleState() instead of trusting sourceFlow.stateJson directly. Mocked
@@ -35,15 +47,20 @@ const { registerDiscussHandlers } = await import("../../../routes/discuss.js");
 // the harness-owned path, not a stub.
 const sessions = await import("../../../plugins/openclaw/manifold/sessions.js");
 
-function createMockReqWithBody(method, path_, body) {
+function createMockReqWithBody(method, path_, body, headers = {}) {
   const chunks = body != null ? [Buffer.from(typeof body === "string" ? body : JSON.stringify(body))] : [];
   return {
-    ...createMockReq(method, path_),
+    ...createMockReq(method, path_, headers),
     [Symbol.asyncIterator]: async function* () { for (const c of chunks) yield c; },
   };
 }
 
 function makeDeps(api, overrides = {}) {
+  // In-memory thread roster standing in for the session index: keyed by
+  // (flow, gate, item) exactly like the discuss_threads table, so stamp →
+  // resolve round-trips behave the same.
+  const threads = new Map();
+  const key = (flowId, gateNodeId, itemId) => `${flowId} ${gateNodeId} ${itemId}`;
   return {
     api,
     store: { get: () => null, list: () => [] },
@@ -55,6 +72,14 @@ function makeDeps(api, overrides = {}) {
     clearPending: () => {},
     sessions,
     discussStore: { getComponent: () => null, listComponents: () => [], setComponent: () => {} },
+    sessionIndex: {
+      async recordThread({ flowId, gateNodeId, itemId, agentId, sessionKey }) {
+        threads.set(key(flowId, gateNodeId, itemId), { sessionKey, agentId: agentId ?? null });
+      },
+      async findThread(flowId, gateNodeId, itemId) {
+        return threads.get(key(flowId, gateNodeId, itemId)) ?? null;
+      },
+    },
     ...overrides,
   };
 }
@@ -78,10 +103,9 @@ describe("registerDiscussHandlers — return shape", () => {
   ];
 
   const REQUIRED_HELPERS = [
-    "stampDiscussSession",
-    "resolveDiscussTarget",
-    "normalizePendingFields",
-  ];
+  "resolveDiscussTarget",
+  "normalizePendingFields",
+];
 
   for (const name of [...REQUIRED_HANDLERS, ...REQUIRED_HELPERS]) {
     test(`returns function: ${name}`, () => {
@@ -103,17 +127,69 @@ describe("registerDiscussHandlers — return shape", () => {
 // gate_transition when flow.status === "running" and waitJson is null.
 
 describe("registerDiscussHandlers — resolveDiscussTarget mid-batch (running)", () => {
-  test("always 503s with gate_transition when flow is running and waitJson is null", () => {
+  test("always 503s with gate_transition when flow is running and waitJson is null", async () => {
     const { api } = createMockApi();
     const deps = makeDeps(api);
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
-    const target = resolveDiscussTarget(
+    const target = await resolveDiscussTarget(
       { flowId: "flow-1", status: "running", waitJson: null, stateJson: { pipelineId: "test-pipeline" } },
       "alpha",
     );
     assert.equal(target.ok, false);
     assert.equal(target.code, "gate_transition");
     assert.equal(target.status, 503);
+  });
+});
+
+// ── resolveDiscussTarget — thread identity comes from the session roster ──
+// No sidecar files: the first turn records (flow, gate, item) → session,
+// later turns re-resolve the same thread verbatim — including the agent,
+// so a pipeline config change mid-thread can't orphan the conversation.
+
+describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identity", () => {
+  const testFlowId = `unit-test-discuss-roster-${Date.now()}`;
+
+  function gateDeps(api) {
+    return makeDeps(api, {
+      pipelinesRef: {
+        value: new Map([["test-pipeline", { nodes: { GATE: { kind: "human-gate", discuss: { agent: "config-agent" } } } }]]),
+      },
+    });
+  }
+
+  function gateFlow() {
+    return {
+      flowId: testFlowId,
+      status: "blocked",
+      waitJson: { kind: "human-gate", nodeId: "GATE", items: [{ itemId: "item-1" }] },
+      stateJson: { pipelineId: "test-pipeline" },
+    };
+  }
+
+  test("unstamped thread resolves with needsStamp and the config agent", async () => {
+    const { api } = createMockApi();
+    const { resolveDiscussTarget } = registerDiscussHandlers(gateDeps(api));
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
+    assert.equal(target.ok, true);
+    assert.equal(target.needsStamp, true);
+    assert.equal(target.agent, "config-agent");
+    assert.equal(typeof target.sessionId, "string");
+  });
+
+  test("stamped thread resolves verbatim, roster agent wins over config", async () => {
+    const { api } = createMockApi();
+    const deps = gateDeps(api);
+    const { resolveDiscussTarget } = registerDiscussHandlers(deps);
+    await deps.sessionIndex.recordThread({
+      flowId: testFlowId, gateNodeId: "GATE", itemId: "item-1",
+      agentId: "roster-agent", sessionKey: "agent:test:thread-1",
+    });
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
+    assert.equal(target.ok, true);
+    assert.equal(target.needsStamp, false);
+    assert.equal(target.sessionId, "agent:test:thread-1");
+    assert.equal(target.sessionKey, "agent:test:thread-1");
+    assert.equal(target.agent, "roster-agent");
   });
 });
 
@@ -126,7 +202,6 @@ describe("registerDiscussHandlers — handleDiscuss builds ctx.state via assembl
   const testFlowId = `unit-test-discuss-${Date.now()}`;
 
   after(async () => {
-    await rm(path.join(os.homedir(), ".openclaw", "discuss-sessions"), { recursive: true, force: true }).catch(() => {});
     await rm(path.join(os.homedir(), ".openclaw", "discuss-turns", testFlowId), { recursive: true, force: true }).catch(() => {});
   });
 
@@ -206,7 +281,7 @@ describe("registerDiscussHandlers — handleDiscussHistory awaits discussStore.g
     });
     const { handleDiscussHistory } = registerDiscussHandlers(deps);
 
-    const req = createMockReq("GET", `/manifold/runs/${sourceFlow.flowId}/discuss/history`);
+    const req = createMockReq("GET", `/manifold/runs/${sourceFlow.flowId}/discuss/history`, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussHistory(req, res, sourceFlow);
 
@@ -228,7 +303,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
   const itemId = "item-1";
 
   after(async () => {
-    await rm(path.join(os.homedir(), ".openclaw", "discuss-audio", testFlowId), { recursive: true, force: true }).catch(() => {});
+    await rm(path.join(ISOLATED_DATA_DIR, "media", "audio", "test-harness", testFlowId), { recursive: true, force: true }).catch(() => {});
   });
 
   const sourceFlow = {
@@ -243,7 +318,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
 
   test("re-transcribes an existing audio file and updates its meta sidecar in place", async () => {
     const { audioDirForFlow } = await import("../../../routes/discuss-audio.js");
-    const audioDir = audioDirForFlow(testFlowId, itemId);
+    const audioDir = audioDirForFlow(testFlowId, itemId, "test-harness");
     const { mkdir, writeFile, readFile } = await import("node:fs/promises");
     await mkdir(audioDir, { recursive: true });
     const turnId = "11111111-1111-1111-1111-111111111111";
@@ -272,7 +347,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 
-    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
 
@@ -318,7 +393,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
   });
 
   test("canonical path: retry emits session.transcript.* with scope=discuss", async () => {    const { audioDirForFlow } = await import("../../../routes/discuss-audio.js");
-    const audioDir = audioDirForFlow(testFlowId, itemId);
+    const audioDir = audioDirForFlow(testFlowId, itemId, "test-harness");
     const { mkdir, writeFile } = await import("node:fs/promises");
     await mkdir(audioDir, { recursive: true });
     const turnId = "22222222-2222-2222-2222-222222222222";
@@ -347,7 +422,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 
-    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId });
+    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 202);
@@ -375,7 +450,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     api.runtime = { mediaUnderstanding: { transcribeAudioFile: async () => ({ text: "x" }) } };
     const deps = makeDeps(api, { pipelinesRef });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
-    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId: "does-not-exist", itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId: "does-not-exist", itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 404);
@@ -386,11 +461,22 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     const { api } = createMockApi();
     const deps = makeDeps(api, { pipelinesRef });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
-    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { itemId });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 400);
     assert.equal(JSON.parse(res.body).code, "missing_turn_id");
+  });
+
+  test("refuses audio without a declared harness, before any store touch", async () => {
+    const { api } = createMockApi();
+    const deps = makeDeps(api, { pipelinesRef });
+    const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId: "t", itemId });
+    const res = createMockRes();
+    await handleDiscussAudioRetry(req, res, sourceFlow);
+    assert.equal(res.statusCode, 400);
+    assert.equal(JSON.parse(res.body).code, "missing_harness");
   });
 });
 
@@ -441,21 +527,21 @@ describe("registerDiscussHandlers — resolveDiscussTarget harness-owned ids", (
     };
   }
 
-  test("new thread takes the harness adapter id verbatim — never gf-discuss", () => {
+  test("new thread takes the harness adapter id verbatim — never gf-discuss", async () => {
     const { api } = createMockApi();
     const deps = makeDeps(api, { pipelinesRef: gatePipelines() });
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
-    const target = resolveDiscussTarget(gateFlow(), "item-1");
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, true);
     assert.equal(target.sessionId, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
     assert.equal(target.sessionKey, target.sessionId, "the key IS the session id");
   });
 
-  test("refuses loudly when the harness provides no session id", () => {
+  test("refuses loudly when the harness provides no session id", async () => {
     const { api } = createMockApi();
     const deps = makeDeps(api, { pipelinesRef: gatePipelines(), sessions: {} });
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
-    const target = resolveDiscussTarget(gateFlow(), "item-1");
+    const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, false);
     assert.equal(target.code, "discuss_session_unavailable");
     assert.equal(target.status, 503);
