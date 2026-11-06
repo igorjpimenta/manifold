@@ -197,8 +197,8 @@ export default definePluginEntry({
     const runStore    = createRunStore({ logger: api.logger, dbPath: runtimeDbPath });
     const nodeExecutionsStore = getNodeExecutionsStore(runtimeDbPath);
     // Locks taken on behalf of a node invocation (executor-nodes.js's
-    // executeNode, and browser tool leases of the sessions it dispatches)
-    // stay held until the invocation resolves.
+    // executeNode, and the harness's own session tool leases of the
+    // sessions it dispatches) stay held until the invocation resolves.
     registerOwnerResolver("invocation", createInvocationOwnerResolver({ nodeExecutionsStore, runStore }));
     // The single durable admission pool for flow runs — child-dispatch and
     // flow-start share it; see state/admission-queue-store.js's own header
