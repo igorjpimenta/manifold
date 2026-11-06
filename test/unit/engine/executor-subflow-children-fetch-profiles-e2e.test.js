@@ -5,7 +5,7 @@
  * fallback) — same simplest topology as EVICT_STALE/EVICT_GATES/SCORE.
  *
  * The load-bearing assertion for THIS test: FETCH_PROFILES declares
- * `crossProcessLock: "browser:linkedin"` on the real sub-node,
+ * `crossProcessLock: "acct:linkedin"` on the real sub-node,
  * SCRAPE_PROFILE. No prior childFlows E2E in this series exercises
  * crossProcessLock at all (confirmed via grep). Under childFlows,
  * executor-subflow-children.js's dispatchLoopChildren() spawns every
@@ -102,7 +102,7 @@ function makeFetchProfilesLikeNode() {
       nodes: {
         SCRAPE_PROFILE: {
           kind: "code",
-          crossProcessLock: "browser:linkedin",
+          crossProcessLock: "acct:linkedin",
           run: (state) => {
             const item = state.item;
             return { SCRAPE_PROFILE: { "linkedin-id": item["linkedin-id"], name: `Prospect ${item["linkedin-id"]}` } };
@@ -218,7 +218,7 @@ describe("childFlows:true FETCH_PROFILES-shaped loop, full engine E2E", () => {
     const childState = await assembleState(child.flowId, { runStore, nodeExecutionsStore, baseState: child.stateJson });
     assert.equal(childState.SCRAPE_PROFILE?.name, "Prospect jane-doe");
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
-    assert.deepEqual(lockCalls, ["browser:linkedin"]);
+    assert.deepEqual(lockCalls, ["acct:linkedin"]);
   });
 
   test("multiple items dispatched concurrently via setImmediate — crossProcessLock acquired once PER CHILD, never more than 1 concurrent holder", async () => {
@@ -236,11 +236,11 @@ describe("childFlows:true FETCH_PROFILES-shaped loop, full engine E2E", () => {
     for (const id of ids) assert.equal((await runStore.get(id)).status, "succeeded");
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
 
-    // The mechanical proof: one withLock("browser:linkedin") call per real
+    // The mechanical proof: one withLock("acct:linkedin") call per real
     // child dispatch — the OLD simple-mode behavior acquired the lock ONCE
     // for the whole node's entire item batch, not per item.
     assert.equal(lockCalls.length, 4);
-    assert.ok(lockCalls.every((n) => n === "browser:linkedin"));
+    assert.ok(lockCalls.every((n) => n === "acct:linkedin"));
     // The concurrency proof: despite dispatchLoopChildren() firing all 4
     // children's runFlow() via setImmediate in the same tick, the lock's
     // real mutual-exclusion contract (faithfully simulated by the

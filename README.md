@@ -24,7 +24,6 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `@igorjpimenta/manifold` | plugin entry (default) | openclaw runtime |
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
 | `@igorjpimenta/manifold-openclaw/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
-| `@igorjpimenta/manifold-openclaw/browser-tabs` | `browserProfileForLock`, `beginTabSession`, `endTabSession` | browser-lease extension |
 | `…/elevation` | `invokeElevated` | oc-config |
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | structured result rendezvous (`writePendingResult`, `readPendingResult`, `clearPendingResult`, `waitForToolResult`) | oc-config |
@@ -270,7 +269,7 @@ shipped **intentionally uncapped** rather than solve this — a
 carried an exhausted count across operator-triggered manual retries
 (retry only clears the failed node's own result, never a lifetime
 counter). The uncapped replacement then genuinely looped forever
-whenever the browser/CDP stayed down (real incident, 2026-08-19 — see
+whenever the shared-profile infra stayed down (real incident, 2026-08-19 — see
 `freelance_workana-proposal/nodes/propose/submit/index.js`'s header), so
 the loop was removed outright rather than re-capped: `infra_unavailable`
 now ends each of these three cascades directly, same as any other
@@ -388,7 +387,7 @@ Past the loader, these only surface during a real flow:
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
 - **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
-- **Cross-process lock with no installed lock service** — `crossProcessLock: "browser:foo"` requires the harness plugin at `~/.openclaw/extensions/manifold` (its `lock.js` supplies the service). Already present in stock installs.
+- **Cross-process lock with no installed lock service** — `crossProcessLock: "acct:foo"` requires the harness plugin at `~/.openclaw/extensions/manifold` (its `lock.js` supplies the service). Already present in stock installs.
 
 ### Two gotchas that *look* like bugs but aren't
 
@@ -678,7 +677,7 @@ The lock name is manifold's contract; whoever runs the flow provides the mechani
 ```js
 SUBMIT_CODE: {
   kind: "code",
-  crossProcessLock: "browser:freelance",   // cross-process mutex on a named resource
+  crossProcessLock: "acct:freelance",    // cross-process mutex on a named resource
   run: async (state, ctx) => { /* ... */ }
 }
 ```
@@ -958,7 +957,7 @@ fallback). Slugs may (and usually do) contain hyphens.
 that pipeline is `running`, `blocked`, or `waiting`. Cancel or finish
 the existing flow before starting a new one.
 
-**Why:** Pipelines own real-world resources (a browser profile, a
+**Why:** Pipelines own real-world resources (a shared account session, a
 marketplace login, operator attention via push notification). Parallel runs
 race for those. `executor.js: start` lines 95–111.
 
@@ -967,7 +966,7 @@ The singleton check is skipped; multiple active flows for the same
 pipelineId become a normal operating state. Use when each flow owns
 an independent slice of state — e.g., one flow per inbound reply,
 each gated independently by the operator. Don't use for pipelines
-that share a real-world resource (browser, login, etc.); the
+that share a real-world resource (a shared account, a login, etc.); the
 serialization is doing real work there.
 
 ## Session keys (agent nodes dispatched by manifold)
@@ -1343,12 +1342,6 @@ past discovery when its readiness condition is already satisfied (e.g.
 
 Procedure lives in Vulcan's `seed-pipeline-flow` skill —
 `workspace/agents/agent-forger/skills/seed-pipeline-flow/SKILL.md`.
-
-**⚠ Infra-skip gotcha.** Skipping `ENSURE_LOGIN_CODE` /
-`LAUNCH_BROWSER` / etc. via a pre-populated state leaves downstream
-CDP-dependent nodes failing with `ECONNREFUSED 127.0.0.1:9222`. Either
-run the infra step manually before seeding, or set the row's
-`current_step` to that infra node (revival starts there).
 
 ### Inspect why a flow failed
 

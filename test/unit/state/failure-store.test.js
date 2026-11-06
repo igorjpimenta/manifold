@@ -170,7 +170,7 @@ describe("classifyRecoveryHint — via get() (computed at read time)", () => {
   });
 
   test("infra_unavailable → retry-step", async () => {
-    assert.equal(await hintFor({ errorType: "infra_unavailable", summary: "browser down" }), "retry-step");
+    assert.equal(await hintFor({ errorType: "infra_unavailable", summary: "harness down" }), "retry-step");
   });
 
   test("blocked + workana-forbidden → skip-only", async () => {

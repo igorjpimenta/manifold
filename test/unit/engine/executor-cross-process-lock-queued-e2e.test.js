@@ -10,7 +10,7 @@
  *
  * Reuses the same FETCH_PROFILES-shaped fixture as
  * executor-loop-children-fetch-profiles-e2e.test.js (single sub-node
- * SCRAPE_PROFILE declaring crossProcessLock: "browser:linkedin"), but the
+ * SCRAPE_PROFILE declaring crossProcessLock: "acct:linkedin"), but the
  * injected withLock here HONORS the onWouldBlock contract for a second
  * concurrent caller — the existing sibling file's stand-in ignores opts
  * entirely, so it can't prove this.
@@ -95,7 +95,7 @@ function makeFetchProfilesLikeNode() {
       nodes: {
         SCRAPE_PROFILE: {
           kind: "code",
-          crossProcessLock: "browser:linkedin",
+          crossProcessLock: "acct:linkedin",
           run: (state) => {
             const item = state.item;
             return { SCRAPE_PROFILE: { "linkedin-id": item["linkedin-id"], name: `Prospect ${item["linkedin-id"]}` } };
@@ -242,11 +242,11 @@ describe("crossProcessLock contention surfaces as status='queued'", () => {
     assert.ok(queuedChild, "one of the two children should transition through status='queued'");
     assert.deepEqual(queuedChild.waitJson, {
       kind: "resource-lock",
-      resource: "browser:linkedin",
+      resource: "acct:linkedin",
       nodeId: "SCRAPE_PROFILE",
     });
     assert.ok(
-      queuedChild.statusReason?.includes("browser:linkedin"),
+      queuedChild.statusReason?.includes("acct:linkedin"),
       `statusReason should mention the lock name, got: ${queuedChild.statusReason}`,
     );
 
