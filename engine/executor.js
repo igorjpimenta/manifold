@@ -151,8 +151,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     // Per-pipeline singleton gate. Default (unset) is unlimited — the
     // shared admission pool below is the only gate almost every pipeline
     // needs. `allowConcurrent: false` opts a pipeline out of overlap
-    // entirely (e.g. a browser-automation poller that would race itself
-    // over shared session/gate state): reject this run before it ever
+    // entirely (e.g. a poller that would race itself over shared
+    // session/gate state): reject this run before it ever
     // competes for an admission slot if another non-terminal run of the
     // same pipelineId already exists.
     if (pipeline.allowConcurrent === false) {
