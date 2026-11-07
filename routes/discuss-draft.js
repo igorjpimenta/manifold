@@ -1,48 +1,6 @@
 // Draft persistence helpers for discuss handlers.
-// These functions mutate flow waitJson (via store.setWaiting) and optionally
-// sync the updated body/fields to the pipeline's draft file on disk.
-import { parseFrontmatterOrdered, serializeFrontmatter, looksLikeMetaNarration, findDraftPathForItem } from "./discuss-helpers.js";
-
-async function writeDraftBodyToFile(draftPath, newBody, logger) {
-  try {
-    const { readFile, writeFile } = await import("node:fs/promises");
-    const raw = await readFile(draftPath, "utf-8");
-    const [entries] = parseFrontmatterOrdered(raw);
-    const out = entries.length > 0
-      ? serializeFrontmatter(entries, newBody)
-      : newBody;
-    await writeFile(draftPath, out, "utf-8");
-    return { ok: true };
-  } catch (err) {
-    logger?.warn?.(`manifold apply-draft body write failed for ${draftPath}: ${err?.message ?? err}`);
-    return { ok: false, error: err?.message ?? String(err) };
-  }
-}
-
-async function writeDraftMetaToFile(draftPath, fields, logger) {
-  try {
-    const { readFile, writeFile } = await import("node:fs/promises");
-    const raw = await readFile(draftPath, "utf-8");
-    const [entries, body] = parseFrontmatterOrdered(raw);
-    const seen = new Set();
-    const next = entries.map(([k, v]) => {
-      if (Object.prototype.hasOwnProperty.call(fields, k)) {
-        seen.add(k);
-        return [k, String(fields[k])];
-      }
-      return [k, v];
-    });
-    for (const [k, v] of Object.entries(fields)) {
-      if (!seen.has(k)) next.push([k, String(v)]);
-    }
-    const out = serializeFrontmatter(next, body);
-    await writeFile(draftPath, out, "utf-8");
-    return { ok: true };
-  } catch (err) {
-    logger?.warn?.(`manifold apply-draft meta write failed for ${draftPath}: ${err?.message ?? err}`);
-    return { ok: false, error: err?.message ?? String(err) };
-  }
-}
+// These functions mutate flow waitJson (via store.setWaiting).
+import { looksLikeMetaNarration } from "./discuss-helpers.js";
 
 export async function persistRevisedDraft({ flowId, itemId, newDraft, source, store, logger }) {
   if (source !== "app" && looksLikeMetaNarration(newDraft)) {

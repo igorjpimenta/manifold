@@ -18,7 +18,6 @@
 // when the caller is a subagent that was never given them directly.
 // See resolveGateContext in shared.js.
 
-import { mergePendingFields, readPending } from "../../../../../state/pending-store.js";
 import { toolErr, META_FIELD_WHITELIST, normalizePendingFields, resolveGateContext, looksLikeNumericRange } from "./shared.js";
 
 export function registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore }) {
@@ -149,7 +148,7 @@ export function registerProposeDraftMetaTool({ api, readStore, componentEmitter,
       // No-op guard: fail if every proposed field is identical to the current
       // state (gate editableFields baseline merged with any pending store fields).
       {
-        const pending = readPending(flowId, itemId) ?? {};
+        const pending = (await discussStore.readPending(flowId, itemId)) ?? {};
         const pendingFields = pending.fields ?? {};
         const gateEditableFields = Array.isArray(currentGateItem?.requestPayload?.editableFields)
           ? currentGateItem.requestPayload.editableFields : [];
@@ -177,10 +176,8 @@ export function registerProposeDraftMetaTool({ api, readStore, componentEmitter,
       // multiple tool calls in the same turn, and also lets a later
       // call to propose_draft_meta refine without resetting earlier
       // operator-acknowledged fields.
-      mergePendingFields(flowId, itemId, fields);
-      if (discussStore) {
-        try { await discussStore.mergePendingFields(flowId, itemId, fields); } catch {}
-      }
+      // The discuss store owns the pending proposal (discuss_state.pending_json).
+      await discussStore.mergePendingFields(flowId, itemId, fields);
       try { api?.logger?.info?.(`propose_draft_meta tool: stashed ${Object.keys(fields).join("+")} for ${flowId.slice(0, 8)}/${itemId.slice(0, 40)}`); } catch {}
       try {
         if (componentEmitter) {

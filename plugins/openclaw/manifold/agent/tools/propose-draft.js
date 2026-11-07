@@ -9,8 +9,8 @@
 // auto-committed.
 //
 // Reads (readStore — cross-process sqlite) to validate the flow + gate
-// item exist before stashing. Writes through the on-disk pending-store
-// (sidecar JSON per flow+item) so the proposal survives gateway
+// item exist before stashing. Writes through the discuss store
+// (discuss_state.pending_json) so the proposal survives gateway
 // restart AND is readable on cold-open of a companion app via the discuss
 // history GET.
 //
@@ -19,7 +19,6 @@
 // subagent (e.g. Cyrano) that was never given them directly. See
 // resolveGateContext in shared.js.
 
-import { setPendingText } from "../../../../../state/pending-store.js";
 import { toolErr, resolveGateContext } from "./shared.js";
 
 export function registerProposeDraftTool({ api, readStore, componentEmitter, discussStore }) {
@@ -90,10 +89,8 @@ export function registerProposeDraftTool({ api, readStore, componentEmitter, dis
       if (currentText !== null && text === currentText) {
         return toolErr("No changes to apply — the proposed text is identical to the current draft. Revise the draft before calling propose_draft.");
       }
-      setPendingText(flowId, itemId, text, draftId);
-      if (discussStore) {
-        try { await discussStore.setPending(flowId, itemId, text, draftId); } catch {}
-      }
+      // The discuss store owns the pending proposal (discuss_state.pending_json).
+      await discussStore.setPending(flowId, itemId, text, draftId);
       const slotTag = draftId ? `/${draftId}` : "";
       try { api?.logger?.info?.(`propose_draft tool: stashed ${text.length} chars for ${flowId.slice(0, 8)}/${itemId.slice(0, 40)}${slotTag}`); } catch {}
       try {

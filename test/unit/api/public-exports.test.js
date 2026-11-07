@@ -79,7 +79,6 @@ const PUBLIC_API = {
       "defaultDataDir",
       "runtimeDbPath",
       "opsDbPath",
-      "pendingDir",
       "locksDir",
       "pipelinesDir",
       "stateFile",

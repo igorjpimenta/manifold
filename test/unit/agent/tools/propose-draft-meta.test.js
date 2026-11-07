@@ -3,52 +3,49 @@
  * (propose_draft_meta): field whitelist, budget normalization, no-op guard,
  * mergePendingFields, normalizePendingFields emitter shape.
  *
- * pending-store is mocked at the module level so disk I/O is replaced with an
- * in-memory map.
+ * The discuss store (discuss_state.pending_json) owns the pending proposal, so
+ * the tests hand the tool an in-memory stand-in for it.
  */
 
 import { test, mock, describe } from "node:test";
 import assert from "node:assert/strict";
 
-const pendingStoreUrl = new URL("../../../../state/pending-store.js", import.meta.url).href;
 const telemetryUrl = new URL("../../../../telemetry/index.js", import.meta.url).href;
 
 // resolveGateContext's auto-resolve delegates to getSharedResolver().resolve() —
 // tests that exercise auto-resolve set this before calling execute().
 let fakeResolver = null;
 
-const _pendingStore = new Map(); // key: `${flowId}__${itemId}`
-
-function _pendingKey(flowId, itemId) { return `${flowId}__${itemId}`; }
+const _pending = new Map(); // key: `${flowId}__${itemId}`
 
 const mergePendingFieldsCalls = [];
 
-await mock.module(pendingStoreUrl, {
-  exports: {
-    setPendingText(flowId, itemId, text, draftId = null) {
-      const key = _pendingKey(flowId, itemId);
-      const prior = _pendingStore.get(key) ?? { flowId, itemId };
-      const next = { ...prior, flowId, itemId, text, draftId: draftId ?? null, updatedAt: Date.now() };
-      _pendingStore.set(key, next);
+function makeDiscussStore() {
+  return {
+    async setPending(flowId, itemId, text, draftId = null) {
+      const key = `${flowId}__${itemId}`;
+      const prior = _pending.get(key) ?? {};
+      const next = { ...prior, text, draftId: draftId ?? prior.draftId ?? null, updatedAt: Date.now() };
+      _pending.set(key, next);
       return next;
     },
-    mergePendingFields(flowId, itemId, fields) {
-      const key = _pendingKey(flowId, itemId);
-      const prior = _pendingStore.get(key) ?? { flowId, itemId };
+    async mergePendingFields(flowId, itemId, fields) {
+      const key = `${flowId}__${itemId}`;
+      const prior = _pending.get(key) ?? {};
       const mergedFields = { ...(prior.fields ?? {}), ...fields };
-      const next = { ...prior, flowId, itemId, fields: mergedFields, updatedAt: Date.now() };
-      _pendingStore.set(key, next);
+      const next = { ...prior, fields: mergedFields, updatedAt: Date.now() };
+      _pending.set(key, next);
       mergePendingFieldsCalls.push({ flowId, itemId, fields });
       return next;
     },
-    readPending(flowId, itemId) {
-      return _pendingStore.get(_pendingKey(flowId, itemId)) ?? null;
+    async readPending(flowId, itemId) {
+      return _pending.get(`${flowId}__${itemId}`) ?? null;
     },
-    clearPending(flowId, itemId) {
-      _pendingStore.delete(_pendingKey(flowId, itemId));
+    async clearPending(flowId, itemId) {
+      _pending.delete(`${flowId}__${itemId}`);
     },
-  },
-});
+  };
+}
 
 await mock.module(telemetryUrl, {
   exports: {
@@ -78,7 +75,7 @@ function findTool(tools, name, ctx = {}) {
 
 describe("registerProposeDraftMetaTool — propose_draft_meta", () => {
   function clearMetaStore() {
-    _pendingStore.clear();
+    _pending.clear();
     mergePendingFieldsCalls.length = 0;
     fakeResolver = null;
   }
@@ -107,7 +104,7 @@ describe("registerProposeDraftMetaTool — propose_draft_meta", () => {
     };
   }
 
-  function makeMetaDeps({ readStoreFlow = makeGateFlowMeta(), componentEmitter = null, discussStore = null, ctx = {} } = {}) {
+  function makeMetaDeps({ readStoreFlow = makeGateFlowMeta(), componentEmitter = null, discussStore = makeDiscussStore(), ctx = {} } = {}) {
     const readStore = { get: (id) => (id === readStoreFlow?.flowId ? readStoreFlow : null) };
     const { api, tools } = createToolApi();
     registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore });
@@ -326,7 +323,7 @@ describe("registerProposeDraftMetaTool — propose_draft_meta", () => {
     };
     const readStore = { get: () => flow };
     const { api, tools } = createToolApi();
-    registerProposeDraftMetaTool({ api, readStore });
+    registerProposeDraftMetaTool({ api, readStore, discussStore: makeDiscussStore() });
     const toolDef = findTool(tools, "propose_draft_meta");
     const result = await toolDef.execute("tc", { flowId: "fid-ni-meta", itemId: "item-meta", fields: { budget: 7000 } }, null);
     assert.equal(result.isError, true);
@@ -397,12 +394,13 @@ describe("registerProposeDraftMetaTool — propose_draft_meta", () => {
     assert.deepEqual(call.fields, { budget: 9000 });
   });
 
-  test("calls discussStore.mergePendingFields when discussStore provided", async () => {
+  test("writes the merged fields through the discuss store", async () => {
     clearMetaStore();
     const mergeDiscussCalls = [];
     const discussStore = {
       setPending: () => {},
       mergePendingFields: (...args) => mergeDiscussCalls.push(args),
+      readPending: async () => null,
     };
     const { toolDef } = makeMetaDeps({ discussStore });
     await toolDef.execute("tc", {

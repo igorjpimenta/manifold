@@ -74,9 +74,8 @@ export function selectDiscussProvider({ primarySpec, chain, isCooldown }) {
 export function createDiscussHandler({
   api,
   normalizePendingFields,
-  readPending,
-  mergePendingFields,
-  setPendingText,
+  // The discuss store owns the pending proposal (discuss_state.pending_json).
+  discussStore,
   componentEmitter,
   sessions,
 }) {
@@ -259,7 +258,7 @@ export function createDiscussHandler({
             }
             if (_eFields) {
               try {
-                mergePendingFields(flowId, itemIdForDraft, _eFields);
+                await discussStore.mergePendingFields(flowId, itemIdForDraft, _eFields);
                 api.logger.info(`manifold discuss: applied child-session meta [${_ck.slice(-8)}]: ${JSON.stringify(Object.keys(_eFields))}`);
               } catch (_err) {
                 api.logger.warn(`manifold discuss: mergePendingFields error: ${_err?.message}`);
@@ -267,15 +266,15 @@ export function createDiscussHandler({
             }
             if (_eDraft) {
               try {
-                setPendingText(flowId, itemIdForDraft, _eDraft);
+                await discussStore.setPending(flowId, itemIdForDraft, _eDraft);
                 api.logger.info(`manifold discuss: applied child-session draft [${_ck.slice(-8)}] (${_eDraft.length} chars)`);
               } catch (_err) {
-                api.logger.warn(`manifold discuss: setPendingText error: ${_err?.message}`);
+                api.logger.warn(`manifold discuss: setPending error: ${_err?.message}`);
               }
             }
             if ((_eFields || _eDraft) && componentEmitter) {
               try {
-                const _pend = readPending(flowId, itemIdForDraft);
+                const _pend = await discussStore.readPending(flowId, itemIdForDraft);
                 await componentEmitter({
                   flowId, itemId: itemIdForDraft,
                   component: {
@@ -297,7 +296,7 @@ export function createDiscussHandler({
       }
       let proposedDraft = null;
       let proposedMeta = null;
-      const currentPending = readPending(flowId, itemIdForDraft);
+      const currentPending = await discussStore.readPending(flowId, itemIdForDraft);
       if (currentPending) {
         if (typeof currentPending.text === "string" && currentPending.text.length > 0) proposedDraft = currentPending.text;
         if (currentPending.fields && Object.keys(currentPending.fields).length > 0) proposedMeta = currentPending.fields;

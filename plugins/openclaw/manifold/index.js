@@ -35,7 +35,6 @@ import {
   registerReportDraftBlockedTool,
   registerReportDraftSkipTool,
 } from "./agent/tools/index.js";
-import { readPending, clearPending, setPendingText, mergePendingFields } from "../../../state/pending-store.js";
 import { checkDb } from "../../../state/db-health.js";
 import { writeCorruptionAlert } from "../../../state/db-guard.js";
 import { createGateResolver } from "../../../gates/gate-resolver.js";
@@ -535,8 +534,6 @@ export default definePluginEntry({
       emit: emitCanonical,
       discussDefaultAgent,
       invokeElevated,
-      readPending,
-      clearPending,
       discussStore,
       runStore,
       nodeExecutionsStore,
@@ -581,10 +578,7 @@ export default definePluginEntry({
       runStore,
       admissionQueueStore,
       resumeParentRef,
-      normalizePendingFields: discussHandlers.normalizePendingFields,
-      readPending,
-      mergePendingFields,
-      setPendingText,
+      discussStore,
       componentEmitter,
       getBroadcast: () => _gatewayBroadcast,
       sessions,

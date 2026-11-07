@@ -68,10 +68,14 @@ function makeDeps(api, overrides = {}) {
     emit: async () => ({ ok: true }),
     discussDefaultAgent: null,
     invokeElevated: async () => ({}),
-    readPending: () => null,
-    clearPending: () => {},
     sessions,
-    discussStore: { getComponent: () => null, listComponents: () => [], setComponent: () => {} },
+    discussStore: {
+      getComponent: () => null,
+      listComponents: () => [],
+      setComponent: () => {},
+      readPending: async () => null,
+      clearPending: async () => {},
+    },
     sessionIndex: {
       async recordThread({ flowId, gateNodeId, itemId, agentId, sessionKey }) {
         threads.set(key(flowId, gateNodeId, itemId), { sessionKey, agentId: agentId ?? null });

@@ -115,6 +115,10 @@ export const discussState = sqliteTable('discuss_state', {
   componentsJson: text('components_json').notNull().default('[]'),
 }, (table) => [
   index('idx_discuss_updated').on(table.updatedAt),
+  // One row per discuss thread. Without this constraint two concurrent
+  // appendMessage calls each insert their own row and the thread's history
+  // splits across them.
+  uniqueIndex('idx_discuss_state_unique').on(table.flowId, table.itemId),
 ]);
 
 export const flowSessions = sqliteTable('flow_sessions', {
