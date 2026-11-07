@@ -1,8 +1,9 @@
-// Pins openclaw.plugin.json to the registration surface in code.
+// Pins the openclaw plugin manifests (repo root + adapter) to the
+// registration surface in code.
 //
 // Invariant: the plugin registers no raw tools and declares no tool
 // contract — manifold exposes its pipeline tools over MCP only — and the set
-// of config-schema property paths in the manifest's configSchema is exactly
+// of config-schema property paths in each manifest's configSchema is exactly
 // the set in index.js's inline configSchema. A tool registered without the
 // host knowing about it fails here.
 //
@@ -187,9 +188,15 @@ function manifestConfigSchemaPaths(manifest) {
   return paths;
 }
 
-function readManifest() {
-  return JSON.parse(readFileSync(path.join(REPO_ROOT, "plugins/openclaw/manifold/openclaw.plugin.json"), "utf8"));
+function readManifest(relativePath) {
+  return JSON.parse(readFileSync(path.join(REPO_ROOT, relativePath), "utf8"));
 }
+
+// The repo root manifest is the one the host loads for a git install; the
+// adapter manifest is the same schema carried by the adapter package. Both
+// are pinned to the registration surface in code.
+const ROOT_MANIFEST = "openclaw.plugin.json";
+const ADAPTER_MANIFEST = "plugins/openclaw/manifold/openclaw.plugin.json";
 
 describe("openclaw.plugin.json contract parity", () => {
   test("the plugin registers no raw tools — the pipeline surface is MCP-only", async () => {
@@ -200,12 +207,14 @@ describe("openclaw.plugin.json contract parity", () => {
       `the plugin registered raw tools (${registered.join(", ")}) — manifold exposes the pipeline tools over MCP only`,
     );
 
-    const declared = readManifest().contracts?.tools ?? [];
-    assert.deepEqual(
-      declared,
-      [],
-      "contracts.tools must stay empty: the plugin contributes no raw tools",
-    );
+    for (const manifestPath of [ROOT_MANIFEST, ADAPTER_MANIFEST]) {
+      const declared = readManifest(manifestPath).contracts?.tools ?? [];
+      assert.deepEqual(
+        declared,
+        [],
+        `${manifestPath}: contracts.tools must stay empty: the plugin contributes no raw tools`,
+      );
+    }
 
     // The raw registration is gone, not the capability: the MCP server still
     // carries the same pipeline tools.
@@ -218,22 +227,36 @@ describe("openclaw.plugin.json contract parity", () => {
   });
 
   test("manifest configSchema property paths equal index.js inline configSchema", () => {
-    const manifestPaths = new Set(manifestConfigSchemaPaths(readManifest()));
     const codePaths = new Set(inlineIndexConfigSchemaPaths());
     assert.ok(codePaths.size > 0, "index.js inline configSchema yielded no property paths");
 
-    const onlyInManifest = [...manifestPaths].filter((p) => !codePaths.has(p)).sort();
-    const onlyInCode = [...codePaths].filter((p) => !manifestPaths.has(p)).sort();
+    for (const manifestPath of [ROOT_MANIFEST, ADAPTER_MANIFEST]) {
+      const manifestPaths = new Set(manifestConfigSchemaPaths(readManifest(manifestPath)));
 
+      const onlyInManifest = [...manifestPaths].filter((p) => !codePaths.has(p)).sort();
+      const onlyInCode = [...codePaths].filter((p) => !manifestPaths.has(p)).sort();
+
+      assert.deepEqual(
+        onlyInManifest,
+        [],
+        `${manifestPath}: configSchema paths in the manifest but not in index.js: ${onlyInManifest.join(", ")}`,
+      );
+      assert.deepEqual(
+        onlyInCode,
+        [],
+        `${manifestPath}: configSchema paths in index.js but not in the manifest: ${onlyInCode.join(", ")}`,
+      );
+    }
+  });
+
+  // The host validates plugin config against the root manifest, so the two
+  // manifests must not drift: a config key added to one and not the other is
+  // accepted on one surface and rejected on the other.
+  test("the root and adapter manifests declare the same configSchema", () => {
     assert.deepEqual(
-      onlyInManifest,
-      [],
-      `configSchema paths in the manifest but not in index.js: ${onlyInManifest.join(", ")}`,
-    );
-    assert.deepEqual(
-      onlyInCode,
-      [],
-      `configSchema paths in index.js but not in the manifest: ${onlyInCode.join(", ")}`,
+      readManifest(ROOT_MANIFEST).configSchema,
+      readManifest(ADAPTER_MANIFEST).configSchema,
+      "the root manifest (host-validated) and the adapter manifest drifted apart",
     );
   });
 });
