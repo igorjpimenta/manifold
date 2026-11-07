@@ -24,6 +24,7 @@
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForTerminal, waitForAll } from "../../helpers/wait-for-event.js";
+import { waitForChildFlowIds, waitForTerminalStatus } from "../../helpers/wait-for-children.js";
 import { flowEmitter } from "../../../events.js";
 import path from "node:path";
 import os from "node:os";
@@ -36,7 +37,6 @@ import { createExecutor } from "../../../engine/executor.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 import { getGlobalConcurrencyLimit, _resetForTests as resetChildFanoutCap } from "../../../engine/global-concurrency.js";
-import { drainDetachedResumes } from "../../../engine/admission-promotion-resume.js";
 
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
@@ -128,15 +128,6 @@ async function makeHarness(concurrency) {
 async function childFlowIds(harness, parentFlowId) {
   const invocationIds = await harness.nodeExecutionsStore.listInvocationIdsForNode(parentFlowId, "SCORE");
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
-}
-
-// Raised above the sibling e2e files' tighter default — a full-suite
-// concurrent run showed the tighter margin flakes under load.
-// Also drains detached promotion resumes — a flow woken by another flow's
-// slot release runs on its own tick, not inline in the releaser's call.
-async function flush(ms = 60) {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-  await drainDetachedResumes();
 }
 
 async function store_seedFiltered(harness, flowId, filtered) {
@@ -293,12 +284,11 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
       { id: "job-11", precachedHit: true },
     ]);
     await executor.runFlow(record.flowId);
-    await flush();
 
-    const ids = await childFlowIds(harness, record.flowId);
+    const ids = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "SCORE", 3);
     assert.equal(ids.length, 3);
     for (const id of ids) {
-      assert.equal((await runStore.get(id)).status, "succeeded");
+      assert.equal((await waitForTerminalStatus(runStore, id)).status, "succeeded");
     }
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
   });
@@ -340,18 +330,16 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
     const recordB = await executor.start("other_parent", {}, { kind: "test" });
     await store_seedFiltered(harness, recordB.flowId, [{ id: "job-b", precachedHit: true }]);
     await executor.runFlow(recordB.flowId);
-    await flush();
 
-    const [childA] = await childFlowIds(harness, recordA.flowId);
-    const bInvocationIds = await nodeExecutionsStore.listInvocationIdsForNode(recordB.flowId, "SCORE");
-    const [childB] = (await runStore.listForParentInvocations(bInvocationIds)).map((c) => c.flowId);
+    const [childA] = await waitForChildFlowIds(nodeExecutionsStore, runStore, recordA.flowId, "SCORE", 1);
+    const [childB] = await waitForChildFlowIds(nodeExecutionsStore, runStore, recordB.flowId, "SCORE", 1);
 
     // Both children eventually succeed — the assertion that matters is that
     // job-b's child, from an entirely unrelated pipeline, was NOT simply
     // starved forever behind job-a's own slot.
-    assert.equal((await runStore.get(childA)).status, "succeeded");
-    assert.equal((await runStore.get(childB)).status, "succeeded", "a different pipeline's queued child must still get woken by the shared global hook, not just siblings of the same pipeline");
-    assert.equal((await runStore.get(recordA.flowId)).status, "succeeded");
-    assert.equal((await runStore.get(recordB.flowId)).status, "succeeded");
+    assert.equal((await waitForTerminalStatus(runStore, childA)).status, "succeeded");
+    assert.equal((await waitForTerminalStatus(runStore, childB)).status, "succeeded", "a different pipeline's queued child must still get woken by the shared global hook, not just siblings of the same pipeline");
+    assert.equal((await waitForTerminalStatus(runStore, recordA.flowId)).status, "succeeded");
+    assert.equal((await waitForTerminalStatus(runStore, recordB.flowId)).status, "succeeded");
   });
 });

@@ -19,6 +19,7 @@
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal, waitForStatus } from "../../helpers/wait-for-event.js";
+import { waitForChildFlowIds, waitForTerminalStatus } from "../../helpers/wait-for-children.js";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -147,19 +148,13 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// Raised above the sibling e2e files' tighter default — a full-suite
-// concurrent run showed the tighter margin flakes under load.
-function flush(ms = 60) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
   test("single item: real child spawned, child's own GATE blocks the child (not the parent)", async () => {
     harness = await makeHarness();
-    const { executor, runStore } = harness;
+    const { executor, runStore, nodeExecutionsStore } = harness;
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc", name: "Jane" }]);
@@ -174,7 +169,7 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     // fixed flush() flakes under full-suite CI load (the assertion fires
     // while the child is still running); the state store already announces
     // the transition, so wait for the condition that matters.
-    const kids = await childFlowIds(harness, record.flowId);
+    const kids = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "CONNECT", 1);
     assert.equal(kids.length, 1);
     const child = await waitForStatus(runStore, kids[0], (r) => r.status === "blocked");
     assert.equal(child.pipelineId, "test_parent::CONNECT");
@@ -189,8 +184,8 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc" }]);
     await executor.runFlow(record.flowId);
-    await flush(); // let the child's fire-and-forget runFlow reach its own GATE
-    const [childFlowId] = await childFlowIds(harness, record.flowId);
+    const [childFlowId] = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "CONNECT", 1);
+    await waitForStatus(runStore, childFlowId, (r) => r.status === "blocked");
 
     const result = await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "approve", source: "cli" });
     assert.equal(result.ok, true);
@@ -201,7 +196,7 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     assert.equal(childState.SEND_CR_CODE?.mode, "ok");
     assert.equal(childState.STAMP_SENT?.stampedAt, "t");
 
-    const parent = await runStore.get(record.flowId);
+    const parent = await waitForTerminalStatus(runStore, record.flowId);
     assert.equal(parent.status, "succeeded", "parent must auto-resume past CONNECT once its only child is terminal");
   });
 
@@ -212,8 +207,8 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc" }]);
     await executor.runFlow(record.flowId);
-    await flush(); // let the child's fire-and-forget runFlow reach its own GATE
-    const [childFlowId] = await childFlowIds(harness, record.flowId);
+    const [childFlowId] = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "CONNECT", 1);
+    await waitForStatus(runStore, childFlowId, (r) => r.status === "blocked");
 
     const childSettled1 = waitForTerminal((q) => q.flowId === childFlowId);
     await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "reject", source: "cli" });
@@ -228,28 +223,25 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
 
   test("two items: parent stays blocked until BOTH siblings are terminal, resolving out of order", async () => {
     harness = await makeHarness();
-    const { executor, runStore, gateResolver } = harness;
+    const { executor, runStore, gateResolver, nodeExecutionsStore } = harness;
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc" }, { "linkedin-id": "def" }]);
     await executor.runFlow(record.flowId);
-    await flush(); // let both children's fire-and-forget runFlow reach their own GATE
 
-    const kids = await childFlowIds(harness, record.flowId);
+    const kids = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "CONNECT", 2);
     assert.equal(kids.length, 2);
     const byItem = {};
     for (const flowId of kids) {
-      const c = await runStore.get(flowId);
+      const c = await waitForStatus(runStore, flowId, (r) => r.status === "blocked");
       byItem[c.waitJson.items[0].itemId] = flowId;
     }
 
     await gateResolver.recordItemDecision({ flowId: byItem.def, itemId: "def", decision: "approve", source: "cli" });
-    await flush();
     assert.equal((await runStore.get(record.flowId)).status, "blocked", "one sibling (abc) still pending — parent must not resume yet");
 
     await gateResolver.recordItemDecision({ flowId: byItem.abc, itemId: "abc", decision: "reject", source: "cli" });
-    await flush();
-    assert.equal((await runStore.get(record.flowId)).status, "succeeded", "last sibling now terminal — parent must auto-resume");
+    assert.equal((await waitForTerminalStatus(runStore, record.flowId)).status, "succeeded", "last sibling now terminal — parent must auto-resume");
   });
 
   test("SEND_CR_CODE mode=agent_required routes through SEND_CR_AGENT before STAMP_SENT", async () => {
@@ -259,8 +251,8 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc" }]);
     await executor.runFlow(record.flowId);
-    await flush(); // let the child's fire-and-forget runFlow reach its own GATE
-    const [childFlowId] = await childFlowIds(harness, record.flowId);
+    const [childFlowId] = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "CONNECT", 1);
+    await waitForStatus(runStore, childFlowId, (r) => r.status === "blocked");
 
     const childSettled2 = waitForTerminal((q) => q.flowId === childFlowId);
     await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "approve", source: "cli" });

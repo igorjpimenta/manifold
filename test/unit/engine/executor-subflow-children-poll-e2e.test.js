@@ -23,6 +23,7 @@
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForTerminal } from "../../helpers/wait-for-event.js";
+import { waitForChildFlowIds, waitForRunRow, waitForTerminalStatus } from "../../helpers/wait-for-children.js";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -156,10 +157,6 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-function flush(ms = 30) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function store_seedProbeResults(harness, flowId, probeResults) {
   const flow = await harness.store.get(flowId);
   await harness.store.setRunning({
@@ -216,10 +213,9 @@ describe("childFlows:true POLL-shaped loop, full engine E2E", () => {
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedProbeResults(harness, record.flowId, [{ jobId: "job-3", needsReply: true }]);
     await executor.runFlow(record.flowId);
-    await flush(50);
 
-    const [childFlowId] = await childFlowIds(harness, record.flowId);
-    const child = await runStore.get(childFlowId);
+    const [childFlowId] = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "POLL", 1);
+    const child = await waitForTerminalStatus(runStore, childFlowId);
     assert.equal(child.status, "succeeded");
     const childState = await assembleState(child.flowId, { runStore, nodeExecutionsStore, baseState: child.stateJson });
     assert.equal(childState.INVOKE_REPLY?.invoked, true);
@@ -231,8 +227,7 @@ describe("childFlows:true POLL-shaped loop, full engine E2E", () => {
     // the identical nodeCtx a root-level node would.
     const targetFlowId = childState.INVOKE_REPLY.flowId;
     assert.ok(targetFlowId, "INVOKE_REPLY must report the real spawned flowId");
-    await flush(50);
-    const targetFlow = await runStore.get(targetFlowId);
+    const targetFlow = await waitForRunRow(runStore, targetFlowId, (r) => r.status === "succeeded");
     assert.ok(targetFlow, "the real target pipeline flow must actually exist in runStore");
     assert.equal(targetFlow.status, "succeeded");
     assert.equal(targetFlow.pipelineId, "test_reply_target");

@@ -14,6 +14,7 @@
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForTerminal } from "../../helpers/wait-for-event.js";
+import { waitForChildFlowIds, waitForTerminalStatus } from "../../helpers/wait-for-children.js";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -109,12 +110,6 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// Raised above the sibling e2e files' tighter default — a full-suite
-// concurrent run showed the tighter margin flakes under load.
-function flush(ms = 60) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 async function store_seedStaleGates(harness, flowId, staleGates) {
   const flow = await harness.store.get(flowId);
   await harness.store.setRunning({
@@ -149,7 +144,7 @@ describe("childFlows:true EVICT_STALE-shaped loop, full engine E2E", () => {
 
   test("multiple stale gates — every selected item spawns a real child (this fixture's 3 items stay under the shared 8-wide default cap)", async () => {
     harness = await makeHarness();
-    const { executor, runStore } = harness;
+    const { executor, runStore, nodeExecutionsStore } = harness;
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedStaleGates(harness, record.flowId, [
@@ -158,11 +153,10 @@ describe("childFlows:true EVICT_STALE-shaped loop, full engine E2E", () => {
       { id: "cccc3333:job-c", targetFlowId: "cccc3333-full", targetBranchKey: "job-c", reason: "bid cap reached" },
     ]);
     await executor.runFlow(record.flowId);
-    await flush();
 
-    const ids = await childFlowIds(harness, record.flowId);
+    const ids = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "EVICT_STALE", 3);
     assert.equal(ids.length, 3, "all 3 selected stale gates spawn a child, no fan-out limiter");
-    for (const id of ids) assert.equal((await runStore.get(id)).status, "succeeded");
+    for (const id of ids) assert.equal((await waitForTerminalStatus(runStore, id)).status, "succeeded");
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
   });
 
@@ -173,7 +167,7 @@ describe("childFlows:true EVICT_STALE-shaped loop, full engine E2E", () => {
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedStaleGates(harness, record.flowId, []);
     await executor.runFlow(record.flowId);
-    await flush();
+    await waitForTerminalStatus(runStore, record.flowId);
 
     assert.equal((await childFlowIds(harness, record.flowId)).length, 0);
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
@@ -188,7 +182,8 @@ describe("childFlows:true EVICT_STALE-shaped loop, full engine E2E", () => {
       { id: "dddd4444:job-d", targetFlowId: "dddd4444-full", targetBranchKey: "job-d", reason: "listing gone" },
     ]);
     await executor.runFlow(record.flowId);
-    await flush();
+    const [childFlowId] = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "EVICT_STALE", 1);
+    await waitForTerminalStatus(runStore, childFlowId);
 
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });
     assert.ok(groups.EVICT_STALE);
