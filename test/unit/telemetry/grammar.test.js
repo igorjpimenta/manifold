@@ -95,7 +95,7 @@ describe("classify", () => {
     assert.equal(r.parentHint, null);
   });
 
-  it("leaves the legacy gf- thread shape unmatched — core no longer mints it", () => {
+  it("leaves the gf- thread shape unmatched — core doesn't mint it", () => {
     const r = classify("gf-discuss-a700a3ea-propose-some-item-slug");
     assert.equal(r.kind, "unknown");
     assert.equal(r.agentId, null);

@@ -3,7 +3,7 @@
   "version": "2026.10.26-beta.1",
   "private": true,
   "license": "UNLICENSED",
-  "description": "LangGraph-style pipeline executor for openclaw. Loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs, dispatching nodes to agents via runtime.subagent.run with explicit state-graph routing.",
+  "description": "LangGraph-style pipeline executor for openclaw. Loads pipeline definitions from <pipelinesDir>/<team>_<name>/index.js and runs them against managed flow_runs, dispatching nodes to agents with explicit state-graph routing.",
   "type": "module",
   "exports": {
     ".": "./index.js",

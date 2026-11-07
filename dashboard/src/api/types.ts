@@ -115,7 +115,7 @@ export interface WaitJson {
 /**
  * Canonical error-record shape shared across every consumer — SQL row
  * (flow_node_executions), JSON wire response, this TS type, and client
- * structs all use the same field set. Replaces the old per-field
+ * structs all use the same field set. Replaces the per-field
  * inconsistency (SubflowData.errors was typed string[] but the real wire
  * payload could contain objects — that mistyping is what caused
  * SubflowsCard.tsx's .slice() crash; RunState.errors was typed
@@ -151,8 +151,7 @@ export interface SubflowStepResult {
 
 /** One row from GET /manifold/runs/:flowId/tree (routes/runs.js's buildTreeNodeRows)
  *  — one per top-level (subflow_key IS NULL) invocation, ordered by invokedAt.
- *  Backs PathTrail/GraphView's executed-path rendering (SUBFLOW_PARENT_STATE_
- *  ACCESS.design.md's Phase 3b), replacing stateJson._stepHistory as the source. */
+ *  Backs PathTrail/GraphView's executed-path rendering. */
 export interface FlowTreeItem {
   type: "node";
   invocationId: string;
@@ -190,7 +189,7 @@ export interface FlowRunFull {
   statusReason: string | null;
   stateJson: RunState;
   waitJson: WaitJson | null;
-  /** Phase 1.5: normalized error history sourced from flow_node_executions, sibling to stateJson (not nested — keeps flow-level and subflow-level shapes symmetric). */
+  /** Normalized error history sourced from failure_events, sibling to stateJson (not nested — keeps flow-level and subflow-level shapes symmetric). */
   errorEntries?: ErrorEntry[];
   createdAt: number | null;
   updatedAt: number | null;

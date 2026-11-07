@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { loadFleet } from "../agent/fleet.js";
 import { ENTRY_FIELDS } from "./needs-resolver.js";
 
-// Phase 2: for every subflow node under `nodes`, register its .flow as an
+// For every subflow node under `nodes`, register its .flow as an
 // addressable pipeline (`${pipelineId}::${nodeId}`) so a real child
 // flow_run can be started against it via the normal
 // executor.start()/pipelinesRef path. Must happen HERE, inside
@@ -41,7 +41,7 @@ function registerSubflowChildren(pipelineId, nodes, { result, indexPath, pipelin
       // semantics. A plain subflow has no .kind and this is simply
       // undefined, so its dispatch is ordinary.
       const synthetic = { id: syntheticId, kind: node.flow.kind, state: {}, nodes: node.flow.nodes, edges: node.flow.edges };
-      // Option B "needs:" — this synthetic child's own hop-1 ancestor is
+      // This synthetic child's own hop-1 ancestor is
       // `nodes`, the map that contains the subflow node (nodeId) which
       // spawns it; prepend it onto whatever ancestor chain THIS level was
       // itself given, so a needs:{hops:N} declared anywhere inside the
@@ -101,7 +101,7 @@ export async function loadPipelines(dir, logger) {
     if (ent.name.startsWith(".")) continue;
     if (!ent.isDirectory()) {
       if (ent.name.endsWith(".js")) {
-        logger?.warn?.(`manifold loader: skipping legacy flat-file pipeline ${ent.name}; convert to a folder with index.js`);
+        logger?.warn?.(`manifold loader: skipping flat-file pipeline ${ent.name}; convert to a folder with index.js`);
       }
       continue;
     }
@@ -139,7 +139,7 @@ export async function loadPipelines(dir, logger) {
       result.set(pipeline.id, { ...pipeline, _filepath: indexPath, _dir: pipelineDir, _fleet });
       logger?.info?.(`manifold loader: loaded pipeline "${pipeline.id}" from ${ent.name}/${_fleet ? " (fleet.yaml found)" : ""}`);
 
-      // Phase 2: for every subflow node, register its .flow as an
+      // For every subflow node, register its .flow as an
       // addressable pipeline (`${pipeline.id}::${nodeId}`) so a real child
       // flow_run can be started against it via the normal
       // executor.start()/pipelinesRef path. Must happen HERE, inside
@@ -165,10 +165,9 @@ export async function loadPipelines(dir, logger) {
  * its own `pipelinesRef.value.size > 0` check-then-act — that heuristic let
  * a caller race ahead of another's still-in-flight load, intermittently
  * finding `pipelinesRef.value` empty and starting a redundant load whose
- * completion the original caller never awaited (observed 2026-08-04: orphan
- * flow revival at boot raced the loader service and failed with
- * "pipeline not loaded: <id>" even though pipelines finished loading ~150ms
- * later in the same boot).
+ * completion the original caller never awaited — so an orphaned flow
+ * revival at boot cannot race the loader service and fail with
+ * "pipeline not loaded: <id>".
  *
  * `load` is injectable for tests; defaults to the real `loadPipelines`.
  */
@@ -246,7 +245,7 @@ function validatePipeline(p, filename, ancestorNodeMaps = []) {
       }
       usedGroupIds.set(nodeId, nodeId);
 
-      // Option B "needs:" — node.flow.nodes' own hop-1 ancestor, once
+      // node.flow.nodes' own hop-1 ancestor, once
       // spawned, is this pipeline itself (p.nodes) — prepend it here so
       // nested needs: entries resolve against a real ancestor chain.
       validateSubflowNode(p, `node "${nodeId}"`, node, [p.nodes, ...ancestorNodeMaps]);
@@ -319,7 +318,7 @@ function validatePipeline(p, filename, ancestorNodeMaps = []) {
   }
 }
 
-// Option B "needs:" — any code/agent/subflow node, top-level or nested,
+// Any code/agent/subflow node, top-level or nested,
 // may declare `.needs: { varName: {hops, nodeId}, ... }` — keyed by the
 // LOCAL variable name it'll be resolved as via ctx.needs(varName), not by
 // nodeId, so it reads like an ORM relation declaration rather than a bare
@@ -433,10 +432,9 @@ function validateSubflowNode(p, label, node, ancestorNodeMaps) {
     throw new Error(`pipeline ${p.id}: ${label} (subflow) requires .mode to be "any" or "all"`);
   }
   // Every subflow node's items become real flow_runs children — requires a
-  // .flow definition (.flow.nodes/.edges); there is no other subflow shape,
-  // the old branch-worker engine having been deleted outright. Renamed from
-  // kind:"loop" — a selector returning a single-item array is the
-  // degenerate "spawn exactly one child" case, not a different kind.
+  // .flow definition (.flow.nodes/.edges); there is no other subflow shape.
+  // A selector returning a single-item array is the degenerate "spawn
+  // exactly one child" case, not a different kind.
   if (!node.flow) {
     throw new Error(`pipeline ${p.id}: ${label} (subflow) requires .flow (.flow.nodes/.edges)`);
   }

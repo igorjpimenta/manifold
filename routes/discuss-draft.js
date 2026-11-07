@@ -85,7 +85,7 @@ export async function persistRevisedMeta({ flowId, itemId, fields, store, logger
     // Reject the whole call if any field the pipeline declares numeric
     // (type: "money"/"number" in its own gate-layout.js) is being set to
     // something other than a real number — e.g. a numeric-looking string.
-    // Fields the layout doesn't know about (legacy callers, unknown ids)
+    // Fields the layout doesn't know about (unknown ids)
     // fall through unchecked since there's no declared type to enforce.
     const fieldTypes = collectLayoutFieldTypes(items[idx]?.requestPayload?.layout);
     for (const [key, v] of Object.entries(fields)) {

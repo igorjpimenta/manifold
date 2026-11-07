@@ -1,11 +1,10 @@
 # Cancel doesn't abort in-flight agent sessions — open gap
 
-**Status: not fixed, documented only (2026-08-12).** `killActiveSessions` — the
-scaffolding that used to attempt this, in `engine/executor-cancel.js` — was
-deleted the same day as dead code, since it had been a guaranteed no-op
-since `branchService`/`flow_branches` were removed. This doc records what
-the gap actually is and what a real fix would need, so it's discoverable
-next time cancel behavior comes up rather than silently forgotten.
+**Status: not fixed, documented only.** There is no `killActiveSessions`
+step in `engine/executor-cancel.js` — cancel cannot abort an in-flight
+agent session. This doc records what the gap actually is and what a real fix
+would need, so it's discoverable next time cancel behavior comes up rather
+than silently forgotten.
 
 ## What cancel actually does today
 
@@ -24,8 +23,8 @@ node is actually doing.
 ## The gap
 
 If a `kind:"agent"` node is mid-dispatch (an actual outbound LLM/Claude call,
-via `dispatchAgentEntry` → `dispatchAgentWithRetry` → `runSubagentTurn` in
-`engine/agent-dispatch.js`/`executor-nodes.js`) when its flow — root or
+via `dispatchAgentEntry` → `dispatchAgentWithRetry` → the injected
+`runTurn` in `engine/agent-dispatch.js`/`executor-nodes.js`) when its flow — root or
 subflow, doesn't matter — gets cancelled:
 
 - The LLM call is never interrupted. It keeps running to natural completion,
@@ -51,22 +50,19 @@ subflow — `cascadeCancelChildren` re-invokes the exact same
 `completeCancellation` on each child, so a child's own in-flight agent
 dispatch has the exact same unaddressed gap.
 
-## Why the old mechanism can't just be revived
+## Why there's no ready-made list to kill from
 
-The deleted `killActiveSessions` step sourced its session-key list
-(`activeBranches`) from `branchService`/`flow_branches` — the pre-`childFlows`
-subflow model, fully removed in an earlier refactor. There is no equivalent
-"list of currently active session keys" table in the current model to
-trivially restore that function against.
+There is no "list of currently active session keys" table in the current
+model, so nothing can enumerate the sessions a cancel would have to kill.
 
 ## What a real fix would need
 
 The raw ingredient does exist: every `kind:"agent"` dispatch writes a row to
 `flow_sessions` (`state/session-index.js`, via `sessionIndex.record({flowId,
-sessionKey, nodeId})` at `agent-dispatch.js`) **before** the LLM call
-starts. `sessionKey` itself is derived from `entry.sessionKey ??
-entry.sessionKeyBuilder?.(state, flowId) ?? defaultAgentSessionKey(agent,
-flowId, nodeId)` (`executor-nodes.js`/`executor-helpers.js`).
+session, nodeId})` at `agent-dispatch.js`) **before** the LLM call
+starts. The session id itself is the harness's: `entry.session ??
+entry.sessionBuilder?.(state, flowId)` (`executor-nodes.js`) — a node that
+declares neither is refused at dispatch.
 
 What's missing is a **completion signal** — `flow_sessions` is write-once,
 answering "did a dispatch start" (`hasSessionForNode()`), not "is it still
@@ -76,16 +72,14 @@ running." A real fix would need to:
    `flow_node_executions` (or equivalent) for the target flow, filtering to
    rows with no completion record yet — not by reading a ready-made table.
 2. Feed that derived list into a real `killActiveSessions`-equivalent, still
-   using `sessions.abort` via `callGatewayFromCli` (the loopback-WS
-   self-pairing pattern the old code already worked out — still correct,
-   `OPENCLAW_GATEWAY_TOKEN` alone doesn't carry the right scope for a direct
-   HTTP/WS call).
+   using `sessions.abort` via `callGatewayFromCli` (loopback-WS
+   self-pairing — `OPENCLAW_GATEWAY_TOKEN` alone doesn't carry the right
+   scope for a direct HTTP/WS call).
 3. Apply it recursively through `cascadeCancelChildren`, same as the
    terminal-status cascade already does.
 4. Decide what to record when an abort races a dispatch that's already
-   finishing (the old code's own unresolved ambiguity: is `"no-active-run"`
-   "already done" or "the abort mechanism missed it"?) — worth resolving
-   properly this time rather than carrying the same ambiguity forward.
+   finishing (is `"no-active-run"` "already done" or "the abort mechanism
+   missed it"?) — worth resolving properly rather than leaving it ambiguous.
 
 Not scoped or estimated here — this doc exists to make the gap findable, not
 to commit to fixing it on any particular timeline.

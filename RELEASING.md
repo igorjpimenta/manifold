@@ -68,7 +68,7 @@ consumers):
 
     npm --prefix <installPath>/dashboard run build
 
-oc-config consumers: bump the `#<version>` pins in the npm git-deps
+Consumers bump the `#<version>` pins in their npm git-deps
 (`workspace/*`, `extensions/*`) and regen their lockfiles — one chore PR
 per release.
 

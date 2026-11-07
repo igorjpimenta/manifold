@@ -1,6 +1,6 @@
 // Unit tests for the public export surface declared in package.json.
 //
-// Consumers (oc-config, later stories) install this repo as the
+// Consumers install this repo as the
 // `@igorjpimenta/manifold` git dependency and import ONLY through the
 // subpaths below — deep file paths are not a contract. This suite pins the
 // map itself: the exact subpath set, each target file's existence, and that

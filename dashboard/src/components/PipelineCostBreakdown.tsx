@@ -23,7 +23,7 @@ export function PipelineCostBreakdown({
   pipelines,
 }: {
   entries: AllPipelinesCostEntry[];
-  /** Pipeline defs from /api/pipelines — used to mark historical pipelines and look up display metadata. */
+  /** Pipeline defs from /api/pipelines — marks historical pipelines and looks up display metadata. */
   pipelines: Pipeline[];
 }) {
   const [mode, setMode] = useState<"cost" | "time">("cost");
@@ -130,7 +130,7 @@ export function PipelineCostBreakdown({
                   {isHistorical && (
                     <span
                       className="bg-bg-elev2 text-fg-dim border border-border rounded-[10px] px-1.5 py-px font-mono text-[9px] shrink-0"
-                      title="pipeline source no longer on disk — kept for historical run context"
+                      title="pipeline source not on disk — kept for historical run context"
                     >
                       historical
                     </span>

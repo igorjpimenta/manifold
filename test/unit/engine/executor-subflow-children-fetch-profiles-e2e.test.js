@@ -11,10 +11,10 @@
  * executor-subflow-children.js's dispatchLoopChildren() spawns every
  * selected child via `setImmediate(() => runFlow(childFlowId))` in the
  * SAME tick — a genuine concurrent fire-and-forget dispatch, not a
- * sequential await-per-item loop (unlike the old branch-worker model).
+ * sequential await-per-item loop.
  * This test proves crossProcessLock on SCRAPE_PROFILE is (a) actually
- * invoked once PER CHILD (not once for the whole node dispatch, the old
- * simple-mode behavior), and (b) genuinely serializes concurrent
+ * invoked once PER CHILD (not once for the whole node dispatch), and
+ * (b) genuinely serializes concurrent
  * children against each other when the lock provides real mutual
  * exclusion — using an instrumented in-memory stand-in for
  * the lock service's withLock that queues callers via promise chaining

@@ -1,10 +1,8 @@
 /**
- * Unit tests for dashboard/search.js's error-tracking redirect (Phase 1.5):
- * searchRuns now indexes errorEntries[] (sourced from flow_node_executions
- * via an opts.errorsByFlow Map) instead of state.errors[] — and since
- * flow_node_executions unifies root and branch errors in one table, this
- * closes the file's own previously-documented gap: branch failures are now
- * searchable, which state.errors[]-only search never covered.
+ * Unit tests for dashboard/search.js's error-tracking redirect:
+ * searchRuns indexes errorEntries[] (sourced from failure_events via an
+ * opts.errorsByFlow Map). failure_events unifies root and subflow errors in
+ * one table, so subflow failures are searchable too.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

@@ -387,7 +387,7 @@ export async function acquireLock(name, opts = {}) {
           if (unlinkIfSameSync(lockPath, mine)) {
             markReleasedSync(name);
           } else {
-            logger?.warn?.(`lock ${name}: no longer held by this acquisition at release — left the current holder's lock in place`);
+            logger?.warn?.(`lock ${name}: not held by this acquisition at release — left the current holder's lock in place`);
           }
         },
       };

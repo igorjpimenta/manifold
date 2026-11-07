@@ -283,8 +283,8 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });
     assert.ok(groups.CONNECT);
     const row = groups.CONNECT.abc;
-    assert.ok(row, "keyed by branchKey, same shape old branchService rows used");
-    assert.equal(row.status, "running", "blocked-on-gate child folds into 'running' to match the old model");
+    assert.ok(row, "keyed by branchKey, same shape callers read");
+    assert.equal(row.status, "running", "blocked-on-gate child folds into 'running'");
     assert.equal(row.awaiting?.requestPayload?.kind, "human-gate");
     assert.ok(row.flowId);
   });

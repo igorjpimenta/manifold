@@ -21,8 +21,8 @@ export function createWsRunEventsListener({ store, nodeExecutionsStore, pipeline
       if (!flow) return;
       // Primary gate: has this write already been processed. Keyed on
       // revision, not status — a flow's status stays "running" across
-      // many internal node transitions (the common case: current_step
-      // advances every node, status only changes at
+      // many internal node transitions (the common case: the in-flight node
+      // advances at every node, status only changes at
       // start/gate/terminal), so a status-keyed gate would drop every
       // transition after the first and never reach the "rich patch"
       // broadcast below. revision (state/run-store.js,

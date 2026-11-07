@@ -40,10 +40,10 @@ async function makeStore(overrides = {}) {
 
 // failure-store.js's nodeExecutionsStore is injectable specifically so
 // tests don't fall through to the real getNodeExecutionsStore() singleton.
-// Phase 1.5 deleted recordFromTerminalState's rootErrors sweep and
-// computeResolvedAt's getExecution() call entirely — queryErrorsByFlow/getExecution are no
-// longer called anywhere in failure-store.js, so the fake no longer exposes
-// them. getLatestExecutionOutcomeForItem's real shape is now
+// recordFromTerminalState's rootErrors sweep and
+// computeResolvedAt's getExecution() call are gone — queryErrorsByFlow/getExecution
+// are not called anywhere in failure-store.js, so the fake doesn't expose
+// them. getLatestExecutionOutcomeForItem's real shape is
 // {executionId, exitedAt} (no `error`) — "did it succeed" is answered by
 // computeResolvedAt asking failure_events directly for that execution_id.
 function makeFakeNodeExecutions({
@@ -114,7 +114,7 @@ describe("createFailureStore — DB setup", () => {
 //
 // summarize remains live — recordEngineFailure still calls it — and the
 // coverage below exercises it through that path. (classifyKind has no
-// describe block here: the classification path it belonged to no longer
+// describe block here: the classification path it belonged to doesn't
 // exists.)
 
 describe("summarize — via failure_summary (still a raw column)", () => {
@@ -259,7 +259,7 @@ describe("deriveFailureContext — via get()", () => {
 // ─── computeResolvedAt — the two resolution mechanisms ───────────────────────
 
 describe("computeResolvedAt — via get()", () => {
-  // Phase 1.5 dropped the old execution.error != null gate on same-flow
+  // The old execution.error != null gate on same-flow
   // completion —
   // every failure_events row is now guaranteed to trace to a real throw by
   // construction, so this mechanism is unconditional on flow status alone.
@@ -397,11 +397,11 @@ describe("computeResolvedAt — via get()", () => {
     });
     const id = await insertRawRow(store, { flowId: failingFlowId, invocationId: failingInvocationId, failedAt: 1000 });
     // A LATER dispatch of the same "pipe"/"SUBMIT"/"job-1" item spawned a
-    // child that succeeded — this must no longer resolve the failure.
+    // child that succeeded — this must not resolve the failure.
     await seedChildOutcome(store, { pipelineId: "pipe", nodeId: "SUBMIT", subflowKey: "job-1", invokedAt: 6000, childStatus: "succeeded", childUpdatedAt: 5000 });
     const row = await store.get(id);
     assert.equal(row.branch_item_id, "job-1", "branch_item_id should still derive via the parent_invocation_id fallback");
-    assert.equal(row.resolved_at, null, "resolution no longer depends on cross-flow item identity");
+    assert.equal(row.resolved_at, null, "resolution doesn't depend on cross-flow item identity");
     store.close();
   });
 
@@ -620,7 +620,7 @@ describe("recordEngineFailure()", () => {
     store.close();
   });
 
-  test("threads errorType onto the row when passed, null when omitted (Phase 1.5)", async () => {
+  test("threads errorType onto the row when passed, null when omitted", async () => {
     const store = await makeStore();
     const flowIdA = randomUUID();
     const flowIdB = randomUUID();
@@ -691,7 +691,7 @@ describe("recordEngineFailure()", () => {
 });
 
 // ─── queryErrorsByFlow() / queryErrorsByFlowIds() ─────────────────────────────
-// Moved here from state/node-executions.js in Phase 1.5 — reimplemented
+// Moved here from state/node-executions.js — reimplemented
 // against failure_events LEFT JOIN flow_node_invocations, same ErrorEntry
 // shape as before. flow_node_invocations belongs to node-executions.js's own
 // migrator, not failure-store.js's — these isolated test DBs need it

@@ -214,7 +214,8 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // CAS: terminal failure. current_step stays frozen at the failing node.
+    // CAS: terminal failure. last_step stays frozen at the last COMPLETED
+    // node — casFail never advances it.
     async casFail(flowId, { expectedRevision, stateJson, statusReason }) {
       try {
         return await withSharedWrite(dbPath, async () => {
