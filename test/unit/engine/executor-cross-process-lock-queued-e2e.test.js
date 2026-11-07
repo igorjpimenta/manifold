@@ -5,7 +5,8 @@
  * assertion nothing else in this test suite covers end-to-end:
  * the wrappedFn technique in engine/executor.js's withCrossProcessLockMaybe
  * actually persists the transition, not just that the lock service's
- * onWouldBlock hook fires (already covered in test/unit/adapter/lock.test.js).
+ * onWouldBlock hook fires (already covered in
+ * plugins/openclaw/manifold/lock.test.js).
  *
  * Reuses the same FETCH_PROFILES-shaped fixture as
  * executor-loop-children-fetch-profiles-e2e.test.js (single sub-node

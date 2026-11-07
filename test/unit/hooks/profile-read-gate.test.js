@@ -1,7 +1,7 @@
 // Unit tests for the before_tool_call hook that makes a PROFILE.md read
 // wait behind gap-answers.js's settleGapAnswer() lock. Uses the real
 // lock.js primitives against a temp HOME (same pattern as
-// adapter/lock.test.js) rather than mocking acquireLock, so this actually
+// plugins/openclaw/manifold/lock.test.js) rather than mocking acquireLock, so this actually
 // exercises the writer/reader lock-name match instead of assuming it.
 // The gated profile path is a fixture passed through the hook's
 // profilePath option — no workspace imports, no real PROFILE.md.
