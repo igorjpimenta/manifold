@@ -23,18 +23,24 @@ The plugin's config lives under `plugins.entries.manifold.config` in
 validator. Keys: `pipelinesDir`, `ownerSessionKey`, `dashboardEnabled`,
 `dashboardPort`, `dashboardHost`, `discuss.defaultAgent`, `globalConcurrency`,
 `profilePath`, `profileEditResultsDir`. Defaults and meanings live in
-`openclaw.plugin.json`.
+`openclaw.plugin.json` — the repo-root one is the manifest the host loads,
+and it carries the same schema as this package's own manifest.
 
 ## Install
 
-Managed installs of a release tag:
+The repo root is the install surface: the installer reads the root
+`openclaw.plugin.json` and the root `package.json` `openclaw.extensions`
+entry, and that entry points at this directory's `index.js`. Managed installs
+of a release tag:
 
 ```sh
-openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install
+openclaw plugins install git:igorjpimenta/manifold@<version> --force --accept-capabilities
 ```
 
 ## Release line
 
-Ships on its own line: `manifold-openclaw-<semver>` tags publish
-`@igorjpimenta/manifold-openclaw`. Bump this package's `version` and its
-`@igorjpimenta/manifold` dependency floor together.
+The adapter ships inside the repository's CalVer tags — there is no separate
+adapter release line, and nothing is published to npm (the repo is UNLICENSED
+and private). This directory keeps a standalone plugin-package shape
+(`openclaw.plugin.json` plus a `package.json` with its own
+`openclaw.extensions` entry) so it can carry its own release line later.

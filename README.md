@@ -6,7 +6,7 @@ written for LLM agents doing engineering work in this plugin or building new
 pipelines that target it.
 
 **Source and install.** Install/update a release with
-`openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install`
+`openclaw plugins install git:igorjpimenta/manifold@<version> --force --accept-capabilities`
 (see `RELEASING.md` for the release process). Managed installs land under
 `~/.openclaw/git/` — never under `extensions/`.
 Development clone: `~/.dev/job/igorpimenta/manifold`. Story worktrees are
@@ -93,7 +93,7 @@ it focused on orientation and quick reference:
 | Approval helpers (CLI + dashboard)      | `gates/gate-resolver.js`                       |
 | Dashboard server                        | `dashboard/server.js`                          |
 | Dashboard frontend                      | `dashboard/src/`                               |
-| Plugin manifest (config schema)         | `plugins/openclaw/manifold/openclaw.plugin.json` |
+| Plugin manifest (config schema)         | `openclaw.plugin.json` (loaded by the host) + `plugins/openclaw/manifold/openclaw.plugin.json` |
 
 ## Glossary
 
