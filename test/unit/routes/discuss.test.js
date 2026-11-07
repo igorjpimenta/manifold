@@ -333,10 +333,13 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
 
     const emitted = [];
     let resolveTranscriptEvent;
+    let resolveTurnEvent;
     const transcriptEventSeen = new Promise((r) => { resolveTranscriptEvent = r; });
+    const turnEventSeen = new Promise((r) => { resolveTurnEvent = r; });
     const emit = async (kind, payload) => {
       emitted.push({ kind, payload });
       if (kind === "session.transcript.updated") resolveTranscriptEvent();
+      if (kind === "session.transcript.completed") resolveTurnEvent();
       return { ok: true, kind, deliveries: {} };
     };
 
@@ -381,6 +384,12 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.equal(updatedMeta.transcript, "hello from retry");
     assert.equal(updatedMeta.error, null);
     assert.equal(updatedMeta.createdAtMs, 1000, "original createdAtMs must survive a retry");
+
+    // The sidecar write and the two events are separate steps of the same
+    // background job, so the write can land before the events do.
+    await transcriptEventSeen;
+    await turnEventSeen;
+    await new Promise((r) => setTimeout(r, 20));
 
     const transcriptEvent = emitted.find((c) => c.kind === "session.transcript.updated");
     assert.ok(transcriptEvent, "must emit session.transcript.updated");
