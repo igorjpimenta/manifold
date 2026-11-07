@@ -142,16 +142,16 @@ export function unregisterOwnerResolver(kind) {
 
 // Maps an agent session to the owner its tool calls should lock as — e.g.
 // manifold registers the dispatching invocation for the session it spawns.
-export function registerSessionOwner(sessionKey, owner) {
-  if (sessionKey && owner?.kind && owner?.id) shared().sessionOwners.set(sessionKey, owner);
+export function registerSessionOwner(session, owner) {
+  if (session && owner?.kind && owner?.id) shared().sessionOwners.set(session, owner);
 }
 
-export function clearSessionOwner(sessionKey) {
-  if (sessionKey) shared().sessionOwners.delete(sessionKey);
+export function clearSessionOwner(session) {
+  if (session) shared().sessionOwners.delete(session);
 }
 
-export function sessionOwner(sessionKey) {
-  return sessionKey ? shared().sessionOwners.get(sessionKey) ?? null : null;
+export function sessionOwner(session) {
+  return session ? shared().sessionOwners.get(session) ?? null : null;
 }
 
 // Runs fn with `owner` as the default owner for every acquireLock()/withLock()

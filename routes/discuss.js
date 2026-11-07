@@ -132,12 +132,12 @@ export function registerDiscussHandlers({
     // no turn ran yet — the caller records the new thread.
     const stamp = await sessionIndex?.findThread?.(sourceFlow.flowId, gateNodeId, normalizedItemId);
     const resolvedAgent = stamp?.agentId ?? effectiveDiscuss.agent;
-    const sessionId = stamp?.sessionKey
+    const session = stamp?.session
       ?? sessions?.newDiscussSessionId?.({
         agentId: resolvedAgent, flowId: sourceFlow.flowId,
         gateNodeId, itemId: normalizedItemId,
       });
-    if (typeof sessionId !== "string" || !sessionId) {
+    if (typeof session !== "string" || !session) {
       return {
         ok: false,
         status: 503,
@@ -145,14 +145,12 @@ export function registerDiscussHandlers({
         error: "harness did not provide a discuss session id (sessions.newDiscussSessionId missing or empty)",
       };
     }
-    // The key IS the session id: the harness's own id, in whatever shape it
-    // uses. The agent travels as its own field — core reads no shape out
-    // of a session key.
-    const sessionKey = sessionId;
+    // Core names the thread `session`: the harness's own id, in whatever
+    // shape it uses. The agent travels as its own field — core reads no
+    // shape out of a session.
     return {
       ok: true,
-      sessionKey,
-      sessionId,
+      session,
       itemId: normalizedItemId,
       agent: resolvedAgent,
       needsStamp: !stamp,
@@ -216,23 +214,22 @@ export function registerDiscussHandlers({
       try {
         await sessionIndex?.recordThread?.({
           flowId: sourceFlow.flowId, gateNodeId: target.gateNodeId ?? "",
-          itemId: target.itemId, agentId: target.agent ?? null, sessionKey: target.sessionKey,
+          itemId: target.itemId, agentId: target.agent ?? null, session: target.session,
         });
       } catch {}
-      api.runtime?.lineage?.recordSpawn?.({ childSessionKey: target.sessionKey, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
+      api.runtime?.lineage?.recordSpawn?.({ childSession: target.session, flowId: sourceFlow.flowId, nodeId: target.nodeId?.toLowerCase() ?? null, itemKey: target.itemId, pipelineId: sourceFlow.stateJson?.pipelineId ?? null, agentId: target.agent ?? null, kind: "flow-gate-discuss", source: "spawn_hook" });
     }
     // Transcript roster lives in flow_sessions alongside dispatch rows, so
     // the transcripts endpoint attributes this thread from stored columns
-    // (nodeId, branchItemId) instead of parsing the session key. Best-effort:
+    // (nodeId, branchItemId) instead of parsing the session. Best-effort:
     // the discuss turn itself is already durable in discuss-store above.
-    try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, sessionKey: target.sessionKey, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null, agent: target.agent ?? null }); } catch {}
+    try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, session: target.session, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null, agent: target.agent ?? null }); } catch {}
 
     setImmediate(async () => {
       try {
         const elev = await invokeElevated("/manifold/_elev/discuss", {
           flowId: sourceFlow.flowId,
-          sessionKey: target.sessionKey,
-          sessionId: target.sessionId,
+          session: target.session,
           agentId: target.agent,
           gateNodeId: target.gateNodeId,
           modelOverride: target.modelOverride,
@@ -359,8 +356,7 @@ export function registerDiscussHandlers({
     try {
       const elev = await invokeElevated("/manifold/_elev/discuss", {
         flowId: sourceFlow.flowId,
-        sessionKey: target.sessionKey,
-        sessionId: target.sessionId,
+        session: target.session,
         agentId: target.agent,
         gateNodeId: target.gateNodeId,
         modelOverride: target.modelOverride,
@@ -683,25 +679,10 @@ export function registerDiscussHandlers({
           updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
         };
       } else {
-        const elev = await invokeElevated("/manifold/_elev/discuss_history", {
-          flowId: sourceFlow.flowId,
-          sessionKey: target.sessionKey,
-          sessionId: target.sessionId,
-          agentId: target.agent,
-        });
-        try {
-          parsed = JSON.parse(elev.body || "{}");
-        } catch { parsed = { ok: false, code: "elevation_no_body" }; }
-        if (parsed && parsed.ok) {
-          const pending = await discussStore.readPending(sourceFlow.flowId, target.itemId);
-          if (pending && (pending.text || (pending.fields && Object.keys(pending.fields).length > 0))) {
-            parsed.pending = {
-              text: typeof pending.text === "string" ? pending.text : null,
-              fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
-              updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
-            };
-          }
-        }
+        // No recorded turn yet — the thread is empty. Discuss history is the
+        // discuss store's own record (both directions of every turn); the
+        // harness's session files are not a source for it.
+        parsed = { ok: true, messages: [] };
       }
       parsed.turnStatus = dsState?.turnStatus ?? "idle";
       parsed.activeTurnId = dsState?.activeTurnId ?? null;

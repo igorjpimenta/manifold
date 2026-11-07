@@ -162,29 +162,30 @@ export function createNodeRunner({
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
     // Session ids belong to the harness, not manifold: pass a declared
-    // entry.sessionKey / entry.sessionKeyBuilder through verbatim, and
+    // entry.session / entry.sessionBuilder through verbatim, and
     // refuse an agent node that declares neither — tool-handoff and the
     // lineage ledger both key off this value, so inventing one here would
     // silently diverge from the harness's own id.
-    const sessionKey = entry.sessionKey
-      ?? entry.sessionKeyBuilder?.(state, flowId)
+    const session = entry.session
+      ?? entry.sessionBuilder?.(state, flowId)
       ?? null;
-    if (!sessionKey) {
-      throw new Error(`manifold: refusing dispatch of node "${nodeId}" with no sessionKey (set entry.sessionKey or entry.sessionKeyBuilder)`);
+    if (!session) {
+      throw new Error(`manifold: refusing dispatch of node "${nodeId}" with no session (set entry.session or entry.sessionBuilder)`);
     }
     _lineage?.recordSpawn?.({
-      childSessionKey: sessionKey, flowId, nodeId,
+      childSession: session, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
     });
+
     // Browser tool calls this session makes lock as this invocation
     // (extensions/browser-lease), the same owner the node-level
     // crossProcessLock uses — so the node's own lock and its agent's tool
     // leases re-enter instead of blocking each other.
     const lockOwner = invocationLockOwner(entry, { invocationId, flowId, nodeId, pipelineId });
-    if (lockOwner) registerSessionOwner(sessionKey, lockOwner);
+    if (lockOwner) registerSessionOwner(session, lockOwner);
     try {
       return await dispatchAgentWithRetry({
-        node: entry, nodeId, sessionKey, initialMessage: message,
+        node: entry, nodeId, session, initialMessage: message,
         applyCtx: state, applyExtraArg: undefined, flowId,
         applyMeta: { flowId, nodeId, invocationId },
         // apply() gets the same lazy ctx.needs() accessor every other
@@ -199,7 +200,7 @@ export function createNodeRunner({
       }
       throw err;
     } finally {
-      clearSessionOwner(sessionKey);
+      clearSessionOwner(session);
     }
   }
 

@@ -560,7 +560,7 @@ describe("registerRunRoutes — rerun handler", () => {
       invokeElevated,
       readStore: { listStatusCounts: () => ({}), listRunsPage: () => [], listCostSnapshot: () => [], get: (id) => id === "flow-1" ? { flowId: "flow-1" } : null, listQueued: () => [] },
     }));
-    const body = { sessionKey: "agent:main:k1", sessionId: "s1", agentId: "main" };
+    const body = { session: "agent:main:k1", agentId: "main" };
     const req = {
       ...authReq("POST", "/manifold/runs/flow-1/rerun"),
       [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body)); },
@@ -571,8 +571,7 @@ describe("registerRunRoutes — rerun handler", () => {
     const [path, payload] = invokeElevated.mock.calls[0].arguments;
     assert.equal(path, "/manifold/_elev/rerun");
     assert.equal(payload.sourceFlowId, "flow-1");
-    assert.equal(payload.sessionKey, "agent:main:k1");
-    assert.equal(payload.sessionId, "s1");
+    assert.equal(payload.session, "agent:main:k1");
     assert.equal(payload.agentId, "main");
     assert.equal(res.statusCode, 200);
   });

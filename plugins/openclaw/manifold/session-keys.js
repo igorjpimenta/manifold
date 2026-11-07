@@ -44,8 +44,8 @@ function mapRunIdIn(runId) {
 }
 
 // Translate a `runId`/`run_id` string field when it carries a mapped value;
-// leave anything else (foreign shapes, missing) untouched. Session keys
-// pass through verbatim — there is no gateway shape left to map back.
+// leave anything else (foreign shapes, missing) untouched. A harness
+// `sessionKey` echo maps back to core's `session`.
 function mapMessageFields(msg) {
   if (!msg || typeof msg !== "object") return msg;
   const out = Array.isArray(msg) ? [...msg] : { ...msg };
@@ -55,6 +55,7 @@ function mapMessageFields(msg) {
     for (const k of ["runId", "run_id"]) {
       if (typeof item[k] === "string") item[k] = mapRunIdIn(item[k]);
     }
+    if (typeof item.sessionKey === "string" && item.session == null) item.session = item.sessionKey;
   }
   return out;
 }
@@ -69,7 +70,9 @@ export function wrapSubagentKeys(raw) {
 
   if (typeof raw.run === "function") {
     wrapped.run = async (args) => {
-      const out = await raw.run({ ...args });
+      // Adapter edge: core `session` → harness `sessionKey` on the way out.
+      const { session, ...rest } = args ?? {};
+      const out = await raw.run(session != null ? { ...rest, sessionKey: session } : { ...args });
       const coreRunId = mintCoreRunId();
       if (out && typeof out === "object" && typeof out.runId === "string") {
         rememberRunMapping(coreRunId, out.runId);
@@ -98,7 +101,9 @@ export function wrapSubagentKeys(raw) {
 
   if (typeof raw.getSessionMessages === "function") {
     wrapped.getSessionMessages = async (args) => {
-      const out = await raw.getSessionMessages({ ...args });
+      // Adapter edge: core `session` → harness `sessionKey` on the way out.
+      const { session, ...rest } = args ?? {};
+      const out = await raw.getSessionMessages(session != null ? { ...rest, sessionKey: session } : { ...args });
       if (out && typeof out === "object" && Array.isArray(out.messages)) {
         return { ...out, messages: mapMessageFields(out.messages) };
       }

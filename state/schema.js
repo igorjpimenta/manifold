@@ -124,13 +124,13 @@ export const discussState = sqliteTable('discuss_state', {
 export const flowSessions = sqliteTable('flow_sessions', {
   id:           text('id').primaryKey(),
   flowId:       text('flow_id').notNull(),
-  sessionKey:   text('session_key').notNull(),
+  session:     text('session_key').notNull(),
   nodeId:       text('node_id'),
   branchItemId: text('branch_item_id'),
   spawnedAt:    integer('spawned_at').notNull(),
 }, (table) => [
   index('idx_flow_sessions_flow_id').on(table.flowId),
-  uniqueIndex('idx_flow_sessions_uniq').on(table.flowId, table.sessionKey),
+  uniqueIndex('idx_flow_sessions_uniq').on(table.flowId, table.session),
 ]);
 
 // Gate discuss thread identity: one row per (flow, gate, item), keyed by
@@ -141,7 +141,7 @@ export const discussThreads = sqliteTable('discuss_threads', {
   gateNodeId:  text('gate_node_id').notNull(),
   itemId:      text('item_id').notNull(),
   agentId:     text('agent_id'),
-  sessionKey:  text('session_key').notNull(),
+  session:     text('session_key').notNull(),
   updatedAt:   integer('updated_at').notNull(),
 }, (table) => [
   uniqueIndex('idx_discuss_threads_unique').on(table.flowId, table.gateNodeId, table.itemId),
@@ -266,11 +266,11 @@ export const pipelineDirs = sqliteTable('pipeline_dirs', {
 });
 
 // Structured tool results delivered by agents over MCP
-// (manifold_deliver_result). Keyed by the harness-stamped session key the
+// (manifold_deliver_result). Keyed by the harness-stamped session the
 // agent and the waiting dispatch both know — no invocationId resolution.
 // Latest write wins; the dispatch consumes the row for its own turn.
 export const toolResults = sqliteTable('tool_results', {
-  sessionKey:  text('session_key').primaryKey(),
+  session:  text('session_key').primaryKey(),
   runId:       text('run_id'),
   agentId:     text('agent_id'),
   kind:        text('kind'),

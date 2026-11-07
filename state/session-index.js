@@ -1,11 +1,11 @@
-// session-index.js — durable flowId→sessionKey index. Keys are the
-// session ids the dispatch used — stored and read verbatim, with no assumed
+// session-index.js — durable flowId→session index. Sessions are the
+// ids the dispatch used — stored and read verbatim, with no assumed
 // shape.
 //
 // Storage: the store home's runtime.sqlite (resolveStorePaths().runtimeDb).
 //
 // INSERT OR IGNORE via UNIQUE(flow_id, session_key) — recording the same
-// session key twice (e.g. on error-retry with the same key) is a no-op.
+// session twice (e.g. on error-retry with the same session) is a no-op.
 
 import { mkdirSync } from "node:fs";
 import { eq, and } from "drizzle-orm";
@@ -33,13 +33,13 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
   }
 
   // `agent` is accepted and ignored (kept for call-site compatibility).
-  async function record({ flowId, sessionKey, nodeId = null, branchItemId = null, agent = null } = {}) {
+  async function record({ flowId, session, nodeId = null, branchItemId = null, agent = null } = {}) {
     void agent;
-    if (!flowId || !sessionKey) return;
+    if (!flowId || !session) return;
     try {
       await withSharedWrite(dbPath, () =>
         db.insert(flowSessions).values({
-          id: randomUUID(), flowId, sessionKey,
+          id: randomUUID(), flowId, session,
           nodeId: nodeId ?? null, branchItemId: branchItemId ?? null,
           spawnedAt: Date.now(),
         }).onConflictDoNothing()
@@ -70,14 +70,14 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Reverse of the above: given a session key alone (no flowId in hand —
-  // e.g. a session key observed on the event queue with no flow attached),
+  // Reverse of the above: given a session alone (no flowId in hand —
+  // e.g. a session observed on the event queue with no flow attached),
   // find which flow it belongs to.
-  async function flowIdForSessionKey(sessionKey) {
-    if (!sessionKey) return null;
+  async function flowIdForSessionKey(session) {
+    if (!session) return null;
     try {
       const rows = await db.select({ x: flowSessions.flowId }).from(flowSessions)
-        .where(eq(flowSessions.sessionKey, sessionKey))
+        .where(eq(flowSessions.session, session))
         .limit(1);
       return rows[0]?.x ?? null;
     } catch (err) {
@@ -86,15 +86,15 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Every session key ever recorded for one flow, in spawn order.
+  // Every session ever recorded for one flow, in spawn order.
   // Transcript listing joins these rows to per-node results (dispatches)
   // and discuss threads (branchItemId = itemId) so attribution comes from
-  // stored columns, never from parsing the key itself.
+  // stored columns, never from parsing the session itself.
   async function listForFlow(flowId) {
     if (!flowId) return [];
     try {
       const rows = await db.select({
-        sessionKey: flowSessions.sessionKey,
+        session: flowSessions.session,
         nodeId: flowSessions.nodeId,
         branchItemId: flowSessions.branchItemId,
         spawnedAt: flowSessions.spawnedAt,
@@ -102,7 +102,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
         .where(eq(flowSessions.flowId, flowId))
         .orderBy(flowSessions.spawnedAt);
       return rows.map((r) => ({
-        sessionKey: r.sessionKey,
+        session: r.session,
         nodeId: r.nodeId ?? null,
         branchItemId: r.branchItemId ?? null,
         spawnedAt: Number(r.spawnedAt),
@@ -116,18 +116,18 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
   // Gate discuss thread identity: one row per (flow, gate, item), upserted
   // on first turn. The roster is the thread map — the harness owns the id.
   // Latest write wins on conflict.
-  async function recordThread({ flowId, gateNodeId, itemId, agentId = null, sessionKey } = {}) {
-    if (!flowId || !gateNodeId || !itemId || !sessionKey) return;
+  async function recordThread({ flowId, gateNodeId, itemId, agentId = null, session } = {}) {
+    if (!flowId || !gateNodeId || !itemId || !session) return;
     try {
       await withSharedWrite(dbPath, () =>
         db.insert(discussThreads).values({
           flowId, gateNodeId, itemId,
-          agentId: agentId ?? null, sessionKey,
+          agentId: agentId ?? null, session,
           updatedAt: Date.now(),
         }).onConflictDoUpdate({
           target: [discussThreads.flowId, discussThreads.gateNodeId, discussThreads.itemId],
           set: {
-            agentId: agentId ?? null, sessionKey,
+            agentId: agentId ?? null, session,
             updatedAt: Date.now(),
           },
         })
@@ -142,7 +142,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     if (!flowId || !gateNodeId || !itemId) return null;
     try {
       const rows = await db.select({
-        sessionKey: discussThreads.sessionKey,
+        session: discussThreads.session,
         agentId: discussThreads.agentId,
       }).from(discussThreads)
         .where(and(
@@ -152,7 +152,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
         ))
         .limit(1);
       if (!rows.length) return null;
-      return { sessionKey: rows[0].sessionKey, agentId: rows[0].agentId ?? null };
+      return { session: rows[0].session, agentId: rows[0].agentId ?? null };
     } catch (err) {
       logger?.warn?.(`manifold session-index: findThread failed: ${err?.message ?? err}`);
       return null;

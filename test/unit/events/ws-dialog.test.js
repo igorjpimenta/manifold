@@ -19,8 +19,7 @@ const FLOW = {
 
 const TARGET = {
   ok: true,
-  sessionKey: "agent:op:subagent:gf-99d6948f-propose",
-  sessionId: "gf-99d6948f-propose",
+  session: "agent:op:subagent:gf-99d6948f-propose",
   itemId: "i1",
   agent: "op",
   needsStamp: true,
@@ -132,7 +131,7 @@ test("full turn: ack, operator persist, stamp, run, reply, emit", async () => {
   assert.equal(reply.turnId, ack.turnId);
   assert.equal(reply.text, "echo: hello agent");
   assert.equal(deps.calls.run.length, 1);
-  assert.equal(deps.calls.run[0].sessionKey, TARGET.sessionKey);
+  assert.equal(deps.calls.run[0].session, TARGET.session);
   // operator message + running status persisted, session stamped, lineage recorded
   assert.ok(deps.calls.append.some((a) => a.msg.role === "operator" && a.msg.turnId === ack.turnId));
   assert.ok(deps.calls.append.some((a) => a.msg.role === "agent" && a.msg.text === "echo: hello agent"));

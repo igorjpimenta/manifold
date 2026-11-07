@@ -637,8 +637,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     }
   }
 
-  // Session keys are opaque: transcript attribution comes from the session
-  // ledger, never from the key's shape.
+  // Sessions are opaque: transcript attribution comes from the session
+  // ledger, never from the session's shape.
   async function sendTranscripts(res, flowId) {
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });

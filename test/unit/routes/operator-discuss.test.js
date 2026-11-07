@@ -1,30 +1,45 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import {
   stringifyMessageContent,
   filterDiscussHistoryMessages,
   selectDiscussProvider,
   createDiscussHandler,
-  createDiscussHistoryHandler,
 } from "../../../routes/operator-discuss.js";
 import { createMockApi } from "../../helpers/mock-api.js";
 
 // No mocking required — the pure helpers carry no external static imports.
 
 // Filesystem-backed stub for the injected `sessions` gateway dep, rooted at
-// process.env.HOME so the tmp-HOME fixtures below keep working.
+// process.env.HOME so the tmp-HOME fixtures below keep working. Mirrors the
+// production adapter: the file is resolved through the agent's sessions.json
+// index by the manifold session KEY, never by treating the key as a filename.
 function makeSessionsStub() {
+  const calls = { resolve: [] };
   return {
-    resolveSessionFile: (agentId, sessionId) =>
-      path.join(process.env.HOME, ".openclaw", "agents", agentId, "sessions", `${sessionId}.jsonl`),
+    calls,
+    resolveSessionFileForKey: (agentId, session) => {
+      calls.resolve.push({ agentId, session });
+      const dir = path.join(process.env.HOME, ".openclaw", "agents", agentId, "sessions");
+      try {
+        const index = JSON.parse(readFileSync(path.join(dir, "sessions.json"), "utf8"));
+        const entry = index?.[session];
+        if (entry?.sessionFile) return entry.sessionFile;
+        if (typeof entry?.sessionId === "string" && entry.sessionId) {
+          return path.join(dir, `${entry.sessionId}.jsonl`);
+        }
+      } catch {}
+      return path.join(dir, `${session}.jsonl`);
+    },
     sessionFileExists: (file) => {
       try { return existsSync(file); } catch { return false; }
     },
-    readSessionFileText: (file) => readFile(file, "utf-8"),
+    ensureSessionFile: (file) => {
+      mkdirSync(path.dirname(file), { recursive: true });
+      try { writeFileSync(file, "", { flag: "wx" }); } catch {}
+    },
   };
 }
 
@@ -215,7 +230,7 @@ describe("selectDiscussProvider", () => {
 });
 
 // ── stamped caller identity — kept guards ───────────────────────────────────
-// The elevated discuss routes refuse unstamped calls before touching the
+// The elevated discuss route refuses unstamped calls before touching the
 // agent runtime or the session file: missing/empty identity → 400.
 
 describe("elev discuss handlers — stamped caller identity", () => {
@@ -225,139 +240,7 @@ describe("elev discuss handlers — stamped caller identity", () => {
     const { status, body } = await handleDiscuss({ flowId: "flow-1", text: "hi" });
     assert.equal(status, 400);
     assert.equal(body.code, "invalid_body");
-    assert.match(body.error, /sessionKey, sessionId, agentId/);
-  });
-
-  it("handleDiscussHistory: missing identity → 400 invalid_body", async () => {
-    const { api } = createMockApi();
-    const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
-    const { status, body } = await handleDiscussHistory({ flowId: "flow-1" });
-    assert.equal(status, 400);
-    assert.equal(body.code, "invalid_body");
-    assert.match(body.error, /sessionKey, sessionId/);
+    assert.match(body.error, /session, agentId/);
   });
 });
 
-// ── createDiscussHistoryHandler — bounded JSONL read ─────────────────────────
-// The handler must tail the session file to MAX_HISTORY_LINES before parsing:
-// an unbounded synchronous parse on the gateway's single event loop can stall
-// past the client's (much tighter) history-load timeout.
-
-describe("createDiscussHistoryHandler — bounded JSONL read", () => {
-  const writeSession = (homeDir, agentId, sessionId, lines) => {
-    const dir = path.join(homeDir, ".openclaw", "agents", agentId, "sessions");
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(path.join(dir, `${sessionId}.jsonl`), lines.join("\n"));
-  };
-  const entryLine = (role, text, ts) =>
-    JSON.stringify({ timestamp: ts, message: { role, content: text } });
-
-  it("returns all messages when the session is under the line cap", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
-    const prevHome = process.env.HOME;
-    try {
-      process.env.HOME = tmpHome;
-      const lines = [
-        entryLine("user", "hi", 1),
-        entryLine("assistant", "hello back", 2),
-      ];
-      writeSession(tmpHome, "main", "sess-small", lines);
-      const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
-      const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-small",
-      });
-      assert.equal(status, 200);
-      assert.equal(body.ok, true);
-      assert.equal(body.messages.length, 2);
-      assert.equal(body.hasMore, false);
-    } finally {
-      process.env.HOME = prevHome;
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
-  });
-
-  it("tails to the last MAX_HISTORY_LINES entries for an oversized session", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
-    const prevHome = process.env.HOME;
-    try {
-      process.env.HOME = tmpHome;
-      // 600 lines > the 500-line cap. Distinct text per line so we can
-      // assert the *oldest* turns were dropped, not just that the count
-      // is bounded.
-      const lines = [];
-      for (let i = 0; i < 600; i++) {
-        lines.push(entryLine(i % 2 === 0 ? "user" : "assistant", `turn-${i}`, i));
-      }
-      writeSession(tmpHome, "main", "sess-huge", lines);
-      const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
-      const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge",
-      });
-      assert.equal(status, 200);
-      assert.equal(body.messages.length, 500);
-      // Oldest surviving turn is turn-100 (600 - 500), the first 100 dropped.
-      assert.equal(body.messages[0].text, "turn-100");
-      assert.equal(body.messages[body.messages.length - 1].text, "turn-599");
-      assert.equal(body.hasMore, true);
-      assert.equal(body.nextOffset, 500);
-    } finally {
-      process.env.HOME = prevHome;
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
-  });
-
-  it("pages further back when the caller passes the prior response's nextOffset", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
-    const prevHome = process.env.HOME;
-    try {
-      process.env.HOME = tmpHome;
-      const lines = [];
-      for (let i = 0; i < 600; i++) {
-        lines.push(entryLine(i % 2 === 0 ? "user" : "assistant", `turn-${i}`, i));
-      }
-      writeSession(tmpHome, "main", "sess-huge-2", lines);
-      const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
-      const first = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge-2",
-      });
-      assert.equal(first.body.hasMore, true);
-      const second = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-huge-2",
-        offset: first.body.nextOffset,
-      });
-      assert.equal(second.status, 200);
-      // Remaining 100 turns (0..99) all fit in one more page — no more after this.
-      assert.equal(second.body.messages.length, 100);
-      assert.equal(second.body.messages[0].text, "turn-0");
-      assert.equal(second.body.messages[second.body.messages.length - 1].text, "turn-99");
-      assert.equal(second.body.hasMore, false);
-      // The two pages together cover the whole session with no gap/overlap.
-      assert.equal(second.body.messages[second.body.messages.length - 1].text, "turn-99");
-      assert.equal(first.body.messages[0].text, "turn-100");
-    } finally {
-      process.env.HOME = prevHome;
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
-  });
-
-  it("returns empty messages when the session file doesn't exist", async () => {
-    const tmpHome = mkdtempSync(path.join(tmpdir(), "manifold-discuss-hist-"));
-    const prevHome = process.env.HOME;
-    try {
-      process.env.HOME = tmpHome;
-      const { api } = createMockApi();
-      const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions: makeSessionsStub() });
-      const { status, body } = await handleDiscussHistory({
-        flowId: "flow-1", sessionKey: "sess-key-1", agentId: "main", sessionId: "sess-missing",
-      });
-      assert.equal(status, 200);
-      assert.deepEqual(body.messages, []);
-    } finally {
-      process.env.HOME = prevHome;
-      rmSync(tmpHome, { recursive: true, force: true });
-    }
-  });
-});

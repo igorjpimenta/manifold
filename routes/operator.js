@@ -1,5 +1,5 @@
 import { createRetryFailure } from "./operator-retry.js";
-import { createDiscussHandler, createDiscussHistoryHandler } from "./operator-discuss.js";
+import { createDiscussHandler } from "./operator-discuss.js";
 import { createStateStore } from "../state/state-store.js";
 import { completeCancellation } from "../engine/executor-cancel.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
@@ -51,8 +51,6 @@ export function registerOperatorRoutes({
       api, discussStore, sessions,
     });
 
-  const { handleDiscussHistory } = createDiscussHistoryHandler({ api, sessions });
-
   // ── POST /manifold/gate/resolve ───────────────────────────────────────────
 
   api.registerHttpRoute({
@@ -84,8 +82,7 @@ export function registerOperatorRoutes({
           source: body.source,
           editedText: body.editedText,
           reason: body.reason,
-          sessionKey: body.sessionKey,
-          sessionId: body.sessionId,
+          session: body.session,
           agentId: body.agentId,
         });
         res.statusCode = elev.status || 500;
@@ -116,7 +113,7 @@ export function registerOperatorRoutes({
       let body;
       try { body = raw ? JSON.parse(raw) : {}; }
       catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const missingGateIdentity = elevIdentityMissing(body, ["flowId", "sessionKey", "sessionId", "agentId"]);
+      const missingGateIdentity = elevIdentityMissing(body, ["flowId", "session", "agentId"]);
       if (missingGateIdentity.length > 0) { refuseElevIdentity(res, missingGateIdentity); return true; }
       try {
         const result = await gateResolver.recordItemDecision({
@@ -271,7 +268,7 @@ export function registerOperatorRoutes({
         const args = (body.args && typeof body.args === "object") ? body.args : {};
         const elev = await invokeElevated("/manifold/_elev/start", {
           pipelineId, args, via: authz.via,
-          sessionKey: body.sessionKey, sessionId: body.sessionId, agentId: body.agentId,
+          session: body.session, agentId: body.agentId,
         });
         res.statusCode = elev.status || 500;
         res.setHeader("Content-Type", "application/json");
@@ -312,7 +309,7 @@ export function registerOperatorRoutes({
         res.end(JSON.stringify({ ok: false, error: "pipelineId required" }));
         return true;
       }
-      const missingStartIdentity = elevIdentityMissing(body, ["sessionKey", "sessionId", "agentId"]);
+      const missingStartIdentity = elevIdentityMissing(body, ["session", "agentId"]);
       if (missingStartIdentity.length > 0) { refuseElevIdentity(res, missingStartIdentity); return true; }
       try {
         await ensurePipelinesLoaded?.();
@@ -455,7 +452,7 @@ export function registerOperatorRoutes({
         res.statusCode = 400; res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: "args must be a JSON object" })); return true;
       }
-      const missingRerunIdentity = elevIdentityMissing(body, ["sessionKey", "sessionId", "agentId"]);
+      const missingRerunIdentity = elevIdentityMissing(body, ["session", "agentId"]);
       if (missingRerunIdentity.length > 0) { refuseElevIdentity(res, missingRerunIdentity); return true; }
       const sourceFlow = await readStore.get(sourceFlowId);
       if (!sourceFlow) {
@@ -505,7 +502,7 @@ export function registerOperatorRoutes({
         res.statusCode = 400; res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: "id required" })); return true;
       }
-      const missingRetryIdentity = elevIdentityMissing(body, ["sessionKey", "sessionId", "agentId"]);
+      const missingRetryIdentity = elevIdentityMissing(body, ["session", "agentId"]);
       if (missingRetryIdentity.length > 0) { refuseElevIdentity(res, missingRetryIdentity); return true; }
       const via = typeof body.via === "string" ? body.via : "elev";
       const result = await retryFailureBranch({ id, via });
@@ -539,26 +536,4 @@ export function registerOperatorRoutes({
     },
   });
 
-  // ── POST /manifold/_elev/discuss_history ──────────────────────────────────
-
-  api.registerHttpRoute({
-    path: "/manifold/_elev/discuss_history",
-    auth: "gateway",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
-      }
-      let raw = "";
-      for await (const chunk of req) raw += chunk;
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; }
-      catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const { status, body: responseBody } = await handleDiscussHistory(body);
-      res.statusCode = status;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(responseBody));
-      return true;
-    },
-  });
 }

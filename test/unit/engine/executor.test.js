@@ -1415,7 +1415,7 @@ function makeFakeNodeHealthStore() {
 }
 
 function makeCircuitBreakerAgentNode(overrides = {}) {
-  return { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", circuitBreaker: true, promptBuilder: () => "hi", apply: (s, o) => ({ reply: o }), ...overrides };
+  return { kind: "agent", agent: "scout", session: "agent:scout:test", circuitBreaker: true, promptBuilder: () => "hi", apply: (s, o) => ({ reply: o }), ...overrides };
 }
 
 describe("runFlow — agent circuit breaker: check", () => {
@@ -1453,7 +1453,7 @@ describe("runFlow — agent circuit breaker: check", () => {
 
   it("does not gate a plain agent node without circuitBreaker:true, even if the store has an entry under its id", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", session: "agent:scout:test", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
@@ -1488,7 +1488,7 @@ describe("runFlow — agent circuit breaker: mark", () => {
 
   it("does not mark unhealthy for a plain agent node without circuitBreaker:true", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", session: "agent:scout:test", promptBuilder: () => "hi", apply: (s, o) => ({ o }) } },
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
@@ -1560,20 +1560,20 @@ describe("reviveAgentKindOrphan", () => {
     return { flowId, revision, lastStep, status: "running", stateJson: { pipelineId }, waitJson: null };
   }
 
-  it("sends REVIVAL_MSG to the same deterministic session key, applies the reply, and continues the flow", async () => {
+  it("sends REVIVAL_MSG to the same deterministic session, applies the reply, and continues the flow", async () => {
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
+          kind: "agent", agent: "scout", session: "agent:scout:orphan-session",
           promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },
       },
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
-    let capturedSessionKey, capturedMessage;
-    const fakeRunTurn = async ({ sessionKey, message }) => {
-      capturedSessionKey = sessionKey;
+    let capturedSession, capturedMessage;
+    const fakeRunTurn = async ({ session, message }) => {
+      capturedSession = session;
       capturedMessage = message;
       return { text: "already submitted, done", runId: "run-1" };
     };
@@ -1584,13 +1584,13 @@ describe("reviveAgentKindOrphan", () => {
     await executor.reviveAgentKindOrphan(flow);
 
     assert.equal(capturedMessage, REVIVAL_MSG, "must send the continuation prompt, not promptBuilder's output");
-    assert.equal(capturedSessionKey, "agent:scout:orphan-session", "must resume the SAME session the original dispatch used");
+    assert.equal(capturedSession, "agent:scout:orphan-session", "must resume the SAME session the original dispatch used");
     const final = store.get(flow.flowId);
     assert.equal(final.status, "succeeded", "flow continues past AGENT to __end__");
     // B4: state_json is entry-only — agentReply (AGENT's own apply() output)
     // never lands there anymore. Reconstruction via assembleState() is
     // covered by executor-assemble-state-e2e.test.js; this test's own job
-    // is the revival/session-key behavior above, not resultJson replay.
+    // is the revival/session behavior above, not resultJson replay.
     assert.equal(final.stateJson.agentReply, undefined, "state_json must not carry node output post-B4");
   });
 
@@ -1607,7 +1607,7 @@ describe("reviveAgentKindOrphan", () => {
 
   it("fails the flow when the revival dispatch throws", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", session: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     const fakeRunTurn = async () => { throw new Error("provider down"); };
     const { executor, store } = makeExecutor({ p: pipeline }, [], { runTurn: fakeRunTurn });
@@ -1630,7 +1630,7 @@ describe("reviveAgentKindOrphan", () => {
     // is always a continuation of the exact node that crashed, not a fresh
     // dispatch decision — this proves the hardcode is actually load-bearing.
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", session: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     const fakeRunTurn = async () => { throw new Error("provider down"); };
     const spy = makeSpyNodeExecutionsStore();
@@ -1647,7 +1647,7 @@ describe("reviveAgentKindOrphan", () => {
 
   it("thrown revival dispatch: threads write()'s returned ids into recordEngineFailure", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", session: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     const fakeRunTurn = async () => { throw new Error("provider down"); };
     const spy = makeSpyNodeExecutionsStore();
@@ -1668,7 +1668,7 @@ describe("reviveAgentKindOrphan", () => {
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused",
+          kind: "agent", agent: "scout", session: "agent:scout:test", promptBuilder: () => "unused",
           apply: () => ({ _blocked: { reason: "needs review" } }),
         },
       },
@@ -1693,7 +1693,7 @@ describe("reviveAgentKindOrphan", () => {
 
   it("fails the flow when no agent runtime is bound (the harness must inject runTurn)", async () => {
     const pipeline = makePipeline({
-      nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
+      nodes: { AGENT: { kind: "agent", agent: "scout", session: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
     // No runTurn provided — dispatch refuses outright ("no agent runtime
     // bound"). A runTurn that throws GatewayHandoffNeeded mid-turn still
@@ -1730,7 +1730,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
+          kind: "agent", agent: "scout", session: "agent:scout:orphan-session",
           promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },
@@ -1802,7 +1802,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
+          kind: "agent", agent: "scout", session: "agent:scout:orphan-session",
           promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },
@@ -1843,7 +1843,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     const pipeline = makePipeline({
       nodes: {
         AGENT: {
-          kind: "agent", agent: "scout", sessionKey: "agent:scout:orphan-session",
+          kind: "agent", agent: "scout", session: "agent:scout:orphan-session",
           promptBuilder: () => "original prompt — must NOT be sent on revival",
           apply: (state, output) => ({ agentReply: output.text }),
         },

@@ -945,14 +945,14 @@ export function registerRunRoutes({
   // resultJson (a single assistant turn when the stored result carries
   // reply text, metadata-only otherwise — content is never invented).
   // Attribution uses stored columns (flow_sessions node/branch columns,
-  // discuss itemId); the sessionKey passes through opaquely and is never
+  // discuss itemId); the session passes through opaquely and is never
   // parsed here.
 
   // lite=1  → return turnCount only, no turn text (for list views)
-  // sessionKey=X → return a single transcript with full turns (for transcript drill-in)
+  // session=X → return a single transcript with full turns (for transcript drill-in)
   async function sendTranscriptsList(res, flow, url) {
     const lite       = url.searchParams.get("lite") === "1";
-    const singleKey  = url.searchParams.get("sessionKey") ?? null;
+    const singleSession = url.searchParams.get("session") ?? null;
 
     // Session roster for this flow: one row per dispatch attempt plus one
     // per discuss thread, each carrying its stored node/item attribution.
@@ -970,12 +970,12 @@ export function registerRunRoutes({
       // Discuss identity rows (branchItemId set) are covered by the discuss
       // loop below, which joins them to full turns from discuss-store.
       if (row.branchItemId != null) continue;
-      if (singleKey && row.sessionKey !== singleKey) continue;
+      if (singleSession && row.session !== singleSession) continue;
       const result = row.nodeId != null ? resultByNode.get(row.nodeId) : null;
       const turns = lite ? null : dispatchTurns(result);
       transcripts.push({
-        sessionKey: row.sessionKey, agent: pipelineNodes?.[row.nodeId]?.agent ?? null,
-        nodeId: row.nodeId ?? null, itemKey: row.branchItemId ?? null, sessionId: row.sessionKey,
+        session: row.session, agent: pipelineNodes?.[row.nodeId]?.agent ?? null,
+        nodeId: row.nodeId ?? null, itemKey: row.branchItemId ?? null,
         startedAt: row.spawnedAt ?? null,
         updatedAt: result?.resultWrittenAt ?? row.spawnedAt ?? null,
         ...(lite ? { turnCount: turnsForCount(result) } : { turns }),
@@ -988,12 +988,12 @@ export function registerRunRoutes({
       for (const row of sessionRows) {
         if (row.branchItemId === thread.itemId && (!identity || (row.spawnedAt ?? 0) > (identity.spawnedAt ?? 0))) identity = row;
       }
-      const sessionKey = identity?.sessionKey ?? null;
-      if (singleKey && sessionKey !== singleKey) continue;
+      const session = identity?.session ?? null;
+      if (singleSession && session !== singleSession) continue;
       const turns = lite ? null : discussTurns(thread.messages);
       transcripts.push({
-        sessionKey, agent: null,
-        nodeId: identity?.nodeId ?? "discuss", itemKey: thread.itemId ?? null, sessionId: sessionKey,
+        session, agent: null,
+        nodeId: identity?.nodeId ?? "discuss", itemKey: thread.itemId ?? null,
         startedAt: thread.messages?.[0]?.ts ?? thread.updatedAt ?? null,
         updatedAt: thread.updatedAt ?? null,
         ...(lite ? { turnCount: Array.isArray(thread.messages) ? thread.messages.length : 0 } : { turns }),
@@ -1112,8 +1112,7 @@ export function registerRunRoutes({
       const elev = await invokeElevated("/manifold/_elev/rerun", {
         sourceFlowId: sourceFlow.flowId,
         args: argsOverride,
-        sessionKey: body.sessionKey,
-        sessionId: body.sessionId,
+        session: body.session,
         agentId: body.agentId,
       });
       res.statusCode = elev.status || 500;

@@ -24,9 +24,9 @@ const ops = {
     calls.push(["cancelFlow", flowId]);
     return flowId === "FLOW-1" ? { cancelled: true, flowId } : { cancelled: false, reason: "not found" };
   },
-  async deliverResult({ sessionKey, payload }) {
-    calls.push(["deliverResult", sessionKey, payload]);
-    return { ok: true, sessionKey };
+  async deliverResult({ session, payload }) {
+    calls.push(["deliverResult", session, payload]);
+    return { ok: true, session };
   },
   logger: { info() {}, warn() {}, error() {} },
 };

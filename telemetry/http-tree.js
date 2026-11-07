@@ -139,22 +139,22 @@ export function registerTreeRoutes({ api, getStore, logger, json, bad, parseRang
           `, [...kinds, label, ...rangeArgs]);
           // hasChildren: check whether each session actually has expandable children
           // (triggered flows or direct cost rows) rather than hardcoding true.
-          const sessionKeys = rows.map((r) => r.session_key);
+          const sessions = rows.map((r) => r.session_key);
           const expandable = new Set();
-          if (sessionKeys.length > 0) {
-            const ph = sessionKeys.map(() => "?").join(",");
+          if (sessions.length > 0) {
+            const ph = sessions.map(() => "?").join(",");
             const triggers = await execAll(client, `
               SELECT DISTINCT parent_session_key FROM session_lineage
               WHERE parent_session_key IN (${ph})
                 AND kind = 'flow-triggered'
                 AND source IN ('trigger_hook', 'trigger_backfill')
-            `, sessionKeys);
+            `, sessions);
             for (const t of triggers) expandable.add(t.parent_session_key);
             const directWhere = ["session_key IN (" + ph + ")", "pipeline_id IS NULL", ...rangeWhere];
             const directs = await execAll(client, `
               SELECT DISTINCT session_key FROM cost_by_call
               WHERE ${directWhere.join(" AND ")}
-            `, [...sessionKeys, ...rangeArgs]);
+            `, [...sessions, ...rangeArgs]);
             for (const d of directs) expandable.add(d.session_key);
           }
           children = rows.map((r) => {

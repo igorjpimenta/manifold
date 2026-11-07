@@ -11,7 +11,7 @@
 //   listRuns({ pipelineId, status, limit })     -> flow record[]
 //   approveGate({ flowId, itemId, decision, text }) -> { ok, ... }
 //   cancelFlow({ flowId, reason })                 -> { cancelled, ... }
-//   deliverResult({ sessionKey, runId, agent, kind, payload }) -> { ok }
+//   deliverResult({ session, runId, agent, kind, payload }) -> { ok }
 //   logger                                       -> { info, warn, error } (optional)
 //
 // The caller identity is the resolved `identity` — never a tool param —
@@ -220,13 +220,13 @@ export function createManifoldToolHandlers(ops = {}) {
       }
       try {
         await need(deliverResult, "deliverResult")({
-          sessionKey: identity.session,
+          session: identity.session,
           runId: typeof args?.runId === "string" ? args.runId : null,
           agentId: identity.agent,
           kind: typeof args?.kind === "string" ? args.kind : null,
           payload: args.payload,
         });
-        return ok("delivered", { status: "ok", sessionKey: identity.session });
+        return ok("delivered", { status: "ok", session: identity.session });
       } catch (e) {
         return err(`manifold_deliver_result failed: ${e?.message ?? e}`, "error");
       }
