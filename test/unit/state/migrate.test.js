@@ -174,6 +174,149 @@ describe("snapshots — forward safety", () => {
   });
 });
 
+// ── one discuss_state row per thread ──────────────────────────────────────────
+//
+// discuss_state shipped without a uniqueness constraint, so two concurrent
+// appendMessage calls could each insert their own row for the same thread.
+// Migration 0006 folds the duplicates into one row and gives discuss_state
+// the unique index its writers always assumed.
+
+describe("migration 0006 — one discuss_state row per thread", () => {
+  const DEDUPE_IDX = 6;
+
+  function dedupeEntry() {
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(RUNTIME_MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8"),
+    );
+    const entry = journal.entries.find((e) => e.idx === DEDUPE_IDX);
+    assert.ok(entry, `journal must carry an entry at idx ${DEDUPE_IDX}`);
+    return entry;
+  }
+
+  // A copy of the migrations folder with the dedupe migration withheld, so
+  // the duplicate rows can be written between the two states.
+  async function preDedupeDb(dir) {
+    const folder = path.join(dir, "runtime");
+    fs.cpSync(RUNTIME_MIGRATIONS_FOLDER, folder, { recursive: true });
+    const journalPath = path.join(folder, "meta", "_journal.json");
+    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+    journal.entries = journal.entries.filter((e) => e.idx < DEDUPE_IDX);
+    fs.writeFileSync(journalPath, JSON.stringify(journal));
+    const entry = dedupeEntry();
+    fs.rmSync(path.join(folder, `${entry.tag}.sql`), { force: true });
+    const dbPath = path.join(dir, "runtime.sqlite");
+    await migrateDatabase({ dbPath, migrationsFolder: folder, logger: silentLogger });
+    return { dbPath, entry };
+  }
+
+  async function applyDedupe(dbPath, entry) {
+    const sql = fs.readFileSync(
+      path.join(RUNTIME_MIGRATIONS_FOLDER, `${entry.tag}.sql`),
+      "utf8",
+    );
+    const db = createClient({ url: `file:${dbPath}` });
+    try {
+      for (const stmt of sql.split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean)) {
+        await db.execute(stmt);
+      }
+    } finally {
+      db.close();
+    }
+  }
+
+  test("folds duplicate rows into one and keeps the fullest history", async () => {
+    const dir = path.join(os.tmpdir(), `migrate-dedupe-${randomUUID()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+      const { dbPath, entry } = await preDedupeDb(dir);
+      const seed = createClient({ url: `file:${dbPath}` });
+      try {
+        // Two rows for one thread — the shape the missing unique index allowed.
+        await seed.execute(
+          "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
+          ["flow-dup", "item-1", '[{"id":"m1","ts":1}]', "idle", null, null, 100, "[]"],
+        );
+        await seed.execute(
+          "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
+          ["flow-dup", "item-1", '[{"id":"m1","ts":1},{"id":"m2","ts":2}]', "running", "turn-1", '{"text":"kept","updatedAt":300}', 200, "[]"],
+        );
+      } finally {
+        seed.close();
+      }
+
+      await applyDedupe(dbPath, entry);
+
+      const db = createClient({ url: `file:${dbPath}` });
+      try {
+        const dupes = await db.execute(
+          "SELECT COUNT(*) AS n FROM discuss_state WHERE flow_id = 'flow-dup' AND item_id = 'item-1'",
+        );
+        assert.equal(dupes.rows[0].n, 1, "one row per thread");
+        const survivor = await db.execute(
+          "SELECT messages_json, turn_status, active_turn_id, pending_json FROM discuss_state WHERE flow_id = 'flow-dup' AND item_id = 'item-1'",
+        );
+        assert.equal(JSON.parse(survivor.rows[0].messages_json).length, 2, "the fullest history survives");
+        assert.equal(survivor.rows[0].active_turn_id, "turn-1");
+        assert.equal(JSON.parse(survivor.rows[0].pending_json).text, "kept");
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the group's newest pending survives the fold", async () => {
+    const dir = path.join(os.tmpdir(), `migrate-dedupe-pending-${randomUUID()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+      const { dbPath, entry } = await preDedupeDb(dir);
+      const seed = createClient({ url: `file:${dbPath}` });
+      try {
+        await seed.execute(
+          "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
+          ["flow-pending", "item-1", "[]", "idle", null, '{"text":"older","updatedAt":100}', 100, "[]"],
+        );
+        await seed.execute(
+          "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
+          ["flow-pending", "item-1", "[]", "idle", null, '{"text":"newer","updatedAt":900}', 900, "[]"],
+        );
+      } finally {
+        seed.close();
+      }
+
+      await applyDedupe(dbPath, entry);
+
+      const db = createClient({ url: `file:${dbPath}` });
+      try {
+        const rows = await db.execute(
+          "SELECT pending_json FROM discuss_state WHERE flow_id = 'flow-pending' AND item_id = 'item-1'",
+        );
+        assert.equal(rows.rows.length, 1);
+        assert.equal(JSON.parse(rows.rows[0].pending_json).text, "newer");
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a fresh migrate leaves the unique index in place", async () => {
+    const { dbPath } = tmpDb("dedupe-fresh");
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger: silentLogger });
+    const db = createClient({ url: `file:${dbPath}` });
+    try {
+      const { rows } = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_discuss_state_unique'",
+      );
+      assert.equal(rows.length, 1, "discuss_state must be unique per thread");
+    } finally {
+      db.close();
+    }
+  });
+});
+
 // ── snapshots are the sole schema path ───────────────────────────────────────
 
 describe("migrateDatabase — snapshots only, no chain", () => {

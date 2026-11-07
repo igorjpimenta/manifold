@@ -1,55 +1,39 @@
 /**
  * Unit tests for agent/tools/propose-draft.js — registerProposeDraftTool (propose_draft).
  *
- * Verifies validation, setPendingText, discussStore, componentEmitter, draftId
- * handling, trimming.
+ * Verifies validation, setPending, componentEmitter, draftId handling, trimming.
  *
- * pending-store is mocked at the module level so disk I/O is replaced with an
- * in-memory map.
+ * The discuss store (discuss_state.pending_json) owns the pending proposal, so
+ * the tests hand the tool an in-memory stand-in for it.
  */
 
 import { test, mock, describe } from "node:test";
 import assert from "node:assert/strict";
 
-const pendingStoreUrl = new URL("../../../../state/pending-store.js", import.meta.url).href;
 const telemetryUrl = new URL("../../../../telemetry/index.js", import.meta.url).href;
 
 // resolveGateContext's auto-resolve delegates to getSharedResolver().resolve() —
 // tests that exercise auto-resolve set this before calling execute().
 let fakeResolver = null;
 
-const _pendingStore = new Map(); // key: `${flowId}__${itemId}`
+const _pending = new Map(); // key: `${flowId}__${itemId}`
+const setPendingCalls = [];
 
-function _pendingKey(flowId, itemId) { return `${flowId}__${itemId}`; }
-
-const setPendingTextCalls = [];
-
-await mock.module(pendingStoreUrl, {
-  exports: {
-    setPendingText(flowId, itemId, text, draftId = null) {
-      const key = _pendingKey(flowId, itemId);
-      const prior = _pendingStore.get(key) ?? { flowId, itemId };
-      const next = { ...prior, flowId, itemId, text, draftId: draftId ?? null, updatedAt: Date.now() };
-      _pendingStore.set(key, next);
-      setPendingTextCalls.push({ flowId, itemId, text, draftId });
+function makeDiscussStore() {
+  return {
+    async setPending(flowId, itemId, text, draftId = null) {
+      const key = `${flowId}__${itemId}`;
+      const prior = _pending.get(key) ?? {};
+      const next = { ...prior, text, draftId: draftId ?? prior.draftId ?? null, updatedAt: Date.now() };
+      _pending.set(key, next);
+      setPendingCalls.push({ flowId, itemId, text, draftId });
       return next;
     },
-    mergePendingFields(flowId, itemId, fields) {
-      const key = _pendingKey(flowId, itemId);
-      const prior = _pendingStore.get(key) ?? { flowId, itemId };
-      const mergedFields = { ...(prior.fields ?? {}), ...fields };
-      const next = { ...prior, flowId, itemId, fields: mergedFields, updatedAt: Date.now() };
-      _pendingStore.set(key, next);
-      return next;
-    },
-    readPending(flowId, itemId) {
-      return _pendingStore.get(_pendingKey(flowId, itemId)) ?? null;
-    },
-    clearPending(flowId, itemId) {
-      _pendingStore.delete(_pendingKey(flowId, itemId));
-    },
-  },
-});
+    async mergePendingFields() {},
+    async readPending() { return null; },
+    async clearPending() {},
+  };
+}
 
 await mock.module(telemetryUrl, {
   exports: {
@@ -79,8 +63,8 @@ function findTool(tools, name, ctx = {}) {
 
 describe("registerProposeDraftTool — propose_draft", () => {
   function clearStore() {
-    _pendingStore.clear();
-    setPendingTextCalls.length = 0;
+    _pending.clear();
+    setPendingCalls.length = 0;
     fakeResolver = null;
   }
 
@@ -101,7 +85,7 @@ describe("registerProposeDraftTool — propose_draft", () => {
     };
   }
 
-  function makeDraftDeps({ readStoreFlow = makeGateFlow(), componentEmitter = null, discussStore = null, ctx = {} } = {}) {
+  function makeDraftDeps({ readStoreFlow = makeGateFlow(), componentEmitter = null, discussStore = makeDiscussStore(), ctx = {} } = {}) {
     const readStore = { get: (id) => (id === readStoreFlow?.flowId ? readStoreFlow : null) };
     const { api, tools } = createToolApi();
     registerProposeDraftTool({ api, readStore, componentEmitter, discussStore });
@@ -157,7 +141,7 @@ describe("registerProposeDraftTool — propose_draft", () => {
     };
     const readStore = { get: () => flow };
     const { api, tools } = createToolApi();
-    registerProposeDraftTool({ api, readStore });
+    registerProposeDraftTool({ api, readStore, discussStore: makeDiscussStore() });
     const toolDef = findTool(tools, "propose_draft");
     const result = await toolDef.execute("tc", { flowId: "fid-ni", itemId: "item-abc", text: "new text" }, null);
     assert.equal(result.isError, true);
@@ -186,7 +170,7 @@ describe("registerProposeDraftTool — propose_draft", () => {
     };
     const readStore = { get: () => flow };
     const { api, tools } = createToolApi();
-    registerProposeDraftTool({ api, readStore });
+    registerProposeDraftTool({ api, readStore, discussStore: makeDiscussStore() });
     const toolDef = findTool(tools, "propose_draft");
     const result = await toolDef.execute("tc", { flowId: "fid-obj-item", itemId: "item-obj", text: "new text" }, null);
     assert.equal(result.isError, undefined, "object-itemId should resolve correctly");
@@ -200,52 +184,52 @@ describe("registerProposeDraftTool — propose_draft", () => {
     assert.ok(result.content[0].text.includes("identical to the current draft"));
   });
 
-  test("calls setPendingText with flowId, itemId, text, draftId on success", async () => {
+  test("calls setPending with flowId, itemId, text, draftId on success", async () => {
     clearStore();
     const { toolDef } = makeDraftDeps();
     await toolDef.execute("tc", { flowId: "fid-gate-draft", itemId: "item-abc", text: "new revised text" }, null);
-    assert.equal(setPendingTextCalls.length, 1);
-    assert.equal(setPendingTextCalls[0].flowId, "fid-gate-draft");
-    assert.equal(setPendingTextCalls[0].itemId, "item-abc");
-    assert.equal(setPendingTextCalls[0].text, "new revised text");
-    assert.equal(setPendingTextCalls[0].draftId, null);
+    assert.equal(setPendingCalls.length, 1);
+    assert.equal(setPendingCalls[0].flowId, "fid-gate-draft");
+    assert.equal(setPendingCalls[0].itemId, "item-abc");
+    assert.equal(setPendingCalls[0].text, "new revised text");
+    assert.equal(setPendingCalls[0].draftId, null);
   });
 
-  test("calls setPendingText with provided draftId when params.id is set", async () => {
+  test("calls setPending with provided draftId when params.id is set", async () => {
     clearStore();
     const { toolDef } = makeDraftDeps();
     await toolDef.execute("tc", { flowId: "fid-gate-draft", itemId: "item-abc", text: "new text", id: "body" }, null);
-    const call = setPendingTextCalls.find((c) => c.draftId === "body");
-    assert.ok(call, "setPendingText called with draftId=body");
+    const call = setPendingCalls.find((c) => c.draftId === "body");
+    assert.ok(call, "setPending called with draftId=body");
   });
 
   test("uses null draftId when params.id is absent", async () => {
     clearStore();
     const { toolDef } = makeDraftDeps();
     await toolDef.execute("tc", { flowId: "fid-gate-draft", itemId: "item-abc", text: "new text" }, null);
-    assert.equal(setPendingTextCalls[0].draftId, null);
+    assert.equal(setPendingCalls[0].draftId, null);
   });
 
   test("uses null draftId when params.id is blank string", async () => {
     clearStore();
     const { toolDef } = makeDraftDeps();
     await toolDef.execute("tc", { flowId: "fid-gate-draft", itemId: "item-abc", text: "new text", id: "   " }, null);
-    assert.equal(setPendingTextCalls[0].draftId, null);
+    assert.equal(setPendingCalls[0].draftId, null);
   });
 
-  test("calls discussStore.setPending when discussStore is provided", async () => {
+  test("writes the pending proposal through the discuss store", async () => {
     clearStore();
-    const setPendingCalls = [];
+    const storeCalls = [];
     const discussStore = {
-      setPending: (...args) => setPendingCalls.push(args),
+      setPending: (...args) => storeCalls.push(args),
       mergePendingFields: () => {},
     };
     const { toolDef } = makeDraftDeps({ discussStore });
     await toolDef.execute("tc", { flowId: "fid-gate-draft", itemId: "item-abc", text: "new text" }, null);
-    assert.equal(setPendingCalls.length, 1);
-    assert.equal(setPendingCalls[0][0], "fid-gate-draft");
-    assert.equal(setPendingCalls[0][1], "item-abc");
-    assert.equal(setPendingCalls[0][2], "new text");
+    assert.equal(storeCalls.length, 1);
+    assert.equal(storeCalls[0][0], "fid-gate-draft");
+    assert.equal(storeCalls[0][1], "item-abc");
+    assert.equal(storeCalls[0][2], "new text");
   });
 
   test("calls componentEmitter with kind=proposed_draft when provided", async () => {
@@ -276,7 +260,7 @@ describe("registerProposeDraftTool — propose_draft", () => {
     const { toolDef } = makeDraftDeps();
     // "  fid-gate-draft  " should match after trim
     await toolDef.execute("tc", { flowId: "  fid-gate-draft  ", itemId: "  item-abc  ", text: "  new text  " }, null);
-    const call = setPendingTextCalls[0];
+    const call = setPendingCalls[0];
     assert.equal(call.flowId, "fid-gate-draft");
     assert.equal(call.itemId, "item-abc");
     assert.equal(call.text, "new text");
@@ -300,8 +284,8 @@ describe("registerProposeDraftTool — propose_draft", () => {
     });
     const result = await toolDef.execute("tc", { text: "auto-resolved text" }, null);
     assert.equal(result.isError, undefined);
-    assert.equal(setPendingTextCalls[0].flowId, "fid-gate-draft");
-    assert.equal(setPendingTextCalls[0].itemId, "item-abc");
+    assert.equal(setPendingCalls[0].flowId, "fid-gate-draft");
+    assert.equal(setPendingCalls[0].itemId, "item-abc");
   });
 
   test("auto-resolve overrides a wrong/garbled explicit flowId (mirrors the real subagent bug)", async () => {
@@ -313,8 +297,8 @@ describe("registerProposeDraftTool — propose_draft", () => {
     // Agent guessed a nonsense flowId/itemId, as Cyrano did in production.
     const result = await toolDef.execute("tc", { flowId: "auto-resolve", itemId: "auto-resolve", text: "revised text" }, null);
     assert.equal(result.isError, undefined);
-    assert.equal(setPendingTextCalls[0].flowId, "fid-gate-draft");
-    assert.equal(setPendingTextCalls[0].itemId, "item-abc");
+    assert.equal(setPendingCalls[0].flowId, "fid-gate-draft");
+    assert.equal(setPendingCalls[0].itemId, "item-abc");
   });
 
   test("does not attempt auto-resolve when the explicit flowId already resolves to a real flow", async () => {
@@ -325,8 +309,8 @@ describe("registerProposeDraftTool — propose_draft", () => {
     });
     const result = await toolDef.execute("tc", { flowId: "fid-gate-draft", itemId: "item-abc", text: "explicit text" }, null);
     assert.equal(result.isError, undefined);
-    assert.equal(setPendingTextCalls[0].flowId, "fid-gate-draft");
-    assert.equal(setPendingTextCalls[0].itemId, "item-abc");
+    assert.equal(setPendingCalls[0].flowId, "fid-gate-draft");
+    assert.equal(setPendingCalls[0].itemId, "item-abc");
   });
 
   test("auto-resolve failure (resolver has nothing for this session) still surfaces a clear error, not a crash", async () => {

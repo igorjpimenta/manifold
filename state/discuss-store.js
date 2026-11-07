@@ -6,7 +6,8 @@
 //   messages_json    — full ordered message history (operator + agent)
 //   turn_status      — idle | running | error (drives the "thinking" row)
 //   active_turn_id   — in-flight turnId; lets clients reconcile live events
-//   pending_json     — proposed draft + fields mid-turn
+//   pending_json     — the proposal waiting on the operator: { text,
+//                      fields, draftId, updatedAt }
 //   components_json  — tool-seeded components keyed by kind; one entry
 //                      per kind, last-write-wins. Cleared on gate resolve.
 //
@@ -70,7 +71,7 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
       messages:     tryParse(row.messagesJson, []),
       turnStatus:   row.turnStatus    ?? "idle",
       activeTurnId: row.activeTurnId  ?? null,
-      pending:      tryParse(row.pendingJson, null),
+      pending:      normalizePending(tryParse(row.pendingJson, null), row.updatedAt),
       components:   tryParse(row.componentsJson, []),
       updatedAt:    row.updatedAt,
     };
@@ -141,14 +142,49 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
   }
 
   // ── Pending proposal ────────────────────────────────────────────────────
+  //
+  // One blob per (flowId, itemId) in pending_json:
+  //   { text?, fields?, draftId?, updatedAt }
+  //
+  // updatedAt is the proposal's own timestamp — the row's updated_at also
+  // moves on every message append, so it cannot stand in for it.
+
+  // Normalizes the stored blob into the shape callers read. Blobs written
+  // before the blob carried its own timestamp fall back to the row's last
+  // activity, which is the earliest moment the proposal can have existed.
+  function normalizePending(blob, rowUpdatedAt) {
+    if (!blob || typeof blob !== "object" || Array.isArray(blob)) return null;
+    const out = {
+      draftId: blob.draftId ?? null,
+      updatedAt: typeof blob.updatedAt === "number" ? blob.updatedAt : Number(rowUpdatedAt),
+    };
+    if (typeof blob.text === "string") out.text = blob.text;
+    if (blob.fields && typeof blob.fields === "object" && !Array.isArray(blob.fields)) out.fields = blob.fields;
+    return out;
+  }
+
+  // The proposal waiting on the operator for this thread, or null.
+  async function readPending(flowId, itemId) {
+    if (!flowId || !itemId) return null;
+    const row = await getRow(flowId, itemId);
+    if (!row) return null;
+    return normalizePending(tryParse(row.pendingJson, null), row.updatedAt);
+  }
 
   // Write or overwrite the pending draft text. Merges with any existing
-  // fields so a propose_draft call doesn't wipe a prior propose_draft_meta.
+  // fields so a later text write doesn't wipe earlier field writes, and
+  // keeps the prior draft slot when the caller names none — the slot picks
+  // which draft apply-draft commits on multi-draft gates.
   async function setPending(flowId, itemId, text, draftId = null) {
     await ensureRow(flowId, itemId);
     const row = await getRow(flowId, itemId);
-    const existing = tryParse(row?.pendingJson, {});
-    const next = { ...existing, text, draftId: draftId ?? null };
+    const existing = tryParse(row?.pendingJson, {}) ?? {};
+    const next = {
+      ...existing,
+      text,
+      draftId: draftId ?? existing.draftId ?? null,
+      updatedAt: Date.now(),
+    };
     await withSharedWrite(dbPath, () =>
       db.update(discussState)
         .set({ pendingJson: JSON.stringify(next), updatedAt: Date.now() })
@@ -162,8 +198,12 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
   async function mergePendingFields(flowId, itemId, fields) {
     await ensureRow(flowId, itemId);
     const row = await getRow(flowId, itemId);
-    const existing = tryParse(row?.pendingJson, {});
-    const next = { ...existing, fields: { ...(existing.fields ?? {}), ...fields } };
+    const existing = tryParse(row?.pendingJson, {}) ?? {};
+    const next = {
+      ...existing,
+      fields: { ...(existing.fields ?? {}), ...fields },
+      updatedAt: Date.now(),
+    };
     await withSharedWrite(dbPath, () =>
       db.update(discussState)
         .set({ pendingJson: JSON.stringify(next), updatedAt: Date.now() })
@@ -233,22 +273,13 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     if (!flowId) return [];
     const rows = await db.select().from(discussState)
       .where(eq(discussState.flowId, flowId));
-    // One entry per itemId: ensureRow has no conflict target on this
-    // table, so repeated appends leave convergent duplicate rows behind.
-    // getState reads rows[0] for the same reason; keep the latest write.
-    const latest = new Map();
-    for (const row of rows) {
-      const entry = {
-        itemId: row.itemId,
-        messages: tryParse(row.messagesJson, []),
-        turnStatus: row.turnStatus ?? "idle",
-        updatedAt: Number(row.updatedAt),
-      };
-      if (!latest.has(row.itemId) || entry.updatedAt > latest.get(row.itemId).updatedAt) {
-        latest.set(row.itemId, entry);
-      }
-    }
-    return [...latest.values()].sort((a, b) => a.updatedAt - b.updatedAt);
+    const entries = rows.map((row) => ({
+      itemId: row.itemId,
+      messages: tryParse(row.messagesJson, []),
+      turnStatus: row.turnStatus ?? "idle",
+      updatedAt: Number(row.updatedAt),
+    }));
+    return entries.sort((a, b) => a.updatedAt - b.updatedAt);
   }
 
   return {
@@ -259,6 +290,7 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     stampMessageError,
     setTurnStatus,
     setPending,
+    readPending,
     mergePendingFields,
     clearPending,
     setComponent,

@@ -30,10 +30,6 @@ export function opsDbPath(dataDir) {
   return path.join(dataDir, "ops.sqlite");
 }
 
-export function pendingDir(dataDir) {
-  return path.join(dataDir, "discuss-pending");
-}
-
 export function locksDir(dataDir) {
   return path.join(dataDir, "locks");
 }
@@ -179,7 +175,6 @@ export function resolveStorePaths({ paths = null, dataDir = null, env = process.
     dataDir: dir,
     runtimeDb: paths?.runtimeDb ?? env.MANIFOLD_RUNTIME_DB ?? runtimeDbPath(dir),
     opsDb: paths?.opsDb ?? env.MANIFOLD_OPS_DB ?? opsDbPath(dir),
-    pendingDir: paths?.pendingDir ?? env.MANIFOLD_PENDING_DIR ?? pendingDir(dir),
     locksDir: paths?.locksDir ?? env.MANIFOLD_LOCKS_DIR ?? locksDir(dir),
     pipelinesDir: paths?.pipelinesDir ?? env.MANIFOLD_PIPELINES_DIR ?? pipelinesDir(dir),
     mediaAudioDir: paths?.mediaAudioDir ?? env.MANIFOLD_MEDIA_AUDIO_DIR ?? mediaAudioDir(dir),

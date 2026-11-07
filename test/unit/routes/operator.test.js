@@ -91,9 +91,12 @@ function makeDeps(api, overrides = {}) {
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
     normalizePendingFields: async () => ({}),
-    readPending: () => null,
-    mergePendingFields: () => {},
-    setPendingText: () => {},
+    discussStore: {
+      readPending: async () => null,
+      mergePendingFields: async () => {},
+      setPending: async () => {},
+      clearPending: async () => {},
+    },
     componentEmitter: async () => {},
     sessions: {
       resolveSessionFile: () => "",
