@@ -2,8 +2,8 @@
 // dispatch: it drives the injected harness turn, hands the reply to the
 // node's apply(), and consumes the delivered tool result.
 //
-// The turn itself (runtime call shape, readiness gate, the wait race)
-// lives in the harness plugin — see test/unit/adapter/run-turn.test.js.
+// The turn itself (runtime call shape, readiness gate, the wait race) is the
+// harness plugin's — see plugins/openclaw/manifold/run-turn.test.js.
 import { test, it, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";

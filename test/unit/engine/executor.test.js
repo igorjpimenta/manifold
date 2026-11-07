@@ -1698,7 +1698,7 @@ describe("reviveAgentKindOrphan", () => {
     // No runTurn provided — dispatch refuses outright ("no agent runtime
     // bound"). A runTurn that throws GatewayHandoffNeeded mid-turn still
     // blocks instead of failing; that harness-side path is covered by
-    // test/unit/adapter/run-turn.test.js.
+    // plugins/openclaw/manifold/run-turn.test.js.
     const { executor, store } = makeExecutor({ p: pipeline }, []);
     const flow = makeOrphanFlow();
     store._map.set(flow.flowId, flow);

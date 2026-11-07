@@ -2,7 +2,6 @@
 // tool call and the dispatching node's apply(). Core owns only this registry
 // and the engine side that reads it. It is also published for harness use
 // (package.json "./tool-handoff").
-// (package.json "./tool-handoff").
 //
 // The harness turn (the plugin's run-turn.js) only ever returns
 // {text, runId, toolResult?} to apply() — a turn's own reply, never a tool

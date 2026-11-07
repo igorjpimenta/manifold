@@ -41,12 +41,11 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
     if (emit && output?.text) {
       try { await emit("session.transcript.completed", { scope: "node", nodeId, sessionKey, text: output.text }); } catch {}
     }
-    // Option B "needs:" — needsCtx threaded through both calling
-    // conventions as a new field/5th positional arg. Additive: every
-    // existing apply() function ignores an argument/key it doesn't
-    // ask for, so this is a no-op for every apply() that hasn't
-    // opted in yet. output.toolResult carries the delivered row (when a
-    // tool fired); the row is consumed here so a retried turn never
+    // needsCtx is threaded through both calling conventions as a new field /
+    // 5th positional arg. Additive: every existing apply() function ignores
+    // an argument/key it doesn't ask for, so this is a no-op for every apply()
+    // that hasn't opted in yet. output.toolResult carries the delivered row
+    // (when a tool fired); the row is consumed here so a retried turn never
     // rereads a stale result.
     try {
       return usesNamedParams(node.apply)
