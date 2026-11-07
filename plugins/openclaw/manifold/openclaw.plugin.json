@@ -7,17 +7,6 @@
       "plugins.entries.manifold"
     ]
   },
-  "contracts": {
-    "tools": [
-      "manifold_start",
-      "propose_draft",
-      "propose_draft_meta",
-      "submit_draft",
-      "report_draft_blocked",
-      "report_draft_skip",
-      "submit_score"
-    ]
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

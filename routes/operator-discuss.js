@@ -73,10 +73,8 @@ export function selectDiscussProvider({ primarySpec, chain, isCooldown }) {
 
 export function createDiscussHandler({
   api,
-  normalizePendingFields,
   // The discuss store owns the pending proposal (discuss_state.pending_json).
   discussStore,
-  componentEmitter,
   sessions,
 }) {
   async function handleDiscuss(body) {
@@ -182,118 +180,8 @@ export function createDiscussHandler({
         api.logger.warn(`manifold discuss (elev) [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
         return { status: 500, body: { ok: false, code: "no_reply_text", error: "agent ran but no assistant text found" } };
       }
-      // Harvest child sessions spawned during this turn
-      if (itemIdForDraft) {
-        try {
-          const _childEntries = [];
-          for (const _aid of sessions.listSessionAgents()) {
-            try {
-              const _sj = sessions.readSessionsIndex(_aid);
-              if (!_sj) continue;
-              for (const [_ck, _ent] of Object.entries(_sj)) {
-                if (_ent?.spawnedBy === sessionKey && typeof _ent?.startedAt === "number" && _ent.startedAt >= startedAt) {
-                  _childEntries.push({ childKey: _ck, agentId: _aid, entry: _ent });
-                }
-              }
-            } catch {}
-          }
-          for (const { childKey: _ck, agentId: _cAid, entry: _initEnt } of _childEntries) {
-            const _dl = Date.now() + 60_000;
-            let _ent = _initEnt;
-            while (_ent?.status !== "done" && _ent?.status !== "error" && Date.now() < _dl) {
-              await new Promise((r) => setTimeout(r, 500));
-              try {
-                const _sj = sessions.readSessionsIndex(_cAid);
-                if (_sj) _ent = _sj[_ck] ?? _ent;
-              } catch {}
-            }
-            if (_ent?.status !== "done" && _ent?.status !== "error") {
-              api.logger.warn(`manifold discuss: child session ${_ck} did not terminate within 60s`);
-              continue;
-            }
-            const _jsonlPath = sessions.resolveChildSessionFile(_cAid, _ent, _ck);
-            if (!sessions.sessionFileExists(_jsonlPath)) continue;
-            const _lines = sessions.readSessionFileSync(_jsonlPath).split("\n").filter(Boolean);
-            let _eFields = null;
-            let _eDraft = null;
-            for (const _ln of _lines) {
-              try {
-                const _o = JSON.parse(_ln);
-                for (const _p of (_o?.message?.content ?? [])) {
-                  if (_p?.type !== "toolCall") continue;
-                  const _args = _p.arguments ?? _p.input ?? {};
-                  if (_p.name === "propose_draft_meta" && _args.fields && Object.keys(_args.fields).length > 0) _eFields = _args.fields;
-                  if (_p.name === "propose_draft" && typeof _args.text === "string" && _args.text.length > 100) _eDraft = _args.text;
-                }
-              } catch {}
-            }
-            if (!_eFields || !_eDraft) {
-              for (let _i = _lines.length - 1; _i >= 0; _i--) {
-                try {
-                  const _o = JSON.parse(_lines[_i]);
-                  const _msg = _o?.message;
-                  if (_msg?.role !== "assistant") continue;
-                  for (const _part of (_msg?.content ?? [])) {
-                    if (_part?.type !== "text") continue;
-                    const _t = _part.text || "";
-                    if (!_eFields) {
-                      for (const [, _js] of _t.matchAll(/```json\s*([\s\S]*?)```/g)) {
-                        try {
-                          const _parsed = JSON.parse(_js.trim());
-                          if (_parsed?.fields && typeof _parsed.fields === "object" && Object.keys(_parsed.fields).length > 0) {
-                            _eFields = _parsed.fields; break;
-                          }
-                        } catch {}
-                      }
-                    }
-                    if (!_eDraft) {
-                      for (const [, _cs] of _t.matchAll(/```(?!json)[^\n]*\n([\s\S]*?)```/g)) {
-                        if (_cs.trim().length > 200) { _eDraft = _cs.trim(); break; }
-                      }
-                    }
-                  }
-                  if (_eFields && _eDraft) break;
-                } catch {}
-              }
-            }
-            if (_eFields) {
-              try {
-                await discussStore.mergePendingFields(flowId, itemIdForDraft, _eFields);
-                api.logger.info(`manifold discuss: applied child-session meta [${_ck.slice(-8)}]: ${JSON.stringify(Object.keys(_eFields))}`);
-              } catch (_err) {
-                api.logger.warn(`manifold discuss: mergePendingFields error: ${_err?.message}`);
-              }
-            }
-            if (_eDraft) {
-              try {
-                await discussStore.setPending(flowId, itemIdForDraft, _eDraft);
-                api.logger.info(`manifold discuss: applied child-session draft [${_ck.slice(-8)}] (${_eDraft.length} chars)`);
-              } catch (_err) {
-                api.logger.warn(`manifold discuss: setPending error: ${_err?.message}`);
-              }
-            }
-            if ((_eFields || _eDraft) && componentEmitter) {
-              try {
-                const _pend = await discussStore.readPending(flowId, itemIdForDraft);
-                await componentEmitter({
-                  flowId, itemId: itemIdForDraft,
-                  component: {
-                    kind: _eDraft ? "proposed_draft" : "proposed_meta",
-                    ...(_pend?.text ? { text: _pend.text } : {}),
-                    ...(_pend?.fields ? { fields: normalizePendingFields(_pend.fields) } : {}),
-                    proposedBy: _ck.split(":")[1] ?? "agent",
-                    updatedAt: Date.now(),
-                  },
-                });
-              } catch (_err) {
-                api.logger.warn(`manifold discuss: componentEmitter error: ${_err?.message}`);
-              }
-            }
-          }
-        } catch (_outerErr) {
-          api.logger.warn(`manifold discuss: child-session wait/apply error: ${_outerErr?.message}`);
-        }
-      }
+      // Core never scans harness transcripts for pipeline tool calls —
+      // pending fields and drafts arrive only via explicit tools.
       let proposedDraft = null;
       let proposedMeta = null;
       const currentPending = await discussStore.readPending(flowId, itemIdForDraft);

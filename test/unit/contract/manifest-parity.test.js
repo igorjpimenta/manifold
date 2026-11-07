@@ -1,12 +1,11 @@
 // Pins openclaw.plugin.json to the registration surface in code.
 //
-// Invariant: the set of tools registered via api.registerTool(...) in tracked
-// .js files (excluding test/ and dashboard/) is exactly contracts.tools, and
-// the set of config-schema property paths in the manifest's configSchema is
-// exactly the set in index.js's inline configSchema. Either direction of
-// drift — a tool registered but undeclared, or declared but never registered —
-// fails here with the offending name.
-
+// Invariant: the plugin registers no raw tools and declares no tool
+// contract — manifold exposes its pipeline tools over MCP only — and the set
+// of config-schema property paths in the manifest's configSchema is exactly
+// the set in index.js's inline configSchema. A tool registered without the
+// host knowing about it fails here.
+//
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -16,11 +15,13 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
-// Real call shapes in agent/tools/*.js: api.registerTool((ctx) => ({ name:
-// "..." })) and api.registerTool({ name: "..." }). The tool name is the
-// `name` property of the definition object, never a registerTool argument.
+// Real call shapes in a plugin: api.registerTool((ctx) => ({ name: "..." }))
+// and api.registerTool({ name: "..." }). The tool name is the `name` property
+// of the definition object, never a registerTool argument. The MCP servers
+// register through their own SDK's server.registerTool(name, schema), which
+// this does not match.
 const REGISTER_TOOL_NAME_RE =
-  /registerTool\(\s*(?:\(\w*\)\s*=>\s*\(\s*\{|\{)\s*name:\s*(['"])([^'"\n]+)\1/g;
+  /api\.registerTool\(\s*(?:\(\w*\)\s*=>\s*\(\s*\{|\{)\s*name:\s*(['"])([^'"\n]+)\1/g;
 
 function trackedSourceJsFiles() {
   return execFileSync("git", ["ls-files", "-z", "*.js"], {
@@ -191,23 +192,28 @@ function readManifest() {
 }
 
 describe("openclaw.plugin.json contract parity", () => {
-  test("contracts.tools equals the set of tools registered via registerTool", () => {
-    const registered = registeredToolNames();
-    assert.ok(registered.size > 0, "no api.registerTool name literals found — registration regex no longer matches the code");
-    const declared = new Set(readManifest().contracts.tools);
-
-    const undeclared = [...registered].filter((n) => !declared.has(n)).sort();
-    const unregistered = [...declared].filter((n) => !registered.has(n)).sort();
-
+  test("the plugin registers no raw tools — the pipeline surface is MCP-only", async () => {
+    const registered = [...registeredToolNames()].sort();
     assert.deepEqual(
-      undeclared,
+      registered,
       [],
-      `registered in code but missing from contracts.tools: ${undeclared.join(", ")}`,
+      `the plugin registered raw tools (${registered.join(", ")}) — manifold exposes the pipeline tools over MCP only`,
     );
+
+    const declared = readManifest().contracts?.tools ?? [];
     assert.deepEqual(
-      unregistered,
+      declared,
       [],
-      `declared in contracts.tools but never registered: ${unregistered.join(", ")}`,
+      "contracts.tools must stay empty: the plugin contributes no raw tools",
+    );
+
+    // The raw registration is gone, not the capability: the MCP server still
+    // carries the same pipeline tools.
+    const { TOOL_DEFS } = await import("../../../mcp/tools.js");
+    const mcpToolNames = TOOL_DEFS.map((d) => d.name);
+    assert.ok(
+      mcpToolNames.includes("manifold_start"),
+      `the MCP tool surface lost manifold_start: ${mcpToolNames.join(", ")}`,
     );
   });
 

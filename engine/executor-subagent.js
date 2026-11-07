@@ -1,6 +1,6 @@
 import { GatewayHandoffNeeded, isRequestScopedSubagentError, fetchSessionError } from "./executor-errors.js";
 import { usesNamedParams } from "./executor-helpers.js";
-import { waitForToolSignal } from "../state/tool-handoff.js";
+import { waitForToolResult, clearPendingResult } from "../state/tool-handoff.js";
 
 // A lapsed agent.wait window answers with the same bare "timeout" status a
 // timed-out run gets — waitForRun drops endedAt, so the two can't be told
@@ -25,41 +25,49 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;
     }
-    // Race waitForRun against a tool-fired wake-up (tool-handoff.js,
-    // notified by e.g. hooks/score-tool-wake.js) — waitForRun only settles
-    // when the WHOLE underlying run reaches its own natural end, even when
-    // the one tool call a node actually cares about already landed well
-    // before that. This lets the common, already-succeeded case finish
-    // early instead of waiting out the model's redundant post-tool-call
-    // wrap-up reply.
+    // Race waitForRun against a tool-result poll (tool-handoff.js): an MCP
+    // deliver_result call for this session lands a row the waiter picks
+    // up — so a turn whose structured result already arrived finishes early
+    // instead of waiting out the model's own natural end. The row is read
+    // through the shared store, so the delivering side and this waiter may
+    // live in different processes.
     //
-    // There is deliberately no manifold-side deadline, idle or absolute: a
-    // dispatched run can sit silently in the gateway's own lane queue
+    // There is deliberately no manifold-side deadline here: a dispatched
+    // run can sit silently in the gateway's own lane queue
     // (agents.defaults.maxConcurrent) for arbitrarily long, and neither
     // silence nor wall-clock time there means the run is hung.
-    const toolSignal = waitForToolSignal(runResult.runId);
+    const toolWait = waitForToolResult(sessionKey);
     let waitResult;
     try {
       waitResult = await Promise.race([
         subagent.waitForRun({ runId: runResult.runId, timeoutMs: WAIT_UNTIL_RUN_ENDS_MS }),
-        toolSignal.promise.then(() => ({ status: "ok", toolFired: true })),
+        toolWait.promise.then((row) => ({ status: "ok", toolFired: true, toolRow: row })),
       ]);
     } catch (err) {
-      toolSignal.cancel();
+      toolWait.cancel();
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;
     }
-    toolSignal.cancel();
+    toolWait.cancel();
     if (waitResult.status !== "ok") {
       const errDetail = waitResult.error ?? (await fetchSessionError(sessionKey)) ?? "no error message";
       throw new Error(`subagent ${waitResult.status}: ${errDetail}`);
     }
-    // Tool already fired with everything apply() needs (tool-handoff.js's
-    // pending-result map) — skip fetching the model's own wrap-up reply,
-    // which is often just a "score submitted" confirmation with nothing
-    // useful in it. output.text is only ever a fallback for apply()s that
-    // don't find a pending result.
-    if (waitResult.toolFired) return { text: "", runId: runResult.runId };
+    // Tool already delivered everything apply() needs (tool-handoff.js's
+    // session-keyed row, written by the MCP deliver_result call) — skip
+    // fetching the model's own wrap-up reply, which is often just a
+    // "submitted" confirmation with nothing useful in it. output.text is
+    // only ever a fallback for apply()s that find no tool result.
+    if (waitResult.toolFired) {
+      const toolRow = waitResult.toolRow ?? null;
+      return {
+        text: "",
+        runId: runResult.runId,
+        toolResult: toolRow
+          ? { kind: toolRow.kind ?? null, payload: toolRow.payload ?? null }
+          : null,
+      };
+    }
     let msgsResult;
     try {
       msgsResult = await subagent.getSessionMessages({ sessionKey, limit: 5 });
@@ -114,12 +122,18 @@ export function createSubagentDispatch({ getSubagent, sessionIndex, logger, emit
     // conventions as a new field/5th positional arg. Additive: every
     // existing apply() function ignores an argument/key it doesn't
     // ask for, so this is a no-op for every apply() that hasn't
-    // opted in yet.
-    return usesNamedParams(node.apply)
-      ? await Promise.resolve(node.apply({ state: applyCtx, output, item: applyExtraArg ?? undefined, meta: applyMeta, needs: needsCtx }))
-      : applyExtraArg !== undefined
-        ? await Promise.resolve(node.apply(applyCtx, output, applyExtraArg, applyMeta, needsCtx))
-        : await Promise.resolve(node.apply(applyCtx, output, undefined, applyMeta, needsCtx));
+    // opted in yet. output.toolResult carries the delivered row (when a
+    // tool fired); the row is consumed here so a retried turn never
+    // rereads a stale result.
+    try {
+      return usesNamedParams(node.apply)
+        ? await Promise.resolve(node.apply({ state: applyCtx, output, item: applyExtraArg ?? undefined, meta: applyMeta, needs: needsCtx }))
+        : applyExtraArg !== undefined
+          ? await Promise.resolve(node.apply(applyCtx, output, applyExtraArg, applyMeta, needsCtx))
+          : await Promise.resolve(node.apply(applyCtx, output, undefined, applyMeta, needsCtx));
+    } finally {
+      if (output?.toolResult) await clearPendingResult(sessionKey).catch(() => {});
+    }
   }
 
   return { runSubagentTurn, dispatchAgentWithRetry };

@@ -1,7 +1,6 @@
 import path from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { normalizePendingFields } from "./discuss-helpers.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
 import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow, resolveAudioHarness } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
@@ -669,7 +668,7 @@ export function registerDiscussHandlers({
       if (pending && (pending.text || (pending.fields && Object.keys(pending.fields ?? {}).length > 0))) {
         parsed.pending = {
           text: typeof pending.text === "string" ? pending.text : null,
-          fields: pending.fields && typeof pending.fields === "object" ? normalizePendingFields(pending.fields) : null,
+          fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
           updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
         };
       }
@@ -680,7 +679,7 @@ export function registerDiscussHandlers({
         parsed = { ok: true, messages: [] };
         parsed.pending = {
           text: typeof pending.text === "string" ? pending.text : null,
-          fields: pending.fields && typeof pending.fields === "object" ? normalizePendingFields(pending.fields) : null,
+          fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
           updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
         };
       } else {
@@ -698,7 +697,7 @@ export function registerDiscussHandlers({
           if (pending && (pending.text || (pending.fields && Object.keys(pending.fields).length > 0))) {
             parsed.pending = {
               text: typeof pending.text === "string" ? pending.text : null,
-              fields: pending.fields && typeof pending.fields === "object" ? normalizePendingFields(pending.fields) : null,
+              fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
               updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
             };
           }
@@ -864,6 +863,5 @@ export function registerDiscussHandlers({
     handleDiscussHistory,
     handleDiscussApplyDraft,
     resolveDiscussTarget,
-    normalizePendingFields,
   };
 }

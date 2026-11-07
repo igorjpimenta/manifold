@@ -26,15 +26,6 @@ import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js
 import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
 import { wrapSubagentKeys } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
-import {
-  registerGraphFlowTool,
-  registerProposeDraftTool,
-  registerProposeDraftMetaTool,
-  registerSubmitDraftTool,
-  registerSubmitScoreTool,
-  registerReportDraftBlockedTool,
-  registerReportDraftSkipTool,
-} from "./agent/tools/index.js";
 import { checkDb } from "../../../state/db-health.js";
 import { writeCorruptionAlert } from "../../../state/db-guard.js";
 import { createGateResolver } from "../../../gates/gate-resolver.js";
@@ -52,7 +43,6 @@ import { createEmitter } from "../../../events/emit.js";
 import { createWsRunEventsListener } from "../../../events/ws-run-events.js";
 import { createCatalogPublisher } from "../../../events/catalog.js";
 import { registerDiscussHandlers } from "../../../routes/discuss.js";
-import { createComponentEmitter } from "../../../routes/discuss-component.js";
 import { registerRunRoutes } from "../../../routes/runs.js";
 import { registerOperatorRoutes } from "../../../routes/operator.js";
 import * as sessions from "./sessions.js";
@@ -77,7 +67,6 @@ const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 import { registerGatewayReadiness } from "../../../engine/gateway-readiness.js";
 import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
 import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
-import { registerScoreToolWakeHook } from "./hooks/score-tool-wake.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
 import { setLocksDir } from "../../../locks/lock.js";
@@ -100,7 +89,7 @@ export default definePluginEntry({
   id: "manifold",
   name: "Manifold Pipeline Engine",
   description:
-    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. Agent tool: `manifold_start`.",
+    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. The pipeline tools ship over MCP; the plugin registers no raw tools.",
   configSchema: () => ({
     type: "object",
     additionalProperties: false,
@@ -199,7 +188,6 @@ export default definePluginEntry({
     // writers (gap-answers.js, prime-nodes.js) it shares that lock with.
     registerProfileReadGate(api, { profilePath: userCfg.profilePath });
     registerProfileWriteLock(api, { profilePath: userCfg.profilePath, resultsDir: userCfg.profileEditResultsDir });
-    registerScoreToolWakeHook(api);
     registerManifoldMetaHook(api);
 
     const pipelinesRef = { value: new Map() };
@@ -486,8 +474,6 @@ export default definePluginEntry({
       },
     );
 
-    registerGraphFlowTool({ api, executor, store, pipelinesRef, ensurePipelinesLoaded });
-
     const readStore = runStore;
     const gateResolver = createGateResolver({
       api, store, executor, getBroadcast: () => _gatewayBroadcast, readStore, runStore,
@@ -505,11 +491,6 @@ export default definePluginEntry({
 
     let _gatewayBroadcast = null;
 
-    // Proposal-artifact fan-out (routes/discuss-component.js): persists the
-    // component, then emits canonical proposed + derived pending through
-    // the shared emitter. Egress carries canonical kinds.
-    const componentEmitter = createComponentEmitter({ discussStore, emit: emitCanonical });
-
     api.registerGatewayMethod("plugin.manifold.ping", (opts) => {
       if (!_gatewayBroadcast) {
         _gatewayBroadcast = opts.context.broadcast;
@@ -517,13 +498,6 @@ export default definePluginEntry({
       }
       opts.respond(true, { ok: true });
     }, { scope: "operator.read" });
-
-    registerSubmitDraftTool({ api, pipelinesRef });
-    registerSubmitScoreTool({ api });
-    registerReportDraftBlockedTool({ api });
-    registerReportDraftSkipTool({ api });
-    registerProposeDraftTool({ api, readStore, componentEmitter, discussStore });
-    registerProposeDraftMetaTool({ api, readStore, componentEmitter, discussStore });
 
     // ── Discuss handlers ─────────────────────────────────────────────────────
 
@@ -579,7 +553,6 @@ export default definePluginEntry({
       admissionQueueStore,
       resumeParentRef,
       discussStore,
-      componentEmitter,
       getBroadcast: () => _gatewayBroadcast,
       sessions,
     });
