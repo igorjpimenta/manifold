@@ -374,11 +374,11 @@ describe("executeNode — lock wiring", () => {
     });
     const node = {
       kind: "code",
-      crossProcessLock: "browser:freelance",
+      crossProcessLock: "acct:freelance",
       run: () => ({ x: 1 }),
     };
     await runner.executeNode({ node, nodeId: "N", state: {}, flowId: "f" });
-    assert.equal(lockNameSeen, "browser:freelance");
+    assert.equal(lockNameSeen, "acct:freelance");
   });
 
   it("passes {flowId, nodeId} as the 3rd arg — the crossProcessLock queued-status hook needs both to persist a blocked-acquire transition", async () => {
@@ -395,7 +395,7 @@ describe("executeNode — lock wiring", () => {
     });
     const node = {
       kind: "code",
-      crossProcessLock: "browser:linkedin",
+      crossProcessLock: "acct:linkedin",
       run: () => ({ x: 1 }),
     };
     await runner.executeNode({ node, nodeId: "SCRAPE_PROFILE", state: {}, flowId: "flow-00000099" });
@@ -424,7 +424,7 @@ describe("executeNode — lock wiring", () => {
     });
     const node = {
       kind: "code",
-      crossProcessLock: "browser:freelance",
+      crossProcessLock: "acct:freelance",
       crossProcessLockCooldownMs: 25_000,
       crossProcessLockCooldownJitterMs: 20_000,
       run: () => ({ x: 1 }),
@@ -456,7 +456,7 @@ describe("executeNode — invocation lock owner", () => {
       logger,
       nodeExecutionsStore: makeNodeExecutionsStore(),
     });
-    const node = { kind: "code", crossProcessLock: "browser:freelance", run: () => { ownerInRun = currentLockOwner(); return {}; } };
+    const node = { kind: "code", crossProcessLock: "acct:freelance", run: () => { ownerInRun = currentLockOwner(); return {}; } };
     await runner.executeNode({ node, nodeId: "SCAN", state: { pipelineId: "p1" }, flowId: "flow-1", invocationId: "inv-1" });
     const expected = { kind: "invocation", id: "inv-1", flowId: "flow-1", nodeId: "SCAN", pipelineId: "p1" };
     assert.deepEqual(ownerInWrapper, expected);
@@ -481,20 +481,18 @@ describe("executeNode — invocation lock owner", () => {
     assert.equal(ownerInWrapper, null);
   });
 
-  it("an agent dispatch registers the invocation (with the node's lease cooldown) as its session's lock owner, cleared afterwards", async () => {
+  it("an agent dispatch registers the invocation as its session's lock owner, cleared afterwards", async () => {
     let ownerDuringDispatch;
     const { executeNode } = makeRunner({
       dispatchAgentWithRetry: async ({ session }) => { ownerDuringDispatch = sessionOwner(session); return {}; },
     });
     const node = {
       kind: "agent", agent: "proposal-sender", session: "agent:proposal-sender:test-owner",
-      browserLeaseCooldownMs: 60_000, browserLeaseCooldownJitterMs: 5_000,
       promptBuilder: () => "go", apply: () => ({}),
     };
     await executeNode({ node, nodeId: "SUBMIT", state: { pipelineId: "p2" }, flowId: "flow-2", invocationId: "inv-2" });
     assert.deepEqual(ownerDuringDispatch, {
       kind: "invocation", id: "inv-2", flowId: "flow-2", nodeId: "SUBMIT", pipelineId: "p2",
-      cooldownMs: 60_000, cooldownJitterMs: 5_000,
     });
     assert.equal(sessionOwner("agent:proposal-sender:test-owner"), null);
   });

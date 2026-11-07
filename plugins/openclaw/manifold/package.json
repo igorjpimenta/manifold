@@ -6,7 +6,6 @@
     ".": "./index.js",
     "./profile-lock": "./hooks/profile-write-lock.js",
     "./lock": "./lock.js",
-    "./browser-tabs": "./browser-tabs.js",
     "./invocation-owner": "./invocation-owner.js"
   },
   "license": "UNLICENSED",
@@ -27,8 +26,6 @@
     "agent/tools/shared.js",
     "agent/tools/submit-draft.js",
     "agent/tools/submit-score.js",
-    "browser-tabs.js",
-    "browser-tabs.test.js",
     "hooks/profile-read-gate.js",
     "hooks/profile-write-lock.js",
     "hooks/score-tool-wake.js",
@@ -47,8 +44,6 @@
     "sessions.test.js",
     "lock.js",
     "lock.test.js",
-    "browser-tabs.js",
-    "browser-tabs.test.js",
     "invocation-owner.js",
     "invocation-owner.test.js"
   ],

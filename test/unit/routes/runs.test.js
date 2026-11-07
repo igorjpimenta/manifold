@@ -215,7 +215,7 @@ describe("registerRunRoutes — queue handler", () => {
       flowId: "child-abc", pipelineId: "nyxen_linkedin-prospect",
       parentFlowId: "parent-xyz", nodeId: "FETCH_PROFILES", subflowKey: "jane-doe",
       currentStep: "SCRAPE_PROFILE", lastStep: "__start__",
-      statusReason: "queued: waiting for cross-process lock browser:linkedin (node SCRAPE_PROFILE)",
+      statusReason: "queued: waiting for cross-process lock acct:linkedin (node SCRAPE_PROFILE)",
       createdAt: 1000, updatedAt: 2000,
     };
     registerRunRoutes(makeDeps(api, {
@@ -231,7 +231,7 @@ describe("registerRunRoutes — queue handler", () => {
       flowId: "child-abc", pipelineId: "nyxen_linkedin-prospect",
       parentFlowId: "parent-xyz", nodeId: "FETCH_PROFILES", subflowKey: "jane-doe",
       status: "queued", currentStep: "SCRAPE_PROFILE", lastStep: "__start__",
-      statusReason: "queued: waiting for cross-process lock browser:linkedin (node SCRAPE_PROFILE)",
+      statusReason: "queued: waiting for cross-process lock acct:linkedin (node SCRAPE_PROFILE)",
       createdAtMs: 1000, updatedAtMs: 2000,
     });
   });

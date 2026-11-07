@@ -99,15 +99,15 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
       children: [
         {
           flowId: "child-2", parentInvocationId: "inv-2", status: "queued", lastStep: "DRAFT", updatedAt: 5,
-          waitJson: { kind: "resource-lock", resource: "browser:linkedin", nodeId: "SCRAPE_PROFILE" },
-          statusReason: "queued: waiting for cross-process lock browser:linkedin (node SCRAPE_PROFILE)",
+          waitJson: { kind: "resource-lock", resource: "acct:linkedin", nodeId: "SCRAPE_PROFILE" },
+          statusReason: "queued: waiting for cross-process lock acct:linkedin (node SCRAPE_PROFILE)",
         },
       ],
     });
 
     const result = await getSubflowGroup({ flowId, groupId: "group1", runStore, nodeExecutionsStore });
     assert.equal(result["item-2"].status, "queued");
-    assert.equal(result["item-2"].statusReason, "queued: waiting for cross-process lock browser:linkedin (node SCRAPE_PROFILE)");
+    assert.equal(result["item-2"].statusReason, "queued: waiting for cross-process lock acct:linkedin (node SCRAPE_PROFILE)");
     // A queued child's wait_json is not gate-shaped — it must not populate
     // `awaiting` (reserved for human-gate payloads with a subNodeId).
     assert.equal(result["item-2"].awaiting, null);

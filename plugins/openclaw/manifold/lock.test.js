@@ -1,12 +1,11 @@
 // Unit tests for the harness lock service (plugins/openclaw/manifold/lock.js) — acquireLock, withLock, safeName, isPidAlive, reapStale semantics.
 
-import { test, describe, before, after, beforeEach, afterEach } from "node:test";
+import { test, describe, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 import { mock } from "node:test";
-import { EventEmitter } from "node:events";
 
 // ─── global test fixtures ────────────────────────────────────────────────────
 
@@ -17,19 +16,6 @@ import { EventEmitter } from "node:events";
 const TEST_HOME = mkdtempSync(join(os.tmpdir(), "gf-lock-test-"));
 const LOCKS_DIR = join(TEST_HOME, ".manifold", "locks");
 mkdirSync(LOCKS_DIR, { recursive: true });
-mkdirSync(join(TEST_HOME, ".openclaw"), { recursive: true });
-
-// browser-tabs.js (imported by lock.js) reads openclaw.json's
-// browser.profiles map, via the same mocked os.homedir() below, to decide
-// whether a "browser:<profile>" lock name is real (and should shell out to
-// the CLI) or just an unrelated lock name that happens to share the
-// prefix. Two fixture profile names here, "integration-test" and
-// "reentrant-test", exist solely for the withLock browser-lifecycle
-// integration tests further down this file.
-writeFileSync(
-  join(TEST_HOME, ".openclaw", "openclaw.json"),
-  JSON.stringify({ browser: { profiles: { "integration-test": {}, "reentrant-test": {} } } }),
-);
 
 // Install the os mock before any test can trigger a lock.js import.
 await mock.module("node:os", {
@@ -93,18 +79,18 @@ async function waitUntil(predicate, description, timeoutMs = 5000) {
 
 describe("safeName — special character replacement", () => {
   test("colon is replaced with underscore", async () => {
-    const lock = await acquireLock("browser:freelance", {});
+    const lock = await acquireLock("acct:freelance", {});
     try {
-      assert.ok(lock.path.endsWith("browser_freelance.lock"), `path was ${lock.path}`);
+      assert.ok(lock.path.endsWith("acct_freelance.lock"), `path was ${lock.path}`);
     } finally {
       await lock.release();
     }
   });
 
   test("slash is replaced with underscore", async () => {
-    const lock = await acquireLock("browser/main", {});
+    const lock = await acquireLock("acct/main", {});
     try {
-      assert.ok(lock.path.endsWith("browser_main.lock"), `path was ${lock.path}`);
+      assert.ok(lock.path.endsWith("acct_main.lock"), `path was ${lock.path}`);
     } finally {
       await lock.release();
     }
@@ -501,82 +487,6 @@ describe("withLock", () => {
   });
 });
 
-// ─── withLock — browser:* tab lifecycle integration ──────────────────────────
-//
-// Confirms the wiring, not the tab-diff logic itself (that's covered
-// exhaustively in browser-tabs.test.js): a "browser:<profile>" lock name
-// triggers the CLI-backed open/close guard on the real acquire/release
-// path, any other lock name doesn't touch it at all, and — critically — a
-// reentrant nested withLock() call for the same "browser:" name (the
-// early-return path above the actual acquire) must NOT trigger a second,
-// nested open/close in the middle of the outer holder's critical section.
-
-describe("withLock — browser:* tab lifecycle integration", () => {
-  afterEach(() => {
-    mock.restoreAll();
-  });
-
-  function makeFakeSpawn() {
-    const calls = [];
-    const spawnImpl = (bin, args) => {
-      calls.push(args.slice());
-      const child = new EventEmitter();
-      child.stdout = new EventEmitter();
-      child.stderr = new EventEmitter();
-      child.kill = () => {};
-      const subcommand = args[4];
-      queueMicrotask(() => {
-        if (subcommand === "tabs") {
-          child.stdout.emit("data", JSON.stringify({ tabs: [] }));
-        } else if (subcommand === "open") {
-          child.stdout.emit("data", JSON.stringify({ targetId: "seed-1", type: "page" }));
-        } else {
-          child.stdout.emit("data", JSON.stringify({ ok: true }));
-        }
-        child.emit("exit", 0);
-      });
-      return child;
-    };
-    return { spawnImpl, calls };
-  }
-
-  test("a browser:* lock name triggers the CLI-backed open/close guard", async () => {
-    const { spawnImpl, calls } = makeFakeSpawn();
-    await mock.module("node:child_process", { exports: { spawn: spawnImpl } });
-
-    await withLock("browser:integration-test", async () => "ok", {});
-
-    const subcommands = calls.map((a) => a[4]);
-    assert.ok(subcommands.includes("tabs"), "should have listed tabs");
-    assert.ok(subcommands.includes("open"), "should have opened a seed tab (zero tabs before)");
-  });
-
-  test("a non-browser lock name never touches the CLI at all", async () => {
-    const { spawnImpl, calls } = makeFakeSpawn();
-    await mock.module("node:child_process", { exports: { spawn: spawnImpl } });
-
-    await withLock("db:something-unrelated", async () => "ok", {});
-
-    assert.equal(calls.length, 0);
-  });
-
-  test("a reentrant nested withLock() for the same browser:* name does not double-wrap", async () => {
-    const { spawnImpl, calls } = makeFakeSpawn();
-    await mock.module("node:child_process", { exports: { spawn: spawnImpl } });
-
-    await withLock("browser:reentrant-test", async () => {
-      // Nested call for the SAME name — must hit the reentrancy early
-      // return (heldLockNames), not acquire/wrap again.
-      return withLock("browser:reentrant-test", async () => "nested-done", {});
-    }, {});
-
-    const opens = calls.filter((a) => a[4] === "open");
-    // Exactly one open — from the OUTER acquire. A double-wrap bug would
-    // show 2 (the nested call re-running the readiness check mid-session).
-    assert.equal(opens.length, 1);
-  });
-});
-
 // ─── concurrent access serialization ─────────────────────────────────────────
 
 describe("acquireLock — serialization between concurrent callers", () => {
@@ -763,10 +673,10 @@ describe("acquireLock — onWouldBlock hook", () => {
 // ─── acquireLock — cooldown ─────────────────────────────────────────────────
 //
 // Serialization alone (the lock's core job) doesn't stop back-to-back
-// Cloudflare Turnstile challenges in the same browser session from
-// escalating each other's bot-risk score. cooldownMs/cooldownJitterMs make
-// the NEXT acquirer wait out a minimum gap since the resource was last
-// released, on top of ordinary mutual exclusion.
+// Cloudflare Turnstile challenges in the same session from escalating each
+// other's bot-risk score. cooldownMs/cooldownJitterMs make the NEXT acquirer
+// wait out a minimum gap since the resource was last released, on top of
+// ordinary mutual exclusion.
 
 describe("acquireLock — cooldown", () => {
   test("no cooldownMs (default) — acquiring immediately after a release does not wait", async () => {

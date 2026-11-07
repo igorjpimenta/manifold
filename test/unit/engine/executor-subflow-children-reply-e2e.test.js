@@ -84,9 +84,9 @@ function makeReplyLikeNode({ sendFailsInfraPersistently = false } = {}) {
             if (stillFailing) {
               const nextInfraRetries = retries + 1;
               if (nextInfraRetries < SEND_INFRA_MAX_RETRIES) {
-                return { SEND_REPLY: { mode: "blocked", blockedReason: "infra-unavailable: CDP dead", _infraRetries: nextInfraRetries } };
+                return { SEND_REPLY: { mode: "blocked", blockedReason: "infra-unavailable: harness down", _infraRetries: nextInfraRetries } };
               }
-              return { SEND_REPLY: { mode: "blocked", blockedReason: "infra-unavailable: CDP dead", _infraRetries: nextInfraRetries, _error: `gave up after ${nextInfraRetries} infra retries` } };
+              return { SEND_REPLY: { mode: "blocked", blockedReason: "infra-unavailable: harness down", _infraRetries: nextInfraRetries, _error: `gave up after ${nextInfraRetries} infra retries` } };
             }
             return { SEND_REPLY: { mode: "ok", ok: true } };
           },

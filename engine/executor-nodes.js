@@ -7,9 +7,8 @@ import { makeNeedsCtx } from "./needs-resolver.js";
 
 // The lock owner for work done on behalf of one node invocation: held locks
 // stay held until the invocation resolves (see the harness plugin's
-// invocation-owner.js), not for a fixed time. `node` supplies the browser
-// lease cooldown it declares.
-function invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId }) {
+// invocation-owner.js), not for a fixed time.
+function invocationLockOwner({ invocationId, flowId, nodeId, pipelineId }) {
   if (!invocationId) return null;
   return {
     kind: "invocation",
@@ -17,8 +16,6 @@ function invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId })
     flowId,
     nodeId,
     pipelineId: pipelineId ?? null,
-    ...(node?.browserLeaseCooldownMs ? { cooldownMs: node.browserLeaseCooldownMs } : {}),
-    ...(node?.browserLeaseCooldownJitterMs ? { cooldownJitterMs: node.browserLeaseCooldownJitterMs } : {}),
   };
 }
 
@@ -177,11 +174,11 @@ export function createNodeRunner({
       pipelineId, agentId: entry.agent ?? null,
     });
 
-    // Browser tool calls this session makes lock as this invocation
-    // (extensions/browser-lease), the same owner the node-level
+    // Tool calls this session makes lock as this invocation (the harness's
+    // own session tool leases), the same owner the node-level
     // crossProcessLock uses — so the node's own lock and its agent's tool
     // leases re-enter instead of blocking each other.
-    const lockOwner = invocationLockOwner(entry, { invocationId, flowId, nodeId, pipelineId });
+    const lockOwner = invocationLockOwner({ invocationId, flowId, nodeId, pipelineId });
     if (lockOwner) registerSessionOwner(session, lockOwner);
     try {
       return await dispatchAgentWithRetry({
@@ -212,7 +209,7 @@ export function createNodeRunner({
    */
   async function executeNode({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
     const body = () => executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId });
-    const owner = invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId: state?.pipelineId });
+    const owner = invocationLockOwner({ invocationId, flowId, nodeId, pipelineId: state?.pipelineId });
     return runWithLockOwner(owner, () => withCrossProcessLockMaybe(node.crossProcessLock, body, {
       flowId, nodeId,
       cooldownMs: node.crossProcessLockCooldownMs,

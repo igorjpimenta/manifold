@@ -1,4 +1,4 @@
-// lock.js — cross-process mutex on a shared resource (e.g., Chrome profile).
+// lock.js — cross-process mutex on a named resource.
 //
 // Bypasses the in-process manifold step-lock by living on disk: any
 // consumer (pipeline nodes, ad-hoc CLI scripts, future automation) can
@@ -7,8 +7,8 @@
 // Usage:
 //
 //   import { withLock } from "./lock.js";
-//   withLock("browser:freelance", async () => {
-//     // ... do browser work ...
+//   withLock("acct:freelance", async () => {
+//     // ... work on the shared resource ...
 //   }, { timeoutMs: 60_000, staleMs: 10 * 60_000 })
 //     .catch((err) => { console.error(err.message); process.exit(2); });
 //
@@ -53,12 +53,12 @@
 //   - Same async call chain (heldLockNames): a nested withLock() for a name
 //     the chain already holds runs fn directly.
 //   - Same owner, same process: an acquire whose owner equals the current
-//     holder's owner gets a non-owning handle — release() is a no-op and
-//     no tab lifecycle is layered on top. Covers work that re-enters from a
-//     different async context (e.g. a second tool call of the same run).
+//     holder's owner gets a non-owning handle — release() is a no-op.
+//     Covers work that re-enters from a different async context (e.g. a
+//     second tool call of the same run).
 //
 // Wait semantics:
-//   - Default `timeoutMs` is Infinity. The browser-profile queue has no
+//   - Default `timeoutMs` is Infinity. The shared-resource queue has no
 //     hard time limit: when the current holder releases, the next waiter
 //     takes over, no matter how long they've been waiting. Callers can
 //     override with a finite timeoutMs if they need a fail-fast.
@@ -93,7 +93,6 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { wrapBrowserTabLifecycle } from "./browser-tabs.js";
 
 function defaultLocksDir() {
   return resolveStorePaths().locksDir;
@@ -317,7 +316,7 @@ async function reapStale(lockPath, staleMs) {
   const isFresh = (Date.now() - holder.since) < staleMs;
   if (!isFresh) return unlinkIfSameSync(lockPath, holder);
   // Alive and within staleMs → real holder doing real work (possibly an
-  // indefinite retry waiting for Chrome to come back). Wait.
+  // indefinite retry waiting for its resource to come back). Wait.
   return false;
 }
 
@@ -423,10 +422,10 @@ export async function withLock(name, fn, opts = {}) {
   // withLock() call for the same name from within an already-locked async
   // call chain would otherwise poll forever waiting for itself to release
   // — a guaranteed self-deadlock. Concretely: a manifold fallback node
-  // (e.g. SUBMIT) can declare crossProcessLock: "browser:freelance" and
+  // (e.g. SUBMIT) can declare crossProcessLock: "acct:freelance" and
   // hold it for its whole dispatch, while its own recover.before sequence
   // dispatches a node (e.g. ENSURE_INFRA_AGENT) that ALSO declares
-  // crossProcessLock: "browser:freelance". heldLockNames tracks names held
+  // crossProcessLock: "acct:freelance". heldLockNames tracks names held
   // by the current async chain (not the whole process — a genuinely
   // unrelated concurrent flow in the same process must still serialize
   // normally), so only a true nested re-entry skips re-acquiring.
@@ -436,24 +435,8 @@ export async function withLock(name, fn, opts = {}) {
   const lock = await acquireLock(name, opts);
   const nextHeld = new Set(heldLockNames.getStore() ?? []);
   nextHeld.add(name);
-  const runHeld = () => heldLockNames.run(nextHeld, () => fn());
-  // wrapBrowserTabLifecycle only wraps when `name` is "browser:<profile>"
-  // (a no-op passthrough for every other lock) — applied on the real
-  // acquire/release path only, never for a re-entry, so a nested acquirer
-  // never opens/closes its own tabs mid-way through the outer holder's
-  // critical section. This is the single point of enforcement for every
-  // "browser:*" lock consumer, whether it's a pipeline node's declarative
-  // `crossProcessLock` field (dispatched through executor.js) or application
-  // code calling withLock directly (e.g. freelance_workana-poll-inbox's
-  // scan-and-probe.js, which acquires "browser:freelance" inline, multiple
-  // times, with no node-level declaration at all) — see browser-tabs.js for
-  // what/why. isOwned keeps a holder whose lock was taken over from closing
-  // the new holder's tabs.
-  const guardedFn = lock.reentrant
-    ? runHeld
-    : wrapBrowserTabLifecycle(name, runHeld, { ...opts, isOwned: lock.isOwned });
   try {
-    return await guardedFn();
+    return await heldLockNames.run(nextHeld, () => fn());
   } finally {
     await lock.release();
   }

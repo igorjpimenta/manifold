@@ -115,13 +115,12 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       }
       return fn();
     };
-    // The browser tab-lifecycle guarantee (open-before/close-after for any
-    // "browser:<profile>" lock name) lives inside the injected lock
-    // service's withLock, not here — it needs to cover every acquirer of
-    // that lock, including application code that calls withLock directly
+    // The lock service is injected by the harness and owns the lock's own
+    // lifecycle — acquire, hold, release — for every acquirer of that
+    // lock, including application code that calls withLock directly
     // outside the engine's node dispatch.
-    // `logger` is threaded through opts so the service's internal wrapping
-    // can log a warning if the browser plugin is unreachable.
+    // `logger` is threaded through opts so the service can warn when a
+    // lock is no longer held by this acquisition at release.
     return withLock(lockName, wrappedFn, {
       cooldownMs,
       cooldownJitterMs,
@@ -207,8 +206,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     // Per-pipeline singleton gate. Default (unset) is unlimited — the
     // shared admission pool below is the only gate almost every pipeline
     // needs. `allowConcurrent: false` opts a pipeline out of overlap
-    // entirely (e.g. a browser-automation poller that would race itself
-    // over shared session/gate state): reject this run before it ever
+    // entirely (e.g. a poller that would race itself over shared
+    // session/gate state): reject this run before it ever
     // competes for an admission slot if another non-terminal run of the
     // same pipelineId already exists.
     if (pipeline.allowConcurrent === false) {

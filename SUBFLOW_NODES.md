@@ -204,9 +204,10 @@ dashboard without those clients needing to know the item's own shape.
 - `crossProcessLock` on a *sub-node* (not the subflow node itself) serializes
   that specific step across every child of the batch, and across every
   other process holding the same lock name — e.g.
-  `nodes/score/index.js`'s children each acquire `browser:linkedin` only
-  around the one sub-node that actually drives a browser, not for their
-  whole lifetime. See `README.md`'s *Lock modifier* for the primitive itself.
+  `nodes/score/index.js`'s children each acquire `acct:linkedin` only
+  around the one sub-node that actually drives the shared account, not for
+  their whole lifetime. See `README.md`'s *Lock modifier* for the primitive
+  itself.
 - `.concurrency` on the subflow node is a **boolean participation switch**,
   not a numeric width — `true` (the default, including when the field is
   unset) means this subflow's children draw from a single **gateway-wide**
