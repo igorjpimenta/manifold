@@ -1,7 +1,6 @@
 // tool-handoff.js — sqlite-backed bridge between a dispatched subagent's
-// tool call and the dispatching node's apply(). The tools live outside core
-// (oc-config submits results over MCP); core owns only this registry and
-// the engine side that reads it. It is also published for harness use
+// tool call and the dispatching node's apply(). Core owns only this registry
+// and the engine side that reads it. It is also published for harness use
 // (package.json "./tool-handoff").
 //
 // runSubagentTurn (executor-subagent.js) only ever returns {text, runId} to

@@ -180,9 +180,8 @@ export function createDiscussHandler({
         api.logger.warn(`manifold discuss (elev) [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
         return { status: 500, body: { ok: false, code: "no_reply_text", error: "agent ran but no assistant text found" } };
       }
-      // Child-session harvesting (propose_draft/propose_draft_meta) lives in
-      // oc-config now: core never scans harness transcripts for pipeline
-      // tool calls. Pending fields/drafts arrive only via explicit tools.
+      // Core never scans harness transcripts for pipeline tool calls —
+      // pending fields and drafts arrive only via explicit tools.
       let proposedDraft = null;
       let proposedMeta = null;
       const currentPending = await discussStore.readPending(flowId, itemIdForDraft);

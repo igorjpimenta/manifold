@@ -176,10 +176,9 @@ describe("snapshots — forward safety", () => {
 
 // ── one discuss_state row per thread ──────────────────────────────────────────
 //
-// discuss_state shipped without a uniqueness constraint, so two concurrent
-// appendMessage calls could each insert their own row for the same thread.
-// Migration 0006 folds the duplicates into one row and gives discuss_state
-// the unique index its writers always assumed.
+// One discuss_state row per thread: the unique index on (flow_id, item_id)
+// enforces it, so two concurrent appendMessage calls cannot each insert their
+// own row and split the thread's history across them.
 
 describe("migration 0006 — one discuss_state row per thread", () => {
   const DEDUPE_IDX = 6;
@@ -231,7 +230,7 @@ describe("migration 0006 — one discuss_state row per thread", () => {
       const { dbPath, entry } = await preDedupeDb(dir);
       const seed = createClient({ url: `file:${dbPath}` });
       try {
-        // Two rows for one thread — the shape the missing unique index allowed.
+        // Two rows for one thread — the shape the unique index now rejects.
         await seed.execute(
           "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
           ["flow-dup", "item-1", '[{"id":"m1","ts":1}]', "idle", null, null, 100, "[]"],

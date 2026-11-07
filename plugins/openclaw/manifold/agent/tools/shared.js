@@ -1,6 +1,4 @@
-// shared.js — helpers shared by manifold's own agent tools. Pipeline-specific
-// helpers (propose/submit/report field handling, gate-context resolution)
-// live in oc-config alongside the tools that use them.
+// shared.js — helpers shared by manifold's own agent tools.
 
 export function toolErr(message) {
   return {
