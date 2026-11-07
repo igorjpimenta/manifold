@@ -25,7 +25,7 @@ node is actually doing.
 
 If a `kind:"agent"` node is mid-dispatch (an actual outbound LLM/Claude call,
 via `dispatchAgentEntry` → `dispatchAgentWithRetry` → `runSubagentTurn` in
-`engine/executor-subagent.js`/`executor-nodes.js`) when its flow — root or
+`engine/agent-dispatch.js`/`executor-nodes.js`) when its flow — root or
 subflow, doesn't matter — gets cancelled:
 
 - The LLM call is never interrupted. It keeps running to natural completion,
@@ -63,7 +63,7 @@ trivially restore that function against.
 
 The raw ingredient does exist: every `kind:"agent"` dispatch writes a row to
 `flow_sessions` (`state/session-index.js`, via `sessionIndex.record({flowId,
-sessionKey, nodeId})` at `executor-subagent.js:89`) **before** the LLM call
+sessionKey, nodeId})` at `agent-dispatch.js`) **before** the LLM call
 starts. `sessionKey` itself is derived from `entry.sessionKey ??
 entry.sessionKeyBuilder?.(state, flowId) ?? defaultAgentSessionKey(agent,
 flowId, nodeId)` (`executor-nodes.js`/`executor-helpers.js`).

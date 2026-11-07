@@ -275,7 +275,7 @@ function makeExecutor(pipelineMap = {}, storeFlows = [], opts = {}) {
       pipelinesRef,
       ensurePipelinesLoaded: opts.ensurePipelinesLoaded ?? null,
       logger,
-      getWorkingSubagent: opts.getWorkingSubagent ?? null,
+      runTurn: opts.runTurn ?? null,
       failureStore: opts.failureStore ?? null,
       nodeHealthStore: opts.nodeHealthStore ?? null,
       notifyFlowEnteredWaiting: opts.notifyFlowEnteredWaiting ?? null,
@@ -715,7 +715,7 @@ describe("runFlow — state persist failure on the plain success path", () => {
     const spy = makeSpyNodeExecutionsStore();
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
+      ensurePipelinesLoaded: null, runTurn: null,
       failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
@@ -740,7 +740,7 @@ describe("runFlow — state persist failure on the plain success path", () => {
     let recorded = null;
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
+      ensurePipelinesLoaded: null, runTurn: null,
       failureStore: { recordEngineFailure: (args) => { recorded = args; } },
       nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
@@ -796,7 +796,7 @@ describe("runFlow — writeResult commits before last_step advances", () => {
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
+      ensurePipelinesLoaded: null, runTurn: null,
       failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
@@ -841,7 +841,7 @@ describe("runFlow — writeResult commits before last_step advances", () => {
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger: spyLogger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
+      ensurePipelinesLoaded: null, runTurn: null,
       failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
@@ -878,7 +878,7 @@ describe("runFlow — writeResult commits before last_step advances", () => {
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: null,
+      ensurePipelinesLoaded: null, runTurn: null,
       failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
@@ -1426,10 +1426,9 @@ describe("runFlow — agent circuit breaker: check", () => {
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
     nodeHealthStore.block("p", "AGENT");
-    // No getWorkingSubagent provided — if the short-circuit didn't fire,
-    // dispatch would throw GatewayHandoffNeeded ("subagent runtime
-    // unavailable") instead of the "failed" status asserted below,
-    // proving the agent was never actually invoked.
+    // No runTurn provided — if the short-circuit didn't fire, dispatch
+    // would refuse ("no agent runtime bound") and the statusReason below
+    // would not match, proving the agent was never actually invoked.
     const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore });
     const r = await executor.start("p");
     await executor.runFlow(r.flowId);
@@ -1445,8 +1444,8 @@ describe("runFlow — agent circuit breaker: check", () => {
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
     nodeHealthStore.block("p", "OTHER_NODE");
-    const fakeSubagent = { run: async () => ({ runId: "run-1" }), waitForRun: async () => ({ status: "ok" }), getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }) };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore, getWorkingSubagent: () => fakeSubagent });
+    const fakeRunTurn = async () => ({ text: "done", runId: "run-1" });
+    const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore, runTurn: fakeRunTurn });
     const r = await executor.start("p");
     await executor.runFlow(r.flowId);
     assert.equal(store.get(r.flowId)?.status, "succeeded");
@@ -1459,8 +1458,8 @@ describe("runFlow — agent circuit breaker: check", () => {
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
     nodeHealthStore.block("p", "AGENT");
-    const fakeSubagent = { run: async () => ({ runId: "run-1" }), waitForRun: async () => ({ status: "ok" }), getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }) };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore, getWorkingSubagent: () => fakeSubagent });
+    const fakeRunTurn = async () => ({ text: "done", runId: "run-1" });
+    const { executor, store } = makeExecutor({ p: pipeline }, [], { nodeHealthStore, runTurn: fakeRunTurn });
     const r = await executor.start("p");
     await executor.runFlow(r.flowId);
     assert.equal(store.get(r.flowId)?.status, "succeeded", "the breaker only gates nodes that opt in via circuitBreaker:true");
@@ -1474,10 +1473,10 @@ describe("runFlow — agent circuit breaker: mark", () => {
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
+    const fakeRunTurn = async () => { throw new Error("provider down"); };
     const { executor, store } = makeExecutor({ p: pipeline }, [], {
       nodeHealthStore,
-      getWorkingSubagent: () => fakeSubagent,
+      runTurn: fakeRunTurn,
     });
     const r = await executor.start("p");
     await executor.runFlow(r.flowId);
@@ -1493,10 +1492,10 @@ describe("runFlow — agent circuit breaker: mark", () => {
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
     const nodeHealthStore = makeFakeNodeHealthStore();
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
+    const fakeRunTurn = async () => { throw new Error("provider down"); };
     const { executor, store } = makeExecutor({ p: pipeline }, [], {
       nodeHealthStore,
-      getWorkingSubagent: () => fakeSubagent,
+      runTurn: fakeRunTurn,
     });
     const r = await executor.start("p");
     await executor.runFlow(r.flowId);
@@ -1573,16 +1572,12 @@ describe("reviveAgentKindOrphan", () => {
       edges: { __start__: "AGENT", AGENT: "__end__" },
     });
     let capturedSessionKey, capturedMessage;
-    const fakeSubagent = {
-      run: async ({ sessionKey, message }) => {
-        capturedSessionKey = sessionKey;
-        capturedMessage = message;
-        return { runId: "run-1" };
-      },
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
+    const fakeRunTurn = async ({ sessionKey, message }) => {
+      capturedSessionKey = sessionKey;
+      capturedMessage = message;
+      return { text: "already submitted, done", runId: "run-1" };
     };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent });
+    const { executor, store } = makeExecutor({ p: pipeline }, [], { runTurn: fakeRunTurn });
     const flow = makeOrphanFlow();
     store._map.set(flow.flowId, flow);
 
@@ -1614,8 +1609,8 @@ describe("reviveAgentKindOrphan", () => {
     const pipeline = makePipeline({
       nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent });
+    const fakeRunTurn = async () => { throw new Error("provider down"); };
+    const { executor, store } = makeExecutor({ p: pipeline }, [], { runTurn: fakeRunTurn });
     const flow = makeOrphanFlow();
     store._map.set(flow.flowId, flow);
 
@@ -1637,9 +1632,9 @@ describe("reviveAgentKindOrphan", () => {
     const pipeline = makePipeline({
       nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
+    const fakeRunTurn = async () => { throw new Error("provider down"); };
     const spy = makeSpyNodeExecutionsStore();
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent, nodeExecutionsStore: spy });
+    const { executor, store } = makeExecutor({ p: pipeline }, [], { runTurn: fakeRunTurn, nodeExecutionsStore: spy });
     const flow = makeOrphanFlow();
     store._map.set(flow.flowId, flow);
 
@@ -1654,11 +1649,11 @@ describe("reviveAgentKindOrphan", () => {
     const pipeline = makePipeline({
       nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
-    const fakeSubagent = { run: async () => { throw new Error("provider down"); } };
+    const fakeRunTurn = async () => { throw new Error("provider down"); };
     const spy = makeSpyNodeExecutionsStore();
     let recorded = null;
     const failureStore = { recordEngineFailure: (args) => { recorded = args; } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent, nodeExecutionsStore: spy, failureStore });
+    const { executor, store } = makeExecutor({ p: pipeline }, [], { runTurn: fakeRunTurn, nodeExecutionsStore: spy, failureStore });
     const flow = makeOrphanFlow();
     store._map.set(flow.flowId, flow);
 
@@ -1678,15 +1673,11 @@ describe("reviveAgentKindOrphan", () => {
         },
       },
     });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "done" }] }),
-    };
+    const fakeRunTurn = async () => ({ text: "done", runId: "run-1" });
     const spy = makeSpyNodeExecutionsStore();
     let recorded = null;
     const failureStore = { recordEngineFailure: (args) => { recorded = args; } };
-    const { executor, store } = makeExecutor({ p: pipeline }, [], { getWorkingSubagent: () => fakeSubagent, nodeExecutionsStore: spy, failureStore });
+    const { executor, store } = makeExecutor({ p: pipeline }, [], { runTurn: fakeRunTurn, nodeExecutionsStore: spy, failureStore });
     const flow = makeOrphanFlow();
     store._map.set(flow.flowId, flow);
 
@@ -1700,12 +1691,14 @@ describe("reviveAgentKindOrphan", () => {
     assert.equal(recorded?.executionId, "exec-1");
   });
 
-  it("blocks with needs-gateway-handoff instead of failing when the dispatch is still request-scoped", async () => {
+  it("fails the flow when no agent runtime is bound (the harness must inject runTurn)", async () => {
     const pipeline = makePipeline({
       nodes: { AGENT: { kind: "agent", agent: "scout", sessionKey: "agent:scout:test", promptBuilder: () => "unused", apply: (s, o) => ({ o }) } },
     });
-    // No getWorkingSubagent and api.runtime.subagent is undefined — runSubagentTurn
-    // throws GatewayHandoffNeeded ("subagent runtime unavailable on this api instance").
+    // No runTurn provided — dispatch refuses outright ("no agent runtime
+    // bound"). A runTurn that throws GatewayHandoffNeeded mid-turn still
+    // blocks instead of failing; that harness-side path is covered by
+    // plugins/openclaw/manifold/run-turn.test.js.
     const { executor, store } = makeExecutor({ p: pipeline }, []);
     const flow = makeOrphanFlow();
     store._map.set(flow.flowId, flow);
@@ -1713,8 +1706,9 @@ describe("reviveAgentKindOrphan", () => {
     await executor.reviveAgentKindOrphan(flow);
 
     const final = store.get(flow.flowId);
-    assert.equal(final.status, "waiting");
-    assert.equal(final.waitJson.kind, "needs-gateway-handoff");
+    assert.equal(final.status, "failed");
+    assert.match(final.statusReason ?? "", /revival failed/);
+    assert.match(final.statusReason ?? "", /no agent runtime bound/);
   });
 });
 
@@ -1749,11 +1743,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
         AGENT: (state) => (state.agentReply ? "__end__" : null),
       },
     });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
-    };
+    const fakeRunTurn = async () => ({ text: "already submitted, done", runId: "run-1" });
     const order = [];
     const baseStore = makeStore([]);
     const store = {
@@ -1774,7 +1764,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: () => fakeSubagent,
+      ensurePipelinesLoaded: null, runTurn: fakeRunTurn,
       failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
@@ -1819,11 +1809,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
       },
       edges: { __start__: "AGENT", AGENT: (state) => (state.agentReply ? "__end__" : null) },
     });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
-    };
+    const fakeRunTurn = async () => ({ text: "already submitted, done", runId: "run-1" });
     const warnCalls = [];
     const spyLogger = { info: () => {}, warn: (msg) => warnCalls.push(msg), error: () => {} };
     const store = makeStore([]);
@@ -1835,7 +1821,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger: spyLogger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: () => fakeSubagent,
+      ensurePipelinesLoaded: null, runTurn: fakeRunTurn,
       failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),
@@ -1864,11 +1850,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
       },
       edges: { __start__: "AGENT", AGENT: (state) => (state.agentReply ? "__end__" : null) },
     });
-    const fakeSubagent = {
-      run: async () => ({ runId: "run-1" }),
-      waitForRun: async () => ({ status: "ok" }),
-      getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "already submitted, done" }] }),
-    };
+    const fakeRunTurn = async () => ({ text: "already submitted, done", runId: "run-1" });
     const store = makeStore([]);
     const pipelinesRef = { value: new Map([["p", pipeline]]) };
     const baseSpy = makeSpyNodeExecutionsStore();
@@ -1884,7 +1866,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     };
     const executor = createExecutor({
       api, store, pipelinesRef, logger,
-      ensurePipelinesLoaded: null, getWorkingSubagent: () => fakeSubagent,
+      ensurePipelinesLoaded: null, runTurn: fakeRunTurn,
       failureStore: null, nodeHealthStore: null, notifyFlowEnteredWaiting: null,
       sessionIndex: null, nodeExecutionsStore: spy,
       admissionQueueStore: makeAdmissionQueueStore(),

@@ -59,7 +59,7 @@ it focused on orientation and quick reference:
 - [Node authoring reference](#node-authoring-reference)
 - [Groups (compound parents in the dashboard)](#groups-compound-parents-in-the-dashboard)
 - [Conventions](#conventions-and-what-breaks-if-you-violate-them)
-- [Session keys (subagents spawned by manifold)](#session-keys-subagents-spawned-by-manifold)
+- [Session keys (agent nodes dispatched by manifold)](#session-keys-agent-nodes-dispatched-by-manifold)
 - [State conventions](#state-conventions)
 - [Status transitions](#status-transitions)
 - [CLI](#cli)
@@ -104,7 +104,7 @@ it focused on orientation and quick reference:
 | **state**       | Mutable JSON for a single flow. Persisted with every revision.                       |
 | **revision**    | Monotonic counter. Increments every time a node returns a `stateUpdate`.             |
 | **wait**        | `flow.waitJson` is set; flow is `blocked` or `waiting`. Resumed by external action.   |
-| **session**     | One subagent JSONL conversation. Owned by an agent. See *Session keys* below.        |
+| **session**     | One agent conversation. Owned by a harness agent. See *Session keys* below.            |
 | **item key**    | Slug identifying one item inside a `subflow` fan-out.                               |
 
 ## Run lifetime
@@ -118,7 +118,7 @@ it focused on orientation and quick reference:
 A flow is created `running` at `__start__` (`store.create`). The executor
 loop repeatedly resolves `edges[lastStep](state)` to the next node id,
 dispatches it per its `kind` (`code` runs `node.run`; `agent` builds a
-prompt and dispatches a subagent; `subflow` fans `.selector(state)` out
+prompt and dispatches an agent turn; `subflow` fans `.selector(state)` out
 into real child `flow_runs`, one per item, and blocks until every sibling
 is terminal; `human-gate` builds `waitJson` and blocks), and persists the
 outcome — a `stateUpdate` advances and loops again, a thrown error or
@@ -285,7 +285,7 @@ looping unconditionally.
 
 **Generalized engine-wide (2026-08-24)**: the same rationale that removed
 the SUBMIT infra loop applied to every `kind:"agent"` node's `node.retry`
-config — `dispatchAgentWithRetry` (`engine/executor-subagent.js`) no
+config — `dispatchAgentWithRetry` (`engine/agent-dispatch.js`) no
 longer retries at all, for any agent dispatch, anywhere. Live cost data
 was the trigger: `freelance_workana-proposal::SCORE` burned up to 41
 calls per flow retrying against a single unreliable model with no
@@ -384,7 +384,7 @@ These are hard-stops at pipeline load time — the gateway log shows `manifold l
 Past the loader, these only surface during a real flow:
 
 - **`approvalRequestBuilder` returning a non-object** — runtime can't serialize it for delivery. Return `{ title, description }` at minimum.
-- **`promptBuilder` returning a non-string** — subagent will see `[object Object]`. Stringify your inputs into a prompt.
+- **`promptBuilder` returning a non-string** — the agent will see `[object Object]`. Stringify your inputs into a prompt.
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
 - **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
@@ -602,7 +602,7 @@ before re-throwing, which blocks every future dispatch of that
 `(pipelineId, nodeId)` pair until an operator resets it — see *CLI*
 below (`openclaw manifold node-health status|reset`). Deliberately does
 **not** mark unhealthy for `NodeBlocked` (an ordinary budget-gate pause,
-not a dispatch failure) or `GatewayHandoffNeeded` (the subagent runtime
+not a dispatch failure) or `GatewayHandoffNeeded` (the agent runtime
 being unreachable in the current context, not evidence the agent itself
 is broken).
 
@@ -970,7 +970,7 @@ each gated independently by the operator. Don't use for pipelines
 that share a real-world resource (browser, login, etc.); the
 serialization is doing real work there.
 
-## Session keys (subagents spawned by manifold)
+## Session keys (agent nodes dispatched by manifold)
 
 Manifold does not mint session ids: the harness owns the id format, so an
 agent node declares its own key and manifold passes it through verbatim.

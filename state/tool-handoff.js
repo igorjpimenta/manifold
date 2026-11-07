@@ -1,11 +1,12 @@
-// tool-handoff.js — sqlite-backed bridge between a dispatched subagent's
+// tool-handoff.js — sqlite-backed bridge between a dispatched agent's
 // tool call and the dispatching node's apply(). Core owns only this registry
 // and the engine side that reads it. It is also published for harness use
 // (package.json "./tool-handoff").
 //
-// runSubagentTurn (executor-subagent.js) only ever returns {text, runId} to
-// apply() — never a tool call's structured payload — so a tool has no other
-// channel to hand structured data back to the node that spawned it.
+// The harness turn (the plugin's run-turn.js) only ever returns
+// {text, runId, toolResult?} to apply() — a turn's own reply, never a tool
+// call's structured payload — so a tool has no other channel to hand
+// structured data back to the node that spawned it.
 //
 // This is deliberately durable, not in-memory: the delivering side (an MCP
 // tool call) and the consuming side (the engine's executor loop) may live
