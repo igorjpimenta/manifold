@@ -73,7 +73,7 @@ export function selectDiscussProvider({ primarySpec, chain, isCooldown }) {
 
 export function createDiscussHandler({
   api,
-  readPending,
+  discussStore,
   sessions,
 }) {
   async function handleDiscuss(body) {
@@ -184,7 +184,7 @@ export function createDiscussHandler({
       // tool calls. Pending fields/drafts arrive only via explicit tools.
       let proposedDraft = null;
       let proposedMeta = null;
-      const currentPending = readPending(flowId, itemIdForDraft);
+      const currentPending = await discussStore.readPending(flowId, itemIdForDraft);
       if (currentPending) {
         if (typeof currentPending.text === "string" && currentPending.text.length > 0) proposedDraft = currentPending.text;
         if (currentPending.fields && Object.keys(currentPending.fields).length > 0) proposedMeta = currentPending.fields;

@@ -174,6 +174,149 @@ describe("snapshots — forward safety", () => {
   });
 });
 
+// ── the pending collapse ──────────────────────────────────────────────────────
+//
+// The pending proposal lived in its own table while discuss_state carried
+// a second copy of the same payload. Migration 0008 folds the table into
+// discuss_state.pending_json and gives discuss_state the unique index its
+// writers always assumed — without it, two concurrent appends each inserted
+// their own row for the same thread.
+
+describe("migration 0008 — pending collapse", () => {
+  const COLLAPSE_IDX = 8;
+
+  function collapseEntry() {
+    const journal = JSON.parse(
+      fs.readFileSync(path.join(RUNTIME_MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8"),
+    );
+    const entry = journal.entries.find((e) => e.idx === COLLAPSE_IDX);
+    assert.ok(entry, `journal must carry an entry at idx ${COLLAPSE_IDX}`);
+    return entry;
+  }
+
+  // A copy of the migrations folder with the collapse migration withheld,
+  // so the seed data can be written between the two states.
+  async function preCollapseDb(dir) {
+    const folder = path.join(dir, "runtime");
+    fs.cpSync(RUNTIME_MIGRATIONS_FOLDER, folder, { recursive: true });
+    const journalPath = path.join(folder, "meta", "_journal.json");
+    const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+    journal.entries = journal.entries.filter((e) => e.idx < COLLAPSE_IDX);
+    fs.writeFileSync(journalPath, JSON.stringify(journal));
+    const entry = collapseEntry();
+    fs.rmSync(path.join(folder, `${entry.tag}.sql`), { force: true });
+    const dbPath = path.join(dir, "runtime.sqlite");
+    await migrateDatabase({ dbPath, migrationsFolder: folder, logger: silentLogger });
+    return { dbPath, entry };
+  }
+
+  async function applyCollapse(dbPath, entry) {
+    const sql = fs.readFileSync(
+      path.join(RUNTIME_MIGRATIONS_FOLDER, `${entry.tag}.sql`),
+      "utf8",
+    );
+    const db = createClient({ url: `file:${dbPath}` });
+    try {
+      for (const stmt of sql.split("--> statement-breakpoint").map((s) => s.trim()).filter(Boolean)) {
+        await db.execute(stmt);
+      }
+    } finally {
+      db.close();
+    }
+  }
+
+  test("folds pending_proposals into discuss_state and drops the table", async () => {
+    const dir = path.join(os.tmpdir(), `migrate-collapse-${randomUUID()}`);
+    fs.mkdirSync(dir, { recursive: true });
+    try {
+      const { dbPath, entry } = await preCollapseDb(dir);
+      const seed = createClient({ url: `file:${dbPath}` });
+      try {
+        // A thread that exists only in pending_proposals.
+        await seed.execute(
+          "INSERT INTO pending_proposals (flow_id, item_id, text, fields_json, draft_id, updated_at) VALUES (?,?,?,?,?,?)",
+          ["flow-new", "item-1", "orphan body", '{"budget":200}', null, 700],
+        );
+        // A thread that exists in both stores.
+        await seed.execute(
+          "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
+          ["flow-both", "item-1", "[]", "idle", null, '{"text":"stale","draftId":null,"updatedAt":100}', 100, "[]"],
+        );
+        await seed.execute(
+          "INSERT INTO pending_proposals (flow_id, item_id, text, fields_json, draft_id, updated_at) VALUES (?,?,?,?,?,?)",
+          ["flow-both", "item-1", "proposal body", '{"budget":1500}', "slot-a", 500],
+        );
+        // Two rows for one thread — the shape the missing unique index allowed.
+        await seed.execute(
+          "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
+          ["flow-dup", "item-1", '[{"id":"m1","ts":1}]', "idle", null, null, 100, "[]"],
+        );
+        await seed.execute(
+          "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
+          ["flow-dup", "item-1", '[{"id":"m1","ts":1},{"id":"m2","ts":2}]', "running", "turn-1", '{"text":"kept","updatedAt":300}', 200, "[]"],
+        );
+      } finally {
+        seed.close();
+      }
+
+      await applyCollapse(dbPath, entry);
+
+      const db = createClient({ url: `file:${dbPath}` });
+      try {
+        const tables = await db.execute(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='pending_proposals'",
+        );
+        assert.equal(tables.rows.length, 0, "pending_proposals must be gone");
+
+        const folded = await db.execute(
+          "SELECT pending_json FROM discuss_state WHERE flow_id = 'flow-both' AND item_id = 'item-1'",
+        );
+        const blob = JSON.parse(folded.rows[0].pending_json);
+        assert.equal(blob.text, "proposal body");
+        assert.deepEqual(blob.fields, { budget: 1500 });
+        assert.equal(blob.draftId, "slot-a");
+        assert.equal(blob.updatedAt, 500);
+
+        const orphan = await db.execute(
+          "SELECT pending_json FROM discuss_state WHERE flow_id = 'flow-new' AND item_id = 'item-1'",
+        );
+        assert.equal(JSON.parse(orphan.rows[0].pending_json).text, "orphan body");
+
+        const dupes = await db.execute(
+          "SELECT COUNT(*) AS n FROM discuss_state WHERE flow_id = 'flow-dup' AND item_id = 'item-1'",
+        );
+        assert.equal(dupes.rows[0].n, 1, "one row per thread");
+        const survivor = await db.execute(
+          "SELECT messages_json, turn_status, active_turn_id, pending_json FROM discuss_state WHERE flow_id = 'flow-dup' AND item_id = 'item-1'",
+        );
+        assert.equal(JSON.parse(survivor.rows[0].messages_json).length, 2, "the fullest history survives");
+        assert.equal(survivor.rows[0].active_turn_id, "turn-1");
+        assert.equal(JSON.parse(survivor.rows[0].pending_json).text, "kept");
+      } finally {
+        db.close();
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a fresh migrate leaves no pending_proposals table and a unique index", async () => {
+    const { dbPath } = tmpDb("collapse-fresh");
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger: silentLogger });
+    const tables = await liveTables(dbPath);
+    assert.ok(!tables.includes("pending_proposals"));
+    const db = createClient({ url: `file:${dbPath}` });
+    try {
+      const { rows } = await db.execute(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_discuss_state_unique'",
+      );
+      assert.equal(rows.length, 1, "discuss_state must be unique per thread");
+    } finally {
+      db.close();
+    }
+  });
+});
+
 // ── snapshots are the sole schema path ───────────────────────────────────────
 
 describe("migrateDatabase — snapshots only, no chain", () => {

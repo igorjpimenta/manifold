@@ -27,7 +27,6 @@ import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
 import { wrapSubagentKeys } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
 import { registerGraphFlowTool } from "./agent/tools/index.js";
-import { readPending, clearPending } from "../../../state/pending-store.js";
 import { checkDb } from "../../../state/db-health.js";
 import { writeCorruptionAlert } from "../../../state/db-guard.js";
 import { createGateResolver } from "../../../gates/gate-resolver.js";
@@ -512,8 +511,6 @@ export default definePluginEntry({
       emit: emitCanonical,
       discussDefaultAgent,
       invokeElevated,
-      readPending,
-      clearPending,
       discussStore,
       runStore,
       nodeExecutionsStore,
@@ -558,7 +555,7 @@ export default definePluginEntry({
       runStore,
       admissionQueueStore,
       resumeParentRef,
-      readPending,
+      discussStore,
       getBroadcast: () => _gatewayBroadcast,
       sessions,
     });

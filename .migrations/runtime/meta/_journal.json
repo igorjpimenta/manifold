@@ -57,6 +57,13 @@
       "when": 1793979305084,
       "tag": "0007_mute_dexter_bennett",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794054612340,
+      "tag": "0008_jazzy_mac_gargan",
+      "breakpoints": true
     }
   ]
 }

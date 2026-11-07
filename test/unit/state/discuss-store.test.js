@@ -401,6 +401,90 @@ describe("mergePendingFields", () => {
   });
 });
 
+// ─── readPending ──────────────────────────────────────────────────────────────
+
+describe("readPending", () => {
+  test("returns null for an unknown thread", async () => {
+    const store = await makeStore();
+    assert.equal(await store.readPending(randomUUID(), randomUUID()), null);
+  });
+
+  test("returns null for a falsy flow or item id", async () => {
+    const store = await makeStore();
+    assert.equal(await store.readPending(null, "item-1"), null);
+    assert.equal(await store.readPending("flow-1", ""), null);
+  });
+
+  test("returns null when the thread holds no proposal", async () => {
+    const store = await makeStore();
+    const flowId = randomUUID();
+    const itemId = randomUUID();
+    await store.appendMessage(flowId, itemId, { role: "operator", text: "hi" });
+    assert.equal(await store.readPending(flowId, itemId), null);
+  });
+
+  test("returns the text, fields and draft slot of the proposal", async () => {
+    const store = await makeStore();
+    const flowId = randomUUID();
+    const itemId = randomUUID();
+    await store.setPending(flowId, itemId, "proposal body", "slot-a");
+    await store.mergePendingFields(flowId, itemId, { budget: 1500 });
+    const pending = await store.readPending(flowId, itemId);
+    assert.equal(pending.text, "proposal body");
+    assert.equal(pending.draftId, "slot-a");
+    assert.deepEqual(pending.fields, { budget: 1500 });
+    assert.equal(typeof pending.updatedAt, "number");
+  });
+
+  test("the proposal carries its own timestamp, not the thread's", async () => {
+    const store = await makeStore();
+    const flowId = randomUUID();
+    const itemId = randomUUID();
+    await store.setPending(flowId, itemId, "proposal body");
+    const written = await store.readPending(flowId, itemId);
+    // A later message moves the thread's updated_at, not the proposal's.
+    await new Promise((r) => setTimeout(r, 5));
+    await store.appendMessage(flowId, itemId, { role: "operator", text: "more" });
+    const after = await store.readPending(flowId, itemId);
+    assert.equal(after.updatedAt, written.updatedAt);
+  });
+
+  test("returns null once the proposal is cleared", async () => {
+    const store = await makeStore();
+    const flowId = randomUUID();
+    const itemId = randomUUID();
+    await store.setPending(flowId, itemId, "proposal body");
+    await store.clearPending(flowId, itemId);
+    assert.equal(await store.readPending(flowId, itemId), null);
+  });
+});
+
+// ─── one row per thread ───────────────────────────────────────────────────────
+
+describe("one row per (flowId, itemId)", () => {
+  test("concurrent writes land on a single row", async () => {
+    const dbPath = tmpDb();
+    const store = await createDiscussStore({ dbPath });
+    const flowId = randomUUID();
+    const itemId = randomUUID();
+    await Promise.all([
+      store.appendMessage(flowId, itemId, { role: "operator", text: "one" }),
+      store.appendMessage(flowId, itemId, { role: "operator", text: "two" }),
+      store.setPending(flowId, itemId, "proposal"),
+    ]);
+    const client = createClient({ url: `file:${dbPath}` });
+    try {
+      const { rows } = await client.execute(
+        "SELECT COUNT(*) AS n FROM discuss_state WHERE flow_id = ? AND item_id = ?",
+        [flowId, itemId],
+      );
+      assert.equal(rows[0].n, 1);
+    } finally {
+      client.close();
+    }
+  });
+});
+
 // ─── clearPending ─────────────────────────────────────────────────────────────
 
 describe("clearPending", () => {

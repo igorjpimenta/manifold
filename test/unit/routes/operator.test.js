@@ -90,7 +90,7 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef: { value: new Map() },
     ensurePipelinesLoaded: async () => {},
     invokeElevated: async () => ({}),
-    readPending: () => null,
+    discussStore: { readPending: async () => null },
     sessions: {
       resolveSessionFile: () => "",
       sessionFileExists: () => false,

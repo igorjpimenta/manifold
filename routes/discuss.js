@@ -1,7 +1,6 @@
 import path from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { looksLikeMetaNarration, normalizePendingFields } from "./discuss-helpers.js";
 import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
 import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow, resolveAudioHarness } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
@@ -43,8 +42,6 @@ export function registerDiscussHandlers({
   emit,
   discussDefaultAgent,
   invokeElevated,
-  readPending,
-  clearPending,
   discussStore,
   runStore,
   nodeExecutionsStore,
@@ -667,25 +664,23 @@ export function registerDiscussHandlers({
         // out, so there's never more to load from this branch.
         hasMore: false,
       };
-      const dsPending = dsState.pending;
-      const fsPending = dsPending ? null : readPending(sourceFlow.flowId, target.itemId);
-      const pending = dsPending || fsPending;
+      const pending = dsState.pending;
       if (pending && (pending.text || (pending.fields && Object.keys(pending.fields ?? {}).length > 0))) {
         parsed.pending = {
           text: typeof pending.text === "string" ? pending.text : null,
-          fields: pending.fields && typeof pending.fields === "object" ? normalizePendingFields(pending.fields) : null,
+          fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
           updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
         };
       }
     } else {
-      const fsPending = readPending(sourceFlow.flowId, target.itemId);
-      const hasFsPending = fsPending && (fsPending.text || (fsPending.fields && Object.keys(fsPending.fields ?? {}).length > 0));
-      if (hasFsPending) {
+      const pending = await discussStore.readPending(sourceFlow.flowId, target.itemId);
+      const hasPending = pending && (pending.text || (pending.fields && Object.keys(pending.fields ?? {}).length > 0));
+      if (hasPending) {
         parsed = { ok: true, messages: [] };
         parsed.pending = {
-          text: typeof fsPending.text === "string" ? fsPending.text : null,
-          fields: fsPending.fields && typeof fsPending.fields === "object" ? normalizePendingFields(fsPending.fields) : null,
-          updatedAt: typeof fsPending.updatedAt === "number" ? fsPending.updatedAt : null,
+          text: typeof pending.text === "string" ? pending.text : null,
+          fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
+          updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
         };
       } else {
         const elev = await invokeElevated("/manifold/_elev/discuss_history", {
@@ -698,11 +693,11 @@ export function registerDiscussHandlers({
           parsed = JSON.parse(elev.body || "{}");
         } catch { parsed = { ok: false, code: "elevation_no_body" }; }
         if (parsed && parsed.ok) {
-          const pending = readPending(sourceFlow.flowId, target.itemId);
+          const pending = await discussStore.readPending(sourceFlow.flowId, target.itemId);
           if (pending && (pending.text || (pending.fields && Object.keys(pending.fields).length > 0))) {
             parsed.pending = {
               text: typeof pending.text === "string" ? pending.text : null,
-              fields: pending.fields && typeof pending.fields === "object" ? normalizePendingFields(pending.fields) : null,
+              fields: pending.fields && typeof pending.fields === "object" ? pending.fields : null,
               updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
             };
           }
@@ -796,14 +791,14 @@ export function registerDiscussHandlers({
       res.end(JSON.stringify({ ok: false, code: target.code, error: target.error }));
       return true;
     }
-    // No explicit payload — fall back to the filesystem sidecar so a client
+    // No explicit payload — fall back to the pending proposal so a client
     // can commit a pre-built proposal with a single tap without
     // needing to fetch and re-POST the full draft text.
     if (!text && !fields) {
-      const sidecar = readPending(sourceFlow.flowId, target.itemId);
-      if (sidecar?.text) text = sidecar.text;
-      if (sidecar?.fields && typeof sidecar.fields === "object" && !Array.isArray(sidecar.fields)) {
-        fields = sidecar.fields;
+      const pending = await discussStore.readPending(sourceFlow.flowId, target.itemId);
+      if (pending?.text) text = pending.text;
+      if (pending?.fields && typeof pending.fields === "object" && !Array.isArray(pending.fields)) {
+        fields = pending.fields;
       }
     }
     if (!text && !fields) {
@@ -850,7 +845,7 @@ export function registerDiscussHandlers({
     }
     // INTENTIONAL: no gateResolver.recordItemDecision here.
     // Apply revises; Approve commits. They are separate operator intents.
-    try { clearPending(sourceFlow.flowId, target.itemId); } catch {}
+    try { await discussStore.clearPending(sourceFlow.flowId, target.itemId); } catch {}
     api.logger.info(`manifold discuss apply-draft [${sourceFlow.flowId.slice(0, 8)}]: applied (${summary.join(", ")})`);
     res.statusCode = 200;
     res.setHeader("Content-Type", "application/json");
