@@ -44,8 +44,22 @@ function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
 }
 
-function flush(ms = 60) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Poll until the node has at least one invocation row, then return them.
+ *
+ * The invocation row is written by the dispatch that runs after the parent's
+ * own step resolves, so reading it right after runFlow() can race that write.
+ */
+async function waitForInvocationIds(nodeExecutionsStore, flowId, nodeId, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    const ids = await nodeExecutionsStore.listInvocationIdsForNode(flowId, nodeId);
+    if (ids.length > 0) return ids;
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out after ${timeoutMs}ms waiting for ${nodeId} to have an invocation row`);
+    }
+    await new Promise((r) => setTimeout(r, 10));
+  }
 }
 
 async function makeHarness(pipelineDef) {
@@ -134,9 +148,10 @@ describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read',
 
     const record = await executor.start("test_needs_parent", {}, { kind: "test" });
     await executor.runFlow(record.flowId, "fresh");
-    await flush();
 
-    const parent = await runStore.get(record.flowId);
+    // Wait for the parent to reach a terminal state instead of sleeping a
+    // fixed interval (too short on a loaded CI runner, too long elsewhere).
+    const parent = await waitForStatus(runStore, record.flowId, (r) => r.status === "succeeded" || r.status === "failed");
     assert.equal(parent.status, "succeeded", "SCAN already complete by the time PROPOSE dispatches — nothing should ever block");
 
     assert.equal(draftCalls.length, 1, "DRAFT's run() must have been called exactly once — never dispatched while pending");
@@ -164,18 +179,15 @@ describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read',
     // "retry" kind + lastStep:"SCAN" makes the loop resolve SCAN's OWN edge
     // next, not re-enter SCAN — redirect by asserting the parent's own
     // dispatch reached PROPOSE and spawned a genuinely blocked child.
-    await flush();
-
-    const parent = await runStore.get(record.flowId);
-    // PROPOSE's own mode:"any" fan-out never resumes the parent until its
-    // child is terminal — the child itself is what's blocked here.
-    const invocationIds = await nodeExecutionsStore.listInvocationIdsForNode(record.flowId, "PROPOSE");
+    // The parent never reaches a terminal state here (its child blocks), so
+    // wait for the child's blocked state rather than the parent's.
+    const invocationIds = await waitForInvocationIds(nodeExecutionsStore, record.flowId, "PROPOSE");
     assert.ok(invocationIds.length >= 1, "PROPOSE must have spawned its one child despite SCAN not being complete — needs: blocking is DRAFT's problem, not PROPOSE's");
     const children = await runStore.listForParentInvocations(invocationIds);
     assert.equal(children.length, 1);
     const childFlowId = children[0].flowId;
 
-    const child = await runStore.get(childFlowId);
+    const child = await waitForStatus(runStore, childFlowId, (r) => r.status === "blocked");
     assert.equal(child.status, "blocked", "DRAFT must block rather than dispatch against a still-pending SCAN");
     assert.equal(child.waitJson.kind, "needs-not-ready");
     assert.equal(child.waitJson.needed[0], "SCAN");
@@ -343,9 +355,8 @@ describe('Option B "needs:" — hops:0 (same-flow), both nodeId and config shape
 
     const record = await executor.start("test_needs_hop0", {}, { kind: "test" });
     await executor.runFlow(record.flowId, "fresh");
-    await flush();
 
-    const flow = await runStore.get(record.flowId);
+    const flow = await waitForStatus(runStore, record.flowId, (r) => r.status === "succeeded" || r.status === "failed");
     assert.equal(flow.status, "succeeded");
     assert.equal(sameFlowCalls.length, 1, "EXTRACT's run() must have been called exactly once");
     assert.deepEqual(sameFlowCalls[0].sessions, ["s1", "s2"], "resolved WALK's own resultJson via nodeId-based needs at hops:0, no walk");
