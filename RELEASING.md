@@ -54,18 +54,21 @@ counts are omitted; a consumer cannot act on them.
 
 ## Consumers of a release
 
-Live gateway (proven spec form — shorthand, pinned tag, unsafe flag for the
-scanner's `child_process` block):
+Live gateway (shorthand, pinned tag, capability consent — the installer
+refuses a plugin whose capabilities the user has not accepted; the plugin
+reaches `child_process` through `bin/cli.js`, and the host's unsafe-install
+flag is a deprecated no-op):
 
-    openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install
+    openclaw plugins install git:igorjpimenta/manifold@<version> --force --accept-capabilities
 
 then reload the plugin. Managed installs land under `~/.openclaw/git/`
 (resolve the exact path from `~/.openclaw/plugins/installs.json`,
 `installPath` for id `manifold`), never under `extensions/`. Build the
 dashboard there explicitly — managed installs pass `--ignore-scripts`, so
-`prepare` never runs there (`prepare` only covers npm and git-dependency
-consumers):
+`prepare` never runs there and `dashboard/node_modules` is absent
+(`prepare` only covers npm and git-dependency consumers):
 
+    npm --prefix <installPath>/dashboard ci
     npm --prefix <installPath>/dashboard run build
 
 Consumers bump the `#<version>` pins in their npm git-deps

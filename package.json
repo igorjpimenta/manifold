@@ -16,6 +16,14 @@
     "./state/batch-writer": "./state/batch-writer.js",
     "./state/schema": "./state/schema.js"
   },
+  "openclaw": {
+    "extensions": [
+      "./plugins/openclaw/manifold/index.js"
+    ],
+    "compat": {
+      "openclawMin": "2026.5.6"
+    }
+  },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",
     "test": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/**/*.test.js'",
