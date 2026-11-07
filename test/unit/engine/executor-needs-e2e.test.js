@@ -73,7 +73,7 @@ async function makeHarness(pipelineDef) {
   const executor = createExecutor({
     api: { runtime: {}, config: {} },
     store, pipelinesRef, ensurePipelinesLoaded: null, logger,
-    runTurn: null, failureStore: null, nodeHealthStore: null,
+    getWorkingSubagent: null, failureStore: null, nodeHealthStore: null,
     notifyFlowEnteredWaiting: null, sessionIndex: null,
     nodeExecutionsStore, runStore,
     admissionQueueStore: makeAdmissionQueueStore(),
