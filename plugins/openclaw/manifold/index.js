@@ -12,8 +12,8 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createPipelinesLoader } from "../../../engine/loader.js";
 import { createStateStore } from "../../../state/state-store.js";
 import { createRunStore } from "../../../state/run-store.js";
-import { registerOwnerResolver } from "../../../locks/lock.js";
-import { createInvocationOwnerResolver } from "../../../locks/invocation-owner.js";
+import { registerOwnerResolver, setLocksDir, withLock, registerSessionOwner, clearSessionOwner, runWithLockOwner } from "./lock.js";
+import { createInvocationOwnerResolver } from "./invocation-owner.js";
 import { getNodeExecutionsStore } from "../../../state/node-executions.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { createExecutor } from "../../../engine/executor.js";
@@ -70,7 +70,6 @@ import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
 import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
-import { setLocksDir } from "../../../locks/lock.js";
 import { setStateFile } from "../../../gates/paused-flows.js";
 
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
@@ -301,6 +300,7 @@ export default definePluginEntry({
     const executor = createExecutor({
       api,
       config: api.config,
+      locks: { withLock, registerSessionOwner, clearSessionOwner, runWithLockOwner },
       pipelinesDir,
       store,
       pipelinesRef,

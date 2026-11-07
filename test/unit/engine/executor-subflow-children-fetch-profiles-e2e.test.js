@@ -1,12 +1,11 @@
 /**
  * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors nyxen_linkedin-prospect's
+ * loop node whose topology mirrors the freelance prospecting pipeline's
  * FETCH_PROFILES (single sub-node SCRAPE_PROFILE, no gate, no
  * fallback) — same simplest topology as EVICT_STALE/EVICT_GATES/SCORE.
  *
- * The load-bearing, previously-unproven-anywhere assertion for THIS
- * migration: FETCH_PROFILES moved `crossProcessLock: "browser:linkedin"`
- * from the old loop-level declaration down onto the real sub-node,
+ * The load-bearing assertion for THIS test: FETCH_PROFILES declares
+ * `crossProcessLock: "browser:linkedin"` on the real sub-node,
  * SCRAPE_PROFILE. No prior childFlows E2E in this series exercises
  * crossProcessLock at all (confirmed via grep). Under childFlows,
  * executor-subflow-children.js's dispatchLoopChildren() spawns every
@@ -18,23 +17,19 @@
  * simple-mode behavior), and (b) genuinely serializes concurrent
  * children against each other when the lock provides real mutual
  * exclusion — using an instrumented in-memory stand-in for
- * locks/lock.js's withLock that queues callers via promise chaining
+ * the lock service's withLock that queues callers via promise chaining
  * (the same mutual-exclusion contract the real disk-backed lock
  * provides), never touching the real ~/.openclaw/locks/*.lock files.
  *
- * mock.module must be registered before engine/executor.js is imported
- * (it imports withLock at module-load time and caches the reference,
- * see executor.js's `import { withLock as withCrossProcessLock } from
- * "../locks/lock.js"`) — so every manifold-internal module here is
- * loaded via a dynamic `await import()` AFTER the mock is in place,
- * not a static top-level import.
+ * The lock service is injected via createExecutor's `locks` param (the
+ * same seam the harness plugin uses in production) — no module mocking.
  *
  * Isolated-sandbox discipline (per the incident writeup):
  * independent tmp-sqlite run-store/node-executions/state-store instances,
  * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
  * in-memory Map, never touching workspace/.pipelines/.
  */
-import { test, describe, afterEach, mock } from "node:test";
+import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
@@ -45,14 +40,20 @@ let concurrentInLock = 0;
 let maxConcurrentInLock = 0;
 let lockChain = Promise.resolve();
 
-await mock.module(new URL("../../../locks/lock.js", import.meta.url).href, {
-  exports: {
-    // Lock-owner plumbing executor-nodes.js imports — inert here: this
-    // stand-in's withLock doesn't model owners.
-    runWithLockOwner: (_owner, fn) => fn(),
-    registerSessionOwner: () => {},
-    clearSessionOwner: () => {},
-    withLock: (name, fn) => {
+import { createRunStore } from "../../../state/run-store.js";
+import { createNodeExecutionsStore } from "../../../state/node-executions.js";
+import { createStateStore } from "../../../state/state-store.js";
+import { createExecutor } from "../../../engine/executor.js";
+import { getAllSubflowGroups } from "../../../state/subflow-state.js";
+import { assembleState } from "../../../engine/executor-helpers.js";
+
+// Stand-in lock service: promise-chained mutual exclusion, owner plumbing
+// inert (this stand-in's withLock doesn't model owners).
+const lockStubs = {
+  runWithLockOwner: (_owner, fn) => fn(),
+  registerSessionOwner: () => {},
+  clearSessionOwner: () => {},
+  withLock: (name, fn) => {
       lockCalls.push(name);
       const run = async () => {
         concurrentInLock++;
@@ -75,15 +76,7 @@ await mock.module(new URL("../../../locks/lock.js", import.meta.url).href, {
       lockChain = next.catch(() => {});
       return next;
     },
-  },
-});
-
-const { createRunStore } = await import("../../../state/run-store.js");
-const { createNodeExecutionsStore } = await import("../../../state/node-executions.js");
-const { createStateStore } = await import("../../../state/state-store.js");
-const { createExecutor } = await import("../../../engine/executor.js");
-const { getAllSubflowGroups } = await import("../../../state/subflow-state.js");
-const { assembleState } = await import("../../../engine/executor-helpers.js");
+};
 
 // Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
 // subflow-children paths. These tests don't exercise queue behavior.
@@ -160,6 +153,7 @@ async function makeHarness() {
     nodeExecutionsStore,
     runStore,
     admissionQueueStore: makeAdmissionQueueStore(),
+    locks: lockStubs,
   });
   resumeParentRef.resume = executor.resume;
 

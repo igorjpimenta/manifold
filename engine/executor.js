@@ -20,7 +20,6 @@ import path from "node:path";
 import os from "node:os";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { nodeEmitter } from "../events.js";
-import { withLock as withCrossProcessLock } from "../locks/lock.js";
 import { resolveStorePaths } from "../state/paths.js";
 
 import {
@@ -36,7 +35,7 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, locks, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
   // Explicit params win; api is the legacy fallback the adapter still
   // supplies during cutover (tests construct with api only).
   const _config = config ?? api?.config ?? null;
@@ -97,6 +96,13 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   // actually invoked, which only happens post-acquire.
   async function withCrossProcessLockMaybe(lockName, fn, { flowId, nodeId, cooldownMs, cooldownJitterMs } = {}) {
     if (!lockName || typeof lockName !== "string") return fn();
+    // The lock service is injected by the harness (createExecutor's `locks`
+    // param): a declared lock with no service refuses loudly at dispatch
+    // time rather than running unlocked.
+    const withLock = locks?.withLock;
+    if (typeof withLock !== "function") {
+      throw new Error(`manifold: refusing dispatch of node "${nodeId}" — cross-process lock "${lockName}" needs a harness lock service (pass locks to createExecutor)`);
+    }
     let wasQueued = false;
     const wrappedFn = async () => {
       if (wasQueued) {
@@ -110,13 +116,13 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       return fn();
     };
     // The browser tab-lifecycle guarantee (open-before/close-after for any
-    // "browser:<profile>" lock name) lives inside withLock/lock.js itself,
-    // not here — it needs to cover every acquirer of that lock, including
-    // application code that calls withLock directly outside the engine's
-    // node dispatch (e.g. freelance_workana-poll-inbox's scan-and-probe.js).
-    // `logger` is threaded through opts so lock.js's internal wrapping can
-    // log a warning if the browser plugin is unreachable.
-    return withCrossProcessLock(lockName, wrappedFn, {
+    // "browser:<profile>" lock name) lives inside the injected lock
+    // service's withLock, not here — it needs to cover every acquirer of
+    // that lock, including application code that calls withLock directly
+    // outside the engine's node dispatch.
+    // `logger` is threaded through opts so the service's internal wrapping
+    // can log a warning if the browser plugin is unreachable.
+    return withLock(lockName, wrappedFn, {
       cooldownMs,
       cooldownJitterMs,
       logger,
@@ -172,7 +178,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
 
   const { executeNode } = createNodeRunner({
     maybeBudgetGate, dispatchAgentWithRetry, executeSubflowNode,
-    withCrossProcessLockMaybe, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, logger,
+    withCrossProcessLockMaybe, locks, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, logger,
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,

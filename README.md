@@ -23,8 +23,8 @@ subpaths. Deep file paths are not a contract — only this table is.
 | --- | --- | --- |
 | `@igorjpimenta/manifold` | plugin entry (default) | openclaw runtime |
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
-| `…/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
-| `…/browser-tabs` | `browserProfileForLock`, `beginTabSession`, `endTabSession` | browser-lease extension |
+| `@igorjpimenta/manifold-openclaw/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
+| `@igorjpimenta/manifold-openclaw/browser-tabs` | `browserProfileForLock`, `beginTabSession`, `endTabSession` | browser-lease extension |
 | `…/elevation` | `invokeElevated` | oc-config |
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | structured result rendezvous (`writePendingResult`, `readPendingResult`, `clearPendingResult`, `waitForToolResult`) | oc-config |
@@ -388,7 +388,7 @@ Past the loader, these only surface during a real flow:
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
 - **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
-- **Cross-process lock with no installed `lock.js`** — `crossProcessLock: "browser:foo"` requires the helper at `~/.openclaw/extensions/manifold/locks/lock.js`. Already present in stock installs.
+- **Cross-process lock with no installed lock service** — `crossProcessLock: "browser:foo"` requires the harness plugin at `~/.openclaw/extensions/manifold` (its `lock.js` supplies the service). Already present in stock installs.
 
 ### Two gotchas that *look* like bugs but aren't
 
@@ -685,7 +685,7 @@ SUBMIT_CODE: {
 
 No script should self-lock internally (`withLock(...)` wrapping its own `main()`) — that only creates a deadlock risk against a pipeline node holding the same lock name across the spawn boundary (a child OS process can't see the parent's held lock). The pipeline node that spawns the script should declare `crossProcessLock` itself, for the full duration of the dispatch.
 
-The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name.
+The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name (`@igorjpimenta/manifold-openclaw/lock`).
 
 ### Code-node `ctx` argument
 

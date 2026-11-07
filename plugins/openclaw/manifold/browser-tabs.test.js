@@ -1,4 +1,4 @@
-// Unit tests for locks/browser-tabs.js — wrapBrowserTabLifecycle.
+// Unit tests for the harness browser-tab lifecycle (plugins/openclaw/manifold/browser-tabs.js) — wrapBrowserTabLifecycle.
 //
 // Mocks node:child_process's spawn() (not fetch — the implementation
 // shells out to the `openclaw browser` CLI, not the plugin's HTTP control
@@ -93,26 +93,26 @@ afterEach(() => {
 
 async function loadWithFakeSpawn(spawnImpl) {
   await mock.module("node:child_process", { exports: { spawn: spawnImpl } });
-  const mod = await import(`../../../locks/browser-tabs.js?t=${Date.now()}-${Math.random()}`);
+  const mod = await import(`../../../plugins/openclaw/manifold/browser-tabs.js?t=${Date.now()}-${Math.random()}`);
   return mod.wrapBrowserTabLifecycle;
 }
 
 describe("wrapBrowserTabLifecycle — pass-through", () => {
   it("returns fn unchanged for a non-browser lock name", async () => {
-    const { wrapBrowserTabLifecycle: wrap } = await import("../../../locks/browser-tabs.js");
+    const { wrapBrowserTabLifecycle: wrap } = await import("../../../plugins/openclaw/manifold/browser-tabs.js");
     const fn = async () => "result";
     assert.equal(wrap("db:sqlite", fn), fn);
   });
 
   it("returns fn unchanged for null/undefined lock name", async () => {
-    const { wrapBrowserTabLifecycle: wrap } = await import("../../../locks/browser-tabs.js");
+    const { wrapBrowserTabLifecycle: wrap } = await import("../../../plugins/openclaw/manifold/browser-tabs.js");
     const fn = async () => "result";
     assert.equal(wrap(null, fn), fn);
     assert.equal(wrap(undefined, fn), fn);
   });
 
   it("returns fn unchanged for a bare 'browser:' with no profile", async () => {
-    const { wrapBrowserTabLifecycle: wrap } = await import("../../../locks/browser-tabs.js");
+    const { wrapBrowserTabLifecycle: wrap } = await import("../../../plugins/openclaw/manifold/browser-tabs.js");
     const fn = async () => "result";
     assert.equal(wrap("browser:", fn), fn);
   });
@@ -304,7 +304,7 @@ describe("tab cleanup is skipped once the lock is no longer ours", () => {
   it("beginTabSession/endTabSession: split form closes only tabs that appeared in between", async () => {
     const { spawnImpl, calls } = makeFakeSpawn({ tabsBefore: [{ targetId: "existing-1", type: "page" }] });
     await mock.module("node:child_process", { exports: { spawn: spawnImpl } });
-    const mod = await import(`../../../locks/browser-tabs.js?t=${Date.now()}-${Math.random()}`);
+    const mod = await import(`../../../plugins/openclaw/manifold/browser-tabs.js?t=${Date.now()}-${Math.random()}`);
     const session = await mod.beginTabSession("freelance");
     await new Promise((resolve) => {
       const child = spawnImpl("openclaw", ["browser", "--browser-profile", "freelance", "--json", "open", "about:blank"]);
@@ -315,7 +315,7 @@ describe("tab cleanup is skipped once the lock is no longer ours", () => {
   });
 
   it("browserProfileForLock: only configured browser:<profile> names map to a profile", async () => {
-    const { browserProfileForLock } = await import("../../../locks/browser-tabs.js");
+    const { browserProfileForLock } = await import("../../../plugins/openclaw/manifold/browser-tabs.js");
     assert.equal(browserProfileForLock("browser:freelance"), "freelance");
     assert.equal(browserProfileForLock("browser:not-a-profile"), null);
     assert.equal(browserProfileForLock("db:sqlite"), null);

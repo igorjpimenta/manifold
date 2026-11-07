@@ -4,27 +4,26 @@
  * row, then flips back to 'running' once the lock frees. This is the one
  * assertion nothing else in this test suite covers end-to-end:
  * the wrappedFn technique in engine/executor.js's withCrossProcessLockMaybe
- * actually persists the transition, not just that locks/lock.js's
- * onWouldBlock hook fires (already covered in test/unit/locks/lock.test.js).
+ * actually persists the transition, not just that the lock service's
+ * onWouldBlock hook fires (already covered in
+ * plugins/openclaw/manifold/lock.test.js).
  *
  * Reuses the same FETCH_PROFILES-shaped fixture as
  * executor-loop-children-fetch-profiles-e2e.test.js (single sub-node
  * SCRAPE_PROFILE declaring crossProcessLock: "browser:linkedin"), but the
- * mocked withLock here HONORS the onWouldBlock contract for a second
- * concurrent caller — the existing sibling file's mock ignores opts
+ * injected withLock here HONORS the onWouldBlock contract for a second
+ * concurrent caller — the existing sibling file's stand-in ignores opts
  * entirely, so it can't prove this.
  *
- * mock.module must be registered before engine/executor.js is imported (it
- * imports withLock at module-load time and caches the reference) — every
- * manifold-internal module here is loaded via a dynamic `await import()`
- * AFTER the mock is in place, not a static top-level import.
+ * The lock service is injected via createExecutor's `locks` param (the
+ * same seam the harness plugin uses in production) — no module mocking.
  *
  * Isolated-sandbox discipline:
  * independent tmp-sqlite run-store/node-executions/state-store instances,
  * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
  * in-memory Map, never touching workspace/.pipelines/.
  */
-import { test, describe, afterEach, mock } from "node:test";
+import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
@@ -34,21 +33,25 @@ let lockCalls = [];
 let holderActive = false;
 let releaseHolder = null;
 
-await mock.module(new URL("../../../locks/lock.js", import.meta.url).href, {
-  exports: {
-    // Lock-owner plumbing executor-nodes.js imports — inert here: this
-    // stand-in's withLock doesn't model owners.
-    runWithLockOwner: (_owner, fn) => fn(),
-    registerSessionOwner: () => {},
-    clearSessionOwner: () => {},
-    withLock: async (name, fn, opts) => {
+import { createRunStore } from "../../../state/run-store.js";
+import { createNodeExecutionsStore } from "../../../state/node-executions.js";
+import { createStateStore } from "../../../state/state-store.js";
+import { createExecutor } from "../../../engine/executor.js";
+
+// Stand-in lock service: withLock honors the onWouldBlock contract, owner
+// plumbing is inert (this stand-in's withLock doesn't model owners).
+const lockStubs = {
+  runWithLockOwner: (_owner, fn) => fn(),
+  registerSessionOwner: () => {},
+  clearSessionOwner: () => {},
+  withLock: async (name, fn, opts) => {
       lockCalls.push(name);
       if (holderActive) {
-        // Simulate a real blocked acquire — fire onWouldBlock exactly once
-        // (the real lock.js contract), same as the first failed tryAcquire
-        // inside acquireLock's poll loop, then wait for the current holder
-        // to release before proceeding.
-        opts?.onWouldBlock?.();
+        // Simulate a blocked acquire — fire onWouldBlock exactly once
+        // (the real lock service's contract), same as the first failed
+        // tryAcquire inside acquireLock's poll loop, then wait for the
+        // current holder to release before proceeding.
+        await opts?.onWouldBlock?.();
         await new Promise((resolve) => { releaseHolder = resolve; });
       }
       holderActive = true;
@@ -65,13 +68,7 @@ await mock.module(new URL("../../../locks/lock.js", import.meta.url).href, {
         release?.();
       }
     },
-  },
-});
-
-const { createRunStore } = await import("../../../state/run-store.js");
-const { createNodeExecutionsStore } = await import("../../../state/node-executions.js");
-const { createStateStore } = await import("../../../state/state-store.js");
-const { createExecutor } = await import("../../../engine/executor.js");
+};
 
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
@@ -149,6 +146,7 @@ async function makeHarness() {
     nodeExecutionsStore,
     runStore,
     admissionQueueStore: makeAdmissionQueueStore(),
+    locks: lockStubs,
   });
   resumeParentRef.resume = executor.resume;
 
