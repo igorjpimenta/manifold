@@ -36,7 +36,7 @@ describe("createNodeHealthStore — markUnhealthy / isBlocked / reset", () => {
 
   test("markUnhealthy blocks the node", async () => {
     const store = await makeStore();
-    // markUnhealthy() defers through batch-writer and no longer returns a
+    // markUnhealthy() defers through batch-writer and doesn't return a
     // value — its only production caller never inspected one. Assert the
     // effect after an explicit flush instead.
     await store.markUnhealthy("pipe_a", "SCAN_AGENT", { reason: "boom", flowId: "flow-1" });

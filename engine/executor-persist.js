@@ -19,10 +19,9 @@ export { REVISION_RETRY_LIMIT };
 // filter) and reading it back through state_json would reopen the staleness
 // bug gate_records exists to prevent.
 //
-// Applied once, centrally, inside these 6 functions rather than at each of
-// executor.js's ~20 call sites — every persist path funnels through here,
-// so this is the one place that needs to change for the cutover, and it's
-// a single choke point to audit instead of twenty scattered edits.
+// Applied centrally, inside these 6 functions — every persist path funnels
+// through here, so the filter is a single choke point to audit instead of
+// scattered per-call-site changes.
 //
 // A global, unconditional filter, not a per-flow gate: the alternative
 // ("check whether THIS flow's current state_json has 100% resultJson

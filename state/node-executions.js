@@ -6,7 +6,7 @@
 // calls return the cached store. Writes are fire-and-forget (errors swallowed)
 // so a timing/error-recording failure never disrupts flow execution.
 //
-// Two-table split (Phase 2):
+// Two tables:
 //   flow_node_invocations — one row per LOGICAL node dispatch (root-level
 //     node-per-flow-visit, or subflow-item), created exactly once and never
 //     duplicated by retries. flow_runs.parent_invocation_id points here.
@@ -34,15 +34,15 @@ function defaultDbPath() {
 
 // No size cap on resultJson: no cap width is both safe for real payloads
 // and small enough to matter, so writeResult() always stores the full
-// result. resultTooLargeBytes and the legacy-row handling in
+// result. resultTooLargeBytes and the pre-existing-row handling in
 // result-replay.js/needs-resolver.js stay in place read-only, for
 // pre-existing rows whose capped result cannot be recovered.
 
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
 
-// Normalizes flow_branches.errors' confirmed mixed shape (bare strings vs
+// Normalizes a stored errors blob's mixed shape (bare strings vs
 // {node, itemId, message, at} objects) — only the last entry is taken.
-// One-time migration-time helper, not permanent runtime logic.
+// Migration-time helper, not permanent runtime logic.
 export function lastErrorMessage(errorsJson) {
   let arr;
   try { arr = JSON.parse(errorsJson); } catch { return null; }
@@ -347,8 +347,8 @@ async function _createStore(dbPath) {
 
       // Writes an invocation's own resultJson once it completes, no size
       // cap (see this file's own header comment). resultTooLargeBytes is
-      // always written null here — it only carries a real value on legacy
-      // rows that predate the cap's removal.
+      // always written null here — it only carries a real value on rows
+      // written before the cap was removed.
       //
       // Two things this deliberately isn't: (1) it doesn't throw on
       // ordinary failure — same fire-and-forget contract as write() above,
@@ -423,9 +423,9 @@ async function _createStore(dbPath) {
       // same item (e.g. a re-shortlisted listing that succeeds on a
       // fresh flow), this is how the earlier failure is found to now be
       // resolved. Returns identity + timing only, not error content
-      // (Phase 1.5 — this table no longer knows success vs failure at
-      // all; the caller checks failure_events for that execution_id
-      // instead: no row there means it succeeded).
+      // (this table knows nothing about success vs failure; the caller
+      // checks failure_events for that execution_id instead: no row there
+      // means it succeeded).
       async getLatestExecutionOutcomeForItem({ pipelineId, nodeId, subflowKey }) {
         try {
           const { rows } = await client.execute({
@@ -470,11 +470,10 @@ async function _createStore(dbPath) {
         return rows;
       },
 
-      // queryErrorsByFlow/queryErrorsByFlowIds moved to state/failure-store.js
-      // in Phase 1.5 ("Eradicate soft errors") — this table no longer
-      // stores error content at all, so it has nothing left to query for
-      // "which nodes errored." failure_events is now the only source; see
-      // failureStore.queryErrorsByFlow(Ids).
+      // queryErrorsByFlow/queryErrorsByFlowIds live in state/failure-store.js —
+      // this table stores no error content at all, so it has nothing left to
+      // query for "which nodes errored." failure_events is the only source;
+      // see failureStore.queryErrorsByFlow(Ids).
 
       async summarizeChildrenByFlowIds(flowIds) {
         if (!Array.isArray(flowIds) || flowIds.length === 0) return new Map();
@@ -522,8 +521,8 @@ async function _createStore(dbPath) {
           if (!byInvocation.has(e.invocationId)) byInvocation.set(e.invocationId, []);
           byInvocation.get(e.invocationId).push(e);
         }
-        // No error field here (Phase 1.5 — this table doesn't know success
-        // vs failure at all anymore). latestExecutionId is exposed so
+        // No error field here (this table doesn't know success vs
+        // failure at all). latestExecutionId is exposed so
         // callers can cross-reference failureStore.queryErrorsByFlow(Ids)
         // themselves to determine whether the MOST RECENT attempt of this
         // invocation failed — see routes/runs.js's buildTreeNodeRows.
@@ -551,7 +550,7 @@ async function _createStore(dbPath) {
         });
       },
 
-      // Option B, Phase B1 — one resultJson row per top-level node, ready
+      // one resultJson row per top-level node, ready
       // for assembleState
       // (engine/executor-helpers.js) to replay into a working state
       // object. Two things this does that listInvocationsForFlow (above)
@@ -606,7 +605,7 @@ async function _createStore(dbPath) {
         } catch { return []; }
       },
 
-      // Single-node-scoped sibling of listResultsForFlow — Option B's
+      // Single-node-scoped sibling of listResultsForFlow — the
       // "needs:" accessor (engine/needs-resolver.js) only ever wants one
       // named node's latest result from a (possibly ancestor) flow, not
       // that flow's entire result set, so this skips fetching/deduping
@@ -702,7 +701,7 @@ async function _createStore(dbPath) {
         } catch { return {}; }
       },
 
-      // No error field here either — same Phase 1.5 reasoning. Callers
+      // No error field here either — same reasoning. Callers
       // needing per-attempt failure content cross-reference executionId
       // against failureStore.queryErrorsByFlow(Ids) themselves (see
       // routes/runs.js's sendInvocationDetail).

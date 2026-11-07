@@ -5,7 +5,7 @@ Read this when authoring or modifying a `kind:"subflow"` node. For general
 node-authoring reference material that applies to any node kind (locks,
 `ctx.invokePipeline`, gate payload shape, discuss opt-in, needs-info) see
 `README.md`'s *Node authoring reference* section instead — none of that is
-subflow-specific even though it used to live under this heading.
+subflow-specific.
 
 A `subflow` node fans a `.selector(state)` array out into one real, independent
 flow per item — each item's own `flow_runs` row, driven by the exact same
@@ -48,9 +48,8 @@ SCORE: {
 
 ## Sub-nodes use the exact same calling convention as top-level nodes
 
-This is the single most important thing to internalize coming from the old
-branch-worker model (or from other graph runtimes): a `flow.nodes` entry
-is dispatched **identically** to a root-level node. `code` nodes get
+This is the single most important thing to internalize: a `flow.nodes`
+entry is dispatched **identically** to a root-level node. `code` nodes get
 `run(state, ctx)`; `agent` nodes get `promptBuilder(state)` /
 `apply(state, output)`; `human-gate` sub-nodes get `pendingSelector(state)` /
 `approvalRequestBuilder(state, itemId)`. A code-then-agent cascade sub-node
@@ -113,11 +112,8 @@ edges: {
 
 ## What a sub-node's `state` actually contains
 
-The child's initial state is **not** a clone of the parent's state (that
-was the pre-2026-08-17 model — a child used to inherit the parent's whole
-state minus a few stripped keys; removed once an audit of every real
-subflow node found zero genuine reads of anything beyond what's listed
-below). A child's initial state is exactly:
+The child's initial state is **not** a clone of the parent's state. A
+child's initial state is exactly:
 
 | Key | Value |
 |---|---|
@@ -130,10 +126,9 @@ node that wants it — a lazy, per-node accessor resolved just-in-time via
 `ctx.needs(varName)`, not an eager clone. See `README.md`'s *Node
 authoring reference* section for the full `needs:` contract (`{hops,
 nodeId}` for another node's own output, `{hops, entry}` for an ancestor's
-entry/bookkeeping field like `runId`/`args`/`cost`). This is the
-replacement for what the old full-clone used to make free — it costs an
-explicit declaration now, but every genuine cross-boundary read in this
-codebase was already using it before the clone was even removed.
+entry/bookkeeping field like `runId`/`args`/`cost`). This costs an
+explicit declaration, but every genuine cross-boundary read in this
+codebase already declares it.
 
 Every sub-node along the subflow's own edge path still writes into this
 same flat state (`CACHE_CHECK`, `SCORE_LLM`, …), and reading `state.CACHE_CHECK`
@@ -167,9 +162,7 @@ item's identity.
 ## Reading a subflow's results downstream
 
 Outside the subflow node, read `state._subflowGroups[groupId][subflowKey]` —
-this is unchanged from before childFlows existed, and works identically
-whether the group ended up on the new model (real children) or old
-(historical `flow_branches`, pre-migration flows only):
+the group's real `flow_runs` children:
 
 ```js
 // nodes/shortlist.js — downstream of SCORE
@@ -202,28 +195,26 @@ dashboard without those clients needing to know the item's own shape.
 
 - `.concurrency` on the subflow node is a **boolean participation switch**,
   not a numeric width — `true` (the default, including when the field is
-  unset) means this subflow's children draw from a single **gateway-wide**
-  budget (`childFanoutConcurrency` config, default 8,
-  `engine/child-fanout-concurrency.js`) shared by every subflow
-  node in every pipeline; `concurrency: false` opts a node out entirely
-  (unbounded), for a fan-out cheap enough that throttling it adds latency
-  for no protective benefit (e.g. a plain code-only cancellation loop). A
-  numeric value (some pipelines still carry old `concurrency: 3`/`5`
-  fields, a leftover from an earlier per-node-numeric design this
-  collapsed from) is simply truthy — it behaves exactly like `true`, not
-  like a per-node cap of that size; the number itself is no longer
-  meaningful and should be treated as `true` when touching that pipeline.
+  unset) means this subflow's children draw from the single shared
+  admission pool (`state/admission-queue-store.js`, `kind:"child-dispatch"`
+  — the same pool a root flow's own admission draws from); `concurrency:
+  false` opts a node out entirely (unbounded), for a fan-out cheap enough
+  that throttling it adds latency for no protective benefit (e.g. a plain
+  code-only cancellation loop). A numeric value (some pipelines still
+  carry old `concurrency: 3`/`5` fields) is simply truthy — it behaves
+  exactly like `true`, not like a per-node cap of that size; the number
+  itself carries no meaning and should be treated as `true` when touching
+  that pipeline.
   Children beyond the shared budget are created immediately (so
   `getAllSubflowGroups`/dashboards see them right away) but held at
   `status:'queued'` until a slot frees, auto-woken the moment ANY flow
   anywhere goes terminal — no polling, no manual retry needed.
-- The process-wide `agentDispatchConcurrency` config (default 8) bounds
-  concurrent `kind:"agent"` dispatch across the whole gateway process, root
-  and subflow alike — a separate, older mechanism from the child-fanout
-  budget above. The two compose: an agent-kind child still has to clear
-  both this dispatch semaphore for its own turn AND (unless its subflow
-  opted out) the child-fanout budget just to be dispatched as a child at
-  all.
+- The pool's ceiling is the process-wide `globalConcurrency` config (default
+  8, `engine/global-concurrency.js`) — one shared number for every flow-run
+  concurrency mechanism: agent dispatch, subflow fan-out, and whole-flow-run
+  concurrency alike. There is no separate agent-dispatch cap to clear: a
+  `kind:"agent"` child runs inside its own flow's admission slot, so it is
+  bounded by the same pool number.
 
 ## Retrying, resuming, and gating one item
 
@@ -236,13 +227,10 @@ applies to a normal flow applies to it directly — there is no separate
 - **Retry it after a failure**: the child's own flowId through the normal
   failures/retry flow (`POST /manifold/failures/<id>/retry`) — the same
   code path as a flow-level retry, walking the child's own topology back
-  to the failing node. There is no itemId-based subflow retry anymore;
-  the old `flow_branches`-era mechanism was removed once every subflow
-  became childFlows (`routes/operator-retry.js` returns a clean
-  `not_found` if an old failure event still carries a stale `itemId`).
+  to the failing node. There is no itemId-based subflow retry.
 - **Retry a subflow node whose `mode` wasn't satisfied**: this is a
   *different* failure event — recorded against the subflow node's own
-  parent flow, `failure_kind: "subflow-mode-not-satisfied"`, since every
+  parent flow, `error_type: "subflow-mode-not-satisfied"`, since every
   sibling child went terminal but not enough of them succeeded. Retrying
   it does **not** re-run the subflow node itself (it already dispatched
   correctly) — `retryFailureBranch` detects this kind and redirects to
@@ -255,7 +243,7 @@ applies to a normal flow applies to it directly — there is no separate
   terminal, same as succeeded/failed/skipped.
 - **See its own transcript / raw state**: any dashboard or companion run-detail
   view works on a childFlowId exactly like a top-level flowId — `data`
-  under `_subflowGroups[...][subflowKey].childFlowId` gives you that id
+  under `_subflowGroups[...][subflowKey].flowId` gives you that id
   directly.
 
 ## `code` node's `ctx.invokePipeline` inside a subflow

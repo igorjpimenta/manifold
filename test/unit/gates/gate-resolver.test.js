@@ -340,7 +340,7 @@ describe("recordItemDecision — idempotency", () => {
     const itemId = randomUUID();
     const flow = makeWaitingFlow({
       flowId,
-      items: [], // item no longer in waitJson
+      items: [], // item absent from waitJson
       stateJson: {
         approvalPending: {
           [itemId]: { decision: "approve", source: "cli", decidedAt: Date.now() },
@@ -406,8 +406,8 @@ describe("recordItemDecision — item membership for waiting flows", () => {
   });
 
   test("returns item_not_in_wait for running flows regardless of itemId (validItem is always false)", async () => {
-    // Running flows no longer support mid-batch item-membership validation via
-    // branchService — validItem is always false for running flows. Gate items
+    // Running flows don't support mid-batch item-membership validation via
+    // — validItem is always false for running flows. Gate items
     // for running flows must arrive via a blocked waitJson.
     const itemId = randomUUID();
     const flow = makeRunningFlow({ itemId });
@@ -1549,7 +1549,7 @@ describe("applyResolutionsAndResume — root-gate apply() hook", () => {
 
 describe("applyResolutionsAndResume — branch-mode apply() hook", () => {
   test("does not call apply on a subflow node that has no .apply property directly on it", async () => {
-    // The branch-row lookup path (branchService.get -> subNodeId -> sub-node apply)
+    // The branch-row lookup path (subNodeId -> sub-node apply)
     // has been removed. A subflow node with .apply only on inner nodes — not directly
     // on the top-level pipelineNode — will not have its inner apply() reached.
     // Resolution itself should still proceed normally.

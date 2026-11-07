@@ -264,7 +264,7 @@ describe("createRunStore — casFinish / casFail / casSkip", () => {
 
   // The reason param must actually land in statusReason — a casSkipStmt
   // that writes NULL there silently drops the node's own _skipped.reason.
-  test("casSkip: reason param persists to statusReason (regression: used to be silently dropped)", async () => {
+  test("casSkip: reason param persists to statusReason (regression guard: it must not be silently dropped)", async () => {
     const store = await makeStore();
     const f = fakeFlow({ status: "running", revision: 0 });
     await store.insert(f);
@@ -315,7 +315,7 @@ describe("createRunStore — cancelFlow", () => {
     store.close();
   });
 
-  test("with no reason, clears any prior status_reason (regression guard: cancel used to leave stale blocked/queued/failed reasons behind)", async () => {
+  test("with no reason, clears any prior status_reason (regression guard: cancel must not leave stale blocked/queued/failed reasons behind)", async () => {
     const store = await makeStore();
     const f = fakeFlow({ status: "running" });
     await store.insert(f);
@@ -456,7 +456,7 @@ describe("createRunStore — list / listFor", () => {
     store.close();
   });
 
-  // Regression test (Phase 2, childFlows): every consumer of list() means
+  // Regression test (childFlows): every consumer of list() means
   // "top-level pipeline runs" — a childFlows loop item (parentInvocationId
   // set) must never surface as its own row, or it pollutes every
   // list()-backed view (routes/pipelines.js's catalog, routes/runs.js's

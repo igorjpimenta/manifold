@@ -713,15 +713,12 @@ describe("validatePipeline — loop node (branch mode)", () => {
 
 });
 
-// ── validatePipeline: loop node childFlows (Phase 2) ────────────────────────
+// ── validatePipeline: subflow node ────────────────────────────────────────
 
-// childFlows is no longer a field validatePipeline reads — every subflow
-// node's items become real child flows unconditionally — so this describe
-// block covers what remains real: a .flow definition is required, groupId
-// is always the node's own id, human-gate sub-nodes require
-// .pendingSelector, and the subflow registers as an addressable child
-// pipeline.
-describe("validatePipeline — loop node (childFlows behavior, unconditional)", () => {
+// A .flow definition is required, groupId is always the node's own id,
+// human-gate sub-nodes require .pendingSelector, and the subflow registers
+// as an addressable child pipeline.
+describe("validatePipeline — subflow node", () => {
   let dir, cleanup;
   let counter = 0;
 
@@ -1304,8 +1301,7 @@ describe("loadPipelines — filesystem edge cases", () => {
   });
 });
 
-// ── validatePipeline — "needs:" (Option B, SUBFLOW_PARENT_STATE_ACCESS.
-// design.md's "needs: v3") ──────────────────────────────────────────────────
+// ── validatePipeline — "needs:" ─────────────────────────────────────────────
 //
 // Keyed by local variable name — { varName: {hops, nodeId} } — not an
 // array, since ctx.needs(varName) resolves by that key, not by nodeId.
@@ -1379,7 +1375,7 @@ describe('validatePipeline — "needs:"', () => {
     assert.equal(loaded, undefined);
   });
 
-  test("needs: as an array (the old v2 shape) throws — must be a keyed object now", async () => {
+  test("needs: as an array throws — must be a keyed object", async () => {
     const { loaded } = await load((id) => `
       export default {
         id: "${id}",

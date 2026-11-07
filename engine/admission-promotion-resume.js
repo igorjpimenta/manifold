@@ -69,7 +69,7 @@ export async function drainDetachedResumes() {
 const RESUMABLE_KINDS = new Set(["child-dispatch", "flow-start"]);
 
 // Guards against driving a promoted row whose kind this engine doesn't
-// admit (an unknown or legacy kind) — such a row has no flow run to flip.
+// admit (an unknown kind) — such a row has no flow run to flip.
 export function isEngineResumableKind(kind) {
   return RESUMABLE_KINDS.has(kind);
 }

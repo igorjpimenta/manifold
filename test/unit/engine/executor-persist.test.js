@@ -236,7 +236,7 @@ describe("persistFailRetrying", () => {
     assert.equal(recorded?.executionId, "exec-1");
   });
 
-  it("threads errorType through to recordEngineFailure, null when omitted (Phase 1.5)", async () => {
+  it("threads errorType through to recordEngineFailure, null when omitted", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
     let recorded = null;

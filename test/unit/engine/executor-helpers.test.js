@@ -499,8 +499,8 @@ describe("assembleState", () => {
     assert.deepEqual(state, {});
   });
 
-  it("a legacy pre-cap-removal row (resultJson null, resultTooLargeBytes set) gets a _resultTooLarge marker at its own node key instead of being silently absent", async () => {
-    // node-executions.js's writeResult() no longer caps results — this row
+  it("a pre-cap-removal row (resultJson null, resultTooLargeBytes set) gets a _resultTooLarge marker at its own node key instead of being silently absent", async () => {
+    // node-executions.js's writeResult() doesn't cap results — this row
     // shape can only exist from before that removal.
     const { nodeExecutionsStore, runStore } = makeStore({
       results: [resultRow("SCAN", { resultJson: null, resultTooLargeBytes: 165000 })],

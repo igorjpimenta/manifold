@@ -648,7 +648,7 @@ function NodeTrendSparkline({ perDay, mode }: {
 // Bar color per node kind. Matches the graph-view's existing kind palette
 // (see GraphView.tsx graphStyle entries) so a node has the same color in
 // the cytoscape graph and in the cost breakdown — cross-surface recall.
-// Unknown kinds (legacy nodes no longer in the pipeline def) fall back
+// Unknown kinds (nodes absent from the pipeline def) fall back
 // to a neutral gray.
 const KIND_COLOR: Record<string, string> = {
   code: "#58a6ff",            // blue

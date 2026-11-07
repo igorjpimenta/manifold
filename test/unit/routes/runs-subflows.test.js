@@ -3,7 +3,7 @@
  *
  * sendSubflowsList serves GET /manifold/runs/:flowId/subflows and resolves
  * a subflow node's real flow_runs children via getAllSubflowGroups
- * (nodeExecutionsStore/runStore). The old branchService path is gone.
+ * (nodeExecutionsStore/runStore).
  */
 import { test, describe, mock, after } from "node:test";
 import assert from "node:assert/strict";
@@ -68,9 +68,9 @@ function makeDeps(api, overrides = {}) {
   };
 }
 
-// Resets the getNodeExecutionsStore mock's childFlows surface to "no subflow
-// node is migrated" — the default every test not explicitly exercising the
-// dual-mode path should start from.
+// Resets the getNodeExecutionsStore mock's childFlows surface to "this flow
+// has no subflow node" — the default every test not explicitly exercising
+// the subflow path should start from.
 function resetNodeExecutionsMock() {
   listSubflowNodeIdsForFlowImpl = () => [];
   listInvocationIdsForNodeImpl = () => [];
@@ -106,8 +106,8 @@ describe("sendSubflowsList — 200 + subflow data", () => {
 });
 
 
-describe("sendSubflowsList — dual-mode (Phase 2): real childFlows children", () => {
-  test("a childFlows-migrated subflow node's real flow_runs children are returned, even when branchService.listByFlow has nothing", async () => {
+describe("sendSubflowsList — real childFlows children", () => {
+  test("a subflow node's real flow_runs children are returned, even when the group has none yet", async () => {
     resetNodeExecutionsMock();
     const { api, routes } = createMockApi();
     const flowId = "flow-with-real-children";
@@ -147,7 +147,7 @@ describe("sendSubflowsList — dual-mode (Phase 2): real childFlows children", (
     assert.deepEqual(b.data, { SCORE_LLM: { score: 77 } });
   });
 
-  test("a childFlows-blocked-on-gate child folds into status 'running' with an awaiting payload, matching the old model's shape", async () => {
+  test("a childFlows-blocked-on-gate child folds into status 'running' with an awaiting payload", async () => {
     resetNodeExecutionsMock();
     const { api, routes } = createMockApi();
     const flowId = "flow-with-blocked-child";
@@ -172,7 +172,7 @@ describe("sendSubflowsList — dual-mode (Phase 2): real childFlows children", (
     const res = createMockRes();
     await prefixHandler(routes)(subflowReq(flowId), res);
     const b = JSON.parse(res.body).subflows[0];
-    assert.equal(b.status, "running", "blocked-on-gate child folds into 'running' to match the old model");
+    assert.equal(b.status, "running", "blocked-on-gate child folds into 'running'");
     assert.equal(b.awaiting?.requestPayload?.kind, "human-gate");
     assert.equal(b.awaiting?.subNodeId, "GATE");
   });

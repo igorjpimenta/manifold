@@ -32,8 +32,8 @@ export function createNodeRunner({
   nodeHealthStore,
   pipelinesRef,
 }) {
-  // Explicit params win; api is the legacy fallback the adapter still
-  // supplies during cutover (tests construct with api only).
+  // Explicit params win; api is the fallback the adapter supplies when
+  // explicit params are absent (tests construct with api only).
   const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
   // threaded through). Without a service there is no lock to own, so owner

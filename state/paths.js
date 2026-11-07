@@ -55,13 +55,13 @@ function migrationMarkerPath(dataDir) {
   return path.join(dataDir, ".migrated.json");
 }
 
-function legacyDbPath(home, name) {
+function preCanonicalDbPath(home, name) {
   return path.join(home, ".openclaw", name);
 }
 
 // One-time copy from harness-managed paths into the core-owned data dir.
-// Copy (never move): the legacy files stay where they are for the old
-// gateway-hosted manifold until cutover; after cutover nothing reads them.
+// Copy (never move): the pre-canonical files stay where they are; after
+// this one-time copy nothing reads them.
 // Integrity-checked after copy; throws on a damaged source so boot refuses
 // loudly instead of serving a torn store. Idempotent via the marker file.
 // Any other failure (missing native module, unwritable dir) is logged, not
@@ -84,14 +84,14 @@ export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } =
     }
     return { migrated: false };
   }
-  const legacyRuntime = legacyDbPath(home, "runtime.sqlite");
-  const legacyOps = legacyDbPath(home, "ops.sqlite");
+  const preCanonicalRuntime = preCanonicalDbPath(home, "runtime.sqlite");
+  const preCanonicalOps = preCanonicalDbPath(home, "ops.sqlite");
   const sources = [];
-  if (existsSync(legacyRuntime) && !existsSync(runtime)) sources.push([legacyRuntime, runtime]);
-  if (existsSync(legacyOps) && !existsSync(ops)) sources.push([legacyOps, ops]);
+  if (existsSync(preCanonicalRuntime) && !existsSync(runtime)) sources.push([preCanonicalRuntime, runtime]);
+  if (existsSync(preCanonicalOps) && !existsSync(ops)) sources.push([preCanonicalOps, ops]);
   if (sources.length === 0) {
     // Fresh install: nothing to copy. The marker records that the decision
-    // was made, so a later-appearing legacy file is never picked up mid-life
+    // was made, so a later-appearing pre-canonical file is never picked up mid-life
     // (that would fork the store).
     try {
       writeFileSync(migrationMarkerPath(dataDir), JSON.stringify({ at: new Date().toISOString(), from: null, fresh: true }) + "\n");
@@ -107,7 +107,7 @@ export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } =
   // Loud throw on a damaged source is the one allowed throw: boot must
   // refuse a torn store rather than serve it. An unavailable verifier is
   // a loud log, not a throw — the marker records the decision either way
-  // so a later-appearing legacy file can never fork the store.
+  // so a later-appearing pre-canonical file can never fork the store.
   let verified = true;
   try {
     verifyCopies(sources.map(([, dest]) => dest));

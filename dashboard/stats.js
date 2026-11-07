@@ -16,7 +16,7 @@ import { getSubflowGroup } from "../state/subflow-state.js";
 //   2. Otherwise, auto-derive a node-visit funnel from pipeline.nodes
 //      in declaration order — each stage counts how many runs reached
 //      that node, per a batched visitedByFlow map
-//      (flow_node_invocations, not state._stepHistory). Generic, agnostic
+//      (flow_node_invocations). Generic, agnostic
 //      to pipeline content; the cost breakdown carries the same per-node
 //      calls with cost/latency, so the auto funnel adds the per-stage
 //      attrition story for pipelines without a custom declaration.
@@ -36,13 +36,13 @@ const ACTIVE = new Set(["running", "blocked"]);
  * any non-succeeded run it points to the PRIOR node, not the
  * throwing/running/blocking one — the executor relies on this
  * invariant for resume (it walks `edges[lastStep]` to find the next
- * node on unblock). This function only reads `lastStep`; the separate
- * `current_step` field (node currently in flight, written BEFORE
- * execution) is a different column and isn't consulted here.
+ * node on unblock). This function only reads `lastStep`; the node currently
+ * in flight is not a flow_runs column — it lives in flow_node_invocations
+ * (findCurrentStep) and waitJson.nodeId — and isn't consulted here.
  *
  * For failed runs, use the LAST entry in `runErrors` (sourced from
- * flow_node_executions, not the old state.errors[]) — the executor
- * records the throw site there. Handles cascade sub-nodes and other
+ * flow_node_executions) — the executor records the throw site there.
+ * Handles cascade sub-nodes and other
  * subflow-internal failures the registry's lastStep can't see (e.g.
  * ENSURE_LOGIN_CODE fails, the cascade routes to ENSURE_LOGIN_AGENT,
  * that times out — the error entry has `nodeId: "ENSURE_LOGIN_AGENT"`
@@ -74,7 +74,7 @@ export function resolveDisplayStep(run, runErrors = []) {
 // so downstream aggregations see the corrected semantics without each
 // site having to call the resolver itself. errorsByFlow is the
 // Map<flowId, ErrorEntry[]> callers fetch once via the gateway's
-// GET /manifold/errors (failureStore.queryErrorsByFlowIds, Phase 1.5) —
+// GET /manifold/errors (failureStore.queryErrorsByFlowIds) —
 // this function stays DB-free, just threading the lookup through.
 function withResolvedSteps(runs, errorsByFlow = null) {
   return runs.map((r) => {
@@ -379,7 +379,7 @@ function stepImpactHistogram(failedRuns, { windowDays = 14 } = {}, errorsByFlow 
  * the error entry matching the failing step; falls back to the last
  * error in the array. runErrors is the run's ErrorEntry[] from
  * flow_node_executions (sourced by the caller via queryErrorsByFlow/
- * queryErrorsByFlowIds), not the old state.errors[].
+ * queryErrorsByFlowIds).
  */
 function extractError(run, step, runErrors = []) {
   const stepErr = runErrors.find((e) => e?.nodeId === step);
@@ -427,8 +427,8 @@ function startOfDay(ms) {
  * (start/end skipped); per-run "size" is 1 when the node was ever visited,
  * per `visitedByFlow` — a Map<flowId, Set<nodeId>> the caller fetches in
  * one batched round-trip (GET /manifold/tree-summary, backed by
- * flow_node_invocations) rather than this function reading
- * state._stepHistory or making one DB/HTTP call per (run, stage) itself.
+ * flow_node_invocations) rather than this function making one DB/HTTP
+ * call per (run, stage) itself.
  * `visitedByFlow` may be null/undefined (caller couldn't fetch it, e.g. no
  * nodeExecutionsStore reachable) — every stage then reports 0, same as an
  * unvisited node, rather than throwing. Counts how many runs reached each
@@ -524,9 +524,9 @@ async function computeFunnel(succeededRuns, def, runStore = null, nodeExecutions
       let size = 0;
       if (typeof stage.size === "function") {
         // Subflow-derived (or any other custom computation). Function returns
-        // the per-run count for this stage. flowId/branchService/runStore/
+        // the per-run count for this stage. flowId/runStore/
         // nodeExecutionsStore are extra args auto-funnel's subflow sub-stages
-        // use to read subflow-group data (dual-mode, see state/subflow-state.js);
+        // use to read subflow-group data (see state/subflow-state.js);
         // pipeline-declared custom size(state) functions just ignore them.
         try { size = Number(await stage.size(state, run.flowId, runStore, nodeExecutionsStore)) || 0; } catch { size = 0; }
       } else {

@@ -26,7 +26,7 @@ import { TERMINAL_STATUS_SET } from "../state/run-store.js";
 // occurring hours into uptime would otherwise go undetected until the next
 // restart.
 //
-// Also reaps admitted rows of kinds the engine no longer admits — see the
+// Also reaps admitted rows of kinds the engine doesn't admit — see the
 // retired-kind pass below for why skipping those is what wedged the whole
 // pool shut, not a safe no-op.
 export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, api, logger, minAgeMs = 30_000 }) {
@@ -34,7 +34,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
   const now = Date.now();
   const admittedRows = await admissionQueueStore.listByStatus("admitted");
 
-  // Reap admitted rows of kinds the engine no longer admits. A retired kind
+  // Reap admitted rows of kinds the engine doesn't admit. A retired kind
   // can never be driven: resumePromotedAdmission refuses non-resumable
   // kinds, and every flow transition releases by the flow's CURRENT
   // admission kind, so releaseByFlow never matches a retired row either.
@@ -54,7 +54,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
     if (isEngineResumableKind(row.kind)) { resumableRows.push(row); continue; }
     if (row.admittedAt && now - row.admittedAt < minAgeMs) continue;
     const flow = await runStore.get(row.flowId);
-    // A flow still 'running' under the old code that admitted this row owns
+    // A flow still 'running' under the code that admitted this row owns
     // the slot legitimately and releases it through its own retired-kind
     // transition path; reclaiming the row underneath it would transiently
     // over-admit the pool. Missing or terminal flows are reaped: no live
@@ -171,8 +171,8 @@ export async function reviveOrphanFlows({
   //
   // createCancelStore(ownerKey) creates a store bound to the flow's actual ownerKey
   // so that cancelFlowByIdForOwner's equality check passes regardless of which
-  // plugin originally created the flow (e.g. legacy graph-flow-owner flows are
-  // rejected by the default manifold-owner store but succeed with their own key).
+  // plugin originally created the flow (e.g. a graph-flow-owner flow is
+  // rejected by the default manifold-owner store but succeeds with its own key).
   const cancelledByRevival = new Set();
   const terminalStatuses = new Set(["cancelled", "failed", "succeeded"]);
   const cancelStores = new Map();
@@ -294,7 +294,7 @@ export async function reviveOrphanFlows({
   // needed. Throttling happens atomically at the moment each flow admits,
   // not as a bulk post-hoc displacement correction here.
   //
-  // A 'queued' orphan on waitJson.kind:"agent-dispatch" — no longer an
+  // A 'queued' orphan on waitJson.kind:"agent-dispatch" — not an
   // admission kind (state/admission-queue-store.js's migration deletes its
   // rows) — gave its own run slot back when it queued, so it holds nothing.
   // Re-entering it directly would run it outside the pool; instead it

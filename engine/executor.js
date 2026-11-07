@@ -44,7 +44,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   // Injectable for tests (defaults to the real singleton in production).
   // A test constructing a real createExecutor() without this override would
   // write its fixture rows into the real store's runtime.sqlite; store/
-  // branchService/failureStore etc. above already follow this DI pattern.
+  // failureStore etc. above already follow this DI pattern.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
 
   // Wraps nodeExecutions.write() for the write-then-fail call sites below —
@@ -104,15 +104,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     // selector silently sees undefined subflow groups and resolves to zero
     // items regardless of how many upstream branches actually succeeded.
     //
-    // assembleState(baseState: state) replaces enrichWithSubflows(state, ...)
-    // here: it subsumes enrichWithSubflows's own _subflowGroups computation
-    // (same getAllSubflowGroups call, folded in) and additionally overlays
-    // each node's resultJson on top of the real stateJson passed as
-    // baseState. The overlay is a no-op against real flows (resultJson-derived
-    // values are byte-identical to state_json's), so this is the same
-    // "additive, verified before cutover" pattern as every prior phase,
-    // scoped to the single narrowest read site (node.selector) rather than
-    // all 5 root call sites at once.
+    // assembleState(baseState: state) overlays each node's resultJson on top
+    // of the entry-only stateJson passed as baseState and attaches
+    // _subflowGroups (the getAllSubflowGroups call, folded in).
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
     return dispatchSubflowChildren({
       node, nodeId, flowId, state: enrichedState, store, runStore, nodeExecutionsStore: nodeExecutions,
@@ -300,11 +294,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       if (nextNodeId === "__end__") {
         // This root read site carries the same resultJson-replay need as
         // every other: pipeline.display() and successCriteria() both read
-        // node output through here. assembleState() replaces the old
-        // enrichWithSubflows, which only ever added _subflowGroups onto raw
-        // `state` and never replayed resultJson at all. Harmless while
-        // state_json still carried the full accumulated blob; broken once
-        // the state-write filter made it entry-only.
+        // node output through here — `state_json` is entry-only, so a node's
+        // own output only exists through that replay.
         const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
         await runAuditIfConfigured({ flowId, pipeline, state: enrichedState, logger });
         // failureStore.recordFromTerminalState's soft-marker scan was
@@ -386,9 +377,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       logger.info(`manifold [${flowId.slice(0, 8)}] → ${nextNodeId} (${node.kind})`);
 
       const enteredAt = Date.now();
-      // Re-pointed off flow_node_invocations by a later cleanup pass (was
-      // state._stepHistory): computed once per dispatch, from this flow's
-      // own last-dispatched node — see executor-helpers.js's isFreshNodeEntry
+      // computed once per dispatch, from this flow's own last-dispatched
+      // node — see executor-helpers.js's isFreshNodeEntry
       // for the full reasoning. execKind is the actual value threaded to every write()
       // call below in this iteration (only one ever fires per iteration) —
       // a genuinely fresh node entry is always "fresh" regardless of why
@@ -649,7 +639,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // last_step is what boot-time orphan revival and the pipeline-
       // concurrency dequeue path both trust as "this node completed" — they
       // jump straight to resolving its outbound edge without re-running
-      // apply(). Under the old order (state persist first, result write
+      // apply(). Under the order where state persist comes first (result write
       // second) a restart landing between the two left last_step durably
       // pointing at a node whose result_json was never committed, so the
       // edge function read an empty state.<nodeId> and returned null — the
@@ -725,8 +715,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   nodeCtx = Object.freeze({
     async invokePipeline(targetPipelineId, args = {}) {
       const record = await start(targetPipelineId, args);
-      // start() no longer throws when the shared admission pool is full —
-      // it queues instead (see start()'s own comment). Preserves the
+      // start() queues when the shared admission pool is full (see
+      // start()'s own comment). Preserves the
       // "singleton-busy" contract at this call site specifically: a caller
       // handling invoked:false is expected to retry invokePipeline itself
       // later, not rely on this record being silently promoted and run out

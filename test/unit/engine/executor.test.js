@@ -93,8 +93,7 @@ function makeNodeExecutionsStore() {
 // case for tests that don't care about fresh-vs-continuation resolution.
 // Pass an override (a plain value, or a function of flowId) for tests
 // that specifically exercise runFlow's forceNew/kind derivation (see
-// "runFlow — kind threading" below), which now reads this instead of
-// state._stepHistory.
+// "runFlow — kind threading" below), which reads this.
 function makeSpyNodeExecutionsStore({ findCurrentStep: findCurrentStepOverride = null } = {}) {
   const calls = [];
   const enterCalls = [];
@@ -312,7 +311,7 @@ describe("start", () => {
     await assert.rejects(() => executor.start("nonexistent"), /unknown pipeline/);
   });
 
-  // admission-queue-store.js: start() no longer THROWS when the
+  // admission-queue-store.js: start() doesn't THROW when the
   // shared pool is full — it queues instead (same UX as child-dispatch
   // already had). These 3 tests need a REAL
   // admissionQueueStore (not the file's own always-admits fake) since
@@ -945,7 +944,7 @@ describe("runFlow — cascade-kind flow: cascading dispatch", () => {
     assert.equal(attempts, 2, "WORK must be dispatched again after cascading, not abandoned");
     const flow = store.get(r.flowId);
     assert.equal(flow.status, "succeeded", "the flow resolves normally — persistFailRetrying must never fire for a non-terminal throw");
-    assert.equal(spy.calls.length, 2, "both the failing and the succeeding attempt get their own tracked execution — the whole point of this redesign vs. the old untracked fallback mechanism");
+    assert.equal(spy.calls.length, 2, "both the failing and the succeeding attempt get their own tracked execution");
   });
 
   it("a throw: escalates to a sibling entry via the failed node's own edge, not a central router", async () => {
@@ -1014,7 +1013,7 @@ describe("runFlow — cascade-kind flow: cascading dispatch", () => {
 });
 
 // ── cascade-kind flow: NodeFailure / edge-function error passing ────────────
-// The "Eradicate soft errors" work — a cascade leg throws
+// A cascade leg throws
 // NodeFailure(message, {errorType}) instead of soft-
 // returning {ok:false, error_type}; the engine carries errorType across the
 // throw via a transient `_cascadeError` state key, consumed by a 2-arg edge
@@ -1265,7 +1264,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
 
 // ── cascade-kind flow: every throw persists to failure_events, no duplicate ──
 // row on exhaustion ────────────────────────────────────────────────────────
-// Under "Eradicate soft errors", every single cascade-leg throw calls
+// Every single cascade-leg throw calls
 // failureStore.recordEngineFailure immediately (unconditional on what the
 // edge decides next), not just the terminal give-up. The exhaustion path's
 // own persistFailRetrying->recordEngineFailure call reuses the SAME
@@ -1341,7 +1340,7 @@ describe("runFlow — cascade-kind flow: failure_events persistence", () => {
 // (pending-item count, child-flow count) that was already in scope. Only
 // human-gate and children-pending ever reach this fallback — every other
 // wait kind (resource-lock, agent-semaphore, needs-gateway-handoff,
-// pipeline-load-pending, budget-gate-approval) carries a real reason by
+// child-dispatch, flow-start, budget-gate-approval) carries a real reason by
 // construction and never hits it.
 
 describe("runFlow — blocked-wait reason synthesis", () => {

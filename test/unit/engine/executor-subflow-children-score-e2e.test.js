@@ -200,8 +200,8 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
     await bothDone;
 
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });
-    assert.ok(groups.SCORE, "must resolve under the node's own id, SCORE — not the old custom groupId \"scored\"");
-    assert.equal(groups.scored, undefined, "the old groupId key must not exist at all");
+    assert.ok(groups.SCORE, "must resolve under the node's own id, SCORE — not a custom groupId \"scored\"");
+    assert.equal(groups.scored, undefined, "a custom groupId key must not exist at all");
 
     const cachedRow = groups.SCORE["job-3"];
     assert.ok(cachedRow);

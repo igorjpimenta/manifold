@@ -3,10 +3,9 @@
 // Loads pipeline definitions from `workspace/.pipelines/<team>_<name>.js`,
 // drives them against managed `flow_runs`, and dispatches each node:
 //   - `code`        : pure function (state) => stateUpdate
-//   - `single`      : one runtime.subagent.run, output parsed by `apply`
+//   - `agent`       : one harness turn, output parsed by `apply`
 //   - `subflow`     : bounded-parallel fan-out over `.selector(state)`; slot-per-item writes
 //   - `human-gate`  : flow.status='blocked' + wait_json; resumed by CLI approve
-//   - `parallel`    : fixed set of named `.tasks`, all dispatched concurrently
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createPipelinesLoader } from "../../../engine/loader.js";
@@ -87,7 +86,7 @@ export default definePluginEntry({
   id: "manifold",
   name: "Manifold Pipeline Engine",
   description:
-    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. The pipeline tools ship over MCP; the plugin registers no raw tools.",
+    "LangGraph-style pipeline executor: loads pipeline definitions from <pipelinesDir>/<team>_<name>/index.js and runs them against managed flow_runs. Nodes (code / agent / subflow / human-gate) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. The pipeline tools ship over MCP; the plugin registers no raw tools.",
   configSchema: () => ({
     type: "object",
     additionalProperties: false,
@@ -98,7 +97,7 @@ export default definePluginEntry({
       },
       ownerSessionKey: {
         type: "string",
-        description: "Session key used to scope flow_run ownership. Default: agent:main:explicit:manifold-owner",
+        description: "Session key that scopes flow_run ownership. Default: agent:main:explicit:manifold-owner",
       },
       dashboardEnabled: {
         type: "boolean",
@@ -135,7 +134,7 @@ export default definePluginEntry({
   register: (api) => {
     const userCfg = api.pluginConfig ?? {};
     // Core owns its store home (state/paths.js): one MANIFOLD_DATA_DIR
-    // move relocates every DB and pending file. Legacy
+    // move relocates every DB and pending file. Pre-canonical
     // ~/.openclaw/{runtime.sqlite,ops.sqlite} are copied in once, never
     // moved, and never read again afterwards.
     const storePaths = resolveStorePaths();
@@ -164,9 +163,7 @@ export default definePluginEntry({
 
     // One shared ceiling for every concurrency mechanism in the engine —
     // agent dispatch, subflow fan-out, and whole-flow-run concurrency alike
-    // (see global-concurrency.js). agentDispatchConcurrency/
-    // childFanoutConcurrency were two independent config keys for what are
-    // now the same number; globalConcurrency replaces both.
+    // (see global-concurrency.js).
     configureGlobalConcurrency({ maxConcurrent: userCfg.globalConcurrency });
 
     // Registered here (rather than deferred) since PROFILE.md reads/edits
@@ -417,7 +414,7 @@ export default definePluginEntry({
           api,
           // Completing an interrupted cancellation needs to cancel flows by
           // their actual ownerKey, not the default manifold-owner key.
-          // Legacy graph-flow-owner flows would fail the
+          // graph-flow-owner flows would fail the
           // cancelFlowByIdForOwner equality check otherwise.
           createCancelStore: (ownerKey) => createStateStore(api, ownerKey, {
             runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger: api.logger,
