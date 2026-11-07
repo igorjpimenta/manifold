@@ -7,11 +7,6 @@
       "plugins.entries.manifold"
     ]
   },
-  "contracts": {
-    "tools": [
-      "manifold_start"
-    ]
-  },
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

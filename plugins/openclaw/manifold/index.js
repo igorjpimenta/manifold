@@ -26,7 +26,6 @@ import { createPipelineRegistryStore } from "../../../state/pipeline-registry.js
 import { createPipelineDirsStore } from "../../../state/pipeline-dirs.js";
 import { wrapSubagentKeys } from "./session-keys.js";
 import { registerCliCommands } from "../../../bin/cli.js";
-import { registerGraphFlowTool } from "./agent/tools/index.js";
 import { checkDb } from "../../../state/db-health.js";
 import { writeCorruptionAlert } from "../../../state/db-guard.js";
 import { createGateResolver } from "../../../gates/gate-resolver.js";
@@ -90,7 +89,7 @@ export default definePluginEntry({
   id: "manifold",
   name: "Manifold Pipeline Engine",
   description:
-    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. Agent tool: `manifold_start`.",
+    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. The pipeline tools ship over MCP; the plugin registers no raw tools.",
   configSchema: () => ({
     type: "object",
     additionalProperties: false,
@@ -474,8 +473,6 @@ export default definePluginEntry({
         }],
       },
     );
-
-    registerGraphFlowTool({ api, executor, store, pipelinesRef, ensurePipelinesLoaded });
 
     const readStore = runStore;
     const gateResolver = createGateResolver({
