@@ -1,5 +1,5 @@
-// spawn-child.js — Phase 2 branch/flow unification: race-safe identity +
-// creation for a subflow-item child flow.
+// spawn-child.js — race-safe identity + creation for a subflow-item child
+// flow.
 
 // resolveOrCreateChild finds or creates the flow_node_invocations row
 // identifying "nodeId processing item subflowKey", then finds or creates

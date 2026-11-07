@@ -107,7 +107,7 @@ async function _writeCapVersion(patch) {
 /** Set cap, persist as a new cap_versions row. Only ever called from the
  *  (already-async) PUT /budget/cap route handler — awaited there so the
  *  response only confirms ok:true once the write actually landed, same
- *  durable-before-response guarantee the old synchronous fs.writeFileSync
+ *  durable-before-response guarantee a synchronous fs.writeFileSync
  *  gave for free. */
 export async function setCapAndPersist(usd) {
   if (typeof usd !== "number" || usd <= 0 || !Number.isFinite(usd)) return;
@@ -327,7 +327,7 @@ async function composeText({ threshold, total, cap, store }) {
   return { body };
 }
 
-/** Highest-spending root in today's data — used to point the operator at
+/** Highest-spending root in today's data — points the operator at
  *  the driver without having to open the app first. Best-effort. */
 async function topDriverToday(store) {
   try {

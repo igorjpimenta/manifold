@@ -22,7 +22,7 @@
 //
 // Records the write's outcome (success/error) keyed by the turn's runId —
 // a kind:"agent" pipeline node's apply(state, output) only ever sees
-// `{text, runId}` (see report-draft-blocked.js's header for why every
+// `{text, runId}` (see the tool-handoff header for why every
 // agent-side signal in this codebase flows through a file side-channel,
 // never direct tool-call introspection). output.runId and this hook's
 // event.runId are the same identifier for a given agent dispatch: the

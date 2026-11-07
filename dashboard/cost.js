@@ -26,7 +26,7 @@ function getClient(dbPath) {
 
 // costForRun — sum all cost_by_call rows for a given flow_id.
 // opts: { sinceMs?, untilMs?, _dbPath? }
-// _sessionIndex: legacy param, accepted and ignored.
+// _sessionIndex: accepted and ignored.
 //
 // Returns:
 //   { flowId, total, tokens, byModel, byNode, bySession }

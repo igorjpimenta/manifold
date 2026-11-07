@@ -605,7 +605,7 @@ describe("acquireLock — directory creation", () => {
   });
 });
 
-// ─── onWouldBlock — Phase 4 queued-status visibility hook ────────────────────
+// ─── onWouldBlock — queued-status visibility hook ────────────────────────────
 
 describe("acquireLock — onWouldBlock hook", () => {
   test("not fired at all when the lock is uncontested", async () => {
@@ -867,7 +867,7 @@ describe("owners — release only removes this acquisition's lock", () => {
     await lock.release();
     assert.ok(existsSync(lockPath(name)), "the new holder's lock must survive the old holder's release");
     assert.equal(JSON.parse(readFileSync(lockPath(name), "utf8")).token, "someone-else");
-    assert.ok(warnings.some((w) => /no longer held/.test(w)));
+    assert.ok(warnings.some((w) => /not held by this acquisition/.test(w)));
     removeLockFile(name);
   });
 

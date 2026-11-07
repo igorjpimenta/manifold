@@ -2,8 +2,7 @@
  * Unit tests for state/subflow-state.js
  *
  * Both getAllSubflowGroups/getSubflowGroup read flow_runs children via
- * nodeExecutionsStore.listSubflowNodeIdsForFlow. The old branchService
- * fallback path has been removed.
+ * nodeExecutionsStore.listSubflowNodeIdsForFlow.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -55,7 +54,7 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.equal(result["item-1"].flowId, "child-1");
   });
 
-  test("maps status/data/timing fields onto the old row shape", async () => {
+  test("maps status/data/timing fields onto the row shape", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
       invocations: [{ id: "inv-1", flowId, nodeId: "group1", subflowKey: "item-1" }],
@@ -75,7 +74,7 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.deepEqual(result["item-1"].data, { foo: "bar" });
   });
 
-  test("folds 'blocked' status into 'running', matching the old model", async () => {
+  test("folds 'blocked' status into 'running'", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
       invocations: [{ id: "inv-1", flowId, nodeId: "group1", subflowKey: "item-1" }],
@@ -88,10 +87,9 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.equal(result["item-1"].status, "running");
   });
 
-  // Phase 4: unlike 'blocked', 'queued'
-  // has no old-model analogue to fold into "running" — it's an internal-
-  // resource wait (crossProcessLock, an admission slot), not a gate,
-  // so it's passed through unchanged along with its reason text.
+  // Unlike 'blocked', 'queued'
+  // is an internal-resource wait (crossProcessLock, an admission slot), not
+  // a gate, so it's passed through unchanged along with its reason text.
   test("passes 'queued' status through unchanged, with statusReason carried onto the row", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({

@@ -63,7 +63,7 @@ export function PipelinesList() {
                     </div>
                     <div className="text-xs text-fg-dim mt-0.5 line-clamp-2">
                       {p.historical
-                        ? <>no longer on disk · {p.runs} run{p.runs === 1 ? "" : "s"} in DB</>
+                        ? <>not on disk · {p.runs} run{p.runs === 1 ? "" : "s"} in DB</>
                         : (p.goal ?? "")}
                     </div>
                   </a>
@@ -86,7 +86,7 @@ export function PipelinesList() {
                         <TD className="text-fg-dim">{p.historical ? "—" : p.nodes.length - 2}</TD>
                         <TD className="text-fg-dim">
                           {p.historical
-                            ? <span className="text-fg-dim">no longer on disk · {p.runs} run(s) in DB</span>
+                            ? <span className="text-fg-dim">not on disk · {p.runs} run(s) in DB</span>
                             : (p.goal ?? "").slice(0, 100)}
                         </TD>
                         <TD className="font-mono text-fg-dim text-xs">

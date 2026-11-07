@@ -70,7 +70,7 @@ export function subflowOutcomeSatisfied(mode, children) {
 // When that happens and the caller supplies `repairGuard` (only
 // maybeResumeParent does — the boot/flow-revival.js and
 // engine/admission-promotion-resume.js callers don't, and get the
-// pre-repair legacy behavior: `flip_failed:not_terminal`), a 'failed'
+// pre-repair behavior: `flip_failed:not_terminal`), a 'failed'
 // parent is force-unblocked back to 'blocked' first, then the normal
 // casSetRunning flip proceeds against the freshly-bumped revision.
 // 'succeeded'/'cancelled'/'skipped' are never repaired — only 'failed' is

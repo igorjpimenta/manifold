@@ -1,7 +1,7 @@
 // routes/operator-resume.js — in-process resume for budget-gate approvals.
 //
 // resumeFlowFromGate is the single implementation behind two callers: POST
-// /pipeclaw/resume-from-gate (thin validating wrapper) and the budget
+// /manifold/resume-from-gate (thin validating wrapper) and the budget
 // decide route's in-process call. It re-requests the flow's own admission
 // (released the moment it blocked, state-store.js's setWaiting hook) and
 // resumes, leaving status:"queued" to the admission cycle when the pool is

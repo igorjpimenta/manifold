@@ -165,7 +165,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     assert.equal(results.filter((r) => r.nodeId === "LOOP").length, 1, "3 visits dedup to exactly 1 row per listResultsForFlow's contract");
   });
 
-  test("human-gate: both gates' records land in gate_records, never in state_json or assembleState() — the FULL replacement for the old state.gates snapshot, across TWO gates in sequence", async () => {
+  test("human-gate: both gates' records land in gate_records, never in state_json or assembleState(), across TWO gates in sequence", async () => {
     harness = await makeHarness({
       test_gates: {
         id: "test_gates",
@@ -296,7 +296,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     assert.equal(assembled.CONNECT, undefined, "CONNECT's own dispatchSubflowChildren always writes stateUpdate:{} — there is no flat state[nodeId] to assemble");
   });
 
-  test("a result well over the old 64KB cap is assembled in full — no size limit left at all", async () => {
+  test("a result well over 64KB is assembled in full — no size limit left at all", async () => {
     harness = await makeHarness({
       test_oversize: {
         id: "test_oversize",
@@ -324,7 +324,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     assert.equal(assembled.BIG.blob, "x".repeat(70_000), "the full oversized payload survives, unmodified");
   });
 
-  test("a result well over the old cap, flat small+bulk fields: assembled state keeps ALL fields, including the bulk one", async () => {
+  test("a result well over 64KB, flat small+bulk fields: assembled state keeps ALL fields, including the bulk one", async () => {
     // Regression coverage for a flat (unwrapped) node result mixing tiny
     // scalars (accessToken, bidderId) with a large array (listings) that
     // lost EVERYTHING (and, under an intermediate fix, just the bulk

@@ -19,10 +19,10 @@ after(() => {
   else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
-// sendFullRun now calls failureStore.queryErrorsByFlow(...) (Phase 1.5,
+// sendFullRun now calls failureStore.queryErrorsByFlow(...),
 // moved from node-executions.js) and getNodeExecutionsStore().getInvocation(...)
 // (parent-link resolution), and the runs list handler calls
-// .summarizeChildrenByFlowIds(...) (Phase 2 dual-mode branch summary) — all
+// .summarizeChildrenByFlowIds(...) — all
 // mocked so tests are deterministic regardless of the real (or
 // singleton-cached) DB.
 let queryErrorsByFlowImpl = () => [];
@@ -346,7 +346,7 @@ describe("registerRunRoutes — runs list handler", () => {
   });
 });
 
-// ── sendFullRun (GET /manifold/runs/:flowId) — errorEntries (Phase 1.5) ───────
+// ── sendFullRun (GET /manifold/runs/:flowId) — errorEntries ──────────────────
 
 describe("registerRunRoutes — sendFullRun errorEntries", () => {
   test("includes a top-level errorEntries array sourced from failureStore.queryErrorsByFlow", async () => {

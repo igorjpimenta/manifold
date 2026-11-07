@@ -114,14 +114,11 @@ export function registerRunRoutes({
         if (hasMore) page.pop();
         const last = page[page.length - 1];
         const discussSummaries = await discussStore.getBulkSummaries(page.map((r) => r.flowId));
-        // Dual-mode (Phase 2): a flow's subflows are either old-model
-        // (flow_branches) or new-model (real flow_runs children) never
-        // both — see state/subflow-state.js's own header comment. Prefer the
+        // A flow's subflows are its real flow_runs children — see
+        // state/subflow-state.js. Prefer the
         // childFlows summary; a flow with no real children (the common
-        // case: hasn't reached a subflow node yet, or predates the
-        // migration) naturally falls through to the old-model map, then
-        // to EMPTY_SUBFLOWS. Without this, every childFlows-migrated run
-        // in the list (i.e. every run post-migration) would report
+        // case: hasn't reached a subflow node yet) falls through to
+        // EMPTY_SUBFLOWS. Without this, every run in the list would report
         // subflowTotal:0 even though its own /subflows endpoint has real
         // data — the exact mismatch that made RunDetailView's Subflows
         // section populate while PipelineDetailView's inline subflow peek
@@ -423,13 +420,12 @@ export function registerRunRoutes({
     // reads when B2 landed.
     const gates = await nodeExecutionsStore.listGateRecordsForFlow(flow.flowId);
     // Strip `loop` from the stateJson payload — subflow data is served via
-    // GET /manifold/runs/:flowId/subflows (childFlows, not old-model branchService).
-    // Strip `errors` too: failure_events is now the sole store for error
-    // history ("Eradicate soft errors" Phase 1.5) — errorEntries below is
-    // the normalized replacement. Only historical rows persisted before
-    // that redirect still carry a baked-in errors[] in their stored
-    // stateJson; stripping it here keeps the wire contract clean for those
-    // too.
+    // GET /manifold/runs/:flowId/subflows.
+    // Strip `errors` too: failure_events is the sole store for error
+    // history, and errorEntries below is the normalized replacement. Rows
+    // persisted before that redirect still carry a baked-in errors[] in
+    // their stored stateJson; stripping it here keeps the wire contract
+    // clean for those too.
     const { loop: _loop, errors: _errors, gates: _staleGates, ...stateWithoutLegacy } = enrichedState;
     // A subflow child is now just a flow_runs row with parent_invocation_id set —
     // resolve it back to the parent's flowId/nodeId/subflowKey so clients can
@@ -598,9 +594,8 @@ export function registerRunRoutes({
     const grouped = await getAllSubflowGroups({
       flowId: flow.flowId, runStore, nodeExecutionsStore: getNodeExecutionsStore(),
     });
-    // Strip the legacy `errors` column (Phase 1.6) — errorEntries (Part B's
-    // enrichment) is the sole normalized replacement now that
-    // executor-branch.js no longer writes this field.
+    // Strip the `errors` field — errorEntries is the normalized
+    // replacement.
     const subflows = Object.values(grouped).flatMap((group) =>
       Object.values(group).map(({ errors: _errors, ...rest }) => rest)
     );
@@ -612,7 +607,7 @@ export function registerRunRoutes({
 
   // ── node tree ─────────────────────────────────────────────────────────────
   //
-  // Unifies the old Steps (this flow's own node timeline) and Subflows
+  // Unifies the Steps (this flow's own node timeline) and Subflows
   // (child-flow fan-out) sections into one recursively-expandable tree.
   // Two row shapes, one recursive expand operation:
   //   type:"node" — one row per invocation (not per execution attempt — see
@@ -632,8 +627,8 @@ export function registerRunRoutes({
     const nodeExecutionsStore = getNodeExecutionsStore();
     const invocations = await nodeExecutionsStore.listInvocationsForFlow(flow.flowId);
     // A node's own status can only be told apart from a failed one by
-    // cross-referencing failure_events (Phase 1.5 — flow_node_executions no
-    // longer stores error content). Every failure this flow ever recorded,
+    // cross-referencing failure_events (flow_node_executions stores no error
+    // content). Every failure this flow ever recorded,
     // not just root-level ones, but only executionId matters here, and a
     // subflow item's own errors live under ITS OWN flow_id, not this one's —
     // so this set naturally only ever matches root-level invocations.
@@ -705,9 +700,8 @@ export function registerRunRoutes({
       // invocations is already ordered ascending by invoked_at
       // (listInvocationsForFlow), so idx === lastIdx already and only ever
       // means "the most recently invoked node for this flow" — no extra
-      // currentStep/isTerminal gate: comparing a dropped field is always
-      // false, and gating on !isTerminal would drop a terminal flow's real
-      // status from its own last node whenever that node's execution
+      // isTerminal gate: gating on !isTerminal would drop a terminal flow's
+      // real status from its own last node whenever that node's execution
       // recorded no error, defaulting a failed flow to "succeeded".
       let status;
       if (inv.latestExecutionId && failedExecutionIds.has(inv.latestExecutionId)) {
@@ -913,8 +907,8 @@ export function registerRunRoutes({
       pipelineId: flow.stateJson?.pipelineId, nodeName: invocation.nodeId, atMs: invocation.invokedAt,
     });
     const rawExecutions = await getNodeExecutionsStore().listExecutionsForInvocation(invocationId);
-    // Per-attempt error content lives in failure_events now (Phase 1.5) —
-    // cross-reference by executionId. A given execution_id gets at most one
+    // Per-attempt error content lives in failure_events — cross-reference
+    // by executionId. A given execution_id gets at most one
     // failure row (upsertFailureRow's conflict target), so this is a clean
     // 1:1 lookup, not a dedup problem.
     const messageByExecutionId = new Map(

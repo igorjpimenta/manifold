@@ -178,7 +178,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
       running = true;
       // Prime the snapshot without emitting flow_created for pre-existing rows.
       // One batched listVisitedNodeIdsByFlow() call for every row instead of
-      // one query per flow — same batching rationale as stats.js's Phase 3a
+      // one query per flow — same batching rationale as stats.js's
       // tree-summary fix.
       try {
         const rows = await store.list();

@@ -13,7 +13,7 @@
 // currently-active (retired_at IS NULL) row per (pipeline_id[, node_name]):
 // content unchanged → no-op; changed or previously absent → retire the
 // old active row (if any) and insert a fresh one; a pipeline_id/node_name
-// that no longer appears in the Map at all → retire without inserting
+// that is absent from the Map at all → retire without inserting
 // (its last version stays queryable, just marked retired).
 //
 // Read path: getNodeVersionsBatch([{pipelineId, nodeName, atMs}, ...]) —
@@ -256,7 +256,7 @@ async function _createStore(dbPath) {
         }
       }
 
-      // Retire any active row whose pipeline/node no longer appears in
+      // Retire any active row whose pipeline/node is absent from
       // the Map at all — a pipeline or node that's been removed. Its
       // last version stays queryable, just marked retired.
       const { rows: activePipelines } = await client.execute(

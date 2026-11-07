@@ -1,4 +1,4 @@
-// needs-resolver.js — Option B, per-node "needs:": a node declares
+// needs-resolver.js — per-node "needs:": a node declares
 // `needs: { varName: {hops, nodeId} }`, keyed by the local variable name
 // it'll be read as (an ORM-style relation declaration, not an array) —
 // and resolves each one lazily, only when `ctx.needs(varName)` is actually
@@ -129,7 +129,7 @@ export async function resolveOneNeed({ flowId, hops, nodeId, runStore, nodeExecu
   if (row.resultWrittenAt == null) return { status: "not-ready" };
   if (row.resultTooLargeBytes != null && row.resultJson == null) {
     // writeResult() (state/node-executions.js) does not cap results, so this
-    // can only fire for a legacy row that kept nothing at all — the real
+    // can only fire for a row that kept nothing at all — the real
     // value isn't recoverable.
     return { status: "ready", value: { _resultTooLarge: true, bytes: row.resultTooLargeBytes } };
   }
