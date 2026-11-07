@@ -1,5 +1,5 @@
 /**
- * Unit tests for state/state-store.js — currently scoped to the Phase 2
+ * Unit tests for state/state-store.js — currently scoped to the
  * resume-trigger wiring: finish/skip/fail/cancel must call maybeResumeParent
  * when a terminal child completes the last non-terminal sibling under its loop
  * node, and must stay a safe no-op when nodeExecutionsStore/resumeParentRef
@@ -103,7 +103,7 @@ describe("createStateStore — create() pipelineId integrity", () => {
   });
 });
 
-describe("createStateStore — Phase 2 resume-trigger wiring", () => {
+describe("createStateStore — resume-trigger wiring", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 

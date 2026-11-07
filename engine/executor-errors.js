@@ -1,7 +1,8 @@
 export const REVISION_RETRY_LIMIT = 5;
 
-// Always resolves null — core never reads harness homes, so callers fall
-// back to their default detail.
+// The openclaw tasks DB (~/.openclaw/tasks/runs.sqlite) is never read —
+// core never reads harness homes. Always resolves null so
+// callers fall back to their default detail.
 export async function fetchSessionError(session) {
   void session;
   return null;

@@ -1,5 +1,5 @@
 /**
- * Unit tests for engine/spawn-child.js — Phase 2 branch/flow unification's
+ * Unit tests for engine/spawn-child.js — the branch/flow unification's
  * race-safe identity + creation primitive. Uses real sqlite-backed
  * run-store.js/node-executions.js/state-store.js instances (tmp files) so
  * the race-safety guarantee is exercised against the actual unique index,

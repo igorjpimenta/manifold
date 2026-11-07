@@ -1,10 +1,8 @@
 // executor-subflow-children.js — real child-flow dispatch for a
 // `kind:"subflow"` node.
 //
-// Deliberately small: unlike the old branch-worker model (subCtx/item
-// calling convention, auto-nested `data`, its own worker-pool concurrency
-// scheduler, gate-batching), a childFlows
-// subflow's items are ordinary flow_runs children driven by the exact same
+// Deliberately small: a childFlows subflow's items are ordinary flow_runs
+// children driven by the exact same
 // executor.js/runFlow() every other flow uses — this module's only job is
 // resolving items → spawning/finding each child → checking whether the
 // whole fan-out is done. No data-shape adapter, no calling-convention

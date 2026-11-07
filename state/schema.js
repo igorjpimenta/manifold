@@ -32,14 +32,13 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   subflowKey: text('subflow_key'),
   visitSeq:   integer('visit_seq').notNull().default(1),
   invokedAt:  integer('invoked_at').notNull(),
-  // Option B, Phase B0 — this
-  // table's first payload column. resultWrittenAt is the "is this real"
+  // The table's first payload column. resultWrittenAt is the "is this real"
   // signal a bare nullable resultJson can't provide on its own (not
   // dispatched vs. dispatched-not-complete vs. complete-with-null-result).
-  // resultTooLargeBytes carries the real size of a result that was capped
+  // resultTooLargeBytes carried the real size when a result was capped
   // instead of stored (see writeResult() in
-  // state/node-executions.js). Every write today sets it null; a non-null
-  // value marks a row whose result was never stored.
+  // state/node-executions.js). Only non-null on rows written before the
+  // cap was removed; every write since always sets it null.
   resultJson:          text('result_json'),
   resultWrittenAt:     integer('result_written_at'),
   resultTooLargeBytes: integer('result_too_large_bytes'),
@@ -55,7 +54,7 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
 ]);
 
 // error/error_type intentionally NOT here — error content lives entirely
-// into failure_events, which gets a permanent row on every single
+// in failure_events, which gets a permanent row on every single
 // throw regardless of what a cascade edge decides to do next. This table
 // is purely an execution-window/identity ledger: which node, which
 // attempt, when it ran, why kind of dispatch (fresh/retry/revival/
@@ -71,10 +70,9 @@ export const flowNodeExecutions = sqliteTable('flow_node_executions', {
   index('idx_fne_exited').on(table.exitedAt),
 ]);
 
-// flow_branches (branch storage) is still a real table in runtime.sqlite —
-// read directly via raw SQL by state/node-executions.js, never through
-// Drizzle — and deliberately has no schema export here: nothing imports
-// one.
+// flow_branches (the pre-childFlows branch storage) is still a real table
+// in a runtime.sqlite that predates the childFlows cutover — it has no
+// schema export here because nothing reads or writes it.
 
 // Deliberately thin — pipeline_id/branch_item_id/failure_node/recovery_hint/
 // resolved status are reconstructed at read time via invocation_id/
@@ -87,8 +85,8 @@ export const failureEvents = sqliteTable('failure_events', {
   failureSummary: text('failure_summary').notNull(),
   invocationId:   text('invocation_id'),
   executionId:    text('execution_id'),
-  // Error content lives here, not in flow_node_executions, so it is not
-  // derivable via a join. NodeFailure vocabulary: never_attempted|
+  // error_type is not derivable via a join — flow_node_executions stores no
+  // error content. Same NodeFailure vocabulary: never_attempted|
   // confirmed_absent|inconclusive|infra_unavailable|blocked — plus
   // "subflow-mode-not-satisfied" for a subflow node whose exit mode wasn't
   // met (not a thrown NodeFailure at all, a policy verdict — see
@@ -114,8 +112,8 @@ export const discussState = sqliteTable('discuss_state', {
 }, (table) => [
   index('idx_discuss_updated').on(table.updatedAt),
   // One row per discuss thread. Without this constraint two concurrent
-  // appendMessage calls each insert their own row and the thread's
-  // messages split across them.
+  // appendMessage calls each insert their own row and the thread's history
+  // splits across them.
   uniqueIndex('idx_discuss_state_unique').on(table.flowId, table.itemId),
 ]);
 
@@ -163,7 +161,7 @@ export const nodeHealth = sqliteTable('node_health', {
 
 // Point lookup of one gate node's own record — keyed (flow_id, node_id) so
 // sibling gates never share a key that can go stale. Written/read via raw
-// SQL (like flow_branches below); the def exists so snapshots cover it.
+// SQL; the def exists so snapshots cover it.
 export const gateRecords = sqliteTable('gate_records', {
   flowId:     text('flow_id').notNull(),
   nodeId:     text('node_id').notNull(),

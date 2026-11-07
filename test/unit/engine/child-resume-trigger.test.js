@@ -1,5 +1,5 @@
 /**
- * Unit tests for engine/child-resume-trigger.js — Phase 2's "wake the parent
+ * Unit tests for engine/child-resume-trigger.js — the "wake the parent
  * once every sibling child is terminal" mechanism. Uses real sqlite-backed
  * run-store.js/node-executions.js instances (tmp files) plus
  * engine/spawn-child.js to build genuine parent/child pairs, since the

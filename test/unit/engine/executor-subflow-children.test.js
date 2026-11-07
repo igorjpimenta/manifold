@@ -111,7 +111,7 @@ describe("dispatchSubflowChildren", () => {
     }
   });
 
-  // buildChildInitialState no longer clones the parent's state at all; a
+  // buildChildInitialState doesn't clone the parent's state at all; a
   // child's initialState is exactly item/itemIndex/parentItem. Anything
   // else an inner node needs from an ancestor flow goes through the
   // explicit needs: mechanism (engine/needs-resolver.js) instead of
@@ -134,7 +134,7 @@ describe("dispatchSubflowChildren", () => {
     assert.deepEqual(child.stateJson.item, { id: "item-1" });
     assert.equal(child.stateJson.itemIndex, 0);
     assert.equal(child.stateJson.parentItem, undefined, "state.item was absent on the parent, so parentItem is too");
-    assert.equal(child.stateJson.shortlist, undefined, "parent's shortlist no longer rides along in the clone");
+    assert.equal(child.stateJson.shortlist, undefined, "parent's shortlist doesn't ride along in the clone");
     // pipelineId IS present — but it's the CHILD's own synthetic id (set by
     // spawn-child.js, not buildChildInitialState), never the parent's.
     assert.equal(child.stateJson.pipelineId, "p::LOOP");

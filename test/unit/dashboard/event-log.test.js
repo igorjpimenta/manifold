@@ -66,8 +66,8 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
 
     // Simulate SCAN completing and DRAFT being newly invoked — state_json
     // itself never gains a "SCAN"/"DRAFT" key in this test (deliberately,
-    // to prove the diff no longer depends on it), only the invocation
-    // store's visited-set changes, same as it would post-B4.
+    // to prove the diff doesn't depend on it), only the invocation
+    // store's visited-set changes.
     nodeExecutionsStore._addVisited(flowId, "DRAFT");
     store._set({ ...row, revision: 2, lastStep: "DRAFT" });
     const evtPromise = waitForEvent(bus, (e) => e.kind === "run.updated" && e.flowId === flowId);
