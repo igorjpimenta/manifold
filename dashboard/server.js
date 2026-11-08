@@ -23,6 +23,7 @@ import { TERMINAL_STATUS_SET } from "../state/run-store.js";
 import { assembleState } from "../engine/executor-helpers.js";
 import { getAllSubflowGroups } from "../state/subflow-state.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
+import { listTranscriptsForFlow } from "../state/transcripts.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Static assets come from vite's build output under `dist/`. Run `npm run
@@ -44,7 +45,7 @@ const MIME = {
   ".ico":  "image/x-icon",
 };
 
-export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
+export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, sessionIndex, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
   let server = null;
   // Live WS door (events/ws-frame.js) — opened in start(), drained on stop().
   let door = null;
@@ -547,7 +548,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
 
       const transcriptsMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/transcripts$/i);
       if (req.method === "GET" && transcriptsMatch) {
-        return sendTranscripts(res, transcriptsMatch[1]);
+        return sendTranscripts(res, transcriptsMatch[1], url);
       }
 
       const artifactGetMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/artifacts\/(.+)$/i);
@@ -637,12 +638,21 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     }
   }
 
-  // Session keys are opaque: transcript attribution comes from the session
-  // ledger, never from the key's shape.
-  async function sendTranscripts(res, flowId) {
+  // Transcripts read manifold's own stores via the shared reader
+  // (state/transcripts.js) — the same source the gateway's
+  // /manifold/runs/:flowId/transcripts route serves. Served bare (no
+  // envelope) so the dashboard Transcript[] client is untouched.
+  async function sendTranscripts(res, flowId, url) {
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
-    return sendJson(res, 200, []);
+    const transcripts = await listTranscriptsForFlow(flow, {
+      discussStore, sessionIndex,
+      nodeExecutionsStore: nx(),
+      pipelinesRef,
+      lite: url.searchParams.get("lite") === "1",
+      sessionKey: url.searchParams.get("sessionKey") ?? null,
+    });
+    return sendJson(res, 200, transcripts);
   }
 
   async function readJsonBody(req, maxBytes = 64 * 1024) {

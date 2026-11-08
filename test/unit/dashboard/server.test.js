@@ -67,7 +67,11 @@ const failureStore = {
   },
 };
 
-const discussStore = { getBulkSummaries: async () => ({}) };
+const discussStore = { getBulkSummaries: async () => ({}), listForFlow: async () => discussThreads };
+
+let discussThreads = [];
+let sessionRows = [];
+const sessionIndex = { listForFlow: async () => sessionRows };
 
 const nodeExecutionsStore = {
   summarizeChildrenByFlowIds: async () => new Map(),
@@ -120,6 +124,7 @@ before(async () => {
     readStore,
     failureStore,
     discussStore,
+    sessionIndex,
     nodeExecutionsStore,
     pipelinesRef: { value: new Map() },
     pipelineRegistryStore,
@@ -213,6 +218,45 @@ describe("dashboard/server.js — direct store reads (no gateway)", () => {
     assert.equal(body.length, 1);
     assert.equal(body[0].id, "pipe1");
     assert.equal(body[0].historical, true);
+  });
+
+  test("GET /api/runs/:id/transcripts serves store-backed transcripts bare", async () => {
+    sessionRows = [
+      { sessionKey: "sk-d1", nodeId: "N1", branchItemId: "item-1", spawnedAt: 100 },
+    ];
+    discussThreads = [{
+      itemId: "item-1",
+      messages: [{ id: "m1", role: "operator", text: "go?", ts: 200 }],
+      turnStatus: "idle",
+      updatedAt: 200,
+    }];
+    try {
+      const { status, body } = await get(`/api/runs/${FLOW_ID}/transcripts`);
+      assert.equal(status, 200);
+      assert.ok(Array.isArray(body));
+      assert.equal(body.length, 1);
+      assert.equal(body[0].nodeId, "N1");
+      assert.equal(body[0].sessionKey, "sk-d1");
+      assert.equal(body[0].turns[0].text, "go?");
+    } finally {
+      sessionRows = [];
+      discussThreads = [];
+    }
+  });
+
+  test("GET /api/runs/:id/transcripts?sessionKey= drills into one transcript", async () => {
+    sessionRows = [
+      { sessionKey: "sk-m1", nodeId: "N1", branchItemId: null, spawnedAt: 100 },
+      { sessionKey: "sk-m2", nodeId: "N1", branchItemId: null, spawnedAt: 150 },
+    ];
+    try {
+      const { status, body } = await get(`/api/runs/${FLOW_ID}/transcripts?sessionKey=sk-m2`);
+      assert.equal(status, 200);
+      assert.equal(body.length, 1);
+      assert.equal(body[0].sessionKey, "sk-m2");
+    } finally {
+      sessionRows = [];
+    }
   });
 
   test("GET /api/runs/:id/events still serves the WS-backed bus", async () => {

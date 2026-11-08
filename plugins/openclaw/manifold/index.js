@@ -657,6 +657,7 @@ export default definePluginEntry({
         readStore,
         failureStore,
         discussStore,
+        sessionIndex,
         nodeExecutionsStore,
         pipelinesRef,
         pipelineRegistryStore,
