@@ -31,26 +31,17 @@ import { NodeBlocked, GatewayHandoffNeeded } from "./executor-errors.js";
 import { REVIVAL_MSG } from "./revival-messages.js";
 import { createBudgetGate } from "./executor-budget.js";
 import { createPersist } from "./executor-persist.js";
-import { createSubagentDispatch } from "./executor-subagent.js";
-import { createGatewaySubagentGate } from "./gateway-subagent.js";
+import { createAgentDispatch } from "./agent-dispatch.js";
 import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, getWorkingSubagent, whenGatewayReady, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
   // Explicit params win; api is the legacy fallback the adapter still
   // supplies during cutover (tests construct with api only).
   const _config = config ?? api?.config ?? null;
   const _lineage = api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? _config?.pipelinesDir ?? resolveStorePaths().pipelinesDir;
-  // Every agent dispatch resolves its subagent here, so gating here covers
-  // revival, cron-started flows at boot and gate continuations alike — see
-  // engine/gateway-subagent.js.
-  const gateSubagent = createGatewaySubagentGate({ whenGatewayReady });
-  function resolveSubagent() {
-    return gateSubagent(getWorkingSubagent?.() ?? api?.runtime?.subagent);
-  }
-
   // Injectable for tests (defaults to the real singleton in production).
   // A test constructing a real createExecutor() without this override would
   // write its fixture rows into the real store's runtime.sqlite; store/
@@ -84,8 +75,11 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     store, failureStore, notifyFlowEnteredWaiting, logger,
   });
 
-  const { dispatchAgentWithRetry } = createSubagentDispatch({
-    getSubagent: () => resolveSubagent(),
+  // The harness injects runTurn — core never speaks the runtime's call
+  // shape, so a node dispatch is one function call from the engine's point
+  // of view (see engine/agent-dispatch.js and the harness's run-turn.js).
+  const { dispatchAgentWithRetry } = createAgentDispatch({
+    runTurn,
     sessionIndex,
     logger,
     emit,
@@ -1049,7 +1043,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     return runFlow(flowId, "revival");
   }
 
-  return { start, runFlow, resume, cancel, rerun, rerunFromSource, reviveAgentKindOrphan, getSubagent: resolveSubagent };
+  return { start, runFlow, resume, cancel, rerun, rerunFromSource, reviveAgentKindOrphan };
 }
 
 // ── audit ─────────────────────────────────────────────────────────────────────

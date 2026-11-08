@@ -27,8 +27,8 @@
 // the gateway restarted (a queued admission survives a crash same as any
 // other flow_runs row), so it can reach an agent-kind node inside the
 // gateway's startup window. Nothing to wait for here: resume() is the
-// executor's, and every subagent call it makes goes through the executor's
-// readiness gate (engine/gateway-subagent.js).
+// executor's, and every agent dispatch it makes goes through the executor's
+// readiness gate (the harness's run-turn gate).
 
 import { flipToRunningAndResume } from "./child-resume-trigger.js";
 

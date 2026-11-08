@@ -144,7 +144,7 @@ async function makeHarness({ scoreNode = makeScoreLikeNode() } = {}) {
     pipelinesRef,
     ensurePipelinesLoaded: null,
     logger,
-    getWorkingSubagent: null,
+    runTurn: null,
     failureStore: null,
     nodeHealthStore: null,
     notifyFlowEnteredWaiting: null,

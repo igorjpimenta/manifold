@@ -26,7 +26,7 @@
 // agent-side signal in this codebase flows through a file side-channel,
 // never direct tool-call introspection). output.runId and this hook's
 // event.runId are the same identifier for a given agent dispatch: the
-// in-repo half is executor-subagent.js's dispatchAgentWithRetry
+// in-repo half is engine/agent-dispatch.js's dispatchAgentWithRetry
 // (output.runId = runResult.runId from subagent.run()); the other half is
 // the gateway's embedded-run harness, outside this tree.
 

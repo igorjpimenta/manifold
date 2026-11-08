@@ -30,6 +30,8 @@
     "index.js",
     "meta.js",
     "openclaw.plugin.json",
+    "run-turn.js",
+    "run-turn.test.js",
     "session-keys.js",
     "session-keys.test.js",
     "sessions.js",
