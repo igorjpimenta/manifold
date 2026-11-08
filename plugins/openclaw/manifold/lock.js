@@ -86,7 +86,7 @@
 // disconnected module instances within one process, and both must see the
 // same registrations.
 
-import { resolveStorePaths } from "../state/paths.js";
+import { resolveStorePaths } from "../../../state/paths.js";
 import { open, readFile, mkdir } from "node:fs/promises";
 import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -98,9 +98,9 @@ import { wrapBrowserTabLifecycle } from "./browser-tabs.js";
 function defaultLocksDir() {
   return resolveStorePaths().locksDir;
 }
-// Adapter-owned override: the openclaw adapter calls setLocksDir once with
-// its resolved store paths. Falls back to the core-owned default so the
-// CLI and tests acquire the same locks without any harness.
+// Harness-owned override: the openclaw plugin calls setLocksDir once with
+// its resolved store paths. Falls back to the resolveStorePaths() default
+// so tests acquire the same locks without a harness.
 let _locksDirOverride = null;
 export function setLocksDir(dir) {
   _locksDirOverride = dir ?? null;

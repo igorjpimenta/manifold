@@ -9,7 +9,7 @@
 // reader — it just refuses to let the read proceed until whatever writer
 // currently holds the same lock name lets go. acquireLock/release reuse
 // the exact same crash-safe, stale-PID-reaping primitive the writer uses
-// (locks/lock.js), rather than a naive raw file-existence poll.
+// (the plugin's lock.js), rather than a naive raw file-existence poll.
 // lockNameForFile comes from that same module so the two sides can never
 // construct different lock names for the same file.
 //
@@ -18,7 +18,7 @@
 // not observed directly against this codebase's actual agent runtime —
 // verify both against a real event log before relying on this.
 
-import { acquireLock, lockNameForFile } from "../../../../locks/lock.js";
+import { acquireLock, lockNameForFile } from "../lock.js";
 import path from "node:path";
 import os from "node:os";
 

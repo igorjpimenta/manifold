@@ -1,7 +1,7 @@
 // Unit tests for the before_tool_call hook that makes a PROFILE.md read
 // wait behind gap-answers.js's settleGapAnswer() lock. Uses the real
 // lock.js primitives against a temp HOME (same pattern as
-// locks/lock.test.js) rather than mocking acquireLock, so this actually
+// plugins/openclaw/manifold/lock.test.js) rather than mocking acquireLock, so this actually
 // exercises the writer/reader lock-name match instead of assuming it.
 // The gated profile path is a fixture passed through the hook's
 // profilePath option — no workspace imports, no real PROFILE.md.
@@ -15,7 +15,7 @@ import os from "node:os";
 const TEST_HOME = mkdtempSync(join(os.tmpdir(), "profile-read-gate-test-"));
 mkdirSync(join(TEST_HOME, ".openclaw", "locks"), { recursive: true });
 
-// LOCKS_DIR (locks/lock.js) is computed from os.homedir() at module-load
+// LOCKS_DIR (the harness lock.js) is computed from os.homedir() at module-load
 // time — mocking it before any import of lock.js keeps lock state inside
 // the temp tree instead of the real ~/.openclaw/locks.
 await mock.module("node:os", {
@@ -24,7 +24,7 @@ await mock.module("node:os", {
 
 const PROFILE_PATH = join(TEST_HOME, "fixture", "profile", "PROFILE.md");
 
-const { lockNameForFile, acquireLock } = await import("../../../locks/lock.js");
+const { lockNameForFile, acquireLock } = await import("../../../plugins/openclaw/manifold/lock.js");
 const { registerProfileReadGate } = await import("../../../plugins/openclaw/manifold/hooks/profile-read-gate.js");
 
 function makeMockApi() {

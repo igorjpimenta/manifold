@@ -1,4 +1,4 @@
-// Owner kind "invocation" for the cross-process lock (locks/lock.js): a lock
+// Owner kind "invocation" for the cross-process lock (lock.js): a lock
 // held on behalf of one node invocation stays held until that invocation is
 // resolved, however long it runs. Resolved means either:
 //   - flow_node_invocations.result_written_at is set (the node finished and

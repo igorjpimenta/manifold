@@ -2,7 +2,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createNodeRunner } from "../../../engine/executor-nodes.js";
 import { NodeBlocked, GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
-import { currentLockOwner, sessionOwner } from "../../../locks/lock.js";
+import { currentLockOwner, sessionOwner, withLock, registerSessionOwner, clearSessionOwner, runWithLockOwner } from "../../../plugins/openclaw/manifold/lock.js";
+
+// Lock service the harness plugin injects into the engine in production
+// (plugins/openclaw/manifold/index.js) — the real implementation, so
+// owner-context assertions below exercise the actual AsyncLocalStorage.
+const testLocks = { withLock, registerSessionOwner, clearSessionOwner, runWithLockOwner };
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -30,6 +35,7 @@ function makeRunner(opts = {}) {
     dispatchAgentWithRetry: opts.dispatchAgentWithRetry ?? (async ({ node, applyCtx }) => node.apply(applyCtx, { text: "mock" })),
     executeSubflowNode: opts.executeSubflowNode ?? (async () => ({ stateUpdate: {} })),
     withCrossProcessLockMaybe: (_lock, fn) => fn(),
+    locks: testLocks,
     getNodeCtx: () => ({ invokePipeline: () => ({ invoked: false }) }),
     api,
     logger,
@@ -361,6 +367,7 @@ describe("executeNode — lock wiring", () => {
       dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (lockName, fn) => { lockNameSeen = lockName; return fn(); },
+      locks: testLocks,
       getNodeCtx: () => ({}),
       api,
       logger,
@@ -381,6 +388,7 @@ describe("executeNode — lock wiring", () => {
       dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn, ctx) => { contextSeen = ctx; return fn(); },
+      locks: testLocks,
       getNodeCtx: () => ({}),
       api,
       logger,
@@ -409,6 +417,7 @@ describe("executeNode — lock wiring", () => {
       dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn, ctx) => { contextSeen = ctx; return fn(); },
+      locks: testLocks,
       getNodeCtx: () => ({}),
       api,
       logger,
@@ -441,6 +450,7 @@ describe("executeNode — invocation lock owner", () => {
       dispatchAgentWithRetry: async () => ({}),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn) => { ownerInWrapper = currentLockOwner(); return fn(); },
+      locks: testLocks,
       getNodeCtx: () => ({}),
       api,
       logger,
@@ -461,6 +471,7 @@ describe("executeNode — invocation lock owner", () => {
       dispatchAgentWithRetry: async () => ({}),
       executeSubflowNode: async () => ({ stateUpdate: {} }),
       withCrossProcessLockMaybe: (_lockName, fn) => { ownerInWrapper = currentLockOwner(); return fn(); },
+      locks: testLocks,
       getNodeCtx: () => ({}),
       api,
       logger,

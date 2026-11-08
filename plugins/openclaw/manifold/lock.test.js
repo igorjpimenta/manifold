@@ -1,4 +1,4 @@
-// Unit tests for locks/lock.js — acquireLock, withLock, safeName, isPidAlive, reapStale semantics.
+// Unit tests for the harness lock service (plugins/openclaw/manifold/lock.js) — acquireLock, withLock, safeName, isPidAlive, reapStale semantics.
 
 import { test, describe, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -44,7 +44,7 @@ await mock.module("node:os", {
 const {
   acquireLock, withLock, registerOwnerResolver, unregisterOwnerResolver,
   runWithLockOwner, currentLockOwner, registerSessionOwner, clearSessionOwner, sessionOwner, readLock,
-} = await import("../../../locks/lock.js");
+} = await import("../../../plugins/openclaw/manifold/lock.js");
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +71,23 @@ function lockPath(name) {
 
 /** A definitely-dead PID — far above what any OS ever assigns. */
 const DEAD_PID = 999_999_999;
+
+/**
+ * Poll until `predicate()` is truthy, or fail naming the condition.
+ *
+ * The acquire loop reaches its onWouldBlock hook after a lock-file read, so a
+ * fixed sleep before asserting the hook fired races that I/O: on a loaded
+ * runner the assertion lands first and the count reads zero.
+ */
+async function waitUntil(predicate, description, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out after ${timeoutMs}ms waiting for ${description}`);
+    }
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
 
 // ─── safeName — via lock path inspection ─────────────────────────────────────
 
@@ -701,6 +718,7 @@ describe("acquireLock — onWouldBlock hook", () => {
       onWouldBlock: () => { calls++; },
     });
     // Let the second acquirer poll several times against the still-held lock.
+    await waitUntil(() => calls > 0, "the blocked acquire to report onWouldBlock");
     await new Promise((r) => setTimeout(r, 100));
     assert.equal(calls, 1, "onWouldBlock must fire exactly once, not once per poll tick");
     await first.release();
@@ -721,7 +739,7 @@ describe("acquireLock — onWouldBlock hook", () => {
       pollMs: 20,
       onWouldBlock: () => { calls++; },
     });
-    await new Promise((r) => setTimeout(r, 50));
+    await waitUntil(() => calls > 0, "withLock to forward onWouldBlock to acquireLock");
     assert.equal(calls, 1, "withLock should surface a blocked acquire via the forwarded onWouldBlock");
     await first.release();
     assert.equal(await withLockPromise, "done");

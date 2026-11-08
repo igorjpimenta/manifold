@@ -4,7 +4,7 @@
 //
 // Deliberately scoped to the edit call itself, not the whole agent turn
 // that leads up to it (read → think → edit) — the underlying lock
-// primitive (locks/lock.js) lets a real holder keep a lock as long as it
+// primitive (the plugin's lock.js) lets a real holder keep a lock as it
 // needs, but every other consumer of this same lock (gap-answers.js's
 // settleGapAnswer, prime-nodes.js's applyTbdFills) is a fast,
 // deterministic, millisecond-scale critical section — holding it for
@@ -30,7 +30,7 @@
 // (output.runId = runResult.runId from subagent.run()); the other half is
 // the gateway's embedded-run harness, outside this tree.
 
-import { acquireLock, lockNameForFile } from "../../../../locks/lock.js";
+import { acquireLock, lockNameForFile } from "../lock.js";
 import { writeFile, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";

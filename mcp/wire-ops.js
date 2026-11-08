@@ -57,6 +57,18 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     logger?.warn?.(`manifold: pipelines failed to load (${err?.message ?? err}); manifold_start will refuse unknown pipelines`);
   });
 
+  // No harness plugin here, so no lock service: a node declaring
+  // crossProcessLock refuses loudly at dispatch time (same shape as the
+  // agent-dispatch refusal below) instead of running unlocked. Owner
+  // plumbing is inert without a service — there is no lock to own.
+  const standaloneLocks = {
+    withLock: async () => {
+      throw new Error("manifold standalone serve: cross-process locks need a harness lock service");
+    },
+    registerSessionOwner: () => {},
+    clearSessionOwner: () => {},
+    runWithLockOwner: (_owner, fn) => fn(),
+  };
   const store = createStateStore(api, "mcp:standalone", {
     runStore,
     nodeExecutionsStore,
@@ -75,6 +87,7 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
   const executor = createExecutor({
     api,
     config: config ?? {},
+    locks: standaloneLocks,
     approvalQueue: null,
     pipelinesDir: pipesDir,
     store,
