@@ -4,23 +4,6 @@ import os from "node:os";
 import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./executor-errors.js";
 import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
-import { registerSessionOwner, clearSessionOwner, runWithLockOwner } from "../locks/lock.js";
-
-// The lock owner for work done on behalf of one node invocation: held locks
-// stay held until the invocation resolves (see locks/invocation-owner.js), not
-// for a fixed time. `node` supplies the browser lease cooldown it declares.
-function invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId }) {
-  if (!invocationId) return null;
-  return {
-    kind: "invocation",
-    id: invocationId,
-    flowId,
-    nodeId,
-    pipelineId: pipelineId ?? null,
-    ...(node?.browserLeaseCooldownMs ? { cooldownMs: node.browserLeaseCooldownMs } : {}),
-    ...(node?.browserLeaseCooldownJitterMs ? { cooldownJitterMs: node.browserLeaseCooldownJitterMs } : {}),
-  };
-}
 
 /**
  * Factory for the node-execution dispatcher: code, agent, subflow, human-gate.
@@ -36,7 +19,6 @@ export function createNodeRunner({
   maybeBudgetGate,
   dispatchAgentWithRetry,
   executeSubflowNode,
-  withCrossProcessLockMaybe,
   getNodeCtx,
   api,
   config,
@@ -168,12 +150,6 @@ export function createNodeRunner({
       childSessionKey: sessionKey, flowId, nodeId,
       pipelineId, agentId: entry.agent ?? null,
     });
-    // Browser tool calls this session makes lock as this invocation
-    // (extensions/browser-lease), the same owner the node-level
-    // crossProcessLock uses — so the node's own lock and its agent's tool
-    // leases re-enter instead of blocking each other.
-    const lockOwner = invocationLockOwner(entry, { invocationId, flowId, nodeId, pipelineId });
-    if (lockOwner) registerSessionOwner(sessionKey, lockOwner);
     try {
       return await dispatchAgentWithRetry({
         node: entry, nodeId, sessionKey, initialMessage: message,
@@ -190,25 +166,20 @@ export function createNodeRunner({
         await nodeHealthStore?.markUnhealthy(pipelineId, nodeId, { reason: err?.message ?? String(err), flowId });
       }
       throw err;
-    } finally {
-      clearSessionOwner(sessionKey);
     }
   }
 
   /**
-   * Acquire the node's declared crossProcessLock (if any) before running the
-   * node body, release after it returns or throws. Runs under the
-   * invocation's lock owner, so that lock and any withLock the node's own
-   * code takes belong to the invocation rather than to no one.
+   * Run the node body. A node that declares `crossProcessLock` is refused:
+   * the lock mechanism is gone, and a node that silently lost its mutual
+   * exclusion would run concurrently with the very work it declared to
+   * exclude. Failing loudly is the only safe reading of a removed option.
    */
   async function executeNode({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
-    const body = () => executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId });
-    const owner = invocationLockOwner(node, { invocationId, flowId, nodeId, pipelineId: state?.pipelineId });
-    return runWithLockOwner(owner, () => withCrossProcessLockMaybe(node.crossProcessLock, body, {
-      flowId, nodeId,
-      cooldownMs: node.crossProcessLockCooldownMs,
-      cooldownJitterMs: node.crossProcessLockCooldownJitterMs,
-    }));
+    if (typeof node.crossProcessLock === "string" && node.crossProcessLock) {
+      throw new Error(`manifold: node "${nodeId}" declares crossProcessLock "${node.crossProcessLock}" — the lock mechanism was removed; drop the option from the pipeline`);
+    }
+    return executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId });
   }
 
   // `reviveMessage`, when set, is used in place of node.promptBuilder(state)

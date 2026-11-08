@@ -8,8 +8,6 @@
   "exports": {
     ".": "./index.js",
     "./errors": "./engine/executor-errors.js",
-    "./lock": "./locks/lock.js",
-    "./browser-tabs": "./locks/browser-tabs.js",
     "./elevation": "./elevation.js",
     "./routes/bearer-auth": "./routes/bearer-auth.js",
     "./tool-handoff": "./state/tool-handoff.js",
@@ -20,8 +18,8 @@
   },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",
-    "test": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/**/*.test.js' 'plugins/**/*.test.js'",
-    "test:unit": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/unit/**/*.test.js' 'plugins/**/*.test.js'",
+    "test": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/**/*.test.js'",
+    "test:unit": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/unit/**/*.test.js'",
     "test:integration": "./scripts/with-guard.sh node --test-timeout=60000 --test 'test/integration/*.test.js'",
     "db:generate": "drizzle-kit generate --config=drizzle.config.js && drizzle-kit generate --config=drizzle.config.ops.js",
     "db:migrate": "drizzle-kit migrate --config=drizzle.config.js && drizzle-kit migrate --config=drizzle.config.ops.js"

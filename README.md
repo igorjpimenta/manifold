@@ -23,12 +23,9 @@ subpaths. Deep file paths are not a contract — only this table is.
 | --- | --- | --- |
 | `@igorjpimenta/manifold` | plugin entry (default) | openclaw runtime |
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
-| `…/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
-| `…/browser-tabs` | `browserProfileForLock`, `beginTabSession`, `endTabSession` | browser-lease extension |
 | `…/elevation` | `invokeElevated` | oc-config |
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | structured result rendezvous (`writePendingResult`, `readPendingResult`, `clearPendingResult`, `waitForToolResult`) | oc-config |
-| `@igorjpimenta/manifold-openclaw/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` | oc-config |
 | `…/routes/bearer-auth` | `authorizeBearerRequest`, `sendUnauthorized` (MANIFOLD_BEARER, winch-style) | sibling extension |
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
@@ -388,7 +385,6 @@ Past the loader, these only surface during a real flow:
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
 - **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
-- **Cross-process lock with no installed `lock.js`** — `crossProcessLock: "browser:foo"` requires the helper at `~/.openclaw/extensions/manifold/locks/lock.js`. Already present in stock installs.
 
 ### Two gotchas that *look* like bugs but aren't
 
@@ -545,7 +541,7 @@ Detailed dispatch logic: `executor.js` lines 380–730.
 ## Subflow nodes (childFlows)
 
 > Full authoring guide (minimal shape, sub-node calling convention, deriving
-> `subflowKey`, reading results downstream, locks/concurrency, retrying one
+> `subflowKey`, reading results downstream, concurrency, retrying one
 > item, nesting) moved to **`SUBFLOW_NODES.md`** — read that before writing
 > or modifying any `kind:"subflow"` node.
 
@@ -665,27 +661,9 @@ return {
 };
 ```
 
-### Lock modifier (any node)
+### The lock mechanism is gone
 
-One lock primitive:
-
-| Field                       | Scope                | Acquired before  | Released after           |
-| --------------------------- | --------------------- | ---------------- | ------------------------ |
-| `crossProcessLock: "kind:id"` | cross-process      | node body runs | node body returns/throws |
-
-The lock name is manifold's contract; whoever runs the flow provides the mechanism behind it. A holder's lock file (`<name>.lock`) is honored across processes, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name.
-
-```js
-SUBMIT_CODE: {
-  kind: "code",
-  crossProcessLock: "browser:freelance",   // cross-process mutex on a named resource
-  run: async (state, ctx) => { /* ... */ }
-}
-```
-
-No script should self-lock internally (`withLock(...)` wrapping its own `main()`) — that only creates a deadlock risk against a pipeline node holding the same lock name across the spawn boundary (a child OS process can't see the parent's held lock). The pipeline node that spawns the script should declare `crossProcessLock` itself, for the full duration of the dispatch.
-
-The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name.
+There is no cross-process lock in manifold. A node that declares `crossProcessLock` is refused at dispatch time — the option is not silently ignored, because a node that lost its mutual exclusion would run concurrently with the very work it declared to exclude. Drop the field from the pipeline.
 
 ### Code-node `ctx` argument
 

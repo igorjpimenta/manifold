@@ -41,14 +41,6 @@ const PUBLIC_API = {
       "REVISION_RETRY_LIMIT",
     ],
   },
-  "./lock": {
-    file: "./locks/lock.js",
-    exports: ["withLock", "lockNameForFile", "acquireLock", "readLock", "lockPathFor"],
-  },
-  "./browser-tabs": {
-    file: "./locks/browser-tabs.js",
-    exports: ["browserProfileForLock", "beginTabSession", "endTabSession"],
-  },
   "./elevation": { file: "./elevation.js", exports: ["invokeElevated"] },
   "./routes/bearer-auth": {
     file: "./routes/bearer-auth.js",
@@ -75,7 +67,6 @@ const PUBLIC_API = {
       "defaultDataDir",
       "runtimeDbPath",
       "opsDbPath",
-      "locksDir",
       "pipelinesDir",
       "stateFile",
       "ensureMigrated",

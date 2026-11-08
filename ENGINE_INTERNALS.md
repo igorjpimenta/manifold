@@ -199,7 +199,7 @@ poller picks it up" step (that described a poller-driven architecture
 that was never built). `queued` **is** a real, currently-used status,
 though — `run-store.js`'s `casSetQueued()` writes `status="queued"`, used
 for waits on an *internal* resource that frees itself (the cross-process
-lock — `executor.js`'s `withCrossProcessLockMaybe`), kept distinct from
+lock — none; the lock mechanism was removed), kept distinct from
 `blocked` (which needs an operator/external actor) specifically so a
 consumer can tell the two apart without inspecting `wait_json.kind`. A
 prior version of this doc claimed no code path ever writes
@@ -213,8 +213,8 @@ stateDiagram-v2
     running --> blocked: human-gate opens,<br/>ctx.needs() not ready,<br/>children-pending
     blocked --> running: gate resolved /<br/>needed data arrived
 
-    running --> queued: cross-process lock contended
-    queued --> running: slot/lock freed<br/>(self-resolving, no operator action)
+    running --> queued: admission slot contended
+    queued --> running: slot freed<br/>(self-resolving, no operator action)
 
     running --> succeeded: __end__ + succeeded verdict
     running --> failed: node/exception throw,<br/>or __end__ + failed verdict

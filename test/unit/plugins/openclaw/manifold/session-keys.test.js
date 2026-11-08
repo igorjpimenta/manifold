@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import {
   coreRunIdForGateway,
   wrapSubagentKeys,
-} from "./session-keys.js";
+} from "../../../../../plugins/openclaw/manifold/session-keys.js";
 
 function makeRaw(log = []) {
   return {
