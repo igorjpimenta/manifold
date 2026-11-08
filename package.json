@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/manifold",
-  "version": "2026.10.26-beta.1",
+  "version": "2026.11.8-beta.1",
   "private": true,
   "license": "UNLICENSED",
   "description": "LangGraph-style pipeline executor for openclaw. Loads pipeline definitions from <pipelinesDir>/<team>_<name>/index.js and runs them against managed flow_runs, dispatching nodes to agents with explicit state-graph routing.",
