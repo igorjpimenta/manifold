@@ -1,11 +1,10 @@
-// sidecar/hub.js — the sidecar's outbound fan-out. Two SSE channels over
-// one hub:
+// sidecar/hub.js — the sidecar's outbound fan-out. One SSE channel:
 //
-//   events   — canonical manifold kinds (the 19 wire kinds). Harnesses
-//              subscribe and react; delivery faults never throw.
-//   dispatch — transport ops, NOT event kinds: dispatch.request down to the
-//              linked harness runner, fulfilled by POST back. Never logged
-//              as history, never replayed.
+//   events — canonical manifold kinds (the 19 wire kinds). Harnesses
+//            subscribe and react; delivery faults never throw.
+//
+// The dispatch channel is not here: transport ops are not event kinds, and
+// they need a socket that answers back (sidecar/ws-dispatch.js owns it).
 //
 // Harnesses hold the subscription; a sidecar with no subscriber keeps
 // serving state and queues nothing (dispatch.request fails fast at accept

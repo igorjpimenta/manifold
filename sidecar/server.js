@@ -7,7 +7,10 @@
 // divergences are structural and live in this file:
 //   - DB paths redirect via MANIFOLD_RUNTIME_DB/_OPS_DB (state/db.js).
 //   - api.runtime.subagent is the remote subagent (sidecar/dispatch.js):
-//     agent execution happens in a harness; the engine awaits outcomes.
+//     agent execution happens in a harness; the engine awaits outcomes. The
+//     harness answers over the WebSocket dispatch door
+//     (sidecar/ws-dispatch.js) — one socket carries the request down and the
+//     outcome up, the way winch's daemon and harness client share one pipe.
 //   - gateway broadcast is the SSE hub (sidecar/hub.js): harnesses
 //     subscribe to /manifold/events and react; nothing calls into the
 //     gateway process.
@@ -29,6 +32,7 @@ import {
 } from "./paths.js";
 import { createHub } from "./hub.js";
 import { createDispatchHub, createRemoteSubagent } from "./dispatch.js";
+import { createWsDispatchDoor } from "./ws-dispatch.js";
 import { createSidecarApi } from "./shim.js";
 import { checkDb } from "../state/db-health.js";
 import { writeCorruptionAlert } from "../state/db-guard.js";
@@ -45,28 +49,6 @@ function serviceToken(dataDir, logger) {
   writeFileSync(p, token + "\n", { mode: 0o600 });
   logger?.info?.("sidecar: minted service token");
   return token;
-}
-
-function readJsonBody(req, limitBytes = 1 << 20) {
-  return new Promise((resolve, reject) => {
-    let raw = "";
-    req.on("data", (chunk) => {
-      raw += chunk;
-      if (raw.length > limitBytes) {
-        reject(new Error("body too large"));
-        req.destroy();
-      }
-    });
-    req.on("end", () => {
-      if (!raw) return resolve({});
-      try {
-        resolve(JSON.parse(raw));
-      } catch {
-        reject(new Error("invalid json"));
-      }
-    });
-    req.on("error", reject);
-  });
 }
 
 function unauthorized(res) {
@@ -108,7 +90,8 @@ export async function bootSidecar({ env = process.env, logger = console } = {}) 
   }
 
   const hub = createHub({ logger });
-  const dispatchHub = createDispatchHub({ publish: hub.publish.bind(hub), logger });
+  const dispatchDoor = createWsDispatchDoor({ serviceToken: token, logger });
+  const dispatchHub = createDispatchHub({ publish: (frame) => dispatchDoor.publish(frame), logger });
   const remoteSubagent = createRemoteSubagent({ dispatchHub, logger });
   const { api, services, routes, cliRegistrations, tools, gatewayMethods, eventHandlers, findRoute } =
     createSidecarApi({
@@ -173,27 +156,6 @@ export async function bootSidecar({ env = process.env, logger = console } = {}) 
         req.on("close", unsub);
         return;
       }
-      if (pathname === "/manifold/internal/dispatch" && req.method === "GET") {
-        if (req.headers.authorization !== `Bearer ${token}`) return unauthorized(res);
-        res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-        const unsub = hub.subscribe("dispatch", res);
-        req.on("close", unsub);
-        return;
-      }
-      if (pathname === "/manifold/internal/dispatch/ack" && req.method === "POST") {
-        if (req.headers.authorization !== `Bearer ${token}`) return unauthorized(res);
-        const body = await readJsonBody(req);
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: dispatchHub.ack(body?.id) }));
-        return;
-      }
-      if (pathname === "/manifold/internal/dispatch/result" && req.method === "POST") {
-        if (req.headers.authorization !== `Bearer ${token}`) return unauthorized(res);
-        const body = await readJsonBody(req);
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: dispatchHub.fulfill(body?.id, body) }));
-        return;
-      }
       if (pathname === "/manifold/internal/health" && req.method === "GET") {
         if (req.headers.authorization !== `Bearer ${token}`) return unauthorized(res);
         res.setHeader("Content-Type", "application/json");
@@ -201,7 +163,7 @@ export async function bootSidecar({ env = process.env, logger = console } = {}) 
           ok: true,
           dataDir,
           uptimeMs: Math.round(process.uptime() * 1000),
-          subscribers: { events: hub.subscriberCount("events"), dispatch: hub.subscriberCount("dispatch") },
+          subscribers: { events: hub.subscriberCount("events"), dispatch: dispatchDoor.clientCount() },
           pendingDispatch: dispatchHub.pendingCount(),
         }));
         return;
@@ -224,6 +186,10 @@ export async function bootSidecar({ env = process.env, logger = console } = {}) 
       } catch {}
     }
   });
+
+  // The dispatch door shares the http server's upgrade path: one socket
+  // carries the request down to the linked companion and the outcome back.
+  dispatchDoor.attach(server, dispatchHub);
 
   const port = Number(env.MANIFOLD_PORT) > 0 ? Number(env.MANIFOLD_PORT) : DEFAULT_PORT;
   const host = env.MANIFOLD_HOST || DEFAULT_HOST;
@@ -248,5 +214,5 @@ export async function bootSidecar({ env = process.env, logger = console } = {}) 
   process.once("SIGTERM", shutdown);
   process.once("SIGINT", shutdown);
 
-  return { server, api, hub, dispatchHub, dataDir, port, host };
+  return { server, api, hub, dispatchHub, dispatchDoor, dataDir, port, host };
 }

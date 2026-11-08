@@ -13,7 +13,7 @@ describe("createHub", () => {
     const a = fakeRes();
     const b = fakeRes();
     const unsubA = hub.subscribe("events", a);
-    hub.subscribe("dispatch", b);
+    hub.subscribe("other", b);
     assert.equal(hub.subscriberCount("events"), 1);
     assert.equal(hub.publish("events", { kind: "plugin.x", n: 1 }), 1);
     assert.equal(a.frames.length, 2); // connected comment + frame

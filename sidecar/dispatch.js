@@ -4,16 +4,18 @@
 // engine/executor.js's resolveSubagent); in the sidecar that object is a
 // remote subagent built here. Each op (run | waitForRun | getSessionMessages)
 // publishes a dispatch.request on the hub's dispatch channel and resolves
-// when the linked harness runner POSTs the outcome back:
+// when the linked harness runner answers on the same socket:
 //
-//   harness -> POST /manifold/internal/dispatch/ack { id }
-//     pickup receipt; without one the request fails fast (no harness
-//     linked) instead of hanging the engine's run loop.
-//   harness -> POST /manifold/internal/dispatch/result { id, ok, result?, error? }
-//     fulfills the op.
+//   harness -> dispatch.ack    { id }   pickup receipt; without one the
+//                                  request fails fast (no harness linked)
+//                                  instead of hanging the engine's run loop.
+//   harness -> dispatch.result { id, ok, result?, error? }   fulfills the op.
 //
-// Wire field names are duplicated in companion/runner.js (the companion
-// vendors standalone — it cannot import this file). Keep them in sync.
+// The transport is the sidecar's WebSocket dispatch door (sidecar/ws-dispatch.js):
+// one socket carries the request down and the outcome up, the way winch's
+// daemon and harness client share one pipe. Wire field names are duplicated
+// in companion/runner.js (the companion vendors standalone — it cannot import
+// this file). Keep them in sync.
 import { randomUUID } from "node:crypto";
 
 export const DISPATCH_OPS = ["run", "waitForRun", "getSessionMessages"];
@@ -22,7 +24,7 @@ const DEFAULT_ACCEPT_TIMEOUT_MS = 30_000;
 const DEFAULT_OP_TIMEOUT_MS = 30 * 60_000;
 
 export function createDispatchHub({ publish, logger = null, acceptTimeoutMs = DEFAULT_ACCEPT_TIMEOUT_MS, opTimeoutMs = DEFAULT_OP_TIMEOUT_MS } = {}) {
-  const pending = new Map(); // id -> { op, resolve, reject, ackTimer, opTimer }
+  const pending = new Map(); // id -> { id, op, args, resolve, reject, ackTimer, opTimer }
 
   function fail(id, err) {
     const p = pending.get(id);
@@ -37,9 +39,20 @@ export function createDispatchHub({ publish, logger = null, acceptTimeoutMs = DE
     pendingCount() {
       return pending.size;
     },
+    // The requests a reconnected harness has not answered yet, as the frames
+    // the dispatch door replays on connect.
+    pending() {
+      return [...pending.values()].map((p) => ({
+        type: "dispatch.request",
+        id: p.id,
+        op: p.op,
+        args: p.args,
+      }));
+    },
     request(op, args, { timeoutMs = opTimeoutMs } = {}) {
       if (!DISPATCH_OPS.includes(op)) return Promise.reject(new Error(`sidecar dispatch: unknown op ${op}`));
       const id = randomUUID();
+      const wireArgs = args ?? {};
       return new Promise((resolve, reject) => {
         const ackTimer = setTimeout(() => {
           fail(id, new Error("sidecar dispatch: no harness subscribed (accept timeout)"));
@@ -51,9 +64,9 @@ export function createDispatchHub({ publish, logger = null, acceptTimeoutMs = DE
           fail(id, new Error(`sidecar dispatch: op ${op} timed out`));
         }, timeoutMs);
         opTimer.unref?.();
-        pending.set(id, { op, resolve, reject, ackTimer, opTimer });
+        pending.set(id, { id, op, args: wireArgs, resolve, reject, ackTimer, opTimer });
         try {
-          publish("dispatch", { type: "dispatch.request", id, op, args: args ?? {} });
+          publish({ type: "dispatch.request", id, op, args: wireArgs });
         } catch (err) {
           fail(id, err);
         }

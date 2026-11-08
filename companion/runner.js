@@ -1,45 +1,20 @@
 // companion/runner.js — the harness half of agent dispatch.
 //
-// Subscribes to the sidecar's dispatch channel. Each dispatch.request is
-// acked (pickup receipt — without it the sidecar fails the op fast), then
-// executed against the gateway's subagent runtime, then fulfilled by POST:
+// Subscribes to the sidecar's dispatch door over WebSocket, the way winch's
+// harness client subscribes to the daemon's event pipe. Each dispatch.request
+// is acked (pickup receipt — without it the sidecar fails the op fast), then
+// executed against the gateway's subagent runtime, then answered on the same
+// socket:
 //
-//   POST /manifold/internal/dispatch/ack    { id }
-//   POST /manifold/internal/dispatch/result { id, ok, result?, error? }
+//   dispatch.ack    { id }
+//   dispatch.result { id, ok, result?, error? }
 //
 // Op names mirror engine/gateway-subagent.js's GATED_METHODS; the wire
 // field names mirror sidecar/dispatch.js. Keep them in sync.
-import http from "node:http";
-import https from "node:https";
-import { subscribeSse } from "./sse.js";
+import { startDispatchClient } from "./ws-client.js";
 
 const DISPATCH_OPS = ["run", "waitForRun", "getSessionMessages"];
-
-function postJson({ sidecarUrl, serviceToken, path, body, logger }) {
-  return new Promise((resolve) => {
-    const base = new URL(sidecarUrl);
-    const transport = base.protocol === "https:" ? https : http;
-    const raw = JSON.stringify(body ?? {});
-    const req = transport.request(
-      {
-        hostname: base.hostname,
-        port: base.port,
-        path,
-        method: "POST",
-        headers: { "content-type": "application/json", "content-length": Buffer.byteLength(raw), authorization: `Bearer ${serviceToken}` },
-      },
-      (res) => {
-        res.resume();
-        res.on("end", () => resolve(res.statusCode));
-      },
-    );
-    req.on("error", (err) => {
-      logger?.warn?.(`companion runner: POST ${path} failed: ${err?.message ?? err}`);
-      resolve(0);
-    });
-    req.end(raw);
-  });
-}
+const DISPATCH_WS_PATH = "/manifold/internal/dispatch";
 
 export async function executeDispatchOp({ subagent, op, args }) {
   if (!DISPATCH_OPS.includes(op)) throw new Error(`companion runner: unknown op ${op}`);
@@ -50,25 +25,30 @@ export async function executeDispatchOp({ subagent, op, args }) {
 }
 
 export function startDispatchRunner({ api, sidecarUrl, serviceToken, logger = null }) {
-  return subscribeSse({
-    url: `${sidecarUrl}/manifold/internal/dispatch`,
+  const url = `${String(sidecarUrl).replace(/^http/, "ws")}${DISPATCH_WS_PATH}`;
+  const client = startDispatchClient({
+    url,
     token: serviceToken,
-    name: "dispatch",
     logger,
-    onEvent: (event) => {
-      if (event?.type !== "dispatch.request" || !event.id) return;
-      void handleRequest(event);
+    onFrame: (frame) => {
+      if (frame?.type !== "dispatch.request" || !frame.id) return;
+      void handleRequest(frame);
     },
   });
 
   async function handleRequest({ id, op, args }) {
-    const post = (path, body) => postJson({ sidecarUrl, serviceToken, path, body, logger });
-    await post("/manifold/internal/dispatch/ack", { id });
+    client.send({ type: "dispatch.ack", id });
     try {
       const result = await executeDispatchOp({ subagent: api.runtime?.subagent, op, args });
-      await post("/manifold/internal/dispatch/result", { id, ok: true, result: result ?? null });
+      client.send({ type: "dispatch.result", id, ok: true, result: result ?? null });
     } catch (err) {
-      await post("/manifold/internal/dispatch/result", { id, ok: false, error: err?.message ?? String(err) });
+      client.send({ type: "dispatch.result", id, ok: false, error: err?.message ?? String(err) });
     }
   }
+
+  return {
+    stop() {
+      client.close();
+    },
+  };
 }

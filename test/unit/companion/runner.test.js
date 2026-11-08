@@ -1,7 +1,9 @@
-// runner.test.js — dispatch op mapping + ack/execute/fulfill round-trip.
+// runner.test.js — dispatch op mapping + the ws round-trip: request down,
+// ack and result back up on the same socket.
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
+import { attachWsEndpoint, encodeWsFrame } from "../../../events/ws-frame.js";
 import { executeDispatchOp, startDispatchRunner } from "../../../companion/runner.js";
 
 describe("executeDispatchOp", () => {
@@ -28,24 +30,30 @@ describe("startDispatchRunner", () => {
   let port;
   let acked = [];
   let results = [];
+  let request = null;
+
   before(async () => {
     server = http.createServer((req, res) => {
-      if (req.url === "/manifold/internal/dispatch" && req.method === "GET") {
-        res.writeHead(200, { "Content-Type": "text/event-stream" });
-        res.write(`data: ${JSON.stringify({ type: "dispatch.request", id: "d1", op: "run", args: { sessionKey: "s" } })}\n\n`);
-        return; // hold open
-      }
-      let raw = "";
-      req.on("data", (c) => { raw += c; });
-      req.on("end", () => {
-        if (req.url === "/manifold/internal/dispatch/ack") acked.push(JSON.parse(raw));
-        if (req.url === "/manifold/internal/dispatch/result") results.push(JSON.parse(raw));
-        res.end("{}");
-      });
+      res.statusCode = 404;
+      res.end();
+    });
+    // The sidecar's door, reduced to what the runner sees: one socket, the
+    // request frame down, the ack and the result back up.
+    attachWsEndpoint(server, {
+      match: (pathname) => pathname === "/manifold/internal/dispatch",
+      onConnect: (socket) => {
+        socket.write(encodeWsFrame(JSON.stringify({ type: "dispatch.request", id: "d1", op: "run", args: { sessionKey: "s" } })));
+      },
+      onMessage: (socket, text) => {
+        const frame = JSON.parse(text);
+        if (frame.type === "dispatch.ack") acked.push(frame);
+        if (frame.type === "dispatch.result") results.push(frame);
+      },
     });
     await new Promise((r) => server.listen(0, "127.0.0.1", r));
     port = server.address().port;
   });
+
   after(async () => {
     await new Promise((r) => server.close(r));
   });
@@ -56,7 +64,7 @@ describe("startDispatchRunner", () => {
     const deadline = Date.now() + 5000;
     while (results.length === 0 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25));
     sub.stop();
-    assert.deepEqual(acked, [{ id: "d1" }]);
+    assert.deepEqual(acked, [{ type: "dispatch.ack", id: "d1" }]);
     assert.equal(results.length, 1);
     assert.equal(results[0].id, "d1");
     assert.equal(results[0].ok, true);
