@@ -101,8 +101,8 @@ async function walkUpHops(flowId, hops, runStore, nodeExecutionsStore) {
 //   "ready" — value is the resolved data. A subflow-sourced need's value
 //     is the same { [subflowKey]: row } aggregate shape _subflowGroups
 //     already exposes elsewhere, not a different mechanism. An over-cap
-//     ordinary result carries the same { _resultTooLarge, bytes } marker
-//     assembleState() already uses.
+//     ordinary result that kept no value carries the same
+//     { _resultTooLarge, bytes } marker assembleState() already uses.
 export async function resolveOneNeed({ flowId, hops, nodeId, runStore, nodeExecutionsStore }) {
   const targetFlowId = await walkUpHops(flowId, hops, runStore, nodeExecutionsStore);
   if (!targetFlowId) return { status: "not-found" };
@@ -129,8 +129,8 @@ export async function resolveOneNeed({ flowId, hops, nodeId, runStore, nodeExecu
   if (row.resultWrittenAt == null) return { status: "not-ready" };
   if (row.resultTooLargeBytes != null && row.resultJson == null) {
     // writeResult() (state/node-executions.js) does not cap results, so this
-    // can only fire for a row that kept nothing at all — the real
-    // value isn't recoverable.
+    // fires only for a row that kept nothing at all — the real value isn't
+    // recoverable.
     return { status: "ready", value: { _resultTooLarge: true, bytes: row.resultTooLargeBytes } };
   }
   try {

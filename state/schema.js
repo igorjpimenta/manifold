@@ -35,10 +35,10 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   // The table's first payload column. resultWrittenAt is the "is this real"
   // signal a bare nullable resultJson can't provide on its own (not
   // dispatched vs. dispatched-not-complete vs. complete-with-null-result).
-  // resultTooLargeBytes carried the real size when a result was capped
-  // instead of stored (see writeResult() in
-  // state/node-executions.js). Only non-null on rows written before the
-  // cap was removed; every write since always sets it null.
+  // resultTooLargeBytes carries the real size of a result that did not
+  // fit the store (see writeResult() in state/node-executions.js).
+  // writeResult() always writes null; only a row that kept no result at
+  // all carries a byte count.
   resultJson:          text('result_json'),
   resultWrittenAt:     integer('result_written_at'),
   resultTooLargeBytes: integer('result_too_large_bytes'),

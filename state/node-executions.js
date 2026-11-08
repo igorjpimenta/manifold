@@ -347,8 +347,8 @@ async function _createStore(dbPath) {
 
       // Writes an invocation's own resultJson once it completes, no size
       // cap (see this file's own header comment). resultTooLargeBytes is
-      // always written null here — it only carries a real value on rows
-      // written before the cap was removed.
+      // always written null here — only a row that kept no result at all
+      // carries a byte count.
       //
       // Two things this deliberately isn't: (1) it doesn't throw on
       // ordinary failure — same fire-and-forget contract as write() above,

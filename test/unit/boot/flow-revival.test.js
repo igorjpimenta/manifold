@@ -703,7 +703,7 @@ describe("reviveOrphanFlows", () => {
     });
   });
 
-  describe("legacy agent-dispatch wait → re-requests its own run slot", () => {
+  describe("agent-dispatch wait → re-requests its own run slot", () => {
     // A flow queued on waitJson.kind:"agent-dispatch" gave its run slot back
     // when it queued, so it holds nothing. It must go through admission for
     // its own run kind — never be re-entered directly, which would run it
@@ -859,13 +859,13 @@ describe("reviveOrphanFlows", () => {
       assert.deepEqual(executor.resumed, []);
     });
 
-    // A retired kind (agent-dispatch) can never be driven —
+    // A unknown kind (agent-dispatch) can never be driven —
     // resumePromotedAdmission refuses it and releaseByFlow never matches it
     // — so its admitted row can only be reclaimed, never resumed. The sweep
     // must free the slot WITHOUT touching the flow: the flow's status is
     // whatever the rest of revival says it is, and force-driving it through
     // flipToRunningAndResume would run it outside the admission pool.
-    it("reaps a retired-kind (legacy agent-dispatch) admitted row without driving its flow", async () => {
+    it("reaps a unknown-kind (agent-dispatch) admitted row without driving its flow", async () => {
       const stuckFlow = makeFlow({
         status: "queued", lastStep: "AGENT_NODE", revision: 4,
         waitJson: { kind: "agent-dispatch", nodeId: "AGENT_NODE" },
@@ -882,19 +882,19 @@ describe("reviveOrphanFlows", () => {
         admissionQueueStore, runStore, executor, logger: makeLogger(), minAgeMs: 0,
       });
 
-      assert.equal(result.retiredKindReaped, 1);
+      assert.equal(result.unknownKindReaped, 1);
       assert.equal(result.stuckAdmissionsResumed, 0);
       assert.deepEqual(executor.resumed, [], "a non-run kind must never be routed through flipToRunningAndResume");
       assert.equal(stuckFlow.status, "queued", "the flow is not this pass's job — only the slot is");
       assert.deepEqual(await admissionQueueStore.listByStatus("admitted"), [], "the zombie slot must be reclaimed, not skipped");
     });
 
-    // The signature this pass exists for: a retired-kind row holding the
+    // The signature this pass exists for: a unknown-kind row holding the
     // pool's only slot while its flow sits queued on its OWN canonical
     // kind. Reaping must not just free the slot — the release's promotion
     // side effect must wake the flow's canonical row in the same pass, or
     // the pool swaps one zombie for another.
-    it("reaps a retired-kind admitted slot and promotes the flow's own canonical queued row in the same pass", async () => {
+    it("reaps a unknown-kind admitted slot and promotes the flow's own canonical queued row in the same pass", async () => {
       const stranded = makeFlow({
         status: "queued", lastStep: "SCORE", revision: 9,
         waitJson: { kind: "child-dispatch" },
@@ -917,7 +917,7 @@ describe("reviveOrphanFlows", () => {
       });
       await drainDetachedResumes();
 
-      assert.equal(result.retiredKindReaped, 1);
+      assert.equal(result.unknownKindReaped, 1);
       assert.equal(result.stuckAdmissionsResumed, 0, "the flow was driven via the promotion wake, not the stuck-resume path");
       assert.deepEqual(executor.resumed, [stranded.flowId]);
       assert.equal(stranded.status, "running", "the freed slot must flow straight into the stranded flow's own admission");
@@ -926,7 +926,7 @@ describe("reviveOrphanFlows", () => {
       assert.equal(rows[0].kind, "child-dispatch", "the survivor is the canonical row, not the zombie");
     });
 
-    it("leaves a fresh retired-kind row alone within the grace window — an older-code process may still own it mid-deploy", async () => {
+    it("leaves a fresh unknown-kind row alone within the grace window — an older-code process may still own it mid-deploy", async () => {
       const freshFlow = makeFlow({
         status: "queued", lastStep: "AGENT_NODE", revision: 4,
         waitJson: { kind: "agent-dispatch", nodeId: "AGENT_NODE" },
@@ -941,7 +941,7 @@ describe("reviveOrphanFlows", () => {
 
       const result = await reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, logger: makeLogger() });
 
-      assert.equal(result.retiredKindReaped, 0, "default minAgeMs grace — the admitting process may still be alive");
+      assert.equal(result.unknownKindReaped, 0, "default minAgeMs grace — the admitting process may still be alive");
       assert.equal((await admissionQueueStore.listByStatus("admitted")).length, 1);
       assert.equal(freshFlow.status, "queued");
     });
@@ -1069,7 +1069,7 @@ describe("reviveOrphanFlows", () => {
       assert.equal(result.revivedAgent, 0, "resource-lock node is code-kind, not agent");
     });
 
-    it("with no admission pool wired in, a legacy agent-dispatch-queued orphan is re-entered via plain runFlow, not the continuation path", async () => {
+    it("with no admission pool wired in, a agent-dispatch-queued orphan is re-entered via plain runFlow, not the continuation path", async () => {
       // Never actually dispatched — no session exists, so it must NOT go
       // through reviveAgentKindOrphan (which sends REVIVAL_MSG
       // unconditionally) even though AGENT_NODE is agent-kind: there's no

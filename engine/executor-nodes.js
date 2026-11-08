@@ -176,13 +176,13 @@ export function createNodeRunner({
   }
   /**
    * Run the node body. A node that declares `crossProcessLock` is refused:
-   * the lock mechanism is gone, and a node that silently lost its mutual
-   * exclusion would run concurrently with the very work it declared to
-   * exclude. Failing loudly is the only safe reading of a removed option.
+   * the option asks for a mutual exclusion this engine does not provide,
+   * and running the node anyway would let it race the work it declared to
+   * exclude.
    */
   async function executeNode({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
     if (typeof node.crossProcessLock === "string" && node.crossProcessLock) {
-      throw new Error(`manifold: node "${nodeId}" declares crossProcessLock "${node.crossProcessLock}" — the lock mechanism was removed; drop the option from the pipeline`);
+      throw new Error(`manifold: node "${nodeId}" declares crossProcessLock "${node.crossProcessLock}" — this engine provides no cross-process lock; drop the option from the pipeline`);
     }
     return executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId });
   }

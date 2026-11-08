@@ -27,17 +27,17 @@ import { TERMINAL_STATUS_SET } from "../state/run-store.js";
 // restart.
 //
 // Also reaps admitted rows of kinds the engine doesn't admit — see the
-// retired-kind pass below for why skipping those is what wedged the whole
+// unknown-kind pass below for why skipping those is what wedged the whole
 // pool shut, not a safe no-op.
 export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, api, logger, minAgeMs = 30_000 }) {
-  if (!admissionQueueStore) return { stuckAdmissionsResumed: 0, stuckAdmissionsFailed: 0, retiredKindReaped: 0 };
+  if (!admissionQueueStore) return { stuckAdmissionsResumed: 0, stuckAdmissionsFailed: 0, unknownKindReaped: 0 };
   const now = Date.now();
   const admittedRows = await admissionQueueStore.listByStatus("admitted");
 
-  // Reap admitted rows of kinds the engine doesn't admit. A retired kind
+  // Reap admitted rows of kinds the engine doesn't admit. Such a row
   // can never be driven: resumePromotedAdmission refuses non-resumable
   // kinds, and every flow transition releases by the flow's CURRENT
-  // admission kind, so releaseByFlow never matches a retired row either.
+  // admission kind, so releaseByFlow never matches such a row either.
   // "Unresumable" therefore makes the row a permanent pool leak, not a safe
   // skip — admit()'s and fillFreeSlots()'s admitted-count queries have no
   // kind filter, so zombie rows count against the ceiling forever and wedge
@@ -45,18 +45,18 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
   // effect, promotes the globally-oldest queued row, which
   // wakePromotedRelease then drives — the freed capacity goes back to work
   // in the same pass instead of idling until some unrelated release.
-  // A QUEUED row of a retired kind is left here (it holds no slot), but
+  // A QUEUED row of such a kind is left here (it holds no slot), but
   // fillFreeSlots() can promote one into 'admitted'; this pass is what
   // reclaims it after that, past the same grace window.
-  let retiredKindReaped = 0;
+  let unknownKindReaped = 0;
   const resumableRows = [];
   for (const row of admittedRows) {
     if (isEngineResumableKind(row.kind)) { resumableRows.push(row); continue; }
     if (row.admittedAt && now - row.admittedAt < minAgeMs) continue;
     const flow = await runStore.get(row.flowId);
     // A flow still 'running' under the code that admitted this row owns
-    // the slot legitimately and releases it through its own retired-kind
-    // transition path; reclaiming the row underneath it would transiently
+    // the slot legitimately and releases it through its own transition
+    // path; reclaiming the row underneath it would transiently
     // over-admit the pool. Missing or terminal flows are reaped: no live
     // process can release them (the terminal-leak sweep above only runs at
     // boot, and release() is a safe no-op if it already did).
@@ -65,16 +65,16 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
       const result = await admissionQueueStore.release(row.id);
       await wakePromotedRelease(result, {
         runStore, resume: executor.resume, logger, api,
-        context: `manifold revival: retired-kind reap [${row.id.slice(0, 8)}]`,
+        context: `manifold revival: unknown-kind reap [${row.id.slice(0, 8)}]`,
       });
-      retiredKindReaped++;
+      unknownKindReaped++;
       logger.warn(
-        `manifold revival: reaped retired-kind '${row.kind}' admission [${row.id.slice(0, 8)}] for flow ` +
+        `manifold revival: reaped unknown-kind '${row.kind}' admission [${row.id.slice(0, 8)}] for flow ` +
         `[${row.flowId.slice(0, 8)}] (${flow ? `status=${flow.status}` : "flow_runs row gone"}) — ` +
         `no code path can drive this kind, slot reclaimed`,
       );
     } catch (err) {
-      logger.warn(`manifold revival: retired-kind reap [${row.id.slice(0, 8)}] failed: ${err?.message ?? err}`);
+      logger.warn(`manifold revival: unknown-kind reap [${row.id.slice(0, 8)}] failed: ${err?.message ?? err}`);
     }
   }
 
@@ -135,7 +135,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
       logger.warn(`manifold revival: stuck-admission force-resume for [${row.flowId.slice(0, 8)}] threw: ${err?.message ?? err}`);
     }
   }));
-  return { stuckAdmissionsResumed, stuckAdmissionsFailed, retiredKindReaped };
+  return { stuckAdmissionsResumed, stuckAdmissionsFailed, unknownKindReaped };
 }
 
 /**
@@ -529,17 +529,17 @@ export async function reviveOrphanFlows({
   // so a boot doesn't just inherit the same "left queued for admission —
   // will resume via the normal release/promotion cycle" hope the process
   // that crashed was already relying on.
-  const { stuckAdmissionsResumed, stuckAdmissionsFailed, retiredKindReaped } = await reconcileStuckAdmissions({
+  const { stuckAdmissionsResumed, stuckAdmissionsFailed, unknownKindReaped } = await reconcileStuckAdmissions({
     admissionQueueStore, runStore, executor, api, logger,
     ...(stuckAdmissionMinAgeMs != null ? { minAgeMs: stuckAdmissionMinAgeMs } : {}),
   });
-  if (retiredKindReaped > 0) {
-    logger.warn(`manifold revival: reaped ${retiredKindReaped} retired-kind admission slot(s) no code path could drive`);
+  if (unknownKindReaped > 0) {
+    logger.warn(`manifold revival: reaped ${unknownKindReaped} unknown-kind admission slot(s) no code path could drive`);
   }
 
   return {
     revived: toRevive.length, revivedAgent, queuedForAdmission, readmitted, recancelled: cancelledByRevival.size,
     childrenReconciled, gatesReconciled, admissionLeaksReleased, freeSlotsFilled,
-    stuckAdmissionsResumed, stuckAdmissionsFailed, retiredKindReaped,
+    stuckAdmissionsResumed, stuckAdmissionsFailed, unknownKindReaped,
   };
 }

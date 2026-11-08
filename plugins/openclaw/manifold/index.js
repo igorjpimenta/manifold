@@ -134,9 +134,7 @@ export default definePluginEntry({
   register: (api) => {
     const userCfg = api.pluginConfig ?? {};
     // Core owns its store home (state/paths.js): one MANIFOLD_DATA_DIR
-    // move relocates every DB and pending file. Pre-canonical
-    // ~/.openclaw/{runtime.sqlite,ops.sqlite} are copied in once, never
-    // moved, and never read again afterwards.
+    // move relocates every DB and pending file.
     const storePaths = resolveStorePaths();
     ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
     setStateFile(stateFile(storePaths.dataDir));

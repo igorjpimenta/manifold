@@ -40,10 +40,9 @@ async function makeStore(overrides = {}) {
 
 // failure-store.js's nodeExecutionsStore is injectable specifically so
 // tests don't fall through to the real getNodeExecutionsStore() singleton.
-// recordFromTerminalState's rootErrors sweep and
-// computeResolvedAt's getExecution() call are gone — queryErrorsByFlow/getExecution
-// are not called anywhere in failure-store.js, so the fake doesn't expose
-// them. getLatestExecutionOutcomeForItem's real shape is
+// The fake exposes only what failure-store.js calls: queryErrorsByFlow
+// and getExecution are not part of it. getLatestExecutionOutcomeForItem's
+// real shape is
 // {executionId, exitedAt} (no `error`) — "did it succeed" is answered by
 // computeResolvedAt asking failure_events directly for that execution_id.
 function makeFakeNodeExecutions({
