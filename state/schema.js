@@ -70,8 +70,7 @@ export const flowNodeExecutions = sqliteTable('flow_node_executions', {
   index('idx_fne_exited').on(table.exitedAt),
 ]);
 
-// flow_branches (the pre-childFlows branch storage) is still a real table
-// in a runtime.sqlite that predates the childFlows cutover — it has no
+// flow_branches is still a real table in a runtime.sqlite — it has no
 // schema export here because nothing reads or writes it.
 
 // Deliberately thin — pipeline_id/branch_item_id/failure_node/recovery_hint/

@@ -1,9 +1,7 @@
 // state/paths.js — manifold owns its data directory. The store belongs to
 // manifold core, not to whichever harness happens to launch it.
 //
-// Precedence: MANIFOLD_DATA_DIR, then ~/.manifold/. Legacy harness-managed
-// files (~/.openclaw/{runtime.sqlite,ops.sqlite}) are copied in once on
-// first boot and never touched again afterwards.
+// Precedence: MANIFOLD_DATA_DIR, then the per-user data directory.
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -60,8 +58,8 @@ function preCanonicalDbPath(home, name) {
 }
 
 // One-time copy from harness-managed paths into the core-owned data dir.
-// Copy (never move): the pre-canonical files stay where they are; after
-// this one-time copy nothing reads them.
+// Copy (never move): the source files stay where they are; after this
+// one-time copy nothing reads them.
 // Integrity-checked after copy; throws on a damaged source so boot refuses
 // loudly instead of serving a torn store. Idempotent via the marker file.
 // Any other failure (missing native module, unwritable dir) is logged, not
@@ -91,7 +89,7 @@ export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } =
   if (existsSync(preCanonicalOps) && !existsSync(ops)) sources.push([preCanonicalOps, ops]);
   if (sources.length === 0) {
     // Fresh install: nothing to copy. The marker records that the decision
-    // was made, so a later-appearing pre-canonical file is never picked up mid-life
+    // was made, so a later-appearing source file is never picked up mid-life
     // (that would fork the store).
     try {
       writeFileSync(migrationMarkerPath(dataDir), JSON.stringify({ at: new Date().toISOString(), from: null, fresh: true }) + "\n");
@@ -107,7 +105,7 @@ export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } =
   // Loud throw on a damaged source is the one allowed throw: boot must
   // refuse a torn store rather than serve it. An unavailable verifier is
   // a loud log, not a throw — the marker records the decision either way
-  // so a later-appearing pre-canonical file can never fork the store.
+  // so a later-appearing source file can never fork the store.
   let verified = true;
   try {
     verifyCopies(sources.map(([, dest]) => dest));
