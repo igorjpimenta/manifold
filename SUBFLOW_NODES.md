@@ -57,8 +57,7 @@ is dispatched **identically** to a root-level node. `code` nodes get
 is just an ordinary `code` entry and an ordinary `agent` entry wired
 together by hand-authored edges within the same `flow.kind:"cascade"`
 child flow — see the README's *Optional: `kind: "cascade"`* section —
-and both still declare `crossProcessLock` directly, same as any other
-sub-node. There is no `subCtx`, no `(state, item, output)` three-arg
+and both are ordinary sub-nodes. There is no `subCtx`, no `(state, item, output)` three-arg
 form, no auto-nesting of return values — **you must wrap every return
 under its own node-id key**, same as any top-level node:
 
@@ -192,14 +191,8 @@ projection) called once on a child's first entry and persisted to
 label in companion apps' Subflows sections (RunDetailView/PipelineDetailView) and the
 dashboard without those clients needing to know the item's own shape.
 
-## Locks and concurrency
+## Concurrency
 
-- `crossProcessLock` on a *sub-node* (not the subflow node itself) serializes
-  that specific step across every child of the batch, and across every
-  other process holding the same lock name — e.g.
-  `nodes/score/index.js`'s children each acquire `browser:linkedin` only
-  around the one sub-node that actually drives a browser, not for their
-  whole lifetime. See `README.md`'s *Lock modifier* for the primitive itself.
 - `.concurrency` on the subflow node is a **boolean participation switch**,
   not a numeric width — `true` (the default, including when the field is
   unset) means this subflow's children draw from a single **gateway-wide**

@@ -2,7 +2,7 @@
 // under `node --test plugins/` with no gateway runtime.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isManifoldTool, buildManifoldMeta, registerManifoldMetaHook } from "./meta.js";
+import { isManifoldTool, buildManifoldMeta, registerManifoldMetaHook } from "../../../../../plugins/openclaw/manifold/meta.js";
 
 test("isManifoldTool matches the mcp__manifold__ naming and rejects other tools", () => {
   assert.equal(isManifoldTool("mcp__manifold__manifold_start"), true);
