@@ -35,7 +35,7 @@ function createMockReqWithBody(method, path, body) {
 }
 
 // Stamped harness caller identity every elevated route now requires.
-const STAMP = { sessionKey: "agent:main:k1", sessionId: "sess-1", agentId: "main" };
+const STAMP = { session: "agent:main:k1", agentId: "main" };
 
 // Mock the external deps that operator.js statically imports:
 //   1. openclaw/plugin-sdk/agent-runtime  (resolveAgentEffectiveModelPrimary)
@@ -106,7 +106,6 @@ function makeDeps(api, overrides = {}) {
       readSessionsIndex: () => null,
       resolveChildSessionFile: () => "",
       readSessionFileSync: () => "",
-      readSessionFileText: async () => "",
     },
     ...overrides,
   };
@@ -145,7 +144,6 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
     "/manifold/_elev/rerun",
     "/manifold/_elev/retry-failure",
     "/manifold/_elev/discuss",
-    "/manifold/_elev/discuss_history",
   ]) {
     test(`${path}: auth=gateway, match=exact`, () => {
       const { api, routes } = createMockApi();
@@ -211,8 +209,7 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     assert.equal(body.flowId, "f1");
     assert.equal(body.itemId, "i1");
     assert.equal(body.decision, "approve");
-    assert.equal(body.sessionKey, STAMP.sessionKey);
-    assert.equal(body.sessionId, STAMP.sessionId);
+    assert.equal(body.session, STAMP.session);
     assert.equal(body.agentId, STAMP.agentId);
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.body).echo.path, "/manifold/_elev/gate-resolve");
@@ -283,7 +280,7 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
 // ── elevated identity guards ────────────────────────────────────────────────
 //
 // Every _elev route refuses calls without the harness-stamped caller identity
-// (sessionKey/sessionId/agentId, plus flowId where the operation is flow-bound)
+// (session/agentId, plus flowId where the operation is flow-bound)
 // with 400 + missing_identity before touching any store or executor.
 
 describe("registerOperatorRoutes — elevated identity guards", { skip: SKIP_MSG }, () => {
@@ -305,19 +302,19 @@ describe("registerOperatorRoutes — elevated identity guards", { skip: SKIP_MSG
     assert.equal(res.statusCode, 400);
     assert.deepEqual(JSON.parse(res.body), {
       ok: false, code: "missing_identity",
-      error: "sessionKey, sessionId, agentId required",
+      error: "session, agentId required",
     });
     assert.equal(recordItemDecision.mock.calls.length, 0);
   });
 
   test("_elev/gate-resolve: empty identity fields are missing too", async () => {
     const { res } = await elevRes("/manifold/_elev/gate-resolve", {
-      flowId: "f1", sessionKey: "  ", sessionId: "", agentId: "main",
+      flowId: "f1", session: "  ", agentId: "main",
     });
     assert.equal(res.statusCode, 400);
     const body = JSON.parse(res.body);
     assert.equal(body.code, "missing_identity");
-    assert.ok(body.error.includes("sessionKey") && body.error.includes("sessionId"), body.error);
+    assert.ok(body.error.includes("session") && body.error.includes("agentId"), body.error);
   });
 
   test("_elev/start: missing identity → 400 missing_identity", async () => {
@@ -376,8 +373,7 @@ describe("registerOperatorRoutes — start handler", { skip: SKIP_MSG }, () => {
     const [path, body] = invokeElevated.mock.calls[0].arguments;
     assert.equal(path, "/manifold/_elev/start");
     assert.equal(body.pipelineId, "p1");
-    assert.equal(body.sessionKey, STAMP.sessionKey);
-    assert.equal(body.sessionId, STAMP.sessionId);
+    assert.equal(body.session, STAMP.session);
     assert.equal(body.agentId, STAMP.agentId);
     assert.equal(res.statusCode, 200);
   });

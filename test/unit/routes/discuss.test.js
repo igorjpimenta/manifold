@@ -77,8 +77,8 @@ function makeDeps(api, overrides = {}) {
       clearPending: async () => {},
     },
     sessionIndex: {
-      async recordThread({ flowId, gateNodeId, itemId, agentId, sessionKey }) {
-        threads.set(key(flowId, gateNodeId, itemId), { sessionKey, agentId: agentId ?? null });
+      async recordThread({ flowId, gateNodeId, itemId, agentId, session }) {
+        threads.set(key(flowId, gateNodeId, itemId), { session, agentId: agentId ?? null });
       },
       async findThread(flowId, gateNodeId, itemId) {
         return threads.get(key(flowId, gateNodeId, itemId)) ?? null;
@@ -176,7 +176,7 @@ describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identit
     assert.equal(target.ok, true);
     assert.equal(target.needsStamp, true);
     assert.equal(target.agent, "config-agent");
-    assert.equal(typeof target.sessionId, "string");
+    assert.equal(typeof target.session, "string");
   });
 
   test("stamped thread resolves verbatim, roster agent wins over config", async () => {
@@ -185,13 +185,12 @@ describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identit
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
     await deps.sessionIndex.recordThread({
       flowId: testFlowId, gateNodeId: "GATE", itemId: "item-1",
-      agentId: "roster-agent", sessionKey: "agent:test:thread-1",
+      agentId: "roster-agent", session: "agent:test:thread-1",
     });
     const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, true);
     assert.equal(target.needsStamp, false);
-    assert.equal(target.sessionId, "agent:test:thread-1");
-    assert.equal(target.sessionKey, "agent:test:thread-1");
+    assert.equal(target.session, "agent:test:thread-1");
     assert.equal(target.agent, "roster-agent");
   });
 });
@@ -334,10 +333,13 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
 
     const emitted = [];
     let resolveTranscriptEvent;
+    let resolveTurnEvent;
     const transcriptEventSeen = new Promise((r) => { resolveTranscriptEvent = r; });
+    const turnEventSeen = new Promise((r) => { resolveTurnEvent = r; });
     const emit = async (kind, payload) => {
       emitted.push({ kind, payload });
       if (kind === "session.transcript.updated") resolveTranscriptEvent();
+      if (kind === "session.transcript.completed") resolveTurnEvent();
       return { ok: true, kind, deliveries: {} };
     };
 
@@ -382,6 +384,12 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.equal(updatedMeta.transcript, "hello from retry");
     assert.equal(updatedMeta.error, null);
     assert.equal(updatedMeta.createdAtMs, 1000, "original createdAtMs must survive a retry");
+
+    // The sidecar write and the two events are separate steps of the same
+    // background job, so the write can land before the events do.
+    await transcriptEventSeen;
+    await turnEventSeen;
+    await new Promise((r) => setTimeout(r, 20));
 
     const transcriptEvent = emitted.find((c) => c.kind === "session.transcript.updated");
     assert.ok(transcriptEvent, "must emit session.transcript.updated");
@@ -536,8 +544,8 @@ describe("registerDiscussHandlers — resolveDiscussTarget harness-owned ids", (
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
     const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, true);
-    assert.equal(target.sessionId, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
-    assert.equal(target.sessionKey, target.sessionId, "the key IS the session id");
+    assert.equal(target.session, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
+    assert.ok(!("sessionKey" in target) && !("sessionId" in target), "core exposes one session term");
   });
 
   test("refuses loudly when the harness provides no session id", async () => {

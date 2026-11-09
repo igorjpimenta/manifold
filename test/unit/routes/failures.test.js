@@ -119,7 +119,7 @@ describe("registerFailureRoutes — retry handler", () => {
     }));
     registerFailureRoutes(makeDeps(api, { invokeElevated }));
     const { handler } = routes.find((r) => r.match === "prefix");
-    const body = { via: "app", sessionKey: "agent:main:k1", sessionId: "s1", agentId: "main" };
+    const body = { via: "app", session: "agent:main:k1", agentId: "main" };
     const req = {
       ...authedReq("POST", "/manifold/failures/f1/retry"),
       [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(body)); },
@@ -130,8 +130,7 @@ describe("registerFailureRoutes — retry handler", () => {
     const [path, payload] = invokeElevated.mock.calls[0].arguments;
     assert.equal(path, "/manifold/_elev/retry-failure");
     assert.equal(payload.id, "f1");
-    assert.equal(payload.sessionKey, "agent:main:k1");
-    assert.equal(payload.sessionId, "s1");
+    assert.equal(payload.session, "agent:main:k1");
     assert.equal(payload.agentId, "main");
     assert.equal(res.statusCode, 200);
   });

@@ -1,7 +1,6 @@
 import path from "node:path";
 import os from "node:os";
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 
 function agentsRoot() {
   return path.join(os.homedir(), ".openclaw", "agents");
@@ -21,8 +20,30 @@ function authPaths(agentId) {
 
 // Session-file path for an agent's JSONL transcript. Pure join, never throws
 // on string input — callers validate agentId/sessionId before reaching here.
+// Harness-internal: the harness names its own file id `sessionId`.
 export function resolveSessionFile(agentId, sessionId) {
   return path.join(sessionsDir(agentId), `${sessionId}.jsonl`);
+}
+
+// Transcript file for a manifold session (the index KEY). Core hands over
+// its single `session` handle; the harness owns the index, so the entry
+// for that key names the file — the key itself is never a filename.
+export function resolveSessionFileForKey(agentId, session) {
+  try {
+    const index = readSessionsIndex(agentId);
+    const entry = index?.[session];
+    if (entry?.sessionFile) return entry.sessionFile;
+    const sessionId = entry?.sessionId;
+    if (typeof sessionId === "string" && sessionId) {
+      return path.join(sessionsDir(agentId), `${sessionId}.jsonl`);
+    }
+  } catch {
+    // Unreadable index falls through to the conventional path below.
+  }
+  // A session is an opaque harness string, so it is never used as a path
+  // segment: only the last segment, sanitized, may name a file.
+  const leaf = String(session ?? "").split(":").pop().replace(/[^A-Za-z0-9._-]+/g, "_");
+  return path.join(sessionsDir(agentId), `${leaf}.jsonl`);
 }
 
 // existsSync-shaped predicate: false on any filesystem error, never throws.
@@ -128,10 +149,4 @@ export function resolveChildSessionFile(agentId, entry, childKey) {
 // already handles that as a child-session skip, same as before.
 export function readSessionFileSync(file) {
   return readFileSync(file, "utf8");
-}
-
-// Async variant for the history handler (gateway event-loop friendly).
-// Throws on unreadable files — the handler maps that to a 500, same as before.
-export function readSessionFileText(file) {
-  return readFile(file, "utf-8");
 }

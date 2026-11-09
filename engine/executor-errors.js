@@ -1,7 +1,9 @@
 export const REVISION_RETRY_LIMIT = 5;
 
-export async function fetchSessionError(sessionKey) {
-  void sessionKey;
+// Always resolves null — core never reads harness homes, so callers fall
+// back to their default detail.
+export async function fetchSessionError(session) {
+  void session;
   return null;
 }
 

@@ -1,4 +1,4 @@
-// sessionKey scope grammar — every sessionKey shape we know about,
+// session scope grammar — every session shape we know about,
 // with a single `classify` entry point that returns the parent breadcrumb (or
 // null for roots). The breadcrumb might be:
 //   { parentKind: "flow", flow8: "..." }   → resolver joins to flow_runs
@@ -33,63 +33,63 @@ const REGEX = {
 };
 
 /** Returns { kind, agentId, pipelineId?, flowShort?, nodeId?, itemKey?, parentHint } */
-export function classify(sessionKey) {
-  if (typeof sessionKey !== "string" || !sessionKey) {
+export function classify(session) {
+  if (typeof session !== "string" || !session) {
     return { kind: "unknown", agentId: null, parentHint: null };
   }
 
   let m;
 
-  if ((m = REGEX.CRON_RUN.exec(sessionKey))) {
+  if ((m = REGEX.CRON_RUN.exec(session))) {
     const [, agentId, cronId, runSid] = m;
     return {
       kind: "cron-tick", agentId, cronId, runSid,
       parentHint: { kind: "cron-id", cronId, agentId },
     };
   }
-  if ((m = REGEX.CRON_OWN.exec(sessionKey))) {
+  if ((m = REGEX.CRON_OWN.exec(session))) {
     const [, agentId, cronName] = m;
     return {
       kind: "cron-owner", agentId, cronName,
       parentHint: null,                              // ROOT
     };
   }
-  if ((m = REGEX.MEMSYNTH.exec(sessionKey))) {
+  if ((m = REGEX.MEMSYNTH.exec(session))) {
     const [, agentId, runTs, chunk] = m;
     return {
       kind: "memory-synth-chunk", agentId, memorySynthRun: runTs, chunk,
       parentHint: { kind: "memory-synth", runId: runTs, agentId },
     };
   }
-  if ((m = REGEX.BARE_SUB.exec(sessionKey))) {
+  if ((m = REGEX.BARE_SUB.exec(session))) {
     const [, agentId, uuid] = m;
     return {
       kind: "bare-subagent", agentId, bareUuid: uuid,
       parentHint: null,                              // Parent must come from spawn hook
     };
   }
-  if ((m = REGEX.TG_DM.exec(sessionKey))) {
+  if ((m = REGEX.TG_DM.exec(session))) {
     const [, agentId, chatId] = m;
     return {
       kind: "telegram-dm", agentId, telegramChatId: chatId,
       parentHint: null,                              // ROOT
     };
   }
-  if ((m = REGEX.OPERATOR_TRIGGER.exec(sessionKey))) {
+  if ((m = REGEX.OPERATOR_TRIGGER.exec(session))) {
     const [, source, triggerFlowId] = m;
     return {
       kind: "operator-trigger", agentId: "operator", operatorSource: source, triggerFlowId,
       parentHint: null,                              // ROOT
     };
   }
-  if ((m = REGEX.EXPLICIT.exec(sessionKey))) {
+  if ((m = REGEX.EXPLICIT.exec(session))) {
     const [, agentId, purpose] = m;
     return {
       kind: "explicit", agentId, explicitPurpose: purpose,
       parentHint: null,                              // ROOT
     };
   }
-  if ((m = REGEX.AGENT_DEF.exec(sessionKey))) {
+  if ((m = REGEX.AGENT_DEF.exec(session))) {
     const [, agentId] = m;
     return {
       kind: "agent-default", agentId,
@@ -99,22 +99,21 @@ export function classify(sessionKey) {
   // Fallback: bare-shape explicit (no scope prefix). Specific rules above
   // (cron-owner, subagent, telegram-dm, etc.) get first crack, so this only
   // matches truly unprefixed `agent:<id>:<tail>` keys.
-  if ((m = REGEX.EXPLICIT_BARE.exec(sessionKey))) {
+  if ((m = REGEX.EXPLICIT_BARE.exec(session))) {
     const [, agentId, purpose] = m;
     return {
       kind: "explicit", agentId, explicitPurpose: purpose,
       parentHint: null,                              // ROOT
     };
   }
-  return { kind: "unknown", agentId: agentIdOf(sessionKey), parentHint: null };
+  return { kind: "unknown", agentId: agentIdOf(session), parentHint: null };
 }
 
-/** sessionKeys ALWAYS start `agent:<id>:...` — peel the agent off generically. */
-export function agentIdOf(sessionKey) {
-  if (typeof sessionKey !== "string") return null;
-  const i1 = sessionKey.indexOf(":");
-  const i2 = sessionKey.indexOf(":", i1 + 1);
+export function agentIdOf(session) {
+  if (typeof session !== "string") return null;
+  const i1 = session.indexOf(":");
+  const i2 = session.indexOf(":", i1 + 1);
   if (i1 !== 5 || i2 === -1) return null;            // must start "agent:"
-  return sessionKey.slice(i1 + 1, i2) || null;
+  return session.slice(i1 + 1, i2) || null;
 }
 

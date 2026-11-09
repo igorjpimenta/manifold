@@ -145,9 +145,9 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     async cancelFlow({ flowId, reason }) {
       return runStore.cancelFlow(flowId, reason);
     },
-    async deliverResult({ sessionKey, runId, agentId, kind, payload }) {
-      await writePendingResult({ sessionKey, runId, agentId, kind, payload });
-      return { ok: true, sessionKey };
+    async deliverResult({ session, runId, agentId, kind, payload }) {
+      await writePendingResult({ session, runId, agentId, kind, payload });
+      return { ok: true, session };
     },
     logger,
   };
