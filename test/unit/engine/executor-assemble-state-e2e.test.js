@@ -114,11 +114,10 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
 
-    // B4: state_json is entry-only — A/B/C never land
-    // there at all. assembleState() is the only source for a node's own
-    // output; this test proves the cutover actually happened (real
-    // stateJson has nothing to compare against) and that assembleState()
-    // alone is still correct.
+    // state_json is entry-only — A/B/C never land there at all.
+    // assembleState() is the only source for a node's own output; this
+    // test proves the real stateJson has nothing to compare against and
+    // that assembleState() alone is correct.
     assert.equal(flow.stateJson.A, undefined, "state_json must not carry node output post-B4");
     assert.equal(flow.stateJson.B, undefined);
     assert.equal(flow.stateJson.C, undefined);
@@ -206,13 +205,11 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
 
-    // B4: the human-gate branch (executor-nodes.js) stopped
-    // writing a state.gates full-snapshot entirely — gate_records was
-    // always the correctness-safe source (see its own MIGRATIONS v11
-    // comment for why a shared-key snapshot embed goes stale across
-    // sibling gates), the parallel state_json write was pure "display/
-    // backward-compat" that turned out to have zero real readers left.
-    // Both gates' own point-lookup rows are the whole story now.
+    // The human-gate branch (executor-nodes.js) does not write a
+    // state.gates full-snapshot at all — gate_records is the
+    // correctness-safe source (see the gateRecords def in state/schema.js
+    // for why a shared-key snapshot embed goes stale across sibling
+    // gates). Both gates' own point-lookup rows are the whole story.
     const gate1 = await nodeExecutionsStore.getGateRecord(record.flowId, "GATE_1");
     const gate2 = await nodeExecutionsStore.getGateRecord(record.flowId, "GATE_2");
     assert.ok(gate1?.consumedAt, "GATE_1's own record survives independently, keyed by its own nodeId");
@@ -326,12 +323,10 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
 
   test("a result well over 64KB, flat small+bulk fields: assembled state keeps ALL fields, including the bulk one", async () => {
     // Regression coverage for a flat (unwrapped) node result mixing tiny
-    // scalars (accessToken, bidderId) with a large array (listings) that
-    // lost EVERYTHING (and, under an intermediate fix, just the bulk
-    // field) once the whole result crossed the size cap — the tiny fields
-    // a much-later node (SUBMIT_CODE) depended on vanished with no error
-    // until that unrelated node failed. The cap itself is now gone, so
-    // nothing gets dropped at all.
+    // scalars (accessToken, bidderId) with a large array (listings): the
+    // assembled state keeps every field, including the tiny ones a
+    // much-later node (SUBMIT_CODE) depends on. writeResult() does not cap
+    // results, so nothing gets dropped at all.
     harness = await makeHarness({
       test_oversize_mixed: {
         id: "test_oversize_mixed",

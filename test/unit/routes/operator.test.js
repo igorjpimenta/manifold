@@ -433,7 +433,7 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
 // ── cancel handler: ownerKey-mismatch fallback ──────────────────────────────
 //
 // When the primary executor.cancel() reports "Flow not found." (the flow
-// belongs to a different ownerKey — legacy graph-flow-owner flows, or any
+// belongs to a different ownerKey — a graph-flow-owner flow, or any
 // flow this process's default store doesn't recognize), the handler builds a
 // second, ad-hoc state-store bound to the flow's real ownerKey and retries
 // through it. That store MUST carry admissionQueueStore and resumeParentRef:

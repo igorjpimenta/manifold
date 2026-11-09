@@ -166,7 +166,7 @@ function postReq(body) {
 }
 
 // ─── canonical budget emissions ─────────────────────────────────────────────
-// decide/lock/unlock go through the shared emitter: identical legacy wire
+// decide/lock/unlock go through the shared emitter: identical wire
 // strings, envelope adds kind. Real sqlite at a tmp dbPath, same as above.
 
 describe("registerBudgetRoutes — canonical emissions", () => {

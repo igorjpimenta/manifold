@@ -216,8 +216,8 @@ describe("openclaw.plugin.json contract parity", () => {
       );
     }
 
-    // The raw registration is gone, not the capability: the MCP server still
-    // carries the same pipeline tools.
+    // The plugin contributes no raw tools; the MCP server still carries the
+    // same pipeline tools.
     const { TOOL_DEFS } = await import("../../../mcp/tools.js");
     const mcpToolNames = TOOL_DEFS.map((d) => d.name);
     assert.ok(

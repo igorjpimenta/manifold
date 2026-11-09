@@ -45,11 +45,10 @@ let getLatestExecutionForNodeImpl = ({ nodeId }) => ({ invocationId: `inv-${node
 let listInvocationIdsForNodeImpl = () => [];
 
 // All async — node-executions.js's real store methods are (Drizzle/
-// better-sqlite3 migration); a plain synchronous double here
-// would silently tolerate a missing `await` at the call site, exactly the
-// class of bug this migration introduced in operator-retry.js itself
-// (every store/readStore/failureStore/nodeExecutionsStore call needed an
-// added `await` — see git history around this date).
+// better-sqlite3); a plain synchronous double here would silently tolerate
+// a missing `await` at the call site, exactly the class of bug a missing
+// `await` on a store/readStore/failureStore/nodeExecutionsStore call
+// produces in operator-retry.js itself.
 await mock.module("../../../state/node-executions.js", {
   exports: {
     getNodeExecutionsStore: () => ({
@@ -547,15 +546,12 @@ describe("retryFailureBranch — flow-level: eligibility keys off the CURRENT ex
 // ── branch retry ──────────────────────────────────────────────────────────────
 //
 // A failure event's branch_item_id is not a routing signal. It comes fresh
-// from flow_node_invocations.subflow_key (the current per-item dispatch key,
-// see node-executions.js's migration from the legacy branch_key column),
-// and a childFlows subflow item runs as a real child flow with its own
-// flow_id (executor-subflow-children.js), so failure.flow_id already names
-// the exact flow to retry regardless of whether branch_item_id is set.
-// Treating a present branch_item_id as unretryable was a live bug (Track A
-// finding 5): every subflow-item failure was permanently unretryable.
-// Confirmed fixed: a branchItemId-present failure now retries exactly like a
-// branchItemId-null one.
+// from flow_node_invocations.subflow_key (the per-item dispatch key), and a
+// childFlows subflow item runs as a real child flow with its own flow_id
+// (executor-subflow-children.js), so failure.flow_id already names the
+// exact flow to retry regardless of whether branch_item_id is set.
+// A branchItemId-present failure retries exactly like a branchItemId-null
+// one.
 describe("retryFailureBranch — branch_item_id is informational, does not block retry", () => {
   it("retries a branchItemId-present failure the same way as a branchItemId-null one", async () => {
     queryErrorsByFlowImpl = () => errorEntries(["DRAFT"]);

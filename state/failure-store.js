@@ -32,8 +32,8 @@
 // inconclusive | infra_unavailable | blocked. A subflow node whose exit
 // mode wasn't satisfied gets "subflow-mode-not-satisfied" instead — not a
 // thrown error at all, a policy verdict computed by
-// engine/child-resume-trigger.js once every spawned child has gone
-// terminal. null means an ordinary engine-caught throw with no further
+// engine/child-resume-trigger.js once every spawned child has reached a
+// terminal state. null means an ordinary engine-caught throw with no further
 // node-level classification (the common case — still safe to retry).
 
 import { randomUUID } from "node:crypto";
@@ -66,8 +66,7 @@ function defaultDbPath() {
 // already closed/awarded — "workana-forbidden" — vs. an unrecognized
 // block, which stays investigate rather than guessing). "redraft"/"wait"
 // aren't reachable today: nothing currently sets an error_type/summary
-// combination that would justify either — see git history if a producer
-// for either ever comes back.
+// combination that would justify either.
 //
 // Computed fresh at read time (see deriveFailureContext) — not stored.
 function classifyRecoveryHint(errorType, summary) {
@@ -363,12 +362,11 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
   }
 
   // ── Mutations ──────────────────────────────────────────────────────
-  // recordRetry/markIgnored/markUnignored/resolveOpenForBranch and the
-  // Skip action they supported are gone. retry_count/
+  // recordEngineFailure is the only mutation here. retry_count/
   // last_retried_at are derivable (COUNT/MAX over flow_node_executions
   // WHERE kind='retry' for the invocation) but confirmed not wanted in
   // the UI at all, so no replacement is computed here either. Ignore
-  // state moved to client-side device-local storage entirely.
+  // state lives in client-side device-local storage, not here.
 
   // Engine-failed recorder — called both when a flow definitively fails
   // (node threw with no cascade left to try, edge resolved to nothing,

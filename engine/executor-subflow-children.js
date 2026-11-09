@@ -37,10 +37,10 @@ const DISPATCH_BATCH_SIZE = 10;
 
 // Bounded-concurrency map, error-isolated per item — Promise.allSettled per
 // batch, not Promise.all, so one item's rejection can never affect its
-// batch-mates or later batches (matches this file's own former per-item
-// try/catch granularity). No general-purpose equivalent exists elsewhere in
-// this codebase; small enough to keep local to this one caller rather than
-// add a dependency or a new shared module.
+// batch-mates or later batches (error isolation is per item). No
+// general-purpose equivalent exists elsewhere in this codebase; small enough
+// to keep local to this one caller rather than add a dependency or a new
+// shared module.
 async function runInBatches(items, batchSize, fn) {
   const results = new Array(items.length);
   for (let start = 0; start < items.length; start += batchSize) {
@@ -117,8 +117,8 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
 
   const childPipelineId = `${state?.pipelineId ?? ""}::${nodeId}`;
 
-  // Pre-filter valid items up front (same empty-subflowKey skip as before)
-  // so the batched phases below work off a clean list.
+  // Pre-filter valid items up front (items with an empty subflowKey are
+  // skipped) so the batched phases below work off a clean list.
   const validItems = [];
   for (let itemIndex = 0; itemIndex < items.length; itemIndex++) {
     const item = items[itemIndex];

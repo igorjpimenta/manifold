@@ -259,13 +259,12 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // gateway restart for free — it's just persisted state_json, same as
       // every other field the executor writes.
       const cascadeError = state?._cascadeError?.nodeId === lastStep ? state._cascadeError : null;
-      // Fourth root dispatch-loop read site cut over: edge functions now
-      // read via assembleState(baseState: state) instead of raw state — the
-      // single call site every edge decision in the engine goes through
-      // (root and child flows alike, since they share this one runFlow
-      // loop). A separate local var, not a reassignment of `state` itself —
-      // `state` is still what gets persisted below; only the value handed
-      // to the edge function changes.
+      // Edge functions read via assembleState(baseState: state) instead of
+      // raw state — the single call site every edge decision in the engine
+      // goes through (root and child flows alike, since they share this one
+      // runFlow loop). A separate local var, not a reassignment of `state`
+      // itself — `state` is still what gets persisted below; only the value
+      // handed to the edge function changes.
       const edgeState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
       const nextNodeId = resolveEdge(pipeline.edges, lastStep, edgeState, {
         logger, flowId,
@@ -298,10 +297,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         // own output only exists through that replay.
         const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
         await runAuditIfConfigured({ flowId, pipeline, state: enrichedState, logger });
-        // failureStore.recordFromTerminalState's soft-marker scan was
-        // deleted — zero soft-error producers remain anywhere in
-        // `.pipelines`/`.shared`; every failure now persists directly from
-        // this file's own throw-catch paths via recordEngineFailure.
+        // Every failure persists directly from this file's own throw-catch
+        // paths via recordEngineFailure — there is no soft-marker scan.
         // finalState is enrichedState-based, not state-based — a node's own
         // output (e.g. a runAudit-only sentinel field like
         // `_successCriteriaReason`) only exists via resultJson replay now,
@@ -477,8 +474,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
             // Every throw persists a permanent failure_events row
             // IMMEDIATELY, right here, regardless of what the edge
             // decides next — not just on eventual give-up. This is the one
-            // gap the pre-existing persistFailRetrying->recordEngineFailure
-            // path never covered (a cascade-continuing throw never reaches
+            // gap the persistFailRetrying->recordEngineFailure path never
+            // covers (a cascade-continuing throw never reaches
             // persistFailRetrying at all). If this attempt turns out to be
             // the cascade's final one, the `!nextNodeId` branch at the top
             // of this loop reuses this SAME invocationId/executionId when
@@ -616,10 +613,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
           });
           return;
         }
-        // node.renderForOperator was an optional hook nothing in this
-        // codebase ever implemented (see describeWaitFallback's own header
-        // comment) — removed rather than keep computing a wide state merge
-        // just to feed an argument no pipeline reads.
         const summary = describeWaitFallback(waitJson, nextNodeId);
         logger.info(`manifold [${flowId.slice(0, 8)}] ${reentrant ? "reentrant gate" : "gate"} → blocked\n${summary}`);
         await persistWaitingRetrying({
@@ -649,17 +642,15 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // instead, last_step simply never advances and revival re-runs this
       // node's apply() again — a duplicate call, not a silent failure.
       //
-      // Also still AWAITED, not fire-and-forget: once the state-write
-      // filter cutover stopped persisting the full state_json blob, the
-      // very next loop iteration's assembleState() call (line ~288, feeding
-      // the edge function) became the ONLY way this node's own output
-      // becomes visible again — if
-      // that read raced ahead of this write, the edge function would see
-      // this node's output as still-missing, some edges then re-route back
-      // to the same node (or worse), producing a tight busy-loop. Found
-      // live: 4 real E2E suites spun at ~45% CPU indefinitely once this
-      // filter shipped. Awaiting costs one DB round-trip per dispatch,
-      // already priced into every other persist call this loop makes.
+      // Also still AWAITED, not fire-and-forget: the state-write filter
+      // does not persist the full state_json blob, so the very next loop
+      // iteration's assembleState() call (line ~288, feeding the edge
+      // function) is the ONLY way this node's own output becomes visible
+      // again — if that read raced ahead of this write, the edge function
+      // would see this node's output as still-missing, some edges then
+      // re-route back to the same node (or worse), producing a tight
+      // busy-loop. Awaiting costs one DB round-trip per dispatch, already
+      // priced into every other persist call this loop makes.
       const resultWrite = await nodeExecutions.writeResult(invocationId, stateUpdate).catch(() => null);
       if (!resultWrite || !resultWrite.ok) {
         const reason = resultWrite?.reason ?? "threw";

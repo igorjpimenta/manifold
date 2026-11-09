@@ -18,9 +18,9 @@ describe("REVISION_RETRY_LIMIT", () => {
 
 // ── fetchSessionError ─────────────────────────────────────────────────────────
 
-// The openclaw tasks DB is dropped legacy (core never reads harness
-// homes) — fetchSessionError always resolves null and callers fall back to
-// their default detail.
+// The openclaw tasks DB is not read (core never reads harness homes) —
+// fetchSessionError always resolves null and callers fall back to their
+// default detail.
 describe("fetchSessionError", () => {
   it("returns null for null session", async () => {
     assert.equal(await fetchSessionError(null), null);

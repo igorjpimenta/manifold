@@ -395,8 +395,7 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     const { api, routes } = createMockApi();
     const fakeRun = {
       flowId: "flow-legacy", status: "failed",
-      // Historical row persisted before the redirect — still carries a
-      // baked-in errors[] in its stored stateJson.
+      // A stored stateJson may still carry a baked-in errors[].
       stateJson: { pipelineId: "team_pipe", errors: [{ node: "SUBMIT", message: "boom", at: 1 }] },
       lastStep: "SUBMIT",
       createdAt: 1000, updatedAt: 2000,

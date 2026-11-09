@@ -10,17 +10,16 @@ const CAS_EXCLUDED_STATUSES = new Set(["succeeded", "failed", "cancelled", "skip
 // so setRunning's CAS will accept it (its WHERE clause excludes those four
 // statuses — see run-store.js's casSetRunningStmt). Goes through the
 // injected `store` (state-store.js → run-store.js's forceBlock CAS) rather
-// than a raw DatabaseSync write — a prior version of this function opened
-// its own `new DatabaseSync(runtime.sqlite path)` here, bypassing `store`/
-// `readStore` entirely, so tests injecting in-memory store doubles could
-// neither observe nor control it (the write landed against a real DB file
-// the doubles knew nothing about, always returning "revision changed
-// during force-block" in tests).
+// than a raw DatabaseSync write: a raw write would bypass `store`/`readStore`
+// entirely, so tests injecting in-memory store doubles could neither observe
+// nor control it (the write would land against a real DB file the doubles
+// know nothing about, always returning "revision changed during force-block"
+// in tests).
 // Exported so other retry paths can reuse this instead of hitting the same
 // `setRunning failed: terminal` result and having no recovery — a subflow
-// item can finish failed on a flow that has since gone fully terminal (the
-// OTHER items in the same subflow resolved and closed the flow out from under
-// it).
+// item can finish failed on a flow that has since reached a fully terminal
+// state (the OTHER items in the same subflow resolved and closed the flow out
+// from under it).
 // Returns { applied: true, nextRevision } or { applied: false, reason }.
 export async function forceBlockOutOfMapFlow({ store, flowId, revision, stateJson, ownerSessionKey }) {
   const result = await store.forceBlock({
@@ -219,14 +218,13 @@ export function createRetryFailure({
       // failure event — so there is nothing left to retry. Fail clean
       // instead of silently re-running the node.
       //
-      // Prefer the exact execution_id anchor when the failure row has one
-      // (every failure recorded since this session's failure-linking work
-      // does) — ties eligibility to the SPECIFIC execution that produced
+      // Prefer the exact execution_id anchor when the failure row has one —
+      // ties eligibility to the SPECIFIC execution that produced
       // this failure, not just "some node named failureNode currently has
       // an error" (which errorNodes alone can't distinguish across
-      // visit_seq-repeated loop-back re-entries of the same node). Legacy
-      // rows recorded before invocation_id/execution_id existed fall back
-      // to the errorNodes Set membership check.
+      // visit_seq-repeated loop-back re-entries of the same node). A row
+      // with no execution_id falls back to the errorNodes Set membership
+      // check.
       const stillLive = failure.execution_id
         ? (await nodeExecutionsStore.getLatestExecutionForNode({ flowId, nodeId: failureNode, subflowKey: null }))?.executionId === failure.execution_id
         : errorNodes.has(failureNode);

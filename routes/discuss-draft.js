@@ -97,7 +97,7 @@ export async function persistRevisedMeta({ flowId, itemId, fields, store, logger
     const nextItems = items.map((it, i) => {
       if (i !== idx) return it;
       const rp = it.requestPayload ?? {};
-      // Legacy shape — no current gate-layout.js produces a top-level
+      // Defensive: no current gate-layout.js produces a top-level
       // requestPayload.editableFields (executor-helpers.js enforces every
       // gate declares `layout` explicitly), but patch it too in case
       // anything still reads it.

@@ -621,9 +621,9 @@ function summariseForChart(r) {
  *
  * A node id may be either top-level ("SCORE") or qualified
  * ("PROPOSE.DRAFT") for subflow children. Subflow-internal step
- * histories live in the branch store (not top-level state since the
- * branch-store migration), and we don't currently aggregate those —
- * top-level visits is the source of truth for v1.
+ * histories live in the branch store (not top-level state), and we don't
+ * currently aggregate those — top-level visits is the source of truth for
+ * v1.
  */
 export function computeNodeStats(runs, pipelineId, nodeId, errorsByFlow = null, visitedByFlow = null, lineageByNodeId = null) {
   runs = withResolvedSteps(runs, errorsByFlow);

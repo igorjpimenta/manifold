@@ -41,7 +41,7 @@ const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "skipped"
 //     task-revival. Without excluding it here, any childFlows:true
 //     descendant containing a kind:"agent" node would make this module's
 //     unbounded poll loop hang forever instead of surfacing the (already
-//     pre-existing, already-expected) blocked status promptly.
+//     already-set, already-expected) blocked status promptly.
 // Anything else non-terminal (running, queued on the shared admission pool,
 // blocked on its own children-pending) needs this process to keep running
 // blocked on its own children-pending) needs this process to keep running
@@ -91,7 +91,7 @@ async function findPending(rootFlowId, ctx) {
  * @param {number} [opts.logEveryMs] — progress log cadence while waiting, default 5000
  * @returns {Promise<{settled: true}>} — resolves once every flow in the
  *   tree is terminal or genuinely gate-blocked. No timeout: unbounded,
- *   same philosophy the CLI's pre-existing single-flow await already had
+ *   same philosophy the CLI's single-flow await already has
  *   ("ctrl-c to stop" is the documented escape hatch, not a silent give-up).
  */
 export async function waitForFlowSettlement(rootFlowId, ctx, { pollMs = 300, logEveryMs = 5000 } = {}) {

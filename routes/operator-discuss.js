@@ -100,9 +100,8 @@ export function createDiscussHandler({
     const sessionFile = sessions.resolveSessionFileForKey(agentId, session);
     const isFirstTurn = !sessions.sessionFileExists(sessionFile);
     if (isFirstTurn) {
-      // Touch only — thread identity lives in core's session roster
-      // (recorded pre-elev); nothing is stamped here and the id is never
-      // parsed.
+      // Touch only — thread identity lives in core's session roster;
+      // nothing is stamped here and the id is never parsed.
       try {
         sessions.ensureSessionFile(sessionFile);
       } catch (err) {

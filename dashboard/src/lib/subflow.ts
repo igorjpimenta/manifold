@@ -13,7 +13,7 @@ export interface SubflowOutcomeCounts {
   running: number;
   /** Terminal-without-business-success: GATE rejected, SUBMIT_CODE
    *  blocked (infra-unavailable, already-sent dedup, etc.), or other
-   *  silent skips. Used to be just `rejected` (GATE-only). */
+   *  silent skips. */
   skipped: number;
 }
 

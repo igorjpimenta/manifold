@@ -8,10 +8,8 @@
  * agent dispatch I/O anywhere in this fixture. GATE's pendingSelector/
  * edge logic is NOT stubbed away — it uses the real plain-item-id shape
  * TOUCH's own GATE uses (no round-scoping helper needed here, unlike
- * PROPOSE's GAP_GATE). SEND_NUDGE was a real kind:"fallback" node here
- * until an earlier rewrite retired that mechanism entirely — now a
- * plain "code" stand-in like every other
- * node in this fixture; the real cascade-migration coverage lives in
+ * PROPOSE's GAP_GATE). SEND_NUDGE is a plain "code" stand-in like every
+ * other node in this fixture; the real cascade-migration coverage lives in
  * workspace/.pipelines/test/unit/freelance_workana-touch-cadence/nodes/
  * touch/send-nudge.test.js.
  *

@@ -375,13 +375,12 @@ describe("GET /manifold/runs/:flowId/tree", () => {
     assert.equal(body.items[0].hasChildren, false, "unresolvable kind can't be subflow, so never expandable");
   });
 
-  // Real evidence this once actually happened in production: a flow ran
-  // and rendered correctly, its pipeline's directory got deleted
-  // afterward (or a node renamed/its kind changed), and the SAME flow's
-  // tree silently degraded to kind:null with no error. pipelineRegistryStore
-  // is what's supposed to prevent that — this row's kind/agent must come
-  // from the historical snapshot, not from pipelinesRef (which here has
-  // nothing at all for this pipeline, simulating the deleted-directory case).
+  // A pipeline's directory can be deleted (or a node renamed/its kind
+  // changed) while flows that dispatched under it still exist —
+  // pipelineRegistryStore is what's supposed to prevent that — this row's
+  // kind/agent must come from the historical snapshot, not from pipelinesRef
+  // (which here has nothing at all for this pipeline, simulating the
+  // deleted-directory case).
   test("a node whose pipeline definition has since changed/vanished still renders its ORIGINAL kind/agent, not null", async () => {
     resetMocks();
     const flow = { flowId: "flow-h", status: "succeeded", currentStep: null, stateJson: { pipelineId: "deleted_pipe" } };
@@ -393,7 +392,7 @@ describe("GET /manifold/runs/:flowId/tree", () => {
     registerRunRoutes(makeDeps(api, {
       readStore: { list: () => [], get: (id) => id === "flow-h" ? flow : null },
       // pipelinesRef has NOTHING for this pipeline at all — the directory
-      // is gone, exactly like the design doc's own repro.
+      // is gone.
       pipelinesRef: { value: new Map() },
       // pipelineRegistryStore still remembers what these nodes WERE at
       // their own dispatch time (invokedAt 5000/6000) — the whole point

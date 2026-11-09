@@ -4,7 +4,7 @@
 // pipelinesRef.value is a live, mutable, single-copy in-memory Map with
 // no history of its own, so once a node is renamed/removed or its whole
 // pipeline file is deleted, every past flow that dispatched under the
-// old shape loses the ability to render correctly, forever, with no
+// previous shape loses the ability to render correctly, forever, with no
 // error — just a silent fallback to kind:null.
 //
 // Write path: reconcilePipelineVersions(pipelinesMap, {logger}) — called

@@ -8,13 +8,11 @@
  * kind:"code" stand-in — zero real filesystem or agent dispatch I/O
  * anywhere in this fixture.
  *
- * The load-bearing assertion for THIS specific migration (unlike prior
- * cutovers, which were pure new-cutover E2Es): SCORE used a custom
- * groupId:"scored" under old branch-mode, which childFlows:true forbids
- * declaring at all — the group key becomes the node's own id "SCORE".
- * Test 3 below proves getAllSubflowGroups resolves under groups.SCORE, not
- * groups.scored — the exact rename freelance_workana-proposal's
- * PROPOSE.selector depends on live.
+ * The load-bearing assertion for THIS specific topology: childFlows:true
+ * forbids declaring a custom groupId at all, so the group key is the
+ * node's own id "SCORE". Test 3 below proves getAllSubflowGroups resolves
+ * under groups.SCORE, not groups.scored — the exact rename
+ * freelance_workana-proposal's PROPOSE.selector depends on live.
  *
  * Isolated-sandbox discipline (per the incident writeup):
  * independent tmp-sqlite run-store/node-executions/state-store instances,

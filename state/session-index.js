@@ -32,7 +32,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, async listForFlow() { return []; }, async recordThread() {}, async findThread() { return null; }, close() {} };
   }
 
-  // `agent` is accepted and ignored (kept for call-site compatibility).
+  // `agent` is accepted and ignored; nothing reads it.
   async function record({ flowId, session, nodeId = null, branchItemId = null, agent = null } = {}) {
     void agent;
     if (!flowId || !session) return;

@@ -22,8 +22,8 @@ const REGEX = {
   // when a pipeline is started via CLI or another harness. Format:
   //   agent:operator:(cli|operator):<flowId-uuid>
   // Treated as root (no parent). The `unknown` source variant is NOT included
-  // here because those historic flows were actually cron-triggered and need
-  // separate SQL attribution, not the operator label.
+  // here because those flows are actually cron-triggered and need separate
+  // SQL attribution, not the operator label.
   OPERATOR_TRIGGER: /^agent:operator:(cli|operator):([0-9a-f-]{36})$/,
   // Catch-all for manual sessions whose key is `agent:<id>:<tail>`
   // with no recognized scope prefix — e.g. hand-typed --session-id values

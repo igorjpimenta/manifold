@@ -168,9 +168,10 @@ export function registerOperatorRoutes({
         if (!result?.cancelled && result?.reason === "Flow not found.") {
           const sqlFlow = await readStore?.get(flowId);
           if (sqlFlow && !["succeeded", "failed", "cancelled", "skipped"].includes(sqlFlow.status)) {
-            // Use a store bound to the flow's actual ownerKey. Legacy flows were
-            // created under "graph-flow-owner"; the default store is bound to
-            // "manifold-owner". Mismatched ownerKey → setRunning returns applied=false.
+            // Use a store bound to the flow's actual ownerKey. A flow created
+            // under a different owner (e.g. "graph-flow-owner") needs its own
+            // store; the default store is bound to "manifold-owner". Mismatched
+            // ownerKey → setRunning returns applied=false.
             //
             // Must carry the same dependency set as the primary `store` and
             // index.js's own createCancelStore factory (nodeExecutionsStore,

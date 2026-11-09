@@ -58,9 +58,9 @@ export function displayRootLabel(rootKind, rootLabel) {
       return "Chat (Telegram)";
     case "operator-trigger":
       // rootLabel is the triggering pipelineId (routes/operator.js's
-      // recordTrigger call) — strip the team prefix for terseness. Legacy
-      // rows still literally "Operator runs" have no underscore, so
-      // stripTeamPrefix is a no-op on them.
+      // recordTrigger call) — strip the team prefix for terseness. A
+      // rootLabel of literally "Operator runs" has no underscore, so
+      // stripTeamPrefix is a no-op on it.
       return stripTeamPrefix(rootLabel);
     case "explicit":
       // The most common explicit purpose is "graph-flow-owner" — used by

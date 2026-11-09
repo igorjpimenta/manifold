@@ -23,8 +23,7 @@ const THRESHOLDS = [0.1, 0.5, 0.8, 1.0];
 
 // Persisted across gateway restarts so we don't re-alert on every reload of
 // the same already-over-budget day. The once-per-day-per-threshold debounce
-// is the only silencing mechanism — no operator-facing snooze (removed:
-// redundant with the debounce, no clear product job).
+// is the only silencing mechanism — there is no operator-facing snooze.
 const STATE_FILE = path.join(os.homedir(), ".openclaw", "lineage", ".alerted-thresholds.json");
 // Same physical file budget/index.js's gate_state lives in — each module
 // owns its own tables there.

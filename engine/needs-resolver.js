@@ -215,8 +215,8 @@ export function makeNeedsCtx({ node, flowId, runStore, nodeExecutionsStore, pipe
     }
     // Optional field-pick, so an author can ask for exactly the sub-key(s)
     // it actually reads instead of the whole ancestor node's output — the
-    // same "scoped read, not the whole blob" reasoning this doc's entire
-    // Option A/B history is built on, just applied at the single-node
+    // same "scoped read, not the whole blob" reasoning this file's own
+    // Option A/B design is built on, just applied at the single-node
     // granularity ctx.needs() operates at. `fields` is always an array,
     // even for a single key — no separate "unwrap to a bare value" mode,
     // so ctx.needs()'s return shape is always a dict, never sometimes-a-

@@ -416,18 +416,17 @@ export function registerRunRoutes({
     // invokedAt order can resolve to a stale snapshot if a later gate opens
     // out of the order assembleState() assumes. gate_records (a dedicated
     // per-flow accessor, one row per gate, no merge) is the staleness-safe
-    // source — same fix already applied to the engine's own human-gate
-    // reads when B2 landed.
+    // source — the engine's own human-gate branch reads and writes that same
+    // table.
     const gates = await nodeExecutionsStore.listGateRecordsForFlow(flow.flowId);
     // Strip `loop` from the stateJson payload — subflow data is served via
     // GET /manifold/runs/:flowId/subflows.
     // Strip `errors` too: failure_events is the sole store for error
-    // history, and errorEntries below is the normalized replacement. Rows
-    // persisted before that redirect still carry a baked-in errors[] in
-    // their stored stateJson; stripping it here keeps the wire contract
-    // clean for those too.
+    // history, and errorEntries below is the normalized replacement. A
+    // stored stateJson may still carry a baked-in errors[]; stripping it
+    // here keeps the wire contract clean for those too.
     const { loop: _loop, errors: _errors, gates: _staleGates, ...stateWithoutLegacy } = enrichedState;
-    // A subflow child is now just a flow_runs row with parent_invocation_id set —
+    // A subflow child is a flow_runs row with parent_invocation_id set —
     // resolve it back to the parent's flowId/nodeId/subflowKey so clients can
     // render a "Parent run" link. Also resolves this child's REAL top-level
     // pipelineId (its own stateJson.pipelineId is the synthetic

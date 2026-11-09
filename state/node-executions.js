@@ -34,9 +34,9 @@ function defaultDbPath() {
 
 // No size cap on resultJson: no cap width is both safe for real payloads
 // and small enough to matter, so writeResult() always stores the full
-// result. resultTooLargeBytes and the pre-existing-row handling in
-// result-replay.js/needs-resolver.js stay in place read-only, for
-// pre-existing rows whose capped result cannot be recovered.
+// result. resultTooLargeBytes and the row handling in
+// result-replay.js/needs-resolver.js stay in place read-only, for rows
+// that kept nothing at all.
 
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
 
@@ -84,8 +84,6 @@ async function _createStore(dbPath) {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     const { db, client } = await getSharedDb(dbPath);
-    // Tracking key deliberately kept as "step-timings" — pure version-history
-    // bookkeeping, unrelated to the table's current name/shape.
 
     // ── helpers ────────────────────────────────────────────────────────────
 

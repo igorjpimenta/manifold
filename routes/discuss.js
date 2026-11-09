@@ -737,8 +737,8 @@ export function registerDiscussHandlers({
       if (!parsed) parsed = { ok: false, code: "internal", error: err?.message ?? String(err) };
     }
     if (parsed?.ok) {
-      // No channel plugin anymore: replies go back through the same HTTP
-      // discuss route this history came from, or the WS dialog door.
+      // Replies go back through the same HTTP discuss route this history
+      // came from, or the WS dialog door.
       parsed.channelId = "manifold-dialog";
       parsed.channelInboundUrl = null;
     }

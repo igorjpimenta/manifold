@@ -10,8 +10,8 @@ import {
 
 // Each test gets its own fresh SQLite file so cap_versions history doesn't
 // leak between cases — never touches the real ~/.openclaw/ops.sqlite. The
-// legacy-file path is likewise pointed at a nonexistent file so seeding is
-// Isolated tmp file — deterministic (DEFAULT_CAP_USD/DEFAULT_LOCK_THRESHOLD).
+// file is an isolated tmp file, so seeding is deterministic
+// (DEFAULT_CAP_USD/DEFAULT_LOCK_THRESHOLD).
 async function freshStore() {
   const dbPath = path.join(os.tmpdir(), `manifold-cap-history-test-${randomUUID()}.sqlite`);
   await initCapStore({ dbPath });

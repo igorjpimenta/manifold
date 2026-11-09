@@ -446,8 +446,8 @@ describe("writeGateRecord() / getGateRecord()", () => {
 });
 
 // ─── listGateRecordsForFlow() ───────────────────────────────────────────────
-// Batch sibling of getGateRecord — B2.5's eventual routes/runs.js cutover
-// needs "every gate this flow has opened," not one specific node.
+// Batch sibling of getGateRecord — routes/runs.js needs "every gate this
+// flow has opened," not one specific node.
 
 describe("listGateRecordsForFlow()", () => {
   test("empty flow — no gates opened at all", async () => {

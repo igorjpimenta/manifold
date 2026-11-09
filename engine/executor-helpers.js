@@ -109,10 +109,9 @@ export function deepClone(v) {
 
 // Fallback reason for a blocked node whose result is a plain returned
 // waitJson (no blockedInfo/throw — see executor.js's own waitJson-persist
-// branch). node.renderForOperator is checked first; since no pipeline in
-// this codebase implements it, this kind-aware synthesis is what actually
-// fires in practice. Every OTHER wait kind (resource-lock,
-// needs-gateway-handoff, child-dispatch, flow-start, budget-gate-approval)
+// branch). This kind-aware synthesis is what fires in practice. Every OTHER
+// wait kind (resource-lock, needs-gateway-handoff, child-dispatch, flow-start,
+// budget-gate-approval)
 // already carries a real reason by construction and never reaches this —
 // only human-gate and children-pending route through the generic waitJson
 // path, so those are the two kinds worth a specific message here.

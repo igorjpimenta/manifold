@@ -15,10 +15,8 @@
  * functions' own mocked-I/O unit tests under workspace/.pipelines/
  * test/unit/freelance_workana-proposal/nodes/propose/).
  *
- * SUBMIT was a real kind:"fallback" node (code-then-agent, two entries)
- * here until an earlier rewrite retired that mechanism entirely — now a
- * plain single "code" stand-in like every other node in this fixture;
- * the real cascade-migration coverage lives
+ * SUBMIT is a plain single "code" stand-in like every other node in this
+ * fixture; the real cascade-migration coverage lives
  * in workspace/.pipelines/test/unit/freelance_workana-proposal/nodes/
  * propose/submit/.
  *

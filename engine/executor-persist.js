@@ -4,20 +4,18 @@ import { ENTRY_FIELDS } from "./needs-resolver.js";
 
 export { REVISION_RETRY_LIMIT };
 
-// The write cutover: state_json stops accumulating a key per dispatched
-// node — a node's own output lives exclusively in
-// flow_node_invocations.result_json and is reconstructed on read via
-// assembleState() (already wired into every dispatch-loop read site). What's
-// persisted here narrows to entry/bookkeeping data only: pipelineId,
-// everything in needs-resolver.js's ENTRY_FIELDS (the same allowlist
-// ctx.needs({entry}) already validates against — this is its exact intended
-// meaning), and the 3 fields buildChildInitialState
+// state_json carries no per-dispatched-node key — a node's own output lives
+// exclusively in flow_node_invocations.result_json and is reconstructed on
+// read via assembleState() (already wired into every dispatch-loop read
+// site). What's persisted here narrows to entry/bookkeeping data only:
+// pipelineId, everything in needs-resolver.js's ENTRY_FIELDS (the same
+// allowlist ctx.needs({entry}) already validates against — this is its exact
+// intended meaning), and the 3 fields buildChildInitialState
 // (executor-subflow-children.js) sets on a freshly spawned child. `gates` is
-// deliberately NOT in this list — it's
-// sourced exclusively from gate_records (executor-nodes.js's human-gate
-// branch stopped writing state.gates in the same change that added this
-// filter) and reading it back through state_json would reopen the staleness
-// bug gate_records exists to prevent.
+// deliberately NOT in this list — it is sourced exclusively from
+// gate_records (executor-nodes.js's human-gate branch does not write
+// state.gates) and reading it back through state_json would reopen the
+// staleness bug gate_records exists to prevent.
 //
 // Applied centrally, inside these 6 functions — every persist path funnels
 // through here, so the filter is a single choke point to audit instead of
@@ -25,11 +23,9 @@ export { REVISION_RETRY_LIMIT };
 //
 // A global, unconditional filter, not a per-flow gate: the alternative
 // ("check whether THIS flow's current state_json has 100% resultJson
-// coverage before dropping its blob") was considered and rejected once the
-// backfill closed every genuine gap across every non-test, non-terminal
-// flow (verified via a full-history audit, not sampling) — carrying that
-// runtime check forever would guard against a scenario the backfill + the
-// live write path already rule out structurally, not just today.
+// coverage before dropping its blob") was considered and rejected — the
+// runtime check would test for a coverage gap the write path does not
+// produce, and it would run on every persist.
 const PERSISTED_FIELDS = new Set([...ENTRY_FIELDS, "pipelineId", "item", "itemIndex", "parentItem"]);
 
 function toPersistableState(state) {

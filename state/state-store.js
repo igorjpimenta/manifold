@@ -81,8 +81,8 @@ async function triggerAdmissionRelease(flowId, { admissionQueueStore, runStore, 
   }
 }
 
-// _session kept in signature for call-site compatibility, used as
-// ownerKey on new flows.
+// _session is the owner session key: new flows are created with it as
+// ownerKey.
 //
 // nodeExecutionsStore + resumeParentRef support subflow-parent resumption
 // (see child-resume-trigger.js) — resumeParentRef is a mutable box because

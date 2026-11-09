@@ -80,11 +80,11 @@ async function getMigratedLoopGroup({ flowId, groupId, runStore, nodeExecutionsS
   // flow_runs child — dispatchLoopChildren never creates an invocation
   // without also spawning one (engine/executor-subflow-children.js). If
   // invocationIds is non-empty but children comes back empty, these
-  // invocations aren't real subflow children at all — they're historical
-  // pre-Milestone-9 sub-node timing rows that happen to share a node_id
-  // with this "group" (a real risk since flow_node_invocations.group_id
-  // was dropped — subflow_key IS NOT NULL alone can't distinguish this
-  // specific case). Return null so the caller sees an empty group.
+  // invocations aren't real subflow children at all — they are timing rows
+  // that happen to share a node_id with this "group" (a real risk since
+  // flow_node_invocations carries no group_id column — subflow_key IS NOT
+  // NULL alone can't distinguish this specific case). Return null so the
+  // caller sees an empty group.
   if (children.length === 0) return null;
   const group = {};
   for (const child of children) {

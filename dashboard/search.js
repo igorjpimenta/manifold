@@ -47,7 +47,7 @@ export function searchRuns(runs, query, opts = {}) {
   const trimmed = String(query ?? "").trim();
   if (!trimmed) {
     // status-only mode: return every status-filtered run as a hit with
-    // no per-field snippets. Hit shape stays compatible (matches: []).
+    // no per-field snippets. Hit shape keeps matches: [] either way.
     if (statusFilter) {
       const hits = runs.slice(0, limit).map((r) => ({
         flowId: r.flowId,

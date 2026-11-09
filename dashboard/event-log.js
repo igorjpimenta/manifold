@@ -77,10 +77,10 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     // same call). Routed through batch-writer's enqueueRaw rather than a
     // bare client.execute(): this fires on every run.created/run.updated/
     // run.ended transition anywhere in the system — the single
-    // highest-frequency write in the app — so an unretried write here both
-    // risked silently dropping history rows under SQLITE_BUSY contention
-    // and meant every one of those transitions issued its own individual
-    // round-trip instead of coalescing. enqueueRaw resolves its own shared
+    // highest-frequency write in the app — so an unretried write here would
+    // silently drop history rows under SQLITE_BUSY contention and make every
+    // one of those transitions issue its own individual round-trip instead of
+    // coalescing. enqueueRaw resolves its own shared
     // connection via dbPath independently of this bus's own `_client` (used
     // only for reads/close below), so this needs no dependency on `_client`
     // having resolved yet either.
@@ -176,7 +176,8 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
     async start() {
       if (running) return;
       running = true;
-      // Prime the snapshot without emitting flow_created for pre-existing rows.
+      // Prime the snapshot without emitting flow_created for rows already
+      // in the table.
       // One batched listVisitedNodeIdsByFlow() call for every row instead of
       // one query per flow — same batching rationale as stats.js's
       // tree-summary fix.
@@ -236,7 +237,8 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
         });
         return rows.map((r) => ({
           // event_type stores the canonical kind outright; no read-time
-          // translation — pre-break rows are out of scope by design.
+          // translation — a row whose event_type is not canonical is out of
+          // scope by design.
           kind: r.event_type,
           flowId: r.flow_id,
           at: r.occurred_at,

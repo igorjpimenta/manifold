@@ -1549,9 +1549,9 @@ describe("applyResolutionsAndResume — root-gate apply() hook", () => {
 
 describe("applyResolutionsAndResume — branch-mode apply() hook", () => {
   test("does not call apply on a subflow node that has no .apply property directly on it", async () => {
-    // The branch-row lookup path (subNodeId -> sub-node apply)
-    // has been removed. A subflow node with .apply only on inner nodes — not directly
-    // on the top-level pipelineNode — will not have its inner apply() reached.
+    // The apply() hook is looked up on the top-level pipelineNode only: a
+    // subflow node with .apply only on inner nodes — not directly on the
+    // top-level pipelineNode — will not have its inner apply() reached.
     // Resolution itself should still proceed normally.
     const flowId = randomUUID();
     const branchKey = "listing-a";

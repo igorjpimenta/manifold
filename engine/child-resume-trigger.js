@@ -1,5 +1,5 @@
 // child-resume-trigger.js — wakes a parent flow once every child spawned by
-// one subflow-node firing has gone terminal.
+// one subflow-node firing has reached a terminal state.
 //
 // Hooked into state/state-store.js's finish/skip/fail/cancel methods
 // themselves (not engine/executor-persist.js's wrappers) — boot/flow-
@@ -8,8 +8,7 @@
 // wrapper level would silently miss waking a parent whose child got
 // displaced at boot.
 //
-// Not wired into the live executor yet (real loop-node dispatch hasn't
-// been cut over to it) — tested here against synthetic parent/child pairs.
+// Fires for every child terminal transition, whichever path drove it.
 
 import { isTerminal } from "./executor-helpers.js";
 import { wakePromotedRelease } from "./admission-promotion-resume.js";
@@ -69,8 +68,8 @@ export function subflowOutcomeSatisfied(mode, children) {
 // surviving children can still turn that same fan-out satisfied afterward.
 // When that happens and the caller supplies `repairGuard` (only
 // maybeResumeParent does — the boot/flow-revival.js and
-// engine/admission-promotion-resume.js callers don't, and get the
-// pre-repair behavior: `flip_failed:not_terminal`), a 'failed'
+// engine/admission-promotion-resume.js callers don't, and get
+// `flip_failed:not_terminal`), a 'failed'
 // parent is force-unblocked back to 'blocked' first, then the normal
 // casSetRunning flip proceeds against the freshly-bumped revision.
 // 'succeeded'/'cancelled'/'skipped' are never repaired — only 'failed' is
@@ -226,7 +225,7 @@ export async function flipToRunningAndResume({ parentFlowId, runStore, resume, l
 // at this node via `failFlow` instead of resuming it, so a mode-mismatched
 // fan-out never silently continues into its normal next step. `pipelinesRef`
 // is optional — if omitted (or the node/pipeline can't be resolved), mode
-// enforcement is skipped and behavior is the pre-mode-check unconditional
+// enforcement is skipped and behavior is the unconditional
 // resume; only real callers wire it, tests may omit it deliberately.
 // Fire-and-forget by design — callers should not await this inline with a
 // CAS write; call it after, uninstrumented failures are logged and swallowed.

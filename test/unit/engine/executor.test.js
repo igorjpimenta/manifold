@@ -669,13 +669,6 @@ describe("runFlow — failure-linking", () => {
   });
 });
 
-// recordFromTerminalState's call site at the clean __end__ branch (and its
-// dedicated await-discipline regression coverage here — the missing-`await`
-// incident this section documented) is gone — the function itself was
-// deleted once STAMP/CACHE_SAVE, the last two soft-error producers, were
-// converted to throw. Nothing async remains at that branch to have the same
-// missing-await failure mode.
-
 // ── state persist failure on the plain success path ─────────────────────────
 // Regression coverage for the runaway-retry incident: a node
 // executes successfully, but persistRunningRetrying's underlying
@@ -1393,8 +1386,9 @@ describe("runFlow — blocked-wait reason synthesis", () => {
 // node.circuitBreaker:true opt-in, checked by dispatchAgentEntry
 // (executor-nodes.js) for ANY "agent"-kind node regardless of which kind of
 // flow it's running inside — not specific to cascade sub-nodes, though
-// those are exactly the nodes that need this opt-in now that kind:"fallback"
-// (which applied this unconditionally to every agent entry) is gone.
+// those are exactly the nodes that need this opt-in: a kind:"fallback" node
+// (which would apply this unconditionally to every agent entry) is not a
+// kind this engine dispatches.
 
 // Methods return Promises — the real store is async, and a sync mock here
 // would let a missing `await` at the call site pass green.

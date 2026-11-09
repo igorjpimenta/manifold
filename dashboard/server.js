@@ -971,8 +971,8 @@ function summariseSubflowRollup(r) {
 function fullRun(r, runErrors = []) {
   // Strip `errors` — failure_events is the sole store for error history;
   // errorEntries below (runErrors, read from failureStore) is the
-  // normalized replacement. Rows written before that redirect may still
-  // carry a baked-in errors[] in their stored stateJson.
+  // normalized replacement. A stored stateJson may still carry a baked-in
+  // errors[]; stripping it here keeps the wire contract uniform.
   const { errors: _errors, ...stateWithoutLegacy } = r.stateJson ?? {};
   return {
     flowId: r.flowId,

@@ -79,8 +79,7 @@ describe("waitForFlowSettlement", () => {
   // resume anywhere in the codebase (executor-errors.js's own docstring).
   // Without excluding it as a rest point, this module's unbounded poll
   // loop would hang forever on any pipeline hitting this, instead of
-  // surfacing the (already pre-existing, already-expected) blocked status
-  // promptly.
+  // surfacing the (already-set, already-expected) blocked status promptly.
   test("blocked on needs-gateway-handoff (a kind:\"agent\" node dispatched outside gateway context): resolves immediately, does not hang", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;
