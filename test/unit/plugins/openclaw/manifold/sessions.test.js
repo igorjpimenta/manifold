@@ -7,7 +7,7 @@ import {
   resolveSessionFile,
   resolveSessionFileForKey,
   newDiscussSessionId,
-} from "./sessions.js";
+} from "../../../../../plugins/openclaw/manifold/sessions.js";
 
 let prevHome;
 let home;

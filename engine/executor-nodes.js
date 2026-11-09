@@ -151,12 +151,6 @@ export function createNodeRunner({
       pipelineId, agentId: entry.agent ?? null,
     });
 
-    // Browser tool calls this session makes lock as this invocation
-    // (extensions/browser-lease), the same owner the node-level
-    // crossProcessLock uses — so the node's own lock and its agent's tool
-    // leases re-enter instead of blocking each other.
-    const lockOwner = invocationLockOwner(entry, { invocationId, flowId, nodeId, pipelineId });
-    if (lockOwner) registerSessionOwner(session, lockOwner);
     try {
       return await dispatchAgentWithRetry({
         node: entry, nodeId, session, initialMessage: message,
@@ -173,8 +167,6 @@ export function createNodeRunner({
         await nodeHealthStore?.markUnhealthy(pipelineId, nodeId, { reason: err?.message ?? String(err), flowId });
       }
       throw err;
-    } finally {
-      clearSessionOwner(session);
     }
   }
 
