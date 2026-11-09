@@ -33,7 +33,7 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2] } }), resultTooLargeBytes: null } },
+      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2] } }) } },
     });
     const result = await resolveOneNeed({ flowId: "child", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
     assert.deepEqual(result, { status: "ready", value: { listings: [1, 2] } });
@@ -43,7 +43,7 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: null, resultJson: null, resultTooLargeBytes: null } },
+      results: { "parent:SCAN": { resultWrittenAt: null, resultJson: null } },
     });
     const result = await resolveOneNeed({ flowId: "child", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
     assert.equal(result.status, "not-ready");
@@ -68,7 +68,7 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
         "inv-child": { flowId: "child" },
         "inv-root-SCAN": { flowId: "root" },
       },
-      results: { "root:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { ok: true } }), resultTooLargeBytes: null } },
+      results: { "root:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { ok: true } }) } },
     });
     const result = await resolveOneNeed({ flowId: "grandchild", hops: 2, nodeId: "SCAN", runStore, nodeExecutionsStore });
     assert.deepEqual(result, { status: "ready", value: { ok: true } });
@@ -82,41 +82,11 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
     assert.equal(result.status, "not-found");
   });
 
-  it("a legacy pre-cap-removal row (resultJson null, resultTooLargeBytes set) resolves ready with the _resultTooLarge marker, same as assembleState()", async () => {
-    // node-executions.js's writeResult() doesn't cap results at all
-    // and never sets resultTooLargeBytes on a new
-    // write — this row shape can only come from before that removal,
-    // where the real value was genuinely never stored.
-    const { runStore, nodeExecutionsStore } = makeStore({
-      flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
-      invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: null, resultTooLargeBytes: 165000 } },
-    });
-    const result = await resolveOneNeed({ flowId: "child", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
-    assert.deepEqual(result, { status: "ready", value: { _resultTooLarge: true, bytes: 165000 } });
-  });
-
-  it("a legacy row with resultJson non-null AND resultTooLargeBytes set (from the brief field-trim era) resolves the real surviving value, not the bytes-only marker", async () => {
-    const { runStore, nodeExecutionsStore } = makeStore({
-      flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
-      invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: {
-        "parent:SCAN": {
-          resultWrittenAt: 1000,
-          resultJson: JSON.stringify({ SCAN: { ok: true }, _resultDroppedFields: ["listings"] }),
-          resultTooLargeBytes: 165000,
-        },
-      },
-    });
-    const result = await resolveOneNeed({ flowId: "child", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
-    assert.deepEqual(result, { status: "ready", value: { ok: true } }, "real (if partial) data beats a bytes-only marker whenever resultJson is present");
-  });
-
   it("a corrupted resultJson row resolves as not-found, not a thrown error", async () => {
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: "{not valid", resultTooLargeBytes: null } },
+      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: "{not valid" } },
     });
     const result = await resolveOneNeed({ flowId: "child", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
     assert.equal(result.status, "not-found");
@@ -127,7 +97,7 @@ describe("resolveOneNeed — hops:0 (same-flow)", () => {
   it("ready — resolves the declaring node's OWN flow's completed sibling result, no walk", async () => {
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { self: { parentInvocationId: "inv-parent-SCAN" } }, // parentInvocationId irrelevant at hops:0 — never walked
-      results: { "self:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2] } }), resultTooLargeBytes: null } },
+      results: { "self:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2] } }) } },
     });
     const result = await resolveOneNeed({ flowId: "self", hops: 0, nodeId: "SCAN", runStore, nodeExecutionsStore });
     assert.deepEqual(result, { status: "ready", value: { listings: [1, 2] } });
@@ -136,7 +106,7 @@ describe("resolveOneNeed — hops:0 (same-flow)", () => {
   it("not-ready — same-flow sibling node hasn't completed yet", async () => {
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { self: {} },
-      results: { "self:SCAN": { resultWrittenAt: null, resultJson: null, resultTooLargeBytes: null } },
+      results: { "self:SCAN": { resultWrittenAt: null, resultJson: null } },
     });
     const result = await resolveOneNeed({ flowId: "self", hops: 0, nodeId: "SCAN", runStore, nodeExecutionsStore });
     assert.equal(result.status, "not-ready");
@@ -303,7 +273,7 @@ describe("makeNeedsCtx — the ctx.needs(varName) accessor a node's own code act
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1] } }), resultTooLargeBytes: null } },
+      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1] } }) } },
     });
     const node = { needs: { scan: { hops: 1, nodeId: "SCAN" } } };
     const needs = makeNeedsCtx({ node, flowId: "child", runStore, nodeExecutionsStore });
@@ -314,7 +284,7 @@ describe("makeNeedsCtx — the ctx.needs(varName) accessor a node's own code act
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: null, resultJson: null, resultTooLargeBytes: null } },
+      results: { "parent:SCAN": { resultWrittenAt: null, resultJson: null } },
     });
     const node = { needs: { scan: { hops: 1, nodeId: "SCAN" } } };
     const needs = makeNeedsCtx({ node, flowId: "child", runStore, nodeExecutionsStore });
@@ -350,7 +320,7 @@ describe("makeNeedsCtx — the ctx.needs(varName) accessor a node's own code act
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2], filtered: [1], bono: 5 } }), resultTooLargeBytes: null } },
+      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2], filtered: [1], bono: 5 } }) } },
     });
     const node = { needs: { picked: { hops: 1, nodeId: "SCAN", fields: ["listings", "bono"] } } };
     const needs = makeNeedsCtx({ node, flowId: "child", runStore, nodeExecutionsStore });
@@ -361,7 +331,7 @@ describe("makeNeedsCtx — the ctx.needs(varName) accessor a node's own code act
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2], filtered: [1] } }), resultTooLargeBytes: null } },
+      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2], filtered: [1] } }) } },
     });
     const node = { needs: { listings: { hops: 1, nodeId: "SCAN", fields: ["listings"] } } };
     const needs = makeNeedsCtx({ node, flowId: "child", runStore, nodeExecutionsStore });

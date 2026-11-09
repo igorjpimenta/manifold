@@ -69,7 +69,7 @@ function makeNodeExecutionsStore() {
       const m = resultsByFlow.get(flowId);
       if (!m) return [];
       return [...m.entries()].map(([nodeId, resultJson]) => ({
-        nodeId, visitSeq: 1, resultWrittenAt: Date.now(), resultTooLargeBytes: null, resultJson,
+        nodeId, visitSeq: 1, resultWrittenAt: Date.now(), resultJson,
       }));
     },
     // gate_records (MIGRATIONS v11) — a gate node's own point-identity
@@ -142,7 +142,7 @@ function makeSpyNodeExecutionsStore({ findCurrentStep: findCurrentStepOverride =
       const m = resultsByFlow.get(flowId);
       if (!m) return [];
       return [...m.entries()].map(([nodeId, resultJson]) => ({
-        nodeId, visitSeq: 1, resultWrittenAt: Date.now(), resultTooLargeBytes: null, resultJson,
+        nodeId, visitSeq: 1, resultWrittenAt: Date.now(), resultJson,
       }));
     },
     // Option B, Phase B0 — records every call so tests can assert exactly

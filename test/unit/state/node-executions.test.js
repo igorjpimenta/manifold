@@ -249,8 +249,7 @@ describe("write()", () => {
 // ─── writeResult() ───────────────────────────────────────────────────────────
 // Option B, Phase B0 — additive
 // resultJson write. No size cap (see node-executions.js's
-// own header comment): a result of any size is always stored in full,
-// resultTooLargeBytes always written null.
+// own header comment): a result of any size is always stored in full.
 
 describe("writeResult()", () => {
   test("writes resultJson + resultWrittenAt on a normal call", async () => {
@@ -262,12 +261,11 @@ describe("writeResult()", () => {
     const expectedBytes = Buffer.byteLength(JSON.stringify({ text: "hello", ok: true }), "utf8");
     assert.deepEqual(result, { ok: true, bytes: expectedBytes });
     const { rows } = await store._db.execute({
-      sql: `SELECT result_json, result_written_at, result_too_large_bytes FROM flow_node_invocations WHERE id = ?`,
+      sql: `SELECT result_json, result_written_at FROM flow_node_invocations WHERE id = ?`,
       args: [invocationId],
     });
     assert.deepEqual(JSON.parse(rows[0].result_json), { text: "hello", ok: true });
     assert.ok(Number(rows[0].result_written_at) >= before);
-    assert.equal(rows[0].result_too_large_bytes, null);
   });
 
   test("a retry-overwrite (second call, same invocation) succeeds and replaces the value", async () => {
@@ -285,7 +283,7 @@ describe("writeResult()", () => {
     assert.deepEqual(JSON.parse(rows[0].result_json), { attempt: 2 });
   });
 
-  test("a result well over 64KB is stored in full, byte-for-byte, resultTooLargeBytes stays null", async () => {
+  test("a result well over 64KB is stored in full, byte-for-byte", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "SCAN", enteredAt: 1, exitedAt: 2, kind: "fresh" });
@@ -305,10 +303,9 @@ describe("writeResult()", () => {
     assert.equal(result.ok, true);
     assert.ok(result.bytes > 64 * 1024, "sanity: this really is bigger than 64KB");
     const { rows } = await store._db.execute({
-      sql: `SELECT result_json, result_too_large_bytes FROM flow_node_invocations WHERE id = ?`,
+      sql: `SELECT result_json FROM flow_node_invocations WHERE id = ?`,
       args: [invocationId],
     });
-    assert.equal(rows[0].result_too_large_bytes, null, "no size cap left to record a breach of");
     assert.deepEqual(JSON.parse(rows[0].result_json), big, "the full result, including `listings`, is stored — nothing dropped");
   });
 
@@ -320,10 +317,9 @@ describe("writeResult()", () => {
     const result = await store.writeResult(invocationId, bigArray);
     assert.equal(result.ok, true);
     const { rows } = await store._db.execute({
-      sql: `SELECT result_json, result_too_large_bytes FROM flow_node_invocations WHERE id = ?`,
+      sql: `SELECT result_json FROM flow_node_invocations WHERE id = ?`,
       args: [invocationId],
     });
-    assert.equal(rows[0].result_too_large_bytes, null);
     assert.deepEqual(JSON.parse(rows[0].result_json), bigArray);
   });
 
@@ -504,7 +500,7 @@ describe("listResultsForFlow()", () => {
     assert.deepEqual(await store.listResultsForFlow(randomUUID()), []);
   });
 
-  test("basic round trip: one node, resultWrittenAt/resultJson/resultTooLargeBytes map correctly", async () => {
+  test("basic round trip: one node, resultWrittenAt/resultJson map correctly", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "DRAFT", enteredAt: 1, exitedAt: 2, kind: "fresh" });
@@ -515,7 +511,6 @@ describe("listResultsForFlow()", () => {
     assert.equal(results[0].visitSeq, 1);
     assert.deepEqual(JSON.parse(results[0].resultJson), { DRAFT: { text: "hello" } });
     assert.ok(results[0].resultWrittenAt != null);
-    assert.equal(results[0].resultTooLargeBytes, null);
   });
 
   // A dispatch with no resultJson written yet must be excluded from the SQL

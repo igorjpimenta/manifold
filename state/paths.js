@@ -10,7 +10,7 @@ const require = createRequire(import.meta.url);
 // Lazy CJS binding (not a static named import) so ESM test mocks of
 // node:fs that only stub the functions they intercept keep linking.
 const fs = require("node:fs");
-const { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } = fs;
+const { mkdirSync } = fs;
 
 export function defaultDataDir(home = os.homedir()) {
   return path.join(home, ".manifold");
@@ -49,112 +49,17 @@ export function stateFile(dataDir) {
   return path.join(dataDir, "state", "manifold-paused.json");
 }
 
-function migrationMarkerPath(dataDir) {
-  return path.join(dataDir, ".migrated.json");
-}
-
-function preCanonicalDbPath(home, name) {
-  return path.join(home, ".openclaw", name);
-}
-
-// One-time copy from harness-managed paths into the core-owned data dir.
-// Copy (never move): the source files stay where they are; after this
-// one-time copy nothing reads them.
-// Integrity-checked after copy; throws on a damaged source so boot refuses
-// loudly instead of serving a torn store. Idempotent via the marker file.
-// Any other failure (missing native module, unwritable dir) is logged, not
-// thrown — boot must not fail on a best-effort migration.
-export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } = {}) {
+// Creates the store home if it is missing. The store lives in one
+// core-owned directory: MANIFOLD_DATA_DIR, else the per-user directory.
+// A failure to create it is logged, not thrown — boot must not die on a
+// store it will report as unusable anyway.
+export function ensureDataDir({ dataDir, logger = null } = {}) {
   try {
     mkdirSync(dataDir, { recursive: true });
+    return { ok: true };
   } catch (err) {
     logger?.warn?.(`paths: cannot create data dir ${dataDir}: ${err?.message ?? err}`);
-    return { migrated: false };
-  }
-  if (existsSync(migrationMarkerPath(dataDir))) return { migrated: false };
-  const runtime = runtimeDbPath(dataDir);
-  const ops = opsDbPath(dataDir);
-  if (existsSync(runtime) && existsSync(ops)) {
-    try {
-      writeFileSync(migrationMarkerPath(dataDir), JSON.stringify({ at: new Date().toISOString(), from: null }) + "\n");
-    } catch (err) {
-      logger?.warn?.(`paths: cannot write migration marker: ${err?.message ?? err}`);
-    }
-    return { migrated: false };
-  }
-  const preCanonicalRuntime = preCanonicalDbPath(home, "runtime.sqlite");
-  const preCanonicalOps = preCanonicalDbPath(home, "ops.sqlite");
-  const sources = [];
-  if (existsSync(preCanonicalRuntime) && !existsSync(runtime)) sources.push([preCanonicalRuntime, runtime]);
-  if (existsSync(preCanonicalOps) && !existsSync(ops)) sources.push([preCanonicalOps, ops]);
-  if (sources.length === 0) {
-    // Fresh install: nothing to copy. The marker records that the decision
-    // was made, so a later-appearing source file is never picked up mid-life
-    // (that would fork the store).
-    try {
-      writeFileSync(migrationMarkerPath(dataDir), JSON.stringify({ at: new Date().toISOString(), from: null, fresh: true }) + "\n");
-    } catch (err) {
-      logger?.warn?.(`paths: cannot write migration marker: ${err?.message ?? err}`);
-    }
-    return { migrated: false };
-  }
-  for (const [src, dest] of sources) {
-    copyFileSync(src, dest);
-    logger?.info?.(`paths: migrated ${src} -> ${dest}`);
-  }
-  // Loud throw on a damaged source is the one allowed throw: boot must
-  // refuse a torn store rather than serve it. An unavailable verifier is
-  // a loud log, not a throw — the marker records the decision either way
-  // so a later-appearing source file can never fork the store.
-  let verified = true;
-  try {
-    verifyCopies(sources.map(([, dest]) => dest));
-  } catch (err) {
-    if (err?.code !== "MANIFOLD_VERIFY_UNAVAILABLE") throw err;
-    verified = false;
-    logger?.error?.(`paths: migrated copies UNVERIFIED: ${err?.message ?? err}`);
-  }
-  try {
-    writeFileSync(
-      migrationMarkerPath(dataDir),
-      JSON.stringify({ at: new Date().toISOString(), from: sources.map(([src]) => src), verified }) + "\n",
-    );
-  } catch (err) {
-    logger?.warn?.(`paths: cannot write migration marker: ${err?.message ?? err}`);
-  }
-  return { migrated: true, from: sources.map(([src]) => src) };
-}
-
-// quick_check (not full integrity_check — multi-GB primaries would add
-// minutes to first boot) on every copied file. Lazy native import so this
-// module stays light for callers that never migrate.
-function verifyCopies(destPaths) {
-  for (const dest of destPaths) {
-    let Database;
-    try {
-      const mod = require("better-sqlite3");
-      Database = mod?.default ?? mod;
-    } catch {
-      const err = new Error(`paths: cannot verify migrated copy ${dest} (better-sqlite3 unavailable)`);
-      err.code = "MANIFOLD_VERIFY_UNAVAILABLE";
-      throw err;
-    }
-    const db = new Database(dest, { readonly: true });
-    try {
-      const row = db.prepare("PRAGMA quick_check;").get();
-      const out = row ? Object.values(row)[0] : null;
-      if (out !== "ok") throw new Error(`paths: migrated copy failed quick_check: ${dest}: ${out}`);
-    } finally {
-      db.close();
-    }
-  }
-}
-
-export function readMigrationMarker(dataDir) {
-  try {
-    return JSON.parse(readFileSync(migrationMarkerPath(dataDir), "utf8"));
-  } catch {
-    return null;
+    return { ok: false };
   }
 }
 

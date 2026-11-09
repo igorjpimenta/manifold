@@ -241,9 +241,8 @@ export function detectSkippedSentinel(result) {
 //
 // writeResult() (state/node-executions.js) does not cap results (see its
 // own header comment) — a node's real value is always what lands here. A
-// `{ _resultTooLarge: true, bytes }` marker at a node's own key surfaces
-// only for a row that kept no result at all: the real value was never
-// stored and isn't recoverable.
+// row that kept no result at all carries no node key: the real value was
+// never stored and isn't recoverable.
 export async function assembleState(flowId, { runStore, nodeExecutionsStore, baseState = {} } = {}) {
   const results = (await nodeExecutionsStore?.listResultsForFlow?.(flowId)) ?? [];
   let state = replayResults(baseState, results);

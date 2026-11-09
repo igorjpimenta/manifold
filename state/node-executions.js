@@ -32,11 +32,9 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// No size cap on resultJson: no cap width is both safe for real payloads
-// and small enough to matter, so writeResult() always stores the full
-// result. resultTooLargeBytes and the pre-existing-row handling in
-// result-replay.js/needs-resolver.js stay in place read-only, for
-// pre-existing rows whose capped result cannot be recovered.
+// No size cap on resultJson: writeResult() always stores the full result.
+// A row that kept no result at all carries a null resultJson and a null
+// resultWrittenAt, and every reader treats that as "not completed".
 
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
 
@@ -346,9 +344,7 @@ async function _createStore(dbPath) {
       },
 
       // Writes an invocation's own resultJson once it completes, no size
-      // cap (see this file's own header comment). resultTooLargeBytes is
-      // always written null here — only a row that kept no result at all
-      // carries a byte count.
+      // cap (see this file's own header comment).
       //
       // Two things this deliberately isn't: (1) it doesn't throw on
       // ordinary failure — same fire-and-forget contract as write() above,
@@ -391,7 +387,7 @@ async function _createStore(dbPath) {
               ? and(eq(flowNodeInvocations.id, invocationId), isNull(flowNodeInvocations.resultWrittenAt))
               : and(eq(flowNodeInvocations.id, invocationId), eq(flowNodeInvocations.resultWrittenAt, expected));
             const r = await db.update(flowNodeInvocations)
-              .set({ resultJson: serialized, resultWrittenAt: now, resultTooLargeBytes: null })
+              .set({ resultJson: serialized, resultWrittenAt: now })
               .where(whereExpected);
             if (r.rowsAffected === 0) return { ok: false, reason: "race" };
             return { ok: true, bytes: byteLength };
@@ -584,7 +580,7 @@ async function _createStore(dbPath) {
           // mode is silent and livelocks: a LOOP node's edge condition
           // never advances and the node re-dispatches forever.
           const { rows } = await client.execute({
-            sql: `SELECT node_id, visit_seq, result_json, result_written_at, result_too_large_bytes
+            sql: `SELECT node_id, visit_seq, result_json, result_written_at
                     FROM flow_node_invocations
                    WHERE flow_id = ? AND subflow_key IS NULL AND result_written_at IS NOT NULL
                    ORDER BY invoked_at ASC, rowid ASC`,
@@ -599,7 +595,6 @@ async function _createStore(dbPath) {
             nodeId: r.node_id,
             visitSeq: Number(r.visit_seq),
             resultWrittenAt: r.result_written_at != null ? Number(r.result_written_at) : null,
-            resultTooLargeBytes: r.result_too_large_bytes != null ? Number(r.result_too_large_bytes) : null,
             resultJson: r.result_json,
           }));
         } catch { return []; }
@@ -618,7 +613,7 @@ async function _createStore(dbPath) {
       async getResultForNode(flowId, nodeId) {
         try {
           const { rows } = await client.execute({
-            sql: `SELECT node_id, visit_seq, result_json, result_written_at, result_too_large_bytes
+            sql: `SELECT node_id, visit_seq, result_json, result_written_at
                     FROM flow_node_invocations
                    WHERE flow_id = ? AND node_id = ? AND subflow_key IS NULL
                    ORDER BY invoked_at DESC, rowid DESC
@@ -631,7 +626,6 @@ async function _createStore(dbPath) {
             nodeId: r.node_id,
             visitSeq: Number(r.visit_seq),
             resultWrittenAt: r.result_written_at != null ? Number(r.result_written_at) : null,
-            resultTooLargeBytes: r.result_too_large_bytes != null ? Number(r.result_too_large_bytes) : null,
             resultJson: r.result_json,
           };
         } catch { return null; }

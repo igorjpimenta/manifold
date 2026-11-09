@@ -526,7 +526,7 @@ describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () =>
     listGateRecordsForFlowImpl = () => ({});
     listResultsForFlowImpl = (flowId) => {
       assert.equal(flowId, "flow-resultjson");
-      return [{ nodeId: "SCAN", resultJson: JSON.stringify({ SCAN: { listings: ["a", "b"] } }), resultWrittenAt: 12345, resultTooLargeBytes: null }];
+      return [{ nodeId: "SCAN", resultJson: JSON.stringify({ SCAN: { listings: ["a", "b"] } }), resultWrittenAt: 12345 }];
     };
     const { api, routes } = createMockApi();
     const fakeRun = {

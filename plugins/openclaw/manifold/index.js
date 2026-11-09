@@ -66,7 +66,7 @@ import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-
 const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 import { registerGatewayReadiness } from "../../../engine/gateway-readiness.js";
 import { registerManifoldMetaHook } from "./meta.js";
-import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
+import { resolveStorePaths, ensureDataDir, stateFile } from "../../../state/paths.js";
 import { setStateFile } from "../../../gates/paused-flows.js";
 
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
@@ -136,7 +136,7 @@ export default definePluginEntry({
     // Core owns its store home (state/paths.js): one MANIFOLD_DATA_DIR
     // move relocates every DB and pending file.
     const storePaths = resolveStorePaths();
-    ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
+    ensureDataDir({ dataDir: storePaths.dataDir, logger: api.logger });
     setStateFile(stateFile(storePaths.dataDir));
     // Pipeline dir resolution (table[harness] → MANIFOLD_PIPELINES_DIR env →
     // config `pipelinesDir` → <dataDir>/workspace/.pipelines). The table lets

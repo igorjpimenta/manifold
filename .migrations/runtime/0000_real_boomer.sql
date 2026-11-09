@@ -69,8 +69,7 @@ CREATE TABLE IF NOT EXISTS `flow_node_invocations` (
 	`visit_seq` integer DEFAULT 1 NOT NULL,
 	`invoked_at` integer NOT NULL,
 	`result_json` text,
-	`result_written_at` integer,
-	`result_too_large_bytes` integer
+	`result_written_at` integer
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_invocations_flow` ON `flow_node_invocations` (`flow_id`);--> statement-breakpoint

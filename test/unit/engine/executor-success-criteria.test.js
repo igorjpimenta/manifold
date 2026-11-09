@@ -56,7 +56,7 @@ function makeNodeExecutionsStore() {
       const m = resultsByFlow.get(flowId);
       if (!m) return [];
       return [...m.entries()].map(([nodeId, resultJson]) => ({
-        nodeId, visitSeq: 1, resultWrittenAt: Date.now(), resultTooLargeBytes: null, resultJson,
+        nodeId, visitSeq: 1, resultWrittenAt: Date.now(), resultJson,
       }));
     },
     writeGateRecord: async () => ({ ok: true }),
