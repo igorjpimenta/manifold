@@ -109,7 +109,6 @@ export function classify(session) {
   return { kind: "unknown", agentId: agentIdOf(session), parentHint: null };
 }
 
-/** Sessions ALWAYS start `agent:<id>:...` — peel the agent off generically. */
 export function agentIdOf(session) {
   if (typeof session !== "string") return null;
   const i1 = session.indexOf(":");
