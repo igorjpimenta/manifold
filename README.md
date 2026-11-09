@@ -37,9 +37,6 @@ removing an entry is a breaking change for the consumers above.
 Two companion docs hold deep-dive material split out of this file to keep
 it focused on orientation and quick reference:
 
-- **`SUBFLOW_NODES.md`** — full `kind:"subflow"` authoring guide (shape,
-  sub-node calling convention, deriving `subflowKey`, locks, retrying one
-  item, nesting). Read before writing or modifying a subflow node.
 
 ## Index
 
@@ -356,7 +353,7 @@ Past the loader, these only surface during a real flow:
 - **`promptBuilder` returning a non-string** — the agent will see `[object Object]`. Stringify your inputs into a prompt.
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
-- **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
+- **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`*.
 
 ### Two gotchas that *look* like bugs but aren't
 
@@ -512,10 +509,6 @@ Detailed dispatch logic: `executor.js` lines 380–730.
 
 ## Subflow nodes (childFlows)
 
-> Full authoring guide (minimal shape, sub-node calling convention, deriving
-> `subflowKey`, reading results downstream, concurrency, retrying one
-> item, nesting) moved to **`SUBFLOW_NODES.md`** — read that before writing
-> or modifying any `kind:"subflow"` node.
 
 A `subflow` node fans a `.selector(state)` array out into one real,
 independent flow per item — each item's own `flow_runs` row, driven by the
@@ -950,7 +943,7 @@ Keys the executor writes; the dashboard reads:
 | `startedAt`     | number (ms epoch)                          | Set at `start`.                                                                  |
 | `endedAt`       | number (ms epoch)                          | Set at terminal transition.                                                      |
 | `args`          | object                                     | The JSON passed via `start --args '…'`. Merged into initial state, not mutable. |
-| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children (see `SUBFLOW_NODES.md`). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
+| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children (see the subflow authoring guide). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
 
 The dashboard derives the path-trail from `GET
 /manifold/runs/:flowId/tree` (`flow_node_invocations`/`flow_node_executions`),
@@ -1350,7 +1343,7 @@ state (`running`/`blocked`/`waiting`/`succeeded`/`failed`/`cancelled`/
 `skipped` only — never races a live executor iteration), or if the
 recorded `failure_node` doesn't match a current error (already
 resolved by an earlier retry). There is no separate itemId-keyed branch
-retry — see `SUBFLOW_NODES.md`'s *Retrying, resuming, and gating one item*.
+retry.
 Implementation: `routes/operator-retry.js: retryFailureBranch`.
 
 ### Resume a gated flow

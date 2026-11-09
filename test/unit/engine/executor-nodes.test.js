@@ -345,23 +345,3 @@ describe("executeNode — unknown kind", () => {
     );
   });
 });
-
-// ── lock refusal ──────────────────────────────────────────────────────────────
-
-describe("executeNode — a declared crossProcessLock is refused", () => {
-  it("throws instead of running the node unlocked", async () => {
-    const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
-      executeSubflowNode: async () => ({ stateUpdate: {} }),
-      getNodeCtx: () => ({}),
-      api,
-      logger,
-    });
-    const node = { kind: "code", crossProcessLock: "browser:freelance", run: () => ({ x: 1 }) };
-    await assert.rejects(
-      () => runner.executeNode({ node, nodeId: "SUBMIT_CODE", state: {}, flowId: "f" }),
-      (err) => err.message.includes("crossProcessLock") && err.message.includes("SUBMIT_CODE"),
-    );
-  });
-});

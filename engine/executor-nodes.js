@@ -171,9 +171,7 @@ export function createNodeRunner({
 
   /**
    * Run the node body. A node that declares `crossProcessLock` is refused:
-   * the lock mechanism is gone, and a node that silently lost its mutual
-   * exclusion would run concurrently with the very work it declared to
-   * exclude. Failing loudly is the only safe reading of a removed option.
+   * the option is no longer supported.
    */
   async function executeNode({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
     if (typeof node.crossProcessLock === "string" && node.crossProcessLock) {
