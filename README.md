@@ -193,7 +193,7 @@ after a success (typically by checking presence/absence of its own
 output in `state`). There is no separate "retry from start" reset and no
 engine-level "terminal" check: an edge function that has exhausted every
 option it wants to try simply returns no next node, which the
-pre-existing `!nextNodeId` → `persistFailRetrying` path already handles
+existing `!nextNodeId` → `persistFailRetrying` path already handles
 — giving up is just an ordinary edge decision, not a special case.
 
 ```js
@@ -251,50 +251,31 @@ edges: {
 
 **Caveat — a real footgun**: a default value (`(state, error = null) => ...`)
 or a rest param collapses `fn.length` back down, silently falling to
-1-arg (legacy) mode with no error at all. Declare the parameter plainly.
+1-arg mode with no error at all. Declare the parameter plainly.
 
 **Attempt counting across dispatches**: there is no supported built-in way
-to do this today. `_stepHistory` (the old mechanism this section used to
-point to) was removed from the engine entirely — it's not a real
-`state_json` field anymore, and nothing replaced it for pipeline-author
-use (`ctx` exposes no execution-count accessor, and `assembleState()`
-never adds one to `state`). A `NodeFailure` throw also never merges
-`state[nodeId]`, so a self-tracked counter on the throwing node's own
-output can't survive a failing attempt either — the same "no room for an
-arbitrary counter" problem this section already calls out.
-`freelance_workana-proposal`/`-reply`/`-touch-cadence`'s
-`SUBMIT_CODE`/`SEND_REPLY_CODE`/`SEND_NUDGE_CODE` cascades used to carry
-an infra-unavailable auto-recovery loop (`↔ ENSURE_INFRA_CODE`) that
-shipped **intentionally uncapped** rather than solve this — a
-`_stepHistory`-backed cap was removed on 2026-08-12 because it silently
-carried an exhausted count across operator-triggered manual retries
-(retry only clears the failed node's own result, never a lifetime
-counter). The uncapped replacement then genuinely looped forever
-whenever the browser/CDP stayed down (real incident, 2026-08-19 — see
-`freelance_workana-proposal/nodes/propose/submit/index.js`'s header), so
-the loop was removed outright rather than re-capped: `infra_unavailable`
-now ends each of these three cascades directly, same as any other
-failure class, and the operator retries manually via the flow's own
-Retry action once infra is actually healthy. If a future pipeline
-genuinely needs a bounded automatic retry count, the only sound pattern
-is a sibling `code` node in the same cascade that never throws and
-always merges into `state` on every pass — have *that* node's own
-`run()` increment its own attempts field, and have the throwing node's
-edge read that (capped) instead of trying to count its own dispatches or
-looping unconditionally.
+to do this today. `_stepHistory` is not a `state_json` field, and nothing
+provides it for pipeline-author use (`ctx` exposes no execution-count
+accessor, and `assembleState()` never adds one to `state`). A
+`NodeFailure` throw also never merges `state[nodeId]`, so a self-tracked
+counter on the throwing node's own output can't survive a failing attempt
+either — the same "no room for an arbitrary counter" problem this section
+already calls out. An `infra_unavailable` failure ends a cascade
+directly, same as any other failure class, and the operator retries
+manually via the flow's own Retry action once infra is actually healthy.
+If a pipeline genuinely needs a bounded automatic retry count, the only
+sound pattern is a sibling `code` node in the same cascade that never
+throws and always merges into `state` on every pass — have *that* node's
+own `run()` increment its own attempts field, and have the throwing
+node's edge read that (capped) instead of trying to count its own
+dispatches or looping unconditionally.
 
-**Generalized engine-wide (2026-08-24)**: the same rationale that removed
-the SUBMIT infra loop applied to every `kind:"agent"` node's `node.retry`
-config — `dispatchAgentWithRetry` (`engine/agent-dispatch.js`) no
-longer retries at all, for any agent dispatch, anywhere. Live cost data
-was the trigger: `freelance_workana-proposal::SCORE` burned up to 41
-calls per flow retrying against a single unreliable model with no
-fallback, and 11 of 13 flows failed anyway — the retries weren't
-rescuing the outcome, just multiplying cost on calls that failed
-regardless. Every agent node is now a single attempt; a failure throws
-immediately, records as a normal failure event, and the operator retries
-manually — no exceptions, no per-node opt-out. Any `retry: {...}` left on
-a node definition is inert and ignored.
+**Generalized engine-wide**: every `kind:"agent"` node's `node.retry`
+config is inert — `dispatchAgentWithRetry` (`engine/agent-dispatch.js`)
+does not retry, for any agent dispatch, anywhere. Every agent node is a
+single attempt; a failure throws immediately, records as a normal failure
+event, and the operator retries manually — no exceptions, no per-node
+opt-out. Any `retry: {...}` left on a node definition is ignored.
 
 **Presence-check pattern for a single-outcome leg**: when a leg either
 throws or returns real payload data with no need to classify *why* it
@@ -532,7 +513,7 @@ export default {
 | `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the gateway broadcasts `manifold.gate.opened` / `manifold.gate.closed` over WS with the full payload, and each consumer decides how to surface it (inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into a discuss surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
 
 A `code`-then-`agent` fallback (deterministic primary path, LLM-driven
-recovery leg) is no longer a distinct node kind — author it as a
+recovery leg) is not a distinct node kind — author it as a
 single-item `subflow` node (`selector: () => [{ id: "only" }]`) whose own
 `flow.kind: "cascade"` child flow routes between an ordinary `code` entry
 and an ordinary `agent` entry via hand-authored edges, with `mode: "all"`
@@ -608,11 +589,10 @@ is broken).
 
 Gated purely on the flag — a node that never sets `circuitBreaker` is a
 complete no-op through this whole path, so plain agent nodes are
-unaffected unless they opt in. Every cascade sub-node that used to get
-automatic circuit-breaker protection under the old `kind:"fallback"`
-mechanism now needs this flag set explicitly — see `ensure-login-node.js`
-factories and `submit-agent.js` files under `workspace/.pipelines/` and
-`workspace/.shared/` for worked examples.
+unaffected unless they opt in. Every cascade sub-node needs this flag set
+explicitly — see `ensure-login-node.js` factories and `submit-agent.js`
+files under `workspace/.pipelines/` and `workspace/.shared/` for worked
+examples.
 
 ### Gate `approvalRequestBuilder` — editable surfaces
 
@@ -622,7 +602,7 @@ factories and `submit-agent.js` files under `workspace/.pipelines/` and
 |---|---|
 | `title` | Card header on the operator Inbox |
 | `description` | Card body — verbose; can include layout markers |
-| `editableText` | Prose body the edit-sheet pre-fills with AND the preview card shows. The free-form content the operator commits if they hit Approve unchanged. Body-only — no structured metadata. (Legacy alias: `editableDraft` — accepted for one transition cycle.) |
+| `editableText` | Prose body the edit-sheet pre-fills with AND the preview card shows. The free-form content the operator commits if they hit Approve unchanged. Body-only — no structured metadata. |
 | `editableFields` | Optional `[ { id, label, type, value, options?, prefix?, helper? } ]` — pipeline-declared structured fields rendered as tappable chips above the prose body. Clients pick input UI from `type`. |
 | `references` | Array of `{ id, label, body }` chips on the gate row + DiscussView |
 
@@ -698,7 +678,7 @@ The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs`
 | `ctx.log.info(msg)` / `.warn(msg)` / `.error(msg)` | Logs with the flow/node prefix already applied — prefer this over a bare `console.log` so log lines are attributable. |
 | `ctx.artifact(name, content)` | Writes a file under this run's own artifact directory (`workspace/.pipelines/<pipelineId>/runs/<runId>/<name>`). Throws if `state.runId`/`state.pipelineId` aren't set yet (i.e. before `start()` has stamped them). |
 | `ctx.readArtifact(name)` | Reads a file back from the same directory. Same throw condition as `ctx.artifact`. |
-| `ctx.blocked(reason, hint)` | Throws `NodeBlocked({reason, hint})`. **Despite the name and the class's own doc comment ("blocks the flow with retry-on-resume semantics"), this actually fails the flow, not pauses it** — verified directly against `executor.js`'s own catch logic: a `NodeBlocked` reaches a real wait/pause only if its `_blocked._kind` is set, and `ctx.blocked()` never sets one (`internal/needs-resolver.js`'s `needs:` mechanism does, by explicitly stamping `_kind: "needs-not-ready"` before throwing — that's the one real example of the pause path firing). Calling `ctx.blocked(reason, hint)` today is equivalent to `throw new Error(reason)` with a slightly different message shape, not a way to pause a node — this looks like a real, pre-existing gap between the helper's intent and its actual behavior, not a documented design choice. |
+| `ctx.blocked(reason, hint)` | Throws `NodeBlocked({reason, hint})`. **Despite the name and the class's own doc comment ("blocks the flow with retry-on-resume semantics"), this actually fails the flow, not pauses it** — verified directly against `executor.js`'s own catch logic: a `NodeBlocked` reaches a real wait/pause only if its `_blocked._kind` is set, and `ctx.blocked()` never sets one (`internal/needs-resolver.js`'s `needs:` mechanism does, by explicitly stamping `_kind: "needs-not-ready"` before throwing — that's the one real example of the pause path firing). Calling `ctx.blocked(reason, hint)` today is equivalent to `throw new Error(reason)` with a slightly different message shape, not a way to pause a node — this looks like a real gap between the helper's intent and its actual behavior, not a documented design choice. |
 | `ctx.needs(varName)` | Resolves a `needs:` declaration — see below. Only present/meaningful if the node itself declares `needs:`. |
 
 Return shape of `ctx.invokePipeline`:
@@ -1005,15 +985,13 @@ Keys the executor writes; the dashboard reads:
 | `startedAt`     | number (ms epoch)                          | Set at `start`.                                                                  |
 | `endedAt`       | number (ms epoch)                          | Set at terminal transition.                                                      |
 | `args`          | object                                     | The JSON passed via `start --args '…'`. Merged into initial state, not mutable. |
-| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any migrated subflow node, `flow_branches` fallback for pre-migration flows only (see `SUBFLOW_NODES.md` and `ENGINE_INTERNALS.md`'s SUBFLOW DATA FLOW section). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
+| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children (see `SUBFLOW_NODES.md` and `ENGINE_INTERNALS.md`'s SUBFLOW DATA FLOW section). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
 
-`_stepHistory` (removed) — used to be a `string[]` of ordered node ids
-visited, driving the dashboard path-trail. Fully removed from the engine;
-the dashboard now derives the same path-trail from `GET
+The dashboard derives the path-trail from `GET
 /manifold/runs/:flowId/tree` (`flow_node_invocations`/`flow_node_executions`),
 one row per invocation rather than one entry per dispatch — a retried node
 collapses to a single pill instead of showing consecutive duplicates. Also
-worth knowing: `state_json` itself no longer accumulates a key per
+worth knowing: `state_json` holds no key per
 dispatched node at all — the table above is the complete list of what's
 actually in it; a node's own output lives in
 `flow_node_invocations.result_json`, reconstructed on read by
@@ -1100,10 +1078,6 @@ Declared in `openclaw.plugin.json`, one tool per file under `agent/tools/`
 Pipeline-specific tools (`propose_*`, `submit_*`, `report_*`) live in
 oc-config, not here — core keeps only the harness-agnostic surface.
 
-**Removed (2026-07 tool deprecation):** `manifold_respond`,
-`manifold_notify_block`, `manifold_list_blocked` — no longer registered;
-don't reflexively restore them if you see stale references elsewhere.
-
 Shared helpers (`toolErr`) live in `agent/tools/shared.js`.
 
 ### Adding a new tool
@@ -1128,10 +1102,7 @@ Shared helpers (`toolErr`) live in `agent/tools/shared.js`.
    registered without `opts.name` can silently hijack lookups for every
    *other* tool in the plugin — surfacing as `plugin tool runtime missing
    (manifold): <unrelated-tool-name>` at call time for tools that are
-   otherwise correctly registered. This bit `propose_draft` in production
-   because `manifold_start` (registered first, factory-form, no
-   `opts.name`) silently poisoned lookups for it — see git history on
-   `agent/tools/manifold-start.js`.
+otherwise correctly registered.
 5. Wire the register call into `index.js`.
 6. Add a test file under `test/unit/agent/tools/<tool-name>.test.js`
    mirroring the source file 1:1.
@@ -1400,7 +1371,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 curl -X POST .../manifold/failures/<id>/retry      # surgical branch retry
 curl -X POST .../manifold/failures/<id>/ignore     # snooze
 curl -X POST .../manifold/failures/<id>/unignore   # restore
-curl -X POST .../manifold/failures/<id>/skip       # back-compat alias for /action/skip
+curl -X POST .../manifold/failures/<id>/skip       # dedicated URL for the skip action
 ```
 
 `/retry` walks the failure's own flow (a top-level flow, OR a `subflow`
@@ -1412,7 +1383,7 @@ executor re-enters at the failing node only, skipping nothing upstream of
 it that already succeeded. Refuses if the flow isn't in a terminal-ish
 state (`running`/`blocked`/`waiting`/`succeeded`/`failed`/`cancelled`/
 `skipped` only — never races a live executor iteration), or if the
-recorded `failure_node` no longer matches a current error (already
+recorded `failure_node` doesn't match a current error (already
 resolved by an earlier retry). There is no separate itemId-keyed branch
 retry — see `SUBFLOW_NODES.md`'s *Retrying, resuming, and gating one item*.
 Implementation: `routes/operator-retry.js: retryFailureBranch`.
@@ -1476,21 +1447,20 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 where `<id>` is the failure event recorded against the child's own
 `flow_id` — `state/failure-store.js: recordEngineFailure` fires from
 within the CHILD's own executor iteration and records this way for any
-genuine thrown error. Every `subflow` sub-node failure throws now
-("Eradicate soft errors" — zero soft `{ _error }` returns survive
-anywhere in this codebase), so every subflow-item failure ends up
-recorded this way and is directly retryable. `branch_item_id` on the wire
+genuine thrown error. Every `subflow` sub-node failure throws (zero soft
+`{ _error }` returns survive anywhere in this codebase), so every
+subflow-item failure ends up recorded this way and is directly
+retryable. `branch_item_id` on the wire
 (derived read-time from `flow_node_invocations.subflow_key`) is purely
 descriptive — it
-doesn't gate whether a failure can be retried; see
-`routes/operator-retry.js`'s own comment for the full history of why
-it used to.
+doesn't gate whether a failure can be retried (see
+`routes/operator-retry.js`'s own comment).
 
-**One real caveat now**:
+**One real caveat**:
 `recordEngineFailure` *can* also fire against the **parent's** own
 `flow_id` — `engine/child-resume-trigger.js`'s `maybeResumeParent`
 calls it directly (`failure_kind: "subflow-mode-not-satisfied"`) when
-every sibling child has gone terminal but the subflow node's own
+every sibling child has reached a terminal status but the subflow node's own
 `mode` ("any"/"all") isn't satisfied. That's a policy decision, not a
 throw — nothing in the parent's own dispatch failed. Retrying *that*
 failure event doesn't re-run the parent (it already dispatched
@@ -1507,12 +1477,9 @@ above) — no manual `runtime.sqlite` surgery, no
 parent flow is untouched and stays blocked on `children-pending` until
 this one child (re-)reaches a terminal status.
 
-The pre-childFlows itemId-keyed branch retry (rewinding `branch.step` by
-hand, restarting the gateway for revival to pick it up) only applies to
-flows that predate this migration and still carry historical
-`flow_branches` rows — `routes/operator-retry.js` returns a clean
-`not_found` for any failure event whose `itemId` refers to one of those,
-since the engine that ever picked up that kind of rewind no longer exists.
+`routes/operator-retry.js` returns a clean `not_found` for any failure
+event whose `itemId` refers to a `flow_branches` row — there is no
+branch-row retry path.
 
 **C. Whole pipeline, custom initial state (operator-supplied input
 the pipeline's discovery wouldn't produce):** see *Seed a pipeline

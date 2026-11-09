@@ -245,7 +245,7 @@ describe("createStateStore — triggerAdmissionRelease promotion routing", () =>
     return { runStore, store, resumed, warnings };
   }
 
-  test("a promotion of a kind the engine doesn't admit (a legacy agent-dispatch row) is never resumed — no resume call, no misleading warning", async () => {
+  test("a promotion of a kind the engine doesn't admit is never resumed — no resume call, no misleading warning", async () => {
     const otherFlowId = randomUUID();
     harness = await makeRoutingHarness({ id: randomUUID(), kind: "agent-dispatch", flowId: otherFlowId, nodeId: "SCORE_LLM" });
     const { store, resumed, warnings } = harness;
@@ -255,7 +255,7 @@ describe("createStateStore — triggerAdmissionRelease promotion routing", () =>
     await flush();
 
     assert.equal(resumed.includes(otherFlowId), false, "a non-run kind has no flow run to flip and resume");
-    assert.equal(warnings.length, 0, "a skipped legacy promotion must never look like a failed resume");
+    assert.equal(warnings.length, 0, "a skipped promotion must never look like a failed resume");
   });
 
   test("a child-dispatch promotion pointing at a real blocked flow IS routed through and resumes it", async () => {

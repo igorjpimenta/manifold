@@ -135,10 +135,7 @@ describe("executeNode — agent kind", () => {
 
 // ── agent kind — circuit breaker ──
 // node.circuitBreaker: true is a generalist opt-in on any "agent" node,
-// independent of which kind of flow it's running inside — separate from
-// (and additive to) the OLD kind:"fallback" node's own circuit-breaker
-// check in executor-fallback.js's runFallbackList, which never sets this
-// flag on its own entries, so the two never double-apply for one dispatch.
+// independent of which kind of flow it's running inside.
 
 describe("executeNode — agent kind: circuit breaker", () => {
   it("fails fast without dispatching when already blocked", async () => {

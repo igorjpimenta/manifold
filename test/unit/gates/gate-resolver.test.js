@@ -375,7 +375,7 @@ describe("recordItemDecision — gate kind validation for waiting/blocked flows"
     assert.notEqual(res.code, "flow_not_gate");
   });
 
-  test("accepts waitJson.kind = gate (legacy compat)", async () => {
+  test("accepts waitJson.kind = gate", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({ flowId, kind: "gate", items: [{ itemId }] });
@@ -695,7 +695,7 @@ describe("maybeResolveFlow — item collection logic", () => {
     assert.equal(store.setRunning.mock.calls.length >= 1, true);
   });
 
-  test("handles waitJson.kind = gate (legacy compat)", async () => {
+  test("handles waitJson.kind = gate", async () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     const flow = makeWaitingFlow({

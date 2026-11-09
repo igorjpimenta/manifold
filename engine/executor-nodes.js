@@ -48,14 +48,14 @@ export function createNodeRunner({
   nodeHealthStore,
   pipelinesRef,
 }) {
-  // Explicit params win; api is the legacy fallback the adapter still
-  // supplies during cutover (tests construct with api only).
+  // Explicit params win; api is the fallback the adapter still
+  // supplies (tests construct with api only).
   const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
   // Shared by the plain "code" branch below and by cascade sub-nodes of
   // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
-  // "agent" branches in executeNodeBody — this function has no fallback-
-  // specific caller anymore). Returns the RAW result from `entry.run(...)`;
+  // "agent" branches in executeNodeBody). Returns the RAW result from
+  // `entry.run(...)`;
   // sentinel detection (_blocked/_skipped) and stateUpdate wrapping is the
   // caller's job.
   async function dispatchCodeEntry(entry, { state, flowId, nodeId }) {

@@ -2,8 +2,7 @@
  * Unit tests for state/subflow-state.js
  *
  * Both getAllSubflowGroups/getSubflowGroup read flow_runs children via
- * nodeExecutionsStore.listSubflowNodeIdsForFlow. The old branchService
- * fallback path has been removed.
+ * nodeExecutionsStore.listSubflowNodeIdsForFlow.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -12,8 +11,8 @@ import { getSubflowGroup, getAllSubflowGroups } from "../../../state/subflow-sta
 
 // ── fake run-store / node-executions-store ─────────────────────────────────
 
-// Post-group_id-drop, an invocation's own nodeId IS the group/loop-node id
-// (see subflow-state.js's normalizeChildAsBranchRow comment) — fixtures below
+// An invocation's own nodeId IS the group/loop-node id
+// (see subflow-state.js's normalizeChildAsSubflowRow comment) — fixtures below
 // use `nodeId` as the group id.
 function fakeStores({ invocations = [], children = [] } = {}) {
   const nodeExecutionsStore = {

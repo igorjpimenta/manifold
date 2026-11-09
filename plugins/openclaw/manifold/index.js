@@ -146,9 +146,7 @@ export default definePluginEntry({
   register: (api) => {
     const userCfg = api.pluginConfig ?? {};
     // Core owns its store home (state/paths.js): one MANIFOLD_DATA_DIR
-    // move relocates every DB, lock, and pending file. Legacy
-    // ~/.openclaw/{runtime.sqlite,ops.sqlite} are copied in once, never
-    // moved, and never read again afterwards.
+    // move relocates every DB, lock, and pending file.
     const storePaths = resolveStorePaths();
     ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
     setLocksDir(storePaths.locksDir);
@@ -211,7 +209,7 @@ export default definePluginEntry({
       dbPath: runtimeDbPath, getLimit: getGlobalConcurrencyLimit,
     });
     // resumeParentRef.resume is set to executor.resume once the executor
-    // exists below — store construction has to precede it, so the
+    // exists below — store construction has to come before it, so the
     // resume-trigger (state-store.js's finish/skip/fail/cancel) reads
     // through this mutable box rather than a captured closure. Currently
     // dormant: no real flow sets parentInvocationId yet, so this hook never
@@ -430,8 +428,6 @@ export default definePluginEntry({
           api,
           // Completing an interrupted cancellation needs to cancel flows by
           // their actual ownerKey, not the default manifold-owner key.
-          // Legacy graph-flow-owner flows would fail the
-          // cancelFlowByIdForOwner equality check otherwise.
           createCancelStore: (ownerKey) => createStateStore(api, ownerKey, {
             runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger: api.logger,
           }),
