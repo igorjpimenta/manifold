@@ -141,8 +141,7 @@ model as any top-level flow); each sub-node's own output lives in its own
 via `assembleState()`, transparently, before your `run`/`selector`/edge
 function ever sees `state`. (Downstream, *outside* the subflow, that same
 reconstructed state is what `_subflowGroups[groupId][subflowKey].data`
-exposes — see `README.md`'s *State conventions* and `ENGINE_INTERNALS.md`'s
-SUBFLOW DATA FLOW section.)
+exposes — see `README.md`'s *State conventions*.)
 
 ## Deriving `subflowKey` (the child's identity)
 

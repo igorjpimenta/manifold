@@ -37,9 +37,6 @@ removing an entry is a breaking change for the consumers above.
 Two companion docs hold deep-dive material split out of this file to keep
 it focused on orientation and quick reference:
 
-- **`ENGINE_INTERNALS.md`** — full executor state-machine detail (store
-  model, every persistence call, status-transition map, subflow data flow).
-  Read when debugging executor behaviour or touching `engine/executor.js`.
 - **`SUBFLOW_NODES.md`** — full `kind:"subflow"` authoring guide (shape,
   sub-node calling convention, deriving `subflowKey`, locks, retrying one
   item, nesting). Read before writing or modifying a subflow node.
@@ -106,11 +103,6 @@ it focused on orientation and quick reference:
 
 ## Run lifetime
 
-> Full state-machine detail (store model, every persistence call, the
-> status-transition diagram, and the subflow read/write data-flow) moved to
-> **`ENGINE_INTERNALS.md`** — read that when debugging executor behaviour
-> or touching `engine/executor.js` itself. Summary below is enough for
-> ordinary pipeline authoring.
 
 A flow is created `running` at `__start__` (`store.create`). The executor
 loop repeatedly resolves `edges[lastStep](state)` to the next node id,
@@ -122,8 +114,7 @@ outcome — a `stateUpdate` advances and loops again, a thrown error or
 `_error` sentinel fails/blocks the flow, `__end__` runs `runAudit` and
 writes the terminal status (`succeeded`/`failed`/`skipped`). Blocked flows
 resume via `POST /manifold/resume-from-gate`; any non-terminal flow can be
-cancelled by an operator. See `ENGINE_INTERNALS.md` for the exact
-persistence call at each step and the full status-transition map.
+cancelled by an operator.
 
 ## Pipeline schema (canonical)
 
@@ -641,10 +632,6 @@ return {
 };
 ```
 
-### The lock mechanism is gone
-
-There is no cross-process lock in manifold. A node that declares `crossProcessLock` is refused at dispatch time — the option is not silently ignored, because a node that lost its mutual exclusion would run concurrently with the very work it declared to exclude. Drop the field from the pipeline.
-
 ### Code-node `ctx` argument
 
 `code`-kind nodes receive a `ctx` object as the LAST positional argument — always `run(state, ctx)`, whether the node is top-level or a `subflow` sub-node (the subflow item, if any, is `state.item` — not a separate positional arg). Existing nodes that ignore the trailing arg keep working unchanged.
@@ -963,7 +950,7 @@ Keys the executor writes; the dashboard reads:
 | `startedAt`     | number (ms epoch)                          | Set at `start`.                                                                  |
 | `endedAt`       | number (ms epoch)                          | Set at terminal transition.                                                      |
 | `args`          | object                                     | The JSON passed via `start --args '…'`. Merged into initial state, not mutable. |
-| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children (see `SUBFLOW_NODES.md` and `ENGINE_INTERNALS.md`'s SUBFLOW DATA FLOW section). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
+| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children (see `SUBFLOW_NODES.md`). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
 
 The dashboard derives the path-trail from `GET
 /manifold/runs/:flowId/tree` (`flow_node_invocations`/`flow_node_executions`),
