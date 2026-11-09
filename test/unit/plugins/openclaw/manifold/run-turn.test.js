@@ -10,9 +10,9 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { mkdtempSync } from "node:fs";
-import { createRunTurn, createGatewaySubagentGate } from "./run-turn.js";
-import { GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
-import { writePendingResult, clearPendingResult } from "../../../state/tool-handoff.js";
+import { createRunTurn, createGatewaySubagentGate } from "../../../../../plugins/openclaw/manifold/run-turn.js";
+import { GatewayHandoffNeeded } from "../../../../../engine/executor-errors.js";
+import { writePendingResult, clearPendingResult } from "../../../../../state/tool-handoff.js";
 
 before(() => {
   process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-run-turn-"));

@@ -43,14 +43,6 @@
         "type": "integer",
         "minimum": 1,
         "description": "Shared ceiling for every flow-run concurrency mechanism \u2014 agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
-      },
-      "profilePath": {
-        "type": "string",
-        "description": "Absolute path of the PROFILE.md file guarded by the before_tool_call read gate and edit lock (hooks/profile-read-gate.js, hooks/profile-write-lock.js). Default: ~/.openclaw/workspace/.shared/freelance/profile/PROFILE.md"
-      },
-      "profileEditResultsDir": {
-        "type": "string",
-        "description": "Directory the edit lock writes one <runId>.json outcome marker per guarded PROFILE.md edit into (hooks/profile-write-lock.js). Default: ~/.openclaw/locks/profile-edit-results"
       }
     }
   }

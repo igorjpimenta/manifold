@@ -23,12 +23,9 @@ subpaths. Deep file paths are not a contract — only this table is.
 | --- | --- | --- |
 | `@igorjpimenta/manifold` | plugin entry (default) | openclaw runtime |
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
-| `…/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` | oc-config |
-| `…/browser-tabs` | `browserProfileForLock`, `beginTabSession`, `endTabSession` | browser-lease extension |
 | `…/elevation` | `invokeElevated` | oc-config |
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
 | `…/tool-handoff` | structured result rendezvous (`writePendingResult`, `readPendingResult`, `clearPendingResult`, `waitForToolResult`) | oc-config |
-| `@igorjpimenta/manifold-openclaw/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` | oc-config |
 | `…/routes/bearer-auth` | `authorizeBearerRequest`, `sendUnauthorized` (MANIFOLD_BEARER, winch-style) | sibling extension |
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
@@ -40,12 +37,6 @@ removing an entry is a breaking change for the consumers above.
 Two companion docs hold deep-dive material split out of this file to keep
 it focused on orientation and quick reference:
 
-- **`ENGINE_INTERNALS.md`** — full executor state-machine detail (store
-  model, every persistence call, status-transition map, subflow data flow).
-  Read when debugging executor behaviour or touching `engine/executor.js`.
-- **`SUBFLOW_NODES.md`** — full `kind:"subflow"` authoring guide (shape,
-  sub-node calling convention, deriving `subflowKey`, locks, retrying one
-  item, nesting). Read before writing or modifying a subflow node.
 
 ## Index
 
@@ -109,11 +100,6 @@ it focused on orientation and quick reference:
 
 ## Run lifetime
 
-> Full state-machine detail (store model, every persistence call, the
-> status-transition diagram, and the subflow read/write data-flow) moved to
-> **`ENGINE_INTERNALS.md`** — read that when debugging executor behaviour
-> or touching `engine/executor.js` itself. Summary below is enough for
-> ordinary pipeline authoring.
 
 A flow is created `running` at `__start__` (`store.create`). The executor
 loop repeatedly resolves `edges[lastStep](state)` to the next node id,
@@ -125,8 +111,7 @@ outcome — a `stateUpdate` advances and loops again, a thrown error or
 `_error` sentinel fails/blocks the flow, `__end__` runs `runAudit` and
 writes the terminal status (`succeeded`/`failed`/`skipped`). Blocked flows
 resume via `POST /manifold/resume-from-gate`; any non-terminal flow can be
-cancelled by an operator. See `ENGINE_INTERNALS.md` for the exact
-persistence call at each step and the full status-transition map.
+cancelled by an operator.
 
 ## Pipeline schema (canonical)
 
@@ -368,8 +353,7 @@ Past the loader, these only surface during a real flow:
 - **`promptBuilder` returning a non-string** — the agent will see `[object Object]`. Stringify your inputs into a prompt.
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
-- **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
-- **Cross-process lock with no installed `lock.js`** — `crossProcessLock: "browser:foo"` requires the helper at `~/.openclaw/extensions/manifold/locks/lock.js`. Already present in stock installs.
+- **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`*.
 
 ### Two gotchas that *look* like bugs but aren't
 
@@ -525,10 +509,6 @@ Detailed dispatch logic: `executor.js` lines 380–730.
 
 ## Subflow nodes (childFlows)
 
-> Full authoring guide (minimal shape, sub-node calling convention, deriving
-> `subflowKey`, reading results downstream, locks/concurrency, retrying one
-> item, nesting) moved to **`SUBFLOW_NODES.md`** — read that before writing
-> or modifying any `kind:"subflow"` node.
 
 A `subflow` node fans a `.selector(state)` array out into one real,
 independent flow per item — each item's own `flow_runs` row, driven by the
@@ -644,28 +624,6 @@ return {
   references,
 };
 ```
-
-### Lock modifier (any node)
-
-One lock primitive:
-
-| Field                       | Scope                | Acquired before  | Released after           |
-| --------------------------- | --------------------- | ---------------- | ------------------------ |
-| `crossProcessLock: "kind:id"` | cross-process      | node body runs | node body returns/throws |
-
-The lock name is manifold's contract; whoever runs the flow provides the mechanism behind it. A holder's lock file (`<name>.lock`) is honored across processes, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name.
-
-```js
-SUBMIT_CODE: {
-  kind: "code",
-  crossProcessLock: "browser:freelance",   // cross-process mutex on a named resource
-  run: async (state, ctx) => { /* ... */ }
-}
-```
-
-No script should self-lock internally (`withLock(...)` wrapping its own `main()`) — that only creates a deadlock risk against a pipeline node holding the same lock name across the spawn boundary (a child OS process can't see the parent's held lock). The pipeline node that spawns the script should declare `crossProcessLock` itself, for the full duration of the dispatch.
-
-The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 10 min), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name.
 
 ### Code-node `ctx` argument
 
@@ -985,7 +943,7 @@ Keys the executor writes; the dashboard reads:
 | `startedAt`     | number (ms epoch)                          | Set at `start`.                                                                  |
 | `endedAt`       | number (ms epoch)                          | Set at terminal transition.                                                      |
 | `args`          | object                                     | The JSON passed via `start --args '…'`. Merged into initial state, not mutable. |
-| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children (see `SUBFLOW_NODES.md` and `ENGINE_INTERNALS.md`'s SUBFLOW DATA FLOW section). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
+| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children. Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
 
 The dashboard derives the path-trail from `GET
 /manifold/runs/:flowId/tree` (`flow_node_invocations`/`flow_node_executions`),
@@ -1385,7 +1343,7 @@ state (`running`/`blocked`/`waiting`/`succeeded`/`failed`/`cancelled`/
 `skipped` only — never races a live executor iteration), or if the
 recorded `failure_node` doesn't match a current error (already
 resolved by an earlier retry). There is no separate itemId-keyed branch
-retry — see `SUBFLOW_NODES.md`'s *Retrying, resuming, and gating one item*.
+retry.
 Implementation: `routes/operator-retry.js: retryFailureBranch`.
 
 ### Resume a gated flow

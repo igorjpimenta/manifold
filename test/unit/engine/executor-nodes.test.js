@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createNodeRunner } from "../../../engine/executor-nodes.js";
 import { NodeBlocked, GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
-import { currentLockOwner, sessionOwner } from "../../../locks/lock.js";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -29,7 +28,6 @@ function makeRunner(opts = {}) {
     maybeBudgetGate: opts.maybeBudgetGate ?? (() => ({ proceed: true })),
     dispatchAgentWithRetry: opts.dispatchAgentWithRetry ?? (async ({ node, applyCtx }) => node.apply(applyCtx, { text: "mock" })),
     executeSubflowNode: opts.executeSubflowNode ?? (async () => ({ stateUpdate: {} })),
-    withCrossProcessLockMaybe: (_lock, fn) => fn(),
     getNodeCtx: () => ({ invokePipeline: () => ({ invoked: false }) }),
     api,
     logger,
@@ -345,152 +343,5 @@ describe("executeNode — unknown kind", () => {
       () => executeNode({ node, nodeId: "X", state: {}, flowId: "f" }),
       (err) => err.message.includes("unknown node kind: magic")
     );
-  });
-});
-
-// ── lock wiring ───────────────────────────────────────────────────────────────
-
-describe("executeNode — lock wiring", () => {
-  it("calls withCrossProcessLockMaybe with the node's declared crossProcessLock", async () => {
-    let lockNameSeen;
-    const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
-      executeSubflowNode: async () => ({ stateUpdate: {} }),
-      withCrossProcessLockMaybe: (lockName, fn) => { lockNameSeen = lockName; return fn(); },
-      getNodeCtx: () => ({}),
-      api,
-      logger,
-    });
-    const node = {
-      kind: "code",
-      crossProcessLock: "browser:freelance",
-      run: () => ({ x: 1 }),
-    };
-    await runner.executeNode({ node, nodeId: "N", state: {}, flowId: "f" });
-    assert.equal(lockNameSeen, "browser:freelance");
-  });
-
-  it("passes {flowId, nodeId} as the 3rd arg — the crossProcessLock queued-status hook needs both to persist a blocked-acquire transition", async () => {
-    let contextSeen;
-    const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
-      executeSubflowNode: async () => ({ stateUpdate: {} }),
-      withCrossProcessLockMaybe: (_lockName, fn, ctx) => { contextSeen = ctx; return fn(); },
-      getNodeCtx: () => ({}),
-      api,
-      logger,
-    });
-    const node = {
-      kind: "code",
-      crossProcessLock: "browser:linkedin",
-      run: () => ({ x: 1 }),
-    };
-    await runner.executeNode({ node, nodeId: "SCRAPE_PROFILE", state: {}, flowId: "flow-00000099" });
-    assert.deepEqual(contextSeen, {
-      flowId: "flow-00000099",
-      nodeId: "SCRAPE_PROFILE",
-      // Always forwarded alongside flowId/nodeId (Workana
-      // Turnstile incident) — undefined here because this node doesn't
-      // declare crossProcessLockCooldownMs/crossProcessLockCooldownJitterMs.
-      cooldownMs: undefined,
-      cooldownJitterMs: undefined,
-    });
-  });
-
-  it("forwards the node's crossProcessLockCooldownMs/crossProcessLockCooldownJitterMs as cooldownMs/cooldownJitterMs on the 3rd arg", async () => {
-    let contextSeen;
-    const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async ({ node }) => node.apply({}, { text: "x" }),
-      executeSubflowNode: async () => ({ stateUpdate: {} }),
-      withCrossProcessLockMaybe: (_lockName, fn, ctx) => { contextSeen = ctx; return fn(); },
-      getNodeCtx: () => ({}),
-      api,
-      logger,
-    });
-    const node = {
-      kind: "code",
-      crossProcessLock: "browser:freelance",
-      crossProcessLockCooldownMs: 25_000,
-      crossProcessLockCooldownJitterMs: 20_000,
-      run: () => ({ x: 1 }),
-    };
-    await runner.executeNode({ node, nodeId: "SUBMIT_CODE", state: {}, flowId: "flow-00000100" });
-    assert.deepEqual(contextSeen, {
-      flowId: "flow-00000100",
-      nodeId: "SUBMIT_CODE",
-      cooldownMs: 25_000,
-      cooldownJitterMs: 20_000,
-    });
-  });
-});
-
-// ── invocation lock owner ─────────────────────────────────────────────────────
-
-describe("executeNode — invocation lock owner", () => {
-  it("runs the node (and its crossProcessLock wrapper) under the invocation's lock owner", async () => {
-    let ownerInWrapper;
-    let ownerInRun;
-    const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async () => ({}),
-      executeSubflowNode: async () => ({ stateUpdate: {} }),
-      withCrossProcessLockMaybe: (_lockName, fn) => { ownerInWrapper = currentLockOwner(); return fn(); },
-      getNodeCtx: () => ({}),
-      api,
-      logger,
-      nodeExecutionsStore: makeNodeExecutionsStore(),
-    });
-    const node = { kind: "code", crossProcessLock: "browser:freelance", run: () => { ownerInRun = currentLockOwner(); return {}; } };
-    await runner.executeNode({ node, nodeId: "SCAN", state: { pipelineId: "p1" }, flowId: "flow-1", invocationId: "inv-1" });
-    const expected = { kind: "invocation", id: "inv-1", flowId: "flow-1", nodeId: "SCAN", pipelineId: "p1" };
-    assert.deepEqual(ownerInWrapper, expected);
-    assert.deepEqual(ownerInRun, expected);
-    assert.equal(currentLockOwner(), null, "the owner context must not leak past the node");
-  });
-
-  it("no invocationId → no lock owner (the lock stays unowned, as before)", async () => {
-    let ownerInWrapper = "unset";
-    const runner = createNodeRunner({
-      maybeBudgetGate: () => ({ proceed: true }),
-      dispatchAgentWithRetry: async () => ({}),
-      executeSubflowNode: async () => ({ stateUpdate: {} }),
-      withCrossProcessLockMaybe: (_lockName, fn) => { ownerInWrapper = currentLockOwner(); return fn(); },
-      getNodeCtx: () => ({}),
-      api,
-      logger,
-      nodeExecutionsStore: makeNodeExecutionsStore(),
-    });
-    await runner.executeNode({ node: { kind: "code", run: () => ({}) }, nodeId: "N", state: {}, flowId: "f" });
-    assert.equal(ownerInWrapper, null);
-  });
-
-  it("an agent dispatch registers the invocation (with the node's lease cooldown) as its session's lock owner, cleared afterwards", async () => {
-    let ownerDuringDispatch;
-    const { executeNode } = makeRunner({
-      dispatchAgentWithRetry: async ({ sessionKey }) => { ownerDuringDispatch = sessionOwner(sessionKey); return {}; },
-    });
-    const node = {
-      kind: "agent", agent: "proposal-sender", sessionKey: "agent:proposal-sender:test-owner",
-      browserLeaseCooldownMs: 60_000, browserLeaseCooldownJitterMs: 5_000,
-      promptBuilder: () => "go", apply: () => ({}),
-    };
-    await executeNode({ node, nodeId: "SUBMIT", state: { pipelineId: "p2" }, flowId: "flow-2", invocationId: "inv-2" });
-    assert.deepEqual(ownerDuringDispatch, {
-      kind: "invocation", id: "inv-2", flowId: "flow-2", nodeId: "SUBMIT", pipelineId: "p2",
-      cooldownMs: 60_000, cooldownJitterMs: 5_000,
-    });
-    assert.equal(sessionOwner("agent:proposal-sender:test-owner"), null);
-  });
-
-  it("the session owner is cleared even when the dispatch throws", async () => {
-    const { executeNode } = makeRunner({
-      dispatchAgentWithRetry: async () => { throw new Error("boom"); },
-    });
-    const node = { kind: "agent", agent: "a", sessionKey: "agent:a:throws", promptBuilder: () => "go", apply: () => ({}) };
-    await assert.rejects(() => executeNode({ node, nodeId: "X", state: {}, flowId: "flow-3", invocationId: "inv-3" }));
-    assert.equal(sessionOwner("agent:a:throws"), null);
   });
 });

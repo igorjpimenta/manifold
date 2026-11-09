@@ -12,8 +12,6 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createPipelinesLoader } from "../../../engine/loader.js";
 import { createStateStore } from "../../../state/state-store.js";
 import { createRunStore } from "../../../state/run-store.js";
-import { registerOwnerResolver } from "../../../locks/lock.js";
-import { createInvocationOwnerResolver } from "../../../locks/invocation-owner.js";
 import { getNodeExecutionsStore } from "../../../state/node-executions.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { createExecutor } from "../../../engine/executor.js";
@@ -66,11 +64,8 @@ import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-
 // probe).
 const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 import { registerGatewayReadiness } from "../../../engine/gateway-readiness.js";
-import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
-import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
-import { setLocksDir } from "../../../locks/lock.js";
 import { setStateFile } from "../../../gates/paused-flows.js";
 
 const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
@@ -133,14 +128,6 @@ export default definePluginEntry({
         minimum: 1,
         description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8.",
       },
-      profilePath: {
-        type: "string",
-        description: "Absolute path of the PROFILE.md file guarded by the before_tool_call read gate and edit lock (hooks/profile-read-gate.js, hooks/profile-write-lock.js). Default: ~/.openclaw/workspace/.shared/freelance/profile/PROFILE.md",
-      },
-      profileEditResultsDir: {
-        type: "string",
-        description: "Directory the edit lock writes one <runId>.json outcome marker per guarded PROFILE.md edit into (hooks/profile-write-lock.js). Default: ~/.openclaw/locks/profile-edit-results",
-      },
     },
   }),
   register: (api) => {
@@ -149,7 +136,6 @@ export default definePluginEntry({
     // move relocates every DB, lock, and pending file.
     const storePaths = resolveStorePaths();
     ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
-    setLocksDir(storePaths.locksDir);
     setStateFile(stateFile(storePaths.dataDir));
     // Pipeline dir resolution (table[harness] → MANIFOLD_PIPELINES_DIR env →
     // config `pipelinesDir` → <dataDir>/workspace/.pipelines). The table lets
@@ -179,14 +165,6 @@ export default definePluginEntry({
     // now the same number; globalConcurrency replaces both.
     configureGlobalConcurrency({ maxConcurrent: userCfg.globalConcurrency });
 
-    // Registered here (rather than deferred) since PROFILE.md reads/edits
-    // can happen from the very first dispatched pipeline run after boot.
-    // Both path options fall through to each hook's own os.homedir() default
-    // when the config key is absent or undefined, so a zero-config install
-    // acquires byte-identical lock names to the workspace-side PROFILE.md
-    // writers (gap-answers.js, prime-nodes.js) it shares that lock with.
-    registerProfileReadGate(api, { profilePath: userCfg.profilePath });
-    registerProfileWriteLock(api, { profilePath: userCfg.profilePath, resultsDir: userCfg.profileEditResultsDir });
     registerManifoldMetaHook(api);
 
     const pipelinesRef = { value: new Map() };
@@ -195,10 +173,6 @@ export default definePluginEntry({
 
     const runStore    = createRunStore({ logger: api.logger, dbPath: runtimeDbPath });
     const nodeExecutionsStore = getNodeExecutionsStore(runtimeDbPath);
-    // Locks taken on behalf of a node invocation (executor-nodes.js's
-    // executeNode, and browser tool leases of the sessions it dispatches)
-    // stay held until the invocation resolves.
-    registerOwnerResolver("invocation", createInvocationOwnerResolver({ nodeExecutionsStore, runStore }));
     // The single durable admission pool for flow runs — child-dispatch and
     // flow-start share it; see state/admission-queue-store.js's own header
     // for why it's one combined pool, not one per kind. Reads

@@ -20,7 +20,6 @@ import path from "node:path";
 import os from "node:os";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { nodeEmitter } from "../events.js";
-import { withLock as withCrossProcessLock } from "../locks/lock.js";
 import { resolveStorePaths } from "../state/paths.js";
 
 import {
@@ -85,55 +84,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     emit,
   });
 
-  // Direct store.setQueued/setRunning, not the CAS-retry-wrapped
-  // persistQueuedRetrying/persistRunningRetrying — best-effort
-  // observability only: a lost/raced status write never affects
-  // correctness, the lock file itself is what enforces mutual exclusion.
-  //
-  // withLock() hides the acquire->fn() handoff internally (unlike the
-  // semaphore's tryAcquire()/acquire(), called inline in the sibling), so
-  // there's no seam to inject an "acquired after having blocked" step —
-  // instead wrap fn so the flip back to running happens the moment fn is
-  // actually invoked, which only happens post-acquire.
-  async function withCrossProcessLockMaybe(lockName, fn, { flowId, nodeId, cooldownMs, cooldownJitterMs } = {}) {
-    if (!lockName || typeof lockName !== "string") return fn();
-    let wasQueued = false;
-    const wrappedFn = async () => {
-      if (wasQueued) {
-        const after = await store.get(flowId);
-        if (after) {
-          await store.setRunning({
-            flowId, expectedRevision: after.revision, lastStep: after.lastStep, stateJson: after.stateJson,
-          });
-        }
-      }
-      return fn();
-    };
-    // The browser tab-lifecycle guarantee (open-before/close-after for any
-    // "browser:<profile>" lock name) lives inside withLock/lock.js itself,
-    // not here — it needs to cover every acquirer of that lock, including
-    // application code that calls withLock directly outside the engine's
-    // node dispatch (e.g. freelance_workana-poll-inbox's scan-and-probe.js).
-    // `logger` is threaded through opts so lock.js's internal wrapping can
-    // log a warning if the browser plugin is unreachable.
-    return withCrossProcessLock(lockName, wrappedFn, {
-      cooldownMs,
-      cooldownJitterMs,
-      logger,
-      onWouldBlock: async () => {
-        wasQueued = true;
-        const before = await store.get(flowId);
-        if (!before) return;
-        await store.setQueued({
-          flowId, expectedRevision: before.revision, lastStep: before.lastStep,
-          stateJson: before.stateJson,
-          waitJson: { kind: "resource-lock", resource: lockName, nodeId },
-          statusReason: `queued: waiting for cross-process lock ${lockName} (node ${nodeId})`,
-        });
-      },
-    });
-  }
-
   // nodeCtx is assigned after start/runFlow are defined (see below).
   // Subflow/node runners read it via getter at call time, not at factory-construction
   // time, so the undefined-at-construction gap is safe.
@@ -170,7 +120,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
 
   const { executeNode } = createNodeRunner({
     maybeBudgetGate, dispatchAgentWithRetry, executeSubflowNode,
-    withCrossProcessLockMaybe, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, logger,
+    api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, logger,
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
@@ -277,11 +227,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // that would naturally re-request admission; it would just dispatch
       // lastStep's outbound edge unconditionally, bypassing the pool
       // entirely. Return immediately — admission-queue-store's own
-      // release()/promotion wakes it later. Deliberately NOT the same for
-      // resource-lock (or no waitJson at all): that wait lives INSIDE this
-      // same node's own re-entered dispatch path (withCrossProcessLockMaybe),
-      // so falling through and re-resolving the edge is exactly how a
-      // boot-revived queued orphan on a lock is meant to retry.
+      // release()/promotion wakes it later.
       if (isQueued(flow.status) && (flow.waitJson?.kind === "flow-start" || flow.waitJson?.kind === "child-dispatch")) {
         logger.info(`manifold [${flowId.slice(0, 8)}] queued at ${flow.lastStep} on ${flow.waitJson?.kind}`);
         return;
