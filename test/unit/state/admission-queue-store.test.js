@@ -59,6 +59,32 @@ describe("admission-queue-store — admit()", () => {
     await assert.rejects(() => store.admit({ kind: "flow-start" }), /flowId is required/);
   });
 
+  test("a kind the pool does not manage is refused — it could never be released by flow", async () => {
+    const store = makeStore(2);
+    await assert.rejects(
+      () => store.admit({ kind: "agent-dispatch", flowId: "f1" }),
+      /kind must be one of flow-start, child-dispatch/,
+    );
+  });
+
+  test("an admitted row of an unmanaged kind does not consume the ceiling", async () => {
+    const dbPath = tmpDb();
+    const store = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
+    await store.ready();
+    // A row an older engine wrote: no code path can resume or release it,
+    // so it must not count against the pool's ceiling — otherwise it
+    // shrinks the pool by one, forever.
+    const { client } = await getSharedDb(dbPath);
+    const now = Date.now();
+    await client.execute({
+      sql: `INSERT INTO flow_admission_queue (id, kind, flow_id, node_id, status, created_at, admitted_at)
+            VALUES (?, ?, ?, ?, 'admitted', ?, ?)`,
+      args: [randomUUID(), "agent-dispatch", "f-legacy", null, now, now],
+    });
+    const a = await store.admit({ kind: "flow-start", flowId: "f1" });
+    assert.equal(a.status, "admitted", "the unmanageable row must not shrink the ceiling");
+  });
+
   test("getLimit is re-read on every call, not cached at store creation", async () => {
     let limit = 1;
     const store = makeStore(0, { getLimit: () => limit });

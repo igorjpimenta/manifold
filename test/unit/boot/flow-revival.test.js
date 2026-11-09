@@ -703,65 +703,6 @@ describe("reviveOrphanFlows", () => {
     });
   });
 
-  describe("agent-dispatch wait → re-requests its own run slot", () => {
-    // A flow queued on waitJson.kind:"agent-dispatch" gave its run slot back
-    // when it queued, so it holds nothing. It must go through admission for
-    // its own run kind — never be re-entered directly, which would run it
-    // outside the pool.
-    it("pool has room: admitted on its own run kind, flipped to running, resumed — not re-entered via runFlow", async () => {
-      const flow = makeFlow({ status: "queued", lastStep: "CACHE_CHECK", waitJson: { kind: "agent-dispatch", nodeId: "SCORE_LLM" } });
-      const pipelines = makePipelines({ p1: { nodes: { SCORE_LLM: { kind: "agent" } } } });
-      const executor = makeExecutor();
-      const runStore = makeRunStore([], [flow]);
-      const dbPath = path.join(os.tmpdir(), `flow-revival-readmit-${randomUUID()}.sqlite`);
-      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
-      await admissionQueueStore.ready();
-
-      const result = await reviveOrphanFlows({
-        all: [{ ...flow }], pipelines, store: makeStore(), logger: makeLogger(), executor,
-        nodeExecutionsStore: makeNodeExecutionsStoreFromFlows([flow]),
-        runStore, admissionQueueStore,
-      });
-      await drainDetachedResumes();
-
-      assert.equal(result.readmitted, 1);
-      assert.equal(result.revived, 0, "not routed through the direct-dispatch path");
-      assert.deepEqual(executor.revived, []);
-      assert.deepEqual(executor.resumed, [flow.flowId]);
-      assert.equal(flow.status, "running");
-      const [row] = await admissionQueueStore.listByStatus("admitted");
-      assert.equal(row.kind, "flow-start");
-      assert.equal(row.flowId, flow.flowId);
-    });
-
-    it("pool full: left queued on its own run kind for the normal promotion cycle, not resumed", async () => {
-      const flow = makeFlow({ status: "queued", lastStep: "CACHE_CHECK", waitJson: { kind: "agent-dispatch", nodeId: "SCORE_LLM" } });
-      flow.parentInvocationId = "inv-1";
-      const pipelines = makePipelines({ p1: { nodes: { SCORE_LLM: { kind: "agent" } } } });
-      const executor = makeExecutor();
-      const runStore = makeRunStore([], [flow]);
-      const dbPath = path.join(os.tmpdir(), `flow-revival-readmit-full-${randomUUID()}.sqlite`);
-      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
-      await admissionQueueStore.ready();
-      await admissionQueueStore.admit({ kind: "flow-start", flowId: "occupant" });
-
-      const result = await reviveOrphanFlows({
-        all: [{ ...flow }], pipelines, store: makeStore(), logger: makeLogger(), executor,
-        nodeExecutionsStore: makeNodeExecutionsStoreFromFlows([flow]),
-        runStore, admissionQueueStore,
-      });
-      await drainDetachedResumes();
-
-      assert.equal(result.readmitted, 1);
-      assert.deepEqual(executor.resumed, []);
-      assert.deepEqual(executor.revived, []);
-      assert.equal(flow.status, "queued");
-      assert.deepEqual(flow.waitJson, { kind: "child-dispatch" }, "a subflow child re-queues on child-dispatch, its own run kind");
-      const [queued] = await admissionQueueStore.listByStatus("queued");
-      assert.equal(queued.kind, "child-dispatch");
-      assert.equal(queued.flowId, flow.flowId);
-    });
-  });
 
   describe("free-slot fill", () => {
     it("promotes queued runs into capacity freed without a release, and resumes them", async () => {

@@ -30,10 +30,10 @@ import { TERMINAL_STATUS_SET } from "../state/run-store.js";
 // flow-start and child-dispatch only, and every flow transition releases by
 // the flow's CURRENT admission kind, so the flow that owns a row is always
 // the code path that releases it. A row of any other kind would hold its
-// slot forever — nothing can release it, and the admitted-count queries in
-// state/admission-queue.js count every admitted row regardless of kind, so
-// each such row shrinks the pool ceiling by one. Keep the engine's
-// admission kinds and the kinds a row can hold in step.
+// slot forever — nothing can release it — which is why the pool's ceiling
+// counts only the kinds the pool manages (state/admission-queue-store.js's
+// admitted-count query filters on them). Keep the engine's admission kinds
+// and the kinds a row can hold in step.
 export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, api, logger, minAgeMs = 30_000 }) {
   if (!admissionQueueStore) return { stuckAdmissionsResumed: 0, stuckAdmissionsFailed: 0 };
   const now = Date.now();
@@ -108,7 +108,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
  * service in index.js.
  *
  * Returns a summary object for observability and testing:
- *   { revived: number, revivedAgent: number, queuedForAdmission: number, readmitted: number, recancelled: number, childrenReconciled: number, gatesReconciled: number, admissionLeaksReleased: number, freeSlotsFilled: number }
+ *   { revived: number, revivedAgent: number, queuedForAdmission: number, recancelled: number, childrenReconciled: number, gatesReconciled: number, admissionLeaksReleased: number, freeSlotsFilled: number }
  */
 
 export async function reviveOrphanFlows({
@@ -256,14 +256,6 @@ export async function reviveOrphanFlows({
   // needed. Throttling happens atomically at the moment each flow admits,
   // not as a bulk post-hoc displacement correction here.
   //
-  // A 'queued' orphan on waitJson.kind:"agent-dispatch" — not an
-  // admission kind (state/admission-queue-store.js's migration deletes its
-  // rows) — gave its own run slot back when it queued, so it holds nothing.
-  // Re-entering it directly would run it outside the pool; instead it
-  // re-requests its own run slot (flipToRunningAndResume with the store:
-  // admitted → flipped to running and resumed; pool full → queued on its
-  // own kind for the normal promotion cycle).
-  //
   // 'queued' orphans on a resource-lock are NOT admission-pool-gated this
   // way — the revive-survivors step below dispatches them directly:
   // re-entering the node they were queued on is how THEY retry (the lock
@@ -271,24 +263,11 @@ export async function reviveOrphanFlows({
   // resolveEdge, not by anything outside this loop).
   const toRevive = [];
   let queuedForAdmission = 0;
-  let readmitted = 0;
   for (const o of orphans) {
     const kind = o.flow.waitJson?.kind;
     if (o.flow.status === "queued" && (kind === "flow-start" || kind === "child-dispatch")) {
       logger.info(`manifold revival: [${o.flow.flowId.slice(0, 8)}] left queued for admission (${kind}) — will resume via the normal release/promotion cycle`);
       queuedForAdmission++;
-      continue;
-    }
-    if (o.flow.status === "queued" && kind === "agent-dispatch" && admissionQueueStore && runStore) {
-      const result = await flipToRunningAndResume({
-        parentFlowId: o.flow.flowId, runStore, admissionQueueStore, logger, api,
-        resume: (flowId) => { scheduleDetachedResume(executor.resume, flowId, { logger, api, context: "manifold revival: re-admit" }); },
-      });
-      logger.info(
-        `manifold revival: [${o.flow.flowId.slice(0, 8)}] re-requested its ${admissionKindForFlow(o.flow)} slot — ` +
-        `${result.resumed ? "admitted, resuming" : result.reason}`,
-      );
-      readmitted++;
       continue;
     }
     toRevive.push(o);
@@ -497,7 +476,7 @@ export async function reviveOrphanFlows({
   });
 
   return {
-    revived: toRevive.length, revivedAgent, queuedForAdmission, readmitted, recancelled: cancelledByRevival.size,
+    revived: toRevive.length, revivedAgent, queuedForAdmission, recancelled: cancelledByRevival.size,
     childrenReconciled, gatesReconciled, admissionLeaksReleased, freeSlotsFilled,
     stuckAdmissionsResumed, stuckAdmissionsFailed,
   };

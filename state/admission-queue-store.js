@@ -5,8 +5,9 @@
 // at a time, so the run cap already bounds everything it does.
 //
 // ONE combined pool, not one per kind — deliberately. Both kinds compete
-// for the same shared count (no `kind` filter on the admitted-count query
-// or the promotion query below). This only works because admission tracks
+// for the same shared count: the admitted-count query below filters on the
+// kinds this table manages, not on one kind, so a flow-start and a
+// child-dispatch row take the same slot. This only works because admission tracks
 // flow_runs.status, not just start/end: a flow-run's own admission entry
 // (whichever kind spawned it) is held only while it's genuinely "running" —
 // the moment it goes "blocked" (a human-gate wait, or its own
@@ -41,6 +42,13 @@ import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
+
+// The kinds this table manages. A row of any other kind can neither be
+// resumed nor released by flow (releaseByFlow matches the flow's CURRENT
+// kind), so it holds its slot forever; the ceiling below counts the rows
+// the pool can actually give back.
+const MANAGED_KINDS = ["flow-start", "child-dispatch"];
+const MANAGED_KINDS_SQL = MANAGED_KINDS.map(() => "?").join(", ");
 
 // Same Proxy-wrapped async-ready factory idiom as run-store.js/state-
 // store.js — every method call transparently awaits store construction
@@ -170,6 +178,12 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
     async admit({ kind, flowId, nodeId = null }) {
       if (!kind) throw new TypeError("admission-queue-store.admit: kind is required");
       if (!flowId) throw new TypeError("admission-queue-store.admit: flowId is required");
+      // A row of a kind the pool does not manage can never be released by
+      // flow (releaseByFlow matches the flow's CURRENT kind), so it would
+      // hold its slot forever. Refuse it at the door instead.
+      if (!MANAGED_KINDS.includes(kind)) {
+        throw new TypeError(`admission-queue-store.admit: kind must be one of ${MANAGED_KINDS.join(", ")}`);
+      }
       const limit = getLimit();
       return withWriteTx(async (tx) => {
         const { rows: existingRows } = await tx.execute({
@@ -184,8 +198,9 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
           return { id, status };
         }
         const { rows } = await tx.execute({
-          sql: `SELECT COUNT(*) AS n FROM flow_admission_queue WHERE status = 'admitted'`,
-          args: [],
+          sql: `SELECT COUNT(*) AS n FROM flow_admission_queue
+                WHERE status = 'admitted' AND kind IN (${MANAGED_KINDS_SQL})`,
+          args: MANAGED_KINDS,
         });
         const admittedCount = Number(rows[0]?.n ?? 0);
         const id = randomUUID();
@@ -254,8 +269,9 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
       const limit = getLimit();
       return withWriteTx(async (tx) => {
         const { rows } = await tx.execute({
-          sql: `SELECT COUNT(*) AS n FROM flow_admission_queue WHERE status = 'admitted'`,
-          args: [],
+          sql: `SELECT COUNT(*) AS n FROM flow_admission_queue
+                WHERE status = 'admitted' AND kind IN (${MANAGED_KINDS_SQL})`,
+          args: MANAGED_KINDS,
         });
         const free = limit - Number(rows[0]?.n ?? 0);
         if (free <= 0) return [];

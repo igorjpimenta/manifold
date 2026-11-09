@@ -940,7 +940,7 @@ stateDiagram-v2
     running --> blocked: human-gate opens,<br/>ctx.needs() not ready,<br/>children-pending
     blocked --> running: gate resolved /<br/>needed data arrived
 
-    running --> queued: agent-dispatch semaphore<br/>or cross-process lock contended
+    running --> queued: the flow waits for its own admission slot
     queued --> running: slot/lock freed<br/>(self-resolving, no operator action)
 
     running --> succeeded: reached __end__ cleanly
