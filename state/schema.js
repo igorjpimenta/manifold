@@ -36,10 +36,10 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   // table's first payload column. resultWrittenAt is the "is this real"
   // signal a bare nullable resultJson can't provide on its own (not
   // dispatched vs. dispatched-not-complete vs. complete-with-null-result).
-  // resultTooLargeBytes carried the real size when a result was capped
+  // resultTooLargeBytes carries the real size of a result that was capped
   // instead of stored (see writeResult() in
-  // state/node-executions.js). Only non-null on legacy rows written
-  // before the cap's removal; every write since always sets it null.
+  // state/node-executions.js). Every write today sets it null; a non-null
+  // value marks a row whose result was never stored.
   resultJson:          text('result_json'),
   resultWrittenAt:     integer('result_written_at'),
   resultTooLargeBytes: integer('result_too_large_bytes'),
@@ -54,9 +54,8 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   index('idx_invocations_pipe_node').on(table.pipelineId, table.nodeId),
 ]);
 
-// error/error_type intentionally NOT here — Phase 1.5 ("Eradicate soft
-// errors") moved error content entirely
-// into failure_events, which now gets a permanent row on every single
+// error/error_type intentionally NOT here — error content lives entirely
+// into failure_events, which gets a permanent row on every single
 // throw regardless of what a cascade edge decides to do next. This table
 // is purely an execution-window/identity ledger: which node, which
 // attempt, when it ran, why kind of dispatch (fresh/retry/revival/
@@ -72,10 +71,10 @@ export const flowNodeExecutions = sqliteTable('flow_node_executions', {
   index('idx_fne_exited').on(table.exitedAt),
 ]);
 
-// flow_branches (old-model branch storage, from the pre-childFlows
-// branchService era) is still a real table in runtime.sqlite — read
-// directly via raw SQL by state/node-executions.js, never through Drizzle
-// — and deliberately has no schema export here: nothing imports one.
+// flow_branches (branch storage) is still a real table in runtime.sqlite —
+// read directly via raw SQL by state/node-executions.js, never through
+// Drizzle — and deliberately has no schema export here: nothing imports
+// one.
 
 // Deliberately thin — pipeline_id/branch_item_id/failure_node/recovery_hint/
 // resolved status are reconstructed at read time via invocation_id/
@@ -88,9 +87,8 @@ export const failureEvents = sqliteTable('failure_events', {
   failureSummary: text('failure_summary').notNull(),
   invocationId:   text('invocation_id'),
   executionId:    text('execution_id'),
-  // The one field that moved here from flow_node_executions in Phase 1.5 —
-  // no longer derivable via a join once that table stopped storing error
-  // content. Same NodeFailure vocabulary as before: never_attempted|
+  // Error content lives here, not in flow_node_executions, so it is not
+  // derivable via a join. NodeFailure vocabulary: never_attempted|
   // confirmed_absent|inconclusive|infra_unavailable|blocked — plus
   // "subflow-mode-not-satisfied" for a subflow node whose exit mode wasn't
   // met (not a thrown NodeFailure at all, a policy verdict — see
@@ -116,8 +114,8 @@ export const discussState = sqliteTable('discuss_state', {
 }, (table) => [
   index('idx_discuss_updated').on(table.updatedAt),
   // One row per discuss thread. Without this constraint two concurrent
-  // appendMessage calls each insert their own row and the thread's history
-  // splits across them.
+  // appendMessage calls each insert their own row and the thread's
+  // messages split across them.
   uniqueIndex('idx_discuss_state_unique').on(table.flowId, table.itemId),
 ]);
 

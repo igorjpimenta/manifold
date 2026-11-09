@@ -24,16 +24,15 @@ terminal path.
 ## Store model
 
 `state-store` wraps `run-store`; all reads and CAS writes go to
-`runtime.sqlite` only. `registry.sqlite` (platform) is never written by
-manifold — it is fully retired.
+`runtime.sqlite` only. `registry.sqlite` (platform) is never read or
+written by manifold.
 
 - **`runStore.X()`** → `runtime.sqlite` `flow_runs` (sole read/write store — dashboard, revival, gate-resolver)
 - **`nodeExecutionsStore.X()`** → `runtime.sqlite` `flow_node_invocations` / `flow_node_executions` (one row per logical node dispatch / per attempt — also the identity source for a subflow node's real children, see *Subflow data flow* below)
-- **`branchService.X()`** → `runtime.sqlite` `flow_branches` (legacy branch truth — read-only historical data; every subflow node's items are real `flow_runs` children now, see *Subflow data flow* below)
+- **`branchService.X()`** → `runtime.sqlite` `flow_branches` (read-only branch rows; every subflow node's items are real `flow_runs` children, see *Subflow data flow* below)
 
-**`state_json` is entry-only, `result_json` is the accumulator**
-("Option B"/B4, shipped 2026-08-18). `flow_runs.state_json` no longer
-grows a key per dispatched node — persist calls filter it
+**`state_json` is entry-only, `result_json` is the accumulator.**
+`flow_runs.state_json` holds no key per dispatched node — persist calls filter it
 (`engine/executor-persist.js`'s `toPersistableState`) down to just
 entry/bookkeeping fields: `pipelineId` + `needs-resolver.js`'s
 `ENTRY_FIELDS` (`runId`, `startedAt`, `args`,
@@ -49,7 +48,7 @@ is reconstructed on read by `assembleState(flowId, {runStore,
 nodeExecutionsStore, baseState})`, which replays every completed
 invocation's `result_json` onto `baseState` (latest `visit_seq` per node
 wins) and also attaches `_subflowGroups` — this is what *Node dispatch*'s
-`enrichedState` below actually is now, not the old `enrichWithSubflows()`.
+`enrichedState` below is.
 
 ## Creation
 
@@ -65,7 +64,7 @@ Iterates until terminal or not running:
 1. `flow = store.get(flowId)` — reads `runtime.sqlite` via `runStore.get()`. If `isTerminal(flow.status)`, stop.
 2. `nextNodeId = resolveEdge(edges, lastStep, state)` — inside a `cascade`-kind flow, a 2-arg edge `(state, error)` also receives the `NodeFailure` `{message, errorType}` the last dispatch threw (or `null` on success). See README.md's *Optional: `kind: cascade`* section and `engine/executor-errors.js`'s `NodeFailure`.
 3. If `nextNodeId === '__end__'` → see *Terminal* below.
-4. Otherwise: `store.markExecuting(nodeId)` (best-effort informational mark), then `result = await executeNode({ node, nodeId, state, flowId })`.
+4. Otherwise: `nodeExecutions.enter({ flowId, nodeId, kind })` creates the invocation row for this dispatch (the row that identifies the currently-running node), then `result = await executeNode({ node, nodeId, state, flowId })`.
 
 ## Node dispatch
 
@@ -74,7 +73,7 @@ Iterates until terminal or not running:
 enrichedState = assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state })
 update = await node.run(enrichedState, ctx)
 ```
-`assembleState` replays this flow's own completed `result_json` rows onto `state` (which is entry-only — see *Store model* above), then attaches `_subflowGroups`: dual-mode per group, real `flow_runs` children if any exist, else legacy `flow_branches` → `{ _subflowGroups: { [group]: { [key]: row } } }`. `_subflowGroups` is **transient** — never written to `state_json`.
+`assembleState` replays this flow's own completed `result_json` rows onto `state` (which is entry-only — see *Store model* above), then attaches `_subflowGroups`: dual-mode per group, real `flow_runs` children if any exist, else the `flow_branches` fallback → `{ _subflowGroups: { [group]: { [key]: row } } }`. `_subflowGroups` is **transient** — never written to `state_json`.
 
 **`kind: 'agent'`**
 ```js
@@ -103,7 +102,7 @@ pending = node.pendingSelector(enrichedState)
 - If `pending` is empty → `gate_records.consumedAt` stamped, `stateUpdate: {}` → advance.
 - Else → `gate_records` written (`nodeExecutionsStore.writeGateRecord`), `waitJson` built → blocked path (see *Node outcomes* below).
 
-Gate delivery data (items, pending, timeoutMs, openedAt/consumedAt) lives **only** in the dedicated `gate_records` table now, never in `state_json` — a prior `"state.gates[nodeId]"` full-snapshot write was removed 2026-08-18 once `gate_records` fully superseded it as every real reader's source (`routes/runs.js`'s `.gates` response field, the internal `existingGate`/`openedAt` checks above). Decision bookkeeping (`approvedIds`/`rejectedIds`/`editedTexts`/`approvalPending`/`approvalResults`) is separate — written by `gates/gate-resolver.js` directly, and **does** survive in `state_json` (all five are in `ENTRY_FIELDS`).
+Gate delivery data (items, pending, timeoutMs, openedAt/consumedAt) lives **only** in the dedicated `gate_records` table, never in `state_json` — `gate_records` is every real reader's source (`routes/runs.js`'s `.gates` response field, the internal `existingGate`/`openedAt` checks above). Decision bookkeeping (`approvedIds`/`rejectedIds`/`editedTexts`/`approvalPending`/`approvalResults`) is separate — written by `gates/gate-resolver.js` directly, and **does** survive in `state_json` (all five are in `ENTRY_FIELDS`).
 
 ## Node outcomes → persistence
 
@@ -117,9 +116,9 @@ persistRunningRetrying({ state: freshAfterNode.stateJson, lastStep: nodeId })
 // → store.setRunning() (state filtered to entry/bookkeeping fields only)
 // → runStore.casSetRunning() → runtime: running, revision++
 ```
-`writeResult` is **awaited**, not fire-and-forget: the very next dispatch-loop iteration's `assembleState()` call depends on this having landed, or an edge function reading this node's own just-completed output would see it as still-missing — found live as an infinite busy-loop before this was fixed (2026-08-18).
+`writeResult` is **awaited**, not fire-and-forget: the very next dispatch-loop iteration's `assembleState()` call depends on this having landed, or an edge function reading this node's own just-completed output would see it as still-missing.
 
-There is no wide merge of `stateUpdate` into the persisted state anymore (removed 2026-08-18): `freshAfterNode.stateJson` is already entry-only, and any node-output fields a merge would have added get stripped right back out by the persist filter regardless — `stateUpdate`'s only real destination is `result_json`, above.
+`stateUpdate` is not merged into the persisted state: `freshAfterNode.stateJson` is already entry-only, and any node-output fields a merge would have added get stripped right back out by the persist filter regardless — `stateUpdate`'s only real destination is `result_json`, above.
 
 **`blockedInfo`** (code threw a `_kind`-stamped `NodeBlocked`, or an `_error` sentinel — a `NodeBlocked` with **no** `_kind` is not a wait at all, it's treated as a failure instead; see README.md's `ctx.blocked` entry under *Code-node `ctx` argument*)
 ```js
@@ -150,7 +149,7 @@ Flow ends.
 ```js
 enrichedState = assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state })
 ```
-This is the 6th root read site, migrated 2026-08-18 (was `enrichWithSubflows`, raw-state-only, no `result_json` replay — `display()`/`successCriteria()` lost visibility into any node's own output the moment `state_json` stopped carrying it; found live via 2 failing tests).
+This is the 6th root read site: it replays `result_json` onto the raw state, so `display()`/`successCriteria()` see every node's own output (raw state alone carries none).
 
 ```js
 runAuditIfConfigured({ state: enrichedState })
@@ -161,7 +160,7 @@ finalState = pipeline.display
 
 verdict = pipeline.runAudit?.successCriteria({ ...enrichedState, ...finalState })
 ```
-`finalState` sees `_subflowGroups`, `_display`, and every node's own `resultJson`-replayed output, all via `enrichedState`/`finalState` — it's safe to carry `_subflowGroups` through here too now (previously avoided on purpose): the persist filter (`toPersistableState`) strips it regardless of what `finalState` contains.
+`finalState` sees `_subflowGroups`, `_display`, and every node's own `resultJson`-replayed output, all via `enrichedState`/`finalState` — the persist filter (`toPersistableState`) strips `_subflowGroups` regardless of what `finalState` contains.
 
 - **`'succeeded'`** (or no `successCriteria` defined) → `persistFinishRetrying({ state: finalState })` → `store.finish()` (filtered to entry/bookkeeping fields only) → `runStore.casFinish()` → runtime: succeeded, revision++
 - **`'failed'`** → `persistFailRetrying({ state: finalState, failureNode: '__end__', message: finalState._successCriteriaReason ?? "successCriteria: failed" })` → `store.fail()` (filtered) → `runStore.casFail()` → runtime: failed, revision++
@@ -195,16 +194,12 @@ the method actually writes status `blocked`; there is no `waiting` status
 at all, despite the method's own name).
 
 A flow is created already `running` — there is no "queued at creation,
-poller picks it up" step (that described a poller-driven architecture
-that was never built). `queued` **is** a real, currently-used status,
-though — `run-store.js`'s `casSetQueued()` writes `status="queued"`, used
+poller picks it up" step. `queued` **is** a real, currently-used status —
+`run-store.js`'s `casSetQueued()` writes `status="queued"`, used
 for waits on an *internal* resource that frees itself (the cross-process
 lock — `executor.js`'s `withCrossProcessLockMaybe`), kept distinct from
 `blocked` (which needs an operator/external actor) specifically so a
-consumer can tell the two apart without inspecting `wait_json.kind`. A
-prior version of this doc claimed no code path ever writes
-`status="queued"` — that was already wrong by the time it was written,
-not something this session's own changes broke.
+consumer can tell the two apart without inspecting `wait_json.kind`.
 
 ```mermaid
 stateDiagram-v2
@@ -235,7 +230,7 @@ stateDiagram-v2
 ## Subflow data flow
 
 Subflow nodes never touch the parent's `stateJson`. Every subflow node's
-items are real `flow_runs` children now — one child per item, its own
+items are real `flow_runs` children — one child per item, its own
 `flowId`, driven start-to-finish by this same executor. There is no
 in-process branch-worker pool and no per-item write call from pipeline
 code; a sub-node just returns a normal `stateUpdate` and the executor
@@ -263,11 +258,11 @@ Every subsequent execution attempt of that same child (retries, revival) reuses 
 ```js
 assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state })
 ```
-→ `state/subflow-state.js`'s `getAllSubflowGroups()` — dual-mode per group: real `flow_runs` children exist for this groupId → use them (`flow_node_invocations.flow_id = parent`, `JOIN flow_runs ON parent_invocation_id`) — else fall back to the legacy `flow_branches` read (`branchService.listByFlow`), for flows that predate this migration. A group is never a blend of both.
+→ `state/subflow-state.js`'s `getAllSubflowGroups()` — dual-mode per group: real `flow_runs` children exist for this groupId → use them (`flow_node_invocations.flow_id = parent`, `JOIN flow_runs ON parent_invocation_id`) — else fall back to the `flow_branches` read (`branchService.listByFlow`), for flows that have no `flow_runs` children. A group is never a blend of both.
 
 → `state._subflowGroups = { [groupId]: { [subflowKey]: row } }`, where:
-- `row.data` — the child's own `resultJson` replayed onto its (entry-only) `stateJson` (`engine/result-replay.js`'s `replayResults` — every sub-node's returned update, keyed by sub-node id, e.g. `row.data.SCORE_LLM`). Was "the child's own full `stateJson`" directly until 2026-08-18 — safe while `state_json` still accumulated every node's own output; broke silently (a parent reading a prior child's output saw nothing) the moment the write cutover made `state_json` entry-only, fixed via this replay.
-- `row.status`, `row.failedAt`/`doneAt`/`cancelledAt`, `row.awaiting` — folded from the child's real status/waitJson to match the shape code written against the old model already expects.
+- `row.data` — the child's own `resultJson` replayed onto its (entry-only) `stateJson` (`engine/result-replay.js`'s `replayResults` — every sub-node's returned update, keyed by sub-node id, e.g. `row.data.SCORE_LLM`). The replay is what makes a prior child's output visible to the parent; raw `state_json` carries none of it.
+- `row.status`, `row.failedAt`/`doneAt`/`cancelledAt`, `row.awaiting` — folded from the child's real status/waitJson to match the shape callers expect.
 - `row.childFlowId` — the real flowId, for callers that want to navigate to it directly (e.g. a dashboard link).
 - `_subflowGroups` is transient — computed fresh every step, never written back to `state_json`.
 

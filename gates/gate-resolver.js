@@ -159,7 +159,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     // Gate pauses are always persisted as "blocked" — "waiting" is never
     // actually written anywhere (confirmed repo-wide), so it's not checked.
     if (flow.status !== "blocked") return;
-    if (flow.waitJson?.kind !== "human-gate" && flow.waitJson?.kind !== "gate" && flow.waitJson?.kind !== "verify-required") return; // "gate" / "verify-required" compat
+    if (flow.waitJson?.kind !== "human-gate" && flow.waitJson?.kind !== "gate" && flow.waitJson?.kind !== "verify-required") return;
 
     const items = flow.waitJson?.items ?? [];
     const approvalPending = flow.stateJson?.approvalPending ?? {};
@@ -522,7 +522,7 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
 
     let validItem = false;
     if (flow.status === "blocked") {
-      if (flow.waitJson?.kind !== "human-gate" && flow.waitJson?.kind !== "gate" && flow.waitJson?.kind !== "verify-required") { // "gate" / "verify-required" compat
+      if (flow.waitJson?.kind !== "human-gate" && flow.waitJson?.kind !== "gate" && flow.waitJson?.kind !== "verify-required") {
         return { ok: false, code: "flow_not_gate" };
       }
       const items = Array.isArray(flow.waitJson?.items) ? flow.waitJson.items : [];

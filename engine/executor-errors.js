@@ -1,8 +1,5 @@
 export const REVISION_RETRY_LIMIT = 5;
 
-// Dropped legacy: the openclaw tasks DB (~/.openclaw/tasks/runs.sqlite) is
-// no longer read — core never reads harness homes. Always resolves null so
-// callers fall back to their default detail.
 export async function fetchSessionError(sessionKey) {
   void sessionKey;
   return null;

@@ -1,9 +1,3 @@
-// state/paths.js — manifold owns its data directory. The store belongs to
-// manifold core, not to whichever harness happens to launch it.
-//
-// Precedence: MANIFOLD_DATA_DIR, then ~/.manifold/. Legacy harness-managed
-// files (~/.openclaw/{runtime.sqlite,ops.sqlite}) are copied in once on
-// first boot and never touched again afterwards.
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -38,9 +32,6 @@ export function pipelinesDir(dataDir) {
   return path.join(dataDir, "workspace", ".pipelines");
 }
 
-// Media root for harness-delivered blobs (voice messages today). The store
-// home is the root; the harness name namespaces it so two harnesses sharing
-// one store never collide. Layout: <dataDir>/media/audio/<harness>/<flow>.
 export function mediaAudioDir(dataDir) {
   return path.join(dataDir, "media", "audio");
 }
@@ -63,13 +54,6 @@ function legacyDbPath(home, name) {
   return path.join(home, ".openclaw", name);
 }
 
-// One-time copy from harness-managed paths into the core-owned data dir.
-// Copy (never move): the legacy files stay where they are for the old
-// gateway-hosted manifold until cutover; after cutover nothing reads them.
-// Integrity-checked after copy; throws on a damaged source so boot refuses
-// loudly instead of serving a torn store. Idempotent via the marker file.
-// Any other failure (missing native module, unwritable dir) is logged, not
-// thrown — boot must not fail on a best-effort migration.
 export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } = {}) {
   try {
     mkdirSync(dataDir, { recursive: true });
@@ -94,9 +78,6 @@ export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } =
   if (existsSync(legacyRuntime) && !existsSync(runtime)) sources.push([legacyRuntime, runtime]);
   if (existsSync(legacyOps) && !existsSync(ops)) sources.push([legacyOps, ops]);
   if (sources.length === 0) {
-    // Fresh install: nothing to copy. The marker records that the decision
-    // was made, so a later-appearing legacy file is never picked up mid-life
-    // (that would fork the store).
     try {
       writeFileSync(migrationMarkerPath(dataDir), JSON.stringify({ at: new Date().toISOString(), from: null, fresh: true }) + "\n");
     } catch (err) {
@@ -108,10 +89,6 @@ export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } =
     copyFileSync(src, dest);
     logger?.info?.(`paths: migrated ${src} -> ${dest}`);
   }
-  // Loud throw on a damaged source is the one allowed throw: boot must
-  // refuse a torn store rather than serve it. An unavailable verifier is
-  // a loud log, not a throw — the marker records the decision either way
-  // so a later-appearing legacy file can never fork the store.
   let verified = true;
   try {
     verifyCopies(sources.map(([, dest]) => dest));
@@ -131,9 +108,6 @@ export function ensureMigrated({ dataDir, home = os.homedir(), logger = null } =
   return { migrated: true, from: sources.map(([src]) => src) };
 }
 
-// quick_check (not full integrity_check — multi-GB primaries would add
-// minutes to first boot) on every copied file. Lazy native import so this
-// module stays light for callers that never migrate.
 function verifyCopies(destPaths) {
   for (const dest of destPaths) {
     let Database;
@@ -164,11 +138,6 @@ export function readMigrationMarker(dataDir) {
   }
 }
 
-// Core-owned store home: every store default derives from here, so one
-// MANIFOLD_DATA_DIR move relocates the whole store. Explicit per-path env
-// overrides win over the dataDir derivation for operators who split files
-// across volumes. Accepts a pre-resolved `paths` object (same shape as the
-// return) so the adapter resolves once and threads it through.
 export function resolveStorePaths({ paths = null, dataDir = null, env = process.env } = {}) {
   const dir = paths?.dataDir ?? dataDir ?? resolveDataDir({ env });
   return {

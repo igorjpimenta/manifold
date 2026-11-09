@@ -3,7 +3,7 @@
 // it'll be read as (an ORM-style relation declaration, not an array) —
 // and resolves each one lazily, only when `ctx.needs(varName)` is actually
 // awaited inside that node's own run()/promptBuilder()/selector(), not
-// pre-fetched in bulk before dispatch. A branch of code that never calls
+// fetched in bulk before dispatch. A branch of code that never calls
 // ctx.needs("x") never pays for or blocks on that declared need.
 //
 // True per-property-access laziness (a bare `state._needs.x` read
@@ -23,8 +23,7 @@
 // back the other way would be a cycle.
 //
 // hops:1 = immediate parent flow, hops:2 = grandparent, etc. Walked via
-// the same two tables/columns the design doc's original multi-hop
-// description already used — flow_runs.parent_invocation_id ->
+// flow_runs.parent_invocation_id ->
 // flow_node_invocations.getInvocation().flowId -> repeat — bounded by the
 // caller's own declared (small, explicit) hop count, so no new denormalized
 // parent_invocation_id column on flow_node_invocations is needed even for
@@ -129,7 +128,7 @@ export async function resolveOneNeed({ flowId, hops, nodeId, runStore, nodeExecu
   if (row.resultWrittenAt == null) return { status: "not-ready" };
   if (row.resultTooLargeBytes != null && row.resultJson == null) {
     // writeResult() (state/node-executions.js) does not cap results, so this
-    // can only fire for a legacy row that kept nothing at all — the real
+    // can only fire for a row that kept nothing at all — the real
     // value isn't recoverable.
     return { status: "ready", value: { _resultTooLarge: true, bytes: row.resultTooLargeBytes } };
   }
@@ -183,7 +182,7 @@ export async function resolveOneConfig({ flowId, hops, config, runStore, nodeExe
 
 // Builds the `needs(varName)` async function passed to a declaring node's
 // own run()/promptBuilder()/selector() as part of its ctx. Each call is an
-// independent, fresh resolveOneNeed — no bulk pre-fetch, no caching across
+// independent, fresh resolveOneNeed — no bulk fetch, no caching across
 // calls within the same dispatch (consistent with this engine's "no cache
 // layer, direct read" convention every other store accessor already
 // follows). A not-ready/not-found result throws NodeBlocked with `_kind:
@@ -215,8 +214,8 @@ export function makeNeedsCtx({ node, flowId, runStore, nodeExecutionsStore, pipe
     }
     // Optional field-pick, so an author can ask for exactly the sub-key(s)
     // it actually reads instead of the whole ancestor node's output — the
-    // same "scoped read, not the whole blob" reasoning this doc's entire
-    // Option A/B history is built on, just applied at the single-node
+    // same "scoped read, not the whole blob" reasoning this engine follows
+    // elsewhere, just applied at the single-node
     // granularity ctx.needs() operates at. `fields` is always an array,
     // even for a single key — no separate "unwrap to a bare value" mode,
     // so ctx.needs()'s return shape is always a dict, never sometimes-a-

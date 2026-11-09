@@ -37,8 +37,8 @@ import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
 export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
-  // Explicit params win; api is the legacy fallback the adapter still
-  // supplies during cutover (tests construct with api only).
+  // Explicit params win; api is the fallback the adapter still
+  // supplies (tests construct with api only).
   const _config = config ?? api?.config ?? null;
   const _lineage = api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? _config?.pipelinesDir ?? resolveStorePaths().pipelinesDir;
@@ -154,13 +154,11 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     // selector silently sees undefined subflow groups and resolves to zero
     // items regardless of how many upstream branches actually succeeded.
     //
-    // assembleState(baseState: state) replaces enrichWithSubflows(state, ...)
-    // here: it subsumes enrichWithSubflows's own _subflowGroups computation
-    // (same getAllSubflowGroups call, folded in) and additionally overlays
+    // assembleState(baseState: state) computes _subflowGroups here (the
+    // same getAllSubflowGroups call, folded in) and additionally overlays
     // each node's resultJson on top of the real stateJson passed as
     // baseState. The overlay is a no-op against real flows (resultJson-derived
-    // values are byte-identical to state_json's), so this is the same
-    // "additive, verified before cutover" pattern as every prior phase,
+    // values are byte-identical to state_json's), so the enrichment stays
     // scoped to the single narrowest read site (node.selector) rather than
     // all 5 root call sites at once.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
@@ -319,13 +317,12 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // gateway restart for free — it's just persisted state_json, same as
       // every other field the executor writes.
       const cascadeError = state?._cascadeError?.nodeId === lastStep ? state._cascadeError : null;
-      // Fourth root dispatch-loop read site cut over: edge functions now
-      // read via assembleState(baseState: state) instead of raw state — the
-      // single call site every edge decision in the engine goes through
-      // (root and child flows alike, since they share this one runFlow
-      // loop). A separate local var, not a reassignment of `state` itself —
-      // `state` is still what gets persisted below; only the value handed
-      // to the edge function changes.
+      // Edge functions read via assembleState(baseState: state), not raw
+      // state — the single call site every edge decision in the engine goes
+      // through (root and child flows alike, since they share this one
+      // runFlow loop). A separate local var, not a reassignment of `state`
+      // itself — `state` is still what gets persisted below; only the value
+      // handed to the edge function changes.
       const edgeState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
       const nextNodeId = resolveEdge(pipeline.edges, lastStep, edgeState, {
         logger, flowId,
@@ -354,11 +351,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       if (nextNodeId === "__end__") {
         // This root read site carries the same resultJson-replay need as
         // every other: pipeline.display() and successCriteria() both read
-        // node output through here. assembleState() replaces the old
-        // enrichWithSubflows, which only ever added _subflowGroups onto raw
-        // `state` and never replayed resultJson at all. Harmless while
-        // state_json still carried the full accumulated blob; broken once
-        // the state-write filter made it entry-only.
+        // node output through here. assembleState() adds _subflowGroups AND
+        // replays resultJson onto raw `state` — both are needed, because
+        // state_json is entry-only and carries no node output of its own.
         const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
         await runAuditIfConfigured({ flowId, pipeline, state: enrichedState, logger });
         // failureStore.recordFromTerminalState's soft-marker scan was
@@ -440,8 +435,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       logger.info(`manifold [${flowId.slice(0, 8)}] → ${nextNodeId} (${node.kind})`);
 
       const enteredAt = Date.now();
-      // Re-pointed off flow_node_invocations by a later cleanup pass (was
-      // state._stepHistory): computed once per dispatch, from this flow's
+      // Computed once per dispatch, from this flow's
       // own last-dispatched node — see executor-helpers.js's isFreshNodeEntry
       // for the full reasoning. execKind is the actual value threaded to every write()
       // call below in this iteration (only one ever fires per iteration) —
@@ -451,10 +445,10 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       const lastNodeId = await nodeExecutions.findCurrentStep(flowId);
       const forceNew = isFreshNodeEntry(lastNodeId, nextNodeId);
       const execKind = forceNew ? "fresh" : kind;
-      // Create the invocation row pre-execution: "last invocation for this
-      // flow" now correctly tracks the in-flight node even during
-      // execution, not just after completion. Replaces markExecuting() as the
-      // mechanism for identifying the currently-running node.
+      // Create the invocation row before execution: "last invocation for
+      // this flow" tracks the in-flight node even during execution, not
+      // just after completion — this is how the currently-running node is
+      // identified.
       const enterResult = await nodeExecutions.enter({
         flowId, pipelineId: state.pipelineId ?? null,
         nodeId: nextNodeId, subflowKey: null, kind: execKind,
@@ -475,7 +469,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       try {
         // "needs:" resolution is lazy, via ctx.needs(varName) called
         // from inside the node's own run()/promptBuilder()/selector(), NOT
-        // pre-checked here. executor-nodes.js/executor-subflow-children.js
+        // checked here ahead of the dispatch. executor-nodes.js/executor-subflow-children.js
         // build that accessor (needs-resolver.js's makeNeedsCtx) and pass
         // it through as part of ctx — nothing to do at this call site
         // beyond letting a NodeBlocked(_kind:"needs-not-ready") thrown from
@@ -541,8 +535,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
             // Every throw persists a permanent failure_events row
             // IMMEDIATELY, right here, regardless of what the edge
             // decides next — not just on eventual give-up. This is the one
-            // gap the pre-existing persistFailRetrying->recordEngineFailure
-            // path never covered (a cascade-continuing throw never reaches
+            // gap the persistFailRetrying->recordEngineFailure path never
+            // covers (a cascade-continuing throw never reaches
             // persistFailRetrying at all). If this attempt turns out to be
             // the cascade's final one, the `!nextNodeId` branch at the top
             // of this loop reuses this SAME invocationId/executionId when
@@ -680,10 +674,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
           });
           return;
         }
-        // node.renderForOperator was an optional hook nothing in this
-        // codebase ever implemented (see describeWaitFallback's own header
-        // comment) — removed rather than keep computing a wide state merge
-        // just to feed an argument no pipeline reads.
+        // The wait summary is synthesized by describeWaitFallback(waitJson,
+        // nextNodeId) — no pipeline-visible render hook feeds this log line.
         const summary = describeWaitFallback(waitJson, nextNodeId);
         logger.info(`manifold [${flowId.slice(0, 8)}] ${reentrant ? "reentrant gate" : "gate"} → blocked\n${summary}`);
         await persistWaitingRetrying({
@@ -703,27 +695,20 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // last_step is what boot-time orphan revival and the pipeline-
       // concurrency dequeue path both trust as "this node completed" — they
       // jump straight to resolving its outbound edge without re-running
-      // apply(). Under the old order (state persist first, result write
-      // second) a restart landing between the two left last_step durably
-      // pointing at a node whose result_json was never committed, so the
-      // edge function read an empty state.<nodeId> and returned null — the
-      // engine surfaced this as "edge <nodeId> returned no next node"
-      // (SCORE_LLM, live in production). Writing the result first makes that
-      // invariant crash-safe: if a restart now lands in the new gap
-      // instead, last_step simply never advances and revival re-runs this
-      // node's apply() again — a duplicate call, not a silent failure.
+      // apply(). Writing the result first makes that invariant crash-safe:
+      // a restart landing before last_step advances leaves last_step
+      // pointing at the previous node, so revival re-runs this node's
+      // apply() again — a duplicate call, not a silent failure.
       //
-      // Also still AWAITED, not fire-and-forget: once the state-write
-      // filter cutover stopped persisting the full state_json blob, the
-      // very next loop iteration's assembleState() call (line ~288, feeding
-      // the edge function) became the ONLY way this node's own output
+      // Also still AWAITED, not fire-and-forget: state_json is entry-only,
+      // so the very next loop iteration's assembleState() call (line ~288,
+      // feeding the edge function) is the ONLY way this node's own output
       // becomes visible again — if
       // that read raced ahead of this write, the edge function would see
       // this node's output as still-missing, some edges then re-route back
-      // to the same node (or worse), producing a tight busy-loop. Found
-      // live: 4 real E2E suites spun at ~45% CPU indefinitely once this
-      // filter shipped. Awaiting costs one DB round-trip per dispatch,
-      // already priced into every other persist call this loop makes.
+      // to the same node (or worse), producing a tight busy-loop.
+      // Awaiting costs one DB round-trip per dispatch, already priced into
+      // every other persist call this loop makes.
       const resultWrite = await nodeExecutions.writeResult(invocationId, stateUpdate).catch(() => null);
       if (!resultWrite || !resultWrite.ok) {
         const reason = resultWrite?.reason ?? "threw";
@@ -779,7 +764,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   nodeCtx = Object.freeze({
     async invokePipeline(targetPipelineId, args = {}) {
       const record = await start(targetPipelineId, args);
-      // start() no longer throws when the shared admission pool is full —
+      // start() does not throw when the shared admission pool is full —
       // it queues instead (see start()'s own comment). Preserves the
       // "singleton-busy" contract at this call site specifically: a caller
       // handling invoked:false is expected to retry invokePipeline itself
@@ -876,7 +861,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
    * the agent no way to know it already tried this once, risking a
    * duplicate side effect. Instead this sends REVIVAL_MSG to the SAME
    * deterministic session key the original dispatch used, so the agent can
-   * check its own history and decide whether to finish or resume.
+   * check its own prior turns and decide whether to finish or resume.
    */
   // nodeId is the crashed/in-flight node — the caller (boot/flow-revival.js)
   // resolves it from f.currentStep/waitJson.nodeId, since flow.lastStep is
@@ -996,15 +981,14 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       const { _cascadeError, ...rest } = entryState;
       entryState = rest;
     }
-    // A gap surfaced live (SCORE_LLM "edge returned no next node" during a
-    // gateway restart storm): the main loop's fix writes a
-    // node's result BEFORE advancing last_step so a crash-then-revival never
-    // reads a stale/empty result for the node it just resumed. This revival
-    // path resumes the SAME crashed dispatch (no fresh nodeExecutions.enter()
-    // call here — the invocation row already exists from the original,
-    // interrupted attempt) but was never given the matching writeResult()
-    // call, so last_step advanced to `nodeId` while its result_json stayed
-    // empty from the pre-crash attempt. The very next runFlow() iteration's
+    // The main loop writes a node's result BEFORE advancing last_step, so a
+    // crash-then-revival never reads a stale/empty result for the node it
+    // just resumed. This revival path resumes the SAME crashed dispatch (no
+    // fresh nodeExecutions.enter() call here — the invocation row already
+    // exists from the original, interrupted attempt) and carries no
+    // writeResult() call of its own, so it writes the result here: without
+    // it, last_step has already advanced to `nodeId` while its result_json
+    // stayed empty from the interrupted attempt. The very next runFlow() iteration's
     // assembleState() then read nothing for this node, and resolveEdge()
     // dead-ended with "no next node" — deterministic on every revived
     // agent-node whose outbound edge depends on its own output, not a race.

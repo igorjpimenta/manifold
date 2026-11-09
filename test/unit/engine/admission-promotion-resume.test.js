@@ -32,7 +32,7 @@ describe("isEngineResumableKind", () => {
     assert.equal(isEngineResumableKind("flow-start"), true);
   });
 
-  test("an unrecognized or legacy kind is treated as not resumable, not thrown on", () => {
+  test("an unrecognized kind is treated as not resumable, not thrown on", () => {
     assert.equal(isEngineResumableKind("agent-dispatch"), false);
     assert.equal(isEngineResumableKind("something-new"), false);
     assert.equal(isEngineResumableKind(undefined), false);
@@ -70,7 +70,7 @@ describe("wakePromotedRelease", () => {
     assert.equal(warnings.length, 0);
   });
 
-  test("a promotion of a kind the engine doesn't admit (e.g. a legacy agent-dispatch row) is a silent no-op", async () => {
+  test("a promotion of a kind the engine doesn't admit is a silent no-op", async () => {
     const { warnings, logger } = makeWarningLogger();
     let resumeCalled = false;
     const result = await wakePromotedRelease(

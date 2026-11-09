@@ -40,10 +40,8 @@ async function makeStore(overrides = {}) {
 
 // failure-store.js's nodeExecutionsStore is injectable specifically so
 // tests don't fall through to the real getNodeExecutionsStore() singleton.
-// Phase 1.5 deleted recordFromTerminalState's rootErrors sweep and
-// computeResolvedAt's getExecution() call entirely — queryErrorsByFlow/getExecution are no
-// longer called anywhere in failure-store.js, so the fake no longer exposes
-// them. getLatestExecutionOutcomeForItem's real shape is now
+// The fake exposes only the three accessors failure-store.js actually
+// calls. getLatestExecutionOutcomeForItem's real shape is
 // {executionId, exitedAt} (no `error`) — "did it succeed" is answered by
 // computeResolvedAt asking failure_events directly for that execution_id.
 function makeFakeNodeExecutions({
@@ -113,9 +111,7 @@ describe("createFailureStore — DB setup", () => {
 // ─── summarize — still a raw-stored column ────────────────────────────────────
 //
 // summarize remains live — recordEngineFailure still calls it — and the
-// coverage below exercises it through that path. (classifyKind has no
-// describe block here: the classification path it belonged to no longer
-// exists.)
+// coverage below exercises it through that path.
 
 describe("summarize — via failure_summary (still a raw column)", () => {
   test("stores long string truncated to 280 chars with ellipsis", async () => {
@@ -397,7 +393,7 @@ describe("computeResolvedAt — via get()", () => {
     });
     const id = await insertRawRow(store, { flowId: failingFlowId, invocationId: failingInvocationId, failedAt: 1000 });
     // A LATER dispatch of the same "pipe"/"SUBMIT"/"job-1" item spawned a
-    // child that succeeded — this must no longer resolve the failure.
+    // child that succeeded — this must not resolve the failure.
     await seedChildOutcome(store, { pipelineId: "pipe", nodeId: "SUBMIT", subflowKey: "job-1", invokedAt: 6000, childStatus: "succeeded", childUpdatedAt: 5000 });
     const row = await store.get(id);
     assert.equal(row.branch_item_id, "job-1", "branch_item_id should still derive via the parent_invocation_id fallback");

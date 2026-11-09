@@ -135,8 +135,8 @@ export function describeWaitFallback(waitJson, nodeId) {
 // Fail-fast check for one waitJson batch's items — called right before any
 // waitJson (root-level human-gate, branch-internal loop aggregate, or a
 // node's own `_blocked.items`) gets persisted. Every gate must declare its
-// own `requestPayload.layout` array — no auto-synthesis from legacy
-// editableFields/editableText/chatThread/references fields exists anymore,
+// own `requestPayload.layout` array — there is no auto-synthesis from
+// editableFields/editableText/chatThread/references fields,
 // so an author who forgets `layout` gets a loud error here instead of an
 // empty gate on any client. A `layout` containing kind:"deck" must have that as
 // its ONLY entry (mixing a deck with other components is ambiguous —
@@ -152,7 +152,7 @@ export function validateGateLayout(items) {
     const layout = item?.requestPayload?.layout;
     const label0 = item?.itemId ?? "?";
     if (!Array.isArray(layout)) {
-      throw new Error(`item ${label0}: requestPayload.layout must be an array — every gate declares its own layout explicitly, there is no legacy editableFields/editableText/chatThread/references auto-synthesis`);
+      throw new Error(`item ${label0}: requestPayload.layout must be an array — every gate declares its own layout explicitly, there is no editableFields/editableText/chatThread/references auto-synthesis`);
     }
     const deckItems = layout.filter((li) => li?.kind === "deck");
     if (deckItems.length === 0) continue;
@@ -223,8 +223,9 @@ export function detectSkippedSentinel(result) {
 //
 // Replays each top-level node's own contributed stateUpdate in
 // chronological order via the exact same shallow-merge applyUpdate already
-// does today (`{...state, ...update}`) — this is a replay of history, not
-// a lookup of "the value of state[nodeId]": a node's resultJson is
+// does today (`{...state, ...update}`) — it replays the run's own node
+// contributions in order, not a lookup of "the value of state[nodeId]": a
+// node's resultJson is
 // whatever object it returned from run()/apply(), which by convention is
 // almost always `{[itsOwnNodeId]: {...}}` but isn't a guaranteed shape, so
 // this merges it exactly the way the live engine already merges it rather
@@ -236,16 +237,14 @@ export function detectSkippedSentinel(result) {
 //     (executor-subflow-children.js) always returns stateUpdate: {} —
 //     there is no such value today, so assembly doesn't fabricate one.
 //   - Subflow results are read exclusively through _subflowGroups,
-//     computed the same way enrichWithSubflows already computes it —
-//     folded into this one function instead of a second call site, not
-//     replaced by a different mechanism.
+//     computed by the same getAllSubflowGroups call this function already
+//     makes — folded into this one function instead of a second call site.
 //
-// writeResult() (state/node-executions.js) no longer caps results at all
-// (see its own header comment) — a node's real value is always what lands
-// here now. A `{ _resultTooLarge: true, bytes }` marker at a node's own key
-// can still surface, but only by replaying a row written before that
-// removal, whose real value was never stored and isn't recoverable — not a
-// live risk for anything writing today.
+// writeResult() (state/node-executions.js) does not cap results (see its
+// own header comment) — a node's real value is always what lands here. A
+// `{ _resultTooLarge: true, bytes }` marker at a node's own key surfaces
+// only for a row whose resultJson is null and whose resultTooLargeBytes is
+// set — a result that was never stored, and is not recoverable.
 export async function assembleState(flowId, { runStore, nodeExecutionsStore, baseState = {} } = {}) {
   const results = (await nodeExecutionsStore?.listResultsForFlow?.(flowId)) ?? [];
   let state = replayResults(baseState, results);

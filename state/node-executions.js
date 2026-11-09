@@ -1,22 +1,20 @@
 // node-executions.js — per-node invocation + execution-attempt records
-// (flow_node_invocations, flow_node_executions), renamed/split from the
-// original flow_step_timings.
+// (flow_node_invocations, flow_node_executions).
 //
 // Lazy singleton: first caller opens the DB and creates the schema; subsequent
 // calls return the cached store. Writes are fire-and-forget (errors swallowed)
 // so a timing/error-recording failure never disrupts flow execution.
 //
-// Two-table split (Phase 2):
+// Two tables, two granularities:
 //   flow_node_invocations — one row per LOGICAL node dispatch (root-level
 //     node-per-flow-visit, or subflow-item), created exactly once and never
 //     duplicated by retries. flow_runs.parent_invocation_id points here.
 //   flow_node_executions — one row per EXECUTION ATTEMPT of an invocation
 //     (one per retry), referencing its invocation via invocation_id.
-// The single flat table this split replaces conflated these two concerns —
-// retries legitimately write multiple rows sharing the same (flow_id,
-// node_id, group_id, branch_key) tuple, so that tuple could never safely be
-// used as a stable identity/anchor on its own (see design doc "Schema:
-// splitting invocation from execution" for the full reasoning).
+// The split matters because retries legitimately write multiple execution
+// rows sharing the same (flow_id, node_id, group_id, branch_key) tuple, so
+// that tuple could never safely be used as a stable identity/anchor on its
+// own.
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -34,15 +32,16 @@ function defaultDbPath() {
 
 // No size cap on resultJson: no cap width is both safe for real payloads
 // and small enough to matter, so writeResult() always stores the full
-// result. resultTooLargeBytes and the legacy-row handling in
-// result-replay.js/needs-resolver.js stay in place read-only, for
-// pre-existing rows whose capped result cannot be recovered.
+// result. resultTooLargeBytes and the read-only handling in
+// result-replay.js/needs-resolver.js stay in place for rows whose capped
+// result cannot be recovered.
 
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
 
-// Normalizes flow_branches.errors' confirmed mixed shape (bare strings vs
+// Normalizes flow_branches.errors' mixed shape (bare strings vs
 // {node, itemId, message, at} objects) — only the last entry is taken.
-// One-time migration-time helper, not permanent runtime logic.
+// Belongs to the flow_branches error backfill, not to the runtime write
+// path.
 export function lastErrorMessage(errorsJson) {
   let arr;
   try { arr = JSON.parse(errorsJson); } catch { return null; }
@@ -84,8 +83,6 @@ async function _createStore(dbPath) {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     const { db, client } = await getSharedDb(dbPath);
-    // Tracking key deliberately kept as "step-timings" — pure version-history
-    // bookkeeping, unrelated to the table's current name/shape.
 
     // ── helpers ────────────────────────────────────────────────────────────
 
@@ -114,7 +111,7 @@ async function _createStore(dbPath) {
     // same withSharedWrite(dbPath, ...) turn as the insert — that queue
     // already serializes every write against this dbPath to one at a time
     // (state/db.js), so running the check there closes the gap a caller-side
-    // pre-check can't: two concurrent findOrCreateInvocation calls for
+    // check can't: two concurrent findOrCreateInvocation calls for
     // DIFFERENT flowIds but the SAME cross-flow identity (e.g. the same
     // listing's SCORE/PROPOSE dispatch, decided by two parent flow-start
     // runs that both read "nothing in flight yet" before either committed)
@@ -177,8 +174,8 @@ async function _createStore(dbPath) {
       // dispatched (written eagerly at invocation start, independent of
       // the node resolving/blocking), a much tighter bound than
       // flow.createdAt, which reflects the whole flow's creation and can
-      // predate the gate node's actual dispatch by however long earlier
-      // steps in the same flow took to run.
+      // be earlier than the gate node's actual dispatch by however long
+      // earlier steps in the same flow took to run.
       async getLatestInvocationInvokedAt(flowId, nodeId, subflowKey) {
         const row = await _findLatestInvocation(flowId, nodeId, subflowKey);
         return row?.invokedAt != null ? Number(row.invokedAt) : null;
@@ -264,7 +261,7 @@ async function _createStore(dbPath) {
       },
 
       // The node_id of the most recently created invocation for this flow.
-      // After enter() is called pre-execution, this correctly identifies the
+      // After enter() is called before execution, this correctly identifies the
       // in-flight node even during execution, not just after completion.
       // Returns null if no invocations exist yet.
       //
@@ -347,8 +344,8 @@ async function _createStore(dbPath) {
 
       // Writes an invocation's own resultJson once it completes, no size
       // cap (see this file's own header comment). resultTooLargeBytes is
-      // always written null here — it only carries a real value on legacy
-      // rows that predate the cap's removal.
+      // always written null here — a non-null value marks a row whose
+      // result was never stored.
       //
       // Two things this deliberately isn't: (1) it doesn't throw on
       // ordinary failure — same fire-and-forget contract as write() above,
@@ -423,7 +420,7 @@ async function _createStore(dbPath) {
       // same item (e.g. a re-shortlisted listing that succeeds on a
       // fresh flow), this is how the earlier failure is found to now be
       // resolved. Returns identity + timing only, not error content
-      // (Phase 1.5 — this table no longer knows success vs failure at
+      // (this table doesn't know success vs failure at
       // all; the caller checks failure_events for that execution_id
       // instead: no row there means it succeeded).
       async getLatestExecutionOutcomeForItem({ pipelineId, nodeId, subflowKey }) {
@@ -470,11 +467,10 @@ async function _createStore(dbPath) {
         return rows;
       },
 
-      // queryErrorsByFlow/queryErrorsByFlowIds moved to state/failure-store.js
-      // in Phase 1.5 ("Eradicate soft errors") — this table no longer
-      // stores error content at all, so it has nothing left to query for
-      // "which nodes errored." failure_events is now the only source; see
-      // failureStore.queryErrorsByFlow(Ids).
+      // queryErrorsByFlow/queryErrorsByFlowIds live in
+      // state/failure-store.js — this table stores no error content, so
+      // it has nothing to query for "which nodes errored." failure_events
+      // is the only source; see failureStore.queryErrorsByFlow(Ids).
 
       async summarizeChildrenByFlowIds(flowIds) {
         if (!Array.isArray(flowIds) || flowIds.length === 0) return new Map();
@@ -543,8 +539,8 @@ async function _createStore(dbPath) {
             kind:  latest?.kind  ?? null,
             // `kind` above is the LATEST execution only — a subflow node
             // re-entered via "recheck" once its children finish always
-            // masks an earlier "retry" in its own history. Derived from
-            // the same `execs` array already loaded above — no extra
+            // masks an earlier "retry" among its own executions. Derived
+            // from the same `execs` array already loaded above — no extra
             // query.
             everRetriedOrRevived: execs.some((e) => e.kind === "retry" || e.kind === "revival"),
           };
@@ -661,7 +657,7 @@ async function _createStore(dbPath) {
       },
 
       // Point lookup — always the real, current value for this one gate,
-      // never a historical snapshot. Returns null if this gate has never
+      // never a stale snapshot. Returns null if this gate has never
       // written a record (not the same as "record exists but is empty").
       async getGateRecord(flowId, nodeId) {
         try {
