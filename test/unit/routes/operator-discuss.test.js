@@ -12,36 +12,6 @@ import { createMockApi } from "../../helpers/mock-api.js";
 
 // No mocking required — the pure helpers carry no external static imports.
 
-// Filesystem-backed stub for the injected `sessions` gateway dep, rooted at
-// process.env.HOME so the tmp-HOME fixtures below keep working. Mirrors the
-// production adapter: the file is resolved through the agent's sessions.json
-// index by the manifold session KEY, never by treating the key as a filename.
-function makeSessionsStub() {
-  const calls = { resolve: [] };
-  return {
-    calls,
-    resolveSessionFileForKey: (agentId, session) => {
-      calls.resolve.push({ agentId, session });
-      const dir = path.join(process.env.HOME, ".openclaw", "agents", agentId, "sessions");
-      try {
-        const index = JSON.parse(readFileSync(path.join(dir, "sessions.json"), "utf8"));
-        const entry = index?.[session];
-        if (entry?.sessionFile) return entry.sessionFile;
-        if (typeof entry?.sessionId === "string" && entry.sessionId) {
-          return path.join(dir, `${entry.sessionId}.jsonl`);
-        }
-      } catch {}
-      return path.join(dir, `${session}.jsonl`);
-    },
-    sessionFileExists: (file) => {
-      try { return existsSync(file); } catch { return false; }
-    },
-    ensureSessionFile: (file) => {
-      mkdirSync(path.dirname(file), { recursive: true });
-      try { writeFileSync(file, "", { flag: "wx" }); } catch {}
-    },
-  };
-}
 
 // ── stringifyMessageContent ───────────────────────────────────────────────────
 
@@ -236,7 +206,7 @@ describe("selectDiscussProvider", () => {
 describe("elev discuss handlers — stamped caller identity", () => {
   it("handleDiscuss: missing identity → 400 invalid_body", async () => {
     const { api } = createMockApi();
-    const { handleDiscuss } = createDiscussHandler({ api, sessions: makeSessionsStub() });
+    const { handleDiscuss } = createDiscussHandler({ api, sessions: {} });
     const { status, body } = await handleDiscuss({ flowId: "flow-1", text: "hi" });
     assert.equal(status, 400);
     assert.equal(body.code, "invalid_body");
