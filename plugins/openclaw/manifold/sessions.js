@@ -57,9 +57,3 @@ export function newDiscussSessionId({ agentId, flowId, gateNodeId, itemId }) {
   const safe = (s) => String(s ?? "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "_";
   return `agent:${safe(agentId)}:discuss:${String(flowId ?? "").slice(0, 8)}-${safe(gateNodeId)}-${safe(itemId)}`;
 }
-
-// Raw JSONL text. Throws on unreadable files — the route's outer catch
-// already handles that as a child-session skip, same as before.
-export function readSessionFileSync(file) {
-  return readFileSync(file, "utf8");
-}

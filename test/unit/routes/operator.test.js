@@ -97,15 +97,8 @@ function makeDeps(api, overrides = {}) {
       clearPending: async () => {},
     },
     sessions: {
-      resolveSessionFile: () => "",
-      sessionFileExists: () => false,
-      ensureSessionFile: () => {},
       resolveAgentEffectiveModelPrimary: async () => null,
       isProviderCooldown: () => false,
-      listSessionAgents: () => [],
-      readSessionsIndex: () => null,
-      resolveChildSessionFile: () => "",
-      readSessionFileSync: () => "",
     },
     ...overrides,
   };

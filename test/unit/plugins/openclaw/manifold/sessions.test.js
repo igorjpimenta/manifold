@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import {
@@ -20,12 +20,6 @@ afterEach(() => {
   process.env.HOME = prevHome;
   rmSync(home, { recursive: true, force: true });
 });
-
-function sessionsDir(agentId) {
-  const dir = path.join(home, ".openclaw", "agents", agentId, "sessions");
-  mkdirSync(dir, { recursive: true });
-  return dir;
-}
 
 describe("newDiscussSessionId", () => {
   it("mints in the harness namespace, deterministic in (flow, gate, item)", () => {
