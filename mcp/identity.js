@@ -39,7 +39,8 @@ export function assertDeclaration(base) {
         `"${h}" cannot identify a consumer — declare the real harness name.`
     );
   }
-  return { harness: h };
+  const pd = typeof base?.pipelinesDir === "string" ? base.pipelinesDir.trim() : "";
+  return pd ? { harness: h, pipelinesDir: pd } : { harness: h };
 }
 
 export function declaredFromEnv(env = process.env) {
@@ -77,12 +78,14 @@ export function resolveIdentity({ meta, args, base }) {
         "Unidentified callers fail; they are never given default keys."
     );
   }
-  return {
+  const out = {
     harness: declared.harness,
     agent: pair.agent,
     session: pair.session,
     source: { harness: "declared", agent: pair.source, session: pair.source },
   };
+  if (declared.pipelinesDir) out.pipelinesDir = declared.pipelinesDir;
+  return out;
 }
 
 export function identitySessionKey(id) {

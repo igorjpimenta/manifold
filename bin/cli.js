@@ -5,10 +5,9 @@
 // Neither surface imports the openclaw SDK, so this module loads under
 // plain node for standalone use and node:test.
 import { loadPipelines } from "../engine/loader.js";
+import { resolveStorePaths } from "../state/paths.js";
 import { listPaused, pause as pauseFlow, resume as resumeFlow } from "../gates/paused-flows.js";
 import { createGateResolver } from "../gates/gate-resolver.js";
-import path from "node:path";
-import os from "node:os";
 import { spawn } from "node:child_process";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { TERMINAL_STATUS_SET } from "../state/run-store.js";
@@ -34,11 +33,25 @@ import { startWsServer, DEFAULT_WS_PORT } from "../events/serve-ws.js";
 // terminal or blocked.
 
 
-const PIPELINES_DIR = path.join(os.homedir(), ".openclaw", "workspace", ".pipelines");
+// Precedence: explicit --pipelines-dir flag wins, then the adapter seam
+// (resolvePipelinesDir: table -> env -> config -> default), then the store
+// seam (resolveStorePaths().pipelinesDir, honoring MANIFOLD_PIPELINES_DIR).
+// Throws when nothing resolves — callers fail loudly naming the flag/env
+// instead of silently falling back to a harness layout.
+export function resolveCliPipelinesDir({ flagDir = null, resolvePipelinesDir = null, storePaths = null, env = process.env } = {}) {
+  if (flagDir) return { dir: flagDir, source: "flag" };
+  try {
+    const adapter = resolvePipelinesDir?.();
+    if (adapter?.dir) return adapter;
+  } catch { /* adapter unavailable — fall through to the store seam */ }
+  const fromStore = storePaths?.pipelinesDir ?? resolveStorePaths({ env }).pipelinesDir;
+  if (fromStore) return { dir: fromStore, source: env?.MANIFOLD_PIPELINES_DIR && !storePaths?.pipelinesDir ? "env" : "store" };
+  throw new Error("manifold: no pipelines directory resolved — pass --pipelines-dir <dir> or set MANIFOLD_PIPELINES_DIR");
+}
 
-async function ensurePipelinesLoaded(pipelinesRef, logger, dir = null) {
+async function ensurePipelinesLoaded(pipelinesRef, logger, dir) {
   if (pipelinesRef.value && pipelinesRef.value.size > 0) return;
-  const loaded = await loadPipelines(dir ?? PIPELINES_DIR, logger);
+  const loaded = await loadPipelines(dir, logger);
   pipelinesRef.value = loaded;
 }
 
@@ -70,23 +83,36 @@ function withExit(action) {
 }
 
 export function registerCliCommands({ program, executor, store, pipelinesRef, logger, dashboardUrl, api, nodeHealthStore, ownerSessionKey, runStore, nodeExecutionsStore, admissionQueueStore, pipelineDirsStore = null, resolvePipelinesDir = null }) {
-  // Adapter-resolved pipelines dir for every CLI load below (table →
-  // env → config → default); standalone one-shot use keeps PIPELINES_DIR.
-  const cliPipelinesDir = (() => {
-    try { return resolvePipelinesDir?.()?.dir ?? PIPELINES_DIR; }
-    catch { return PIPELINES_DIR; }
-  })();
+  // Pipelines dir for every CLI load below, resolved lazily per command
+  // (the --pipelines-dir flag is only known after parse): flag wins, then
+  // the adapter seam, then the store seam. Refusal to resolve is fatal —
+  // there is no harness-layout fallback.
+  function resolveCliDir(harness = null) {
+    return resolveCliPipelinesDir({
+      flagDir: root.opts()?.pipelinesDir ?? null,
+      resolvePipelinesDir: resolvePipelinesDir ? () => resolvePipelinesDir(harness) : null,
+      env: process.env,
+    });
+  }
   async function ensureCliLoaded() {
-    await ensurePipelinesLoaded(pipelinesRef, logger, cliPipelinesDir);
+    let resolved;
+    try {
+      resolved = resolveCliDir();
+    } catch (err) {
+      console.error(`manifold: ${err.message}`);
+      process.exit(1);
+    }
+    await ensurePipelinesLoaded(pipelinesRef, logger, resolved.dir);
   }
   const root = program.command("manifold");
-  root.description("Run state-graph pipelines defined in workspace/.pipelines/");
+  root.option("--pipelines-dir <dir>", "Pipeline definitions directory (wins over MANIFOLD_PIPELINES_DIR and the store default).");
+  root.description("Run state-graph pipelines from the resolved pipelines directory.");
   const failureStore = createFailureStore({ logger, nodeExecutionsStore });
 
   // manifold list
   root
     .command("list")
-    .description("List loaded pipelines (from workspace/.pipelines/)")
+    .description("List loaded pipelines (from the resolved pipelines directory)")
     .action(withExit(async () => {
       await ensureCliLoaded();
       const all = [...pipelinesRef.value.values()];
@@ -142,7 +168,13 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
         for (const r of rows) console.log(`  ${r.harness}  ${r.path}`);
       }
       const h = options.harness ?? null;
-      const resolved = resolvePipelinesDir ? resolvePipelinesDir(h) : { dir: cliPipelinesDir, source: "default" };
+      let resolved;
+      try {
+        resolved = resolveCliDir(h);
+      } catch (err) {
+        console.error(`manifold: ${err.message}`);
+        process.exit(1);
+      }
       console.log(`manifold: effective dir${h ? ` for harness "${h}"` : ""}: ${resolved.dir} (source: ${resolved.source})`);
     }));
 
@@ -726,7 +758,7 @@ function browserOpenCommand(url) {
 
 const USAGE = `usage: manifold <command>
 
-  serve --mcp stdio|http [--port N] [--host H]
+  serve --mcp stdio|http [--port N] [--host H] [--pipelines-dir DIR]
                                        serve the pipeline tools over MCP stdio or Streamable HTTP
                                        (stdio harness from MANIFOLD_HARNESS env only; agent+session stamped per call;
                                        http additionally needs MANIFOLD_BEARER + X-Manifold-Harness per session)
@@ -765,6 +797,7 @@ export async function runCli(argv) {
             mcp: { type: "string" },
             port: { type: "string" },
             host: { type: "string" },
+            "pipelines-dir": { type: "string" },
           },
         }));
       } catch (err) {
@@ -786,15 +819,16 @@ export async function runCli(argv) {
       if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) {
         fail(`manifold: --port must be 1-65535, got ${JSON.stringify(values.port)}`);
       }
+      const servePipelinesDir = values["pipelines-dir"] ?? null;
       if (values.mcp === "stdio") {
-        const ops = await createRealOps({ logger }).catch((err) => fail(`manifold: ops wiring failed: ${err?.message ?? err}`, 1));
+        const ops = await createRealOps({ pipelinesDir: servePipelinesDir, logger }).catch((err) => fail(`manifold: ops wiring failed: ${err?.message ?? err}`, 1));
         // Harness is env-only here by design: the spawner owns identity.
         await startMcpServer({ ops, logger }).catch((err) => fail(String(err?.message ?? err)));
         return;
       }
       if (values.mcp === "http") {
         const { startMcpHttpServer } = await import("../mcp/http.js");
-        const ops = await createRealOps({ logger }).catch((err) => fail(`manifold: ops wiring failed: ${err?.message ?? err}`, 1));
+        const ops = await createRealOps({ pipelinesDir: servePipelinesDir, logger }).catch((err) => fail(`manifold: ops wiring failed: ${err?.message ?? err}`, 1));
         await startMcpHttpServer({ ops, port, host, logger }).catch((err) => fail(String(err?.message ?? err)));
         return;
       }

@@ -48,14 +48,32 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
       },
     },
   };
-  const pipelinesRef = { value: new Map() };
-  const ensurePipelinesLoaded = async () => {
-    if (pipelinesRef.value && pipelinesRef.value.size > 0) return;
-    pipelinesRef.value = await loadPipelines(pipesDir, logger);
+  // Pipelines cache keyed by dir — the default dir loads at startup;
+  // per-connection dirs (X-Manifold-Pipelines-Dir) load lazily on first use.
+  const pipelinesCache = new Map();
+  const loadPipelinesForDir = async (dir) => {
+    const key = dir ?? pipesDir;
+    if (pipelinesCache.has(key)) return pipelinesCache.get(key);
+    const loaded = await loadPipelines(key, logger);
+    pipelinesCache.set(key, loaded);
+    return loaded;
   };
-  await ensurePipelinesLoaded().catch((err) => {
+  const pipelinesRef = { value: await loadPipelinesForDir(pipesDir).catch((err) => {
     logger?.warn?.(`manifold: pipelines failed to load (${err?.message ?? err}); manifold_start will refuse unknown pipelines`);
-  });
+    return new Map();
+  }) };
+  const ensurePipelinesLoaded = async (dir = null) => {
+    const key = dir ?? pipesDir;
+    if (!pipelinesCache.has(key)) {
+      const loaded = await loadPipelines(key, logger).catch((err) => {
+        logger?.warn?.(`manifold: pipelines failed to load from ${key} (${err?.message ?? err})`);
+        return new Map();
+      });
+      pipelinesCache.set(key, loaded);
+    }
+    if (key === pipesDir) pipelinesRef.value = pipelinesCache.get(key);
+    return pipelinesCache.get(key);
+  };
 
   const store = createStateStore(api, "mcp:standalone", {
     runStore,
@@ -103,13 +121,19 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     getBroadcast: () => null,
     readStore: runStore,
     runStore,
-    pipelineLookup: (id) => pipelinesRef.value?.get(id) ?? null,
+    pipelineLookup: (id, dir = null) => {
+      const cache = pipelinesCache.get(dir ?? pipesDir);
+      return (cache ?? pipelinesRef.value)?.get(id) ?? null;
+    },
     nodeExecutionsStore,
     admissionQueueStore,
   });
 
   return {
-    async startRun({ pipelineId, args, triggeredBy }) {
+    async startRun({ pipelineId, args, triggeredBy, pipelinesDir = null }) {
+      const dir = pipelinesDir || pipesDir;
+      const loaded = await ensurePipelinesLoaded(dir);
+      if (loaded && !pipelinesRef.value?.has(pipelineId)) pipelinesRef.value = loaded;
       const record = await executor.start(pipelineId, args ?? {}, triggeredBy ?? { kind: "mcp", ts: Date.now() });
       setImmediate(() => {
         executor.runFlow(record.flowId, "fresh").catch((err) => {
