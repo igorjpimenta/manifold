@@ -120,9 +120,13 @@ export async function startMcpHttpServer({ ops, port = null, host = "127.0.0.1",
         return;
       }
       const harness = req.headers["x-manifold-harness"];
+      const pipelinesDir = req.headers["x-manifold-pipelines-dir"];
       let base;
       try {
-        base = assertDeclaration({ harness: Array.isArray(harness) ? harness[0] : harness });
+        base = assertDeclaration({
+          harness: Array.isArray(harness) ? harness[0] : harness,
+          pipelinesDir: Array.isArray(pipelinesDir) ? pipelinesDir[0] : pipelinesDir,
+        });
       } catch {
         res.writeHead(400, { "content-type": "application/json" });
         res.end(JSON.stringify({ error: "missing or reserved X-Manifold-Harness" }));
