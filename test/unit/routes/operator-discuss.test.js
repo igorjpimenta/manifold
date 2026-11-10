@@ -12,15 +12,6 @@ import { createMockApi } from "../../helpers/mock-api.js";
 
 // No mocking required — the pure helpers carry no external static imports.
 
-// Stub for the injected `sessions` gateway dep. Session-file resolution
-// retired — manifold no longer touches session files.
-function makeSessionsStub() {
-  const calls = { resolve: [] };
-  return {
-    calls,
-    // session-file resolution retired — manifold no longer touches session files.
-  };
-}
 
 // ── stringifyMessageContent ───────────────────────────────────────────────────
 
@@ -215,7 +206,7 @@ describe("selectDiscussProvider", () => {
 describe("elev discuss handlers — stamped caller identity", () => {
   it("handleDiscuss: missing identity → 400 invalid_body", async () => {
     const { api } = createMockApi();
-    const { handleDiscuss } = createDiscussHandler({ api, sessions: makeSessionsStub() });
+    const { handleDiscuss } = createDiscussHandler({ api, sessions: {} });
     const { status, body } = await handleDiscuss({ flowId: "flow-1", text: "hi" });
     assert.equal(status, 400);
     assert.equal(body.code, "invalid_body");

@@ -95,7 +95,6 @@ export function createDiscussHandler({
     const itemIdForDraft = typeof body.itemId === "string" ? body.itemId : null;
     const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : null;
     const startedAt = Date.now();
-    // Manifold no longer touches session files — the harness owns them.
     try {
       const workspaceDir = agentRuntime.resolveAgentWorkspaceDir(api.config, agentId)
         ?? agentRuntime.resolveAgentWorkspaceDir(api.config);
