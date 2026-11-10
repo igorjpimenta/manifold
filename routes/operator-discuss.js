@@ -95,20 +95,7 @@ export function createDiscussHandler({
     const itemIdForDraft = typeof body.itemId === "string" ? body.itemId : null;
     const systemPrompt = typeof body.systemPrompt === "string" ? body.systemPrompt : null;
     const startedAt = Date.now();
-    // Core `session` resolves to a transcript file through the harness index,
-    // not by treating the id as a filename.
-    const sessionFile = sessions.resolveSessionFileForKey(agentId, session);
-    const isFirstTurn = !sessions.sessionFileExists(sessionFile);
-    if (isFirstTurn) {
-      // Touch only — thread identity lives in core's session roster
-      // (recorded pre-elev); nothing is stamped here and the id is never
-      // parsed.
-      try {
-        sessions.ensureSessionFile(sessionFile);
-      } catch (err) {
-        api.logger.warn(`manifold discuss: session-file touch failed for ${sessionFile}: ${err?.message ?? err}`);
-      }
-    }
+    // Manifold no longer touches session files — the harness owns them.
     try {
       const workspaceDir = agentRuntime.resolveAgentWorkspaceDir(api.config, agentId)
         ?? agentRuntime.resolveAgentWorkspaceDir(api.config);
@@ -129,7 +116,7 @@ export function createDiscussHandler({
       const _runParams = {
       // Adapter edge: the harness runtime names its own fields `sessionId` /
       // `sessionKey`; core passes its single `session` as both.
-      sessionId: session, sessionKey: session, agentId, trigger: "manual", sessionFile, workspaceDir,
+      sessionId: session, sessionKey: session, agentId, trigger: "manual", workspaceDir,
         config: api.config, prompt: text, timeoutMs: 300_000,
         ...(systemPrompt ? { extraSystemPrompt: systemPrompt } : {}),
       };
