@@ -40,7 +40,16 @@ export function assertDeclaration(base) {
     );
   }
   const pd = typeof base?.pipelinesDir === "string" ? base.pipelinesDir.trim() : "";
-  return pd ? { harness: h, pipelinesDir: pd } : { harness: h };
+  const gc = base?.globalConcurrency;
+  const gcVal = (typeof gc === "number" && Number.isInteger(gc) && gc > 0)
+    ? gc
+    : (typeof gc === "string" && gc.trim() !== "" && Number.isInteger(Number(gc.trim())) && Number(gc.trim()) > 0)
+      ? Number(gc.trim())
+      : null;
+  const out = { harness: h };
+  if (pd) out.pipelinesDir = pd;
+  if (gcVal !== null) out.globalConcurrency = gcVal;
+  return out;
 }
 
 export function declaredFromEnv(env = process.env) {
@@ -85,6 +94,7 @@ export function resolveIdentity({ meta, args, base }) {
     source: { harness: "declared", agent: pair.source, session: pair.source },
   };
   if (declared.pipelinesDir) out.pipelinesDir = declared.pipelinesDir;
+  if (declared.globalConcurrency) out.globalConcurrency = declared.globalConcurrency;
   return out;
 }
 

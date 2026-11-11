@@ -331,7 +331,7 @@ describe("reviveOrphanFlows", () => {
   // per-pipeline quota: a 'queued' orphan whose waitJson.kind is
   // "flow-start" or "child-dispatch" is left alone at boot (the durable
   // admission table already reflects the correct state as of the crash, no
-  // re-derivation needed); a resource-lock-queued orphan is dispatched
+  // re-derivation needed); a queued orphan is dispatched
   // directly, unconditionally — it isn't capacity-limited at revival time.
 
   describe("children-pending reconciliation", () => {
@@ -954,7 +954,7 @@ describe("reviveOrphanFlows", () => {
     it("leaves a child-dispatch admission alone when the flow is queued for a DIFFERENT, unrelated resource", async () => {
       const busyChild = makeFlow({
         status: "queued", lastStep: "SUBMIT", revision: 7,
-        waitJson: { kind: "resource-lock", nodeId: "SUBMIT" },
+        waitJson: { kind: "agent-dispatch", nodeId: "SUBMIT" },
       });
       const executor = makeExecutor();
       const runStore = makeRunStore([], [busyChild]);
@@ -1054,23 +1054,6 @@ describe("reviveOrphanFlows", () => {
   });
 
   describe("queued orphans (any wait kind) → revived like running ones", () => {
-    it("re-submits a resource-lock-queued orphan via runFlow, same as before", async () => {
-      const flow = makeFlow({
-        status: "queued",
-        waitJson: { kind: "resource-lock", nodeId: "PRIME" },
-      });
-      const pipelines = makePipelines({ p1: { nodes: { SOME_CODE_NODE: { kind: "code" } } } });
-      const executor = makeExecutor();
-
-      const result = await reviveOrphanFlows({
-        all: [flow], pipelines, store: makeStore(), logger: makeLogger(), executor,
-      });
-
-      assert.equal(result.revived, 1);
-      assert.deepEqual(executor.revived, [flow.flowId]);
-      assert.equal(result.revivedAgent, 0, "resource-lock node is code-kind, not agent");
-    });
-
     it("with no admission pool wired in, an agent-dispatch-queued orphan is re-entered via plain runFlow, not the continuation path", async () => {
       // Never actually dispatched — no session exists, so it must NOT go
       // through reviveAgentKindOrphan (which sends REVIVAL_MSG
@@ -1107,47 +1090,6 @@ describe("reviveOrphanFlows", () => {
 
       assert.equal(result.revived, 1);
       assert.deepEqual(executor.revived, [flow.flowId]);
-    });
-
-    it("resource-lock-queued orphans are never capacity-limited at revival — all dispatch directly, regardless of the shared limit", async () => {
-      resetGlobalConcurrency(1);
-      const flows = [1, 2, 3].map((rev) => makeFlow({
-        status: "queued", revision: rev,
-        waitJson: { kind: "resource-lock", nodeId: "PRIME" },
-      }));
-      const pipelines = makePipelines({ p1: { nodes: { SOME_CODE_NODE: { kind: "code" } } } });
-      const store = makeStore();
-      const executor = makeExecutor();
-
-      const result = await reviveOrphanFlows({ all: flows, pipelines, store, logger: makeLogger(), executor });
-
-      assert.equal(result.revived, 3, "resource-lock queuing was never admission-pool-gated — retrying is each orphan's own job, same as live operation");
-      assert.equal(result.queuedForAdmission, 0);
-      assert.equal(store.queued.length, 0);
-    });
-
-    it("a flow-start-queued orphan is left queued (not dispatched); a resource-lock-queued sibling of the same pipeline still dispatches directly", async () => {
-      const runningFlow = makeFlow({ status: "running", pipelineId: "p1", revision: 5 });
-      const flowStartQueued = makeFlow({
-        status: "queued", pipelineId: "p1", revision: 1,
-        waitJson: { kind: "flow-start" },
-      });
-      const lockQueued = makeFlow({
-        status: "queued", pipelineId: "p1", revision: 2,
-        waitJson: { kind: "resource-lock", nodeId: "PRIME" },
-      });
-      const pipelines = makePipelines({ p1: { nodes: { SOME_CODE_NODE: { kind: "code" } } } });
-      const store = makeStore();
-      const executor = makeExecutor();
-
-      const result = await reviveOrphanFlows({
-        all: [runningFlow, flowStartQueued, lockQueued], pipelines, store, logger: makeLogger(), executor,
-      });
-
-      assert.equal(result.revived, 2, "running orphan + the resource-lock-queued one; the flow-start-queued one is left alone");
-      assert.equal(result.queuedForAdmission, 1);
-      assert.deepEqual([...executor.revived].sort(), [runningFlow.flowId, lockQueued.flowId].sort());
-      assert.ok(!executor.revived.includes(flowStartQueued.flowId), "flow-start-queued orphan must not be dispatched directly — admission-queue-store's own release/promotion wakes it");
     });
 
     it("a child-dispatch-queued orphan is likewise left queued, not dispatched", async () => {
