@@ -11,7 +11,7 @@
 // another non-terminal run of the same pipelineId exists. There is no way to
 // raise or lower the ceiling for one pipeline — a pipeline needing tighter
 // serialization than this shared number (e.g. a pipeline colliding on a
-// shared external resource) takes a whole-pipeline lock instead.
+// shared external resource) is handled by the pipeline author.
 
 const DEFAULT_MAX_CONCURRENT = 8;
 

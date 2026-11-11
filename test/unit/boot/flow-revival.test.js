@@ -1057,7 +1057,7 @@ describe("reviveOrphanFlows", () => {
     it("re-submits a resource-lock-queued orphan via runFlow, same as before", async () => {
       const flow = makeFlow({
         status: "queued",
-        waitJson: { kind: "resource-lock", resource: "acct:freelance", nodeId: "PRIME" },
+        waitJson: { kind: "resource-lock", nodeId: "PRIME" },
       });
       const pipelines = makePipelines({ p1: { nodes: { SOME_CODE_NODE: { kind: "code" } } } });
       const executor = makeExecutor();
@@ -1113,7 +1113,7 @@ describe("reviveOrphanFlows", () => {
       resetGlobalConcurrency(1);
       const flows = [1, 2, 3].map((rev) => makeFlow({
         status: "queued", revision: rev,
-        waitJson: { kind: "resource-lock", resource: "acct:freelance", nodeId: "PRIME" },
+        waitJson: { kind: "resource-lock", nodeId: "PRIME" },
       }));
       const pipelines = makePipelines({ p1: { nodes: { SOME_CODE_NODE: { kind: "code" } } } });
       const store = makeStore();
@@ -1134,7 +1134,7 @@ describe("reviveOrphanFlows", () => {
       });
       const lockQueued = makeFlow({
         status: "queued", pipelineId: "p1", revision: 2,
-        waitJson: { kind: "resource-lock", resource: "acct:freelance", nodeId: "PRIME" },
+        waitJson: { kind: "resource-lock", nodeId: "PRIME" },
       });
       const pipelines = makePipelines({ p1: { nodes: { SOME_CODE_NODE: { kind: "code" } } } });
       const store = makeStore();
