@@ -1,0 +1,54 @@
+{
+  "id": "manifold",
+  "name": "Manifold",
+  "description": "Manifold openclaw companion: serves the discuss routes, the WS dialog door and the boot services (pipeline loader, flow revival, gateway readiness) on the gateway.",
+  "enabledByDefault": true,
+  "activation": {
+    "onStartup": true,
+    "onConfigPaths": [
+      "plugins.entries.manifold"
+    ]
+  },
+  "extensions": [
+    "./plugins/openclaw/manifold/index.js"
+  ],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "pipelinesDir": {
+        "type": "string"
+      },
+      "ownerSessionKey": {
+        "type": "string"
+      },
+      "dashboardEnabled": {
+        "type": "boolean"
+      },
+      "dashboardPort": {
+        "type": "integer",
+        "minimum": 1024,
+        "maximum": 65535
+      },
+      "dashboardHost": {
+        "type": "string"
+      },
+      "discuss": {
+        "type": "object",
+        "description": "Discuss defaults. Used when a blocked gate node does not declare its own discuss.agent.",
+        "additionalProperties": false,
+        "properties": {
+          "defaultAgent": {
+            "type": "string",
+            "description": "Default agent for gate discuss sessions. Used when the blocked gate node does not declare its own discuss.agent."
+          }
+        }
+      },
+      "globalConcurrency": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+      }
+    }
+  }
+}

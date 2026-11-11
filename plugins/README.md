@@ -44,9 +44,11 @@ new plugin config keys (env + table only).
 
 ## openclaw
 
-1. Install the adapter package (its own release line, pulls
-   `@igorjpimenta/manifold` as a dependency): `openclaw plugins install
-   @igorjpimenta/manifold-openclaw`. No push setup exists: the harness
+1. Install the release tag — the repo root is the plugin surface (root
+   `openclaw.plugin.json` plus the root `package.json` `openclaw.extensions`
+   entry, which points at the adapter under `plugins/openclaw/manifold/`):
+   `openclaw plugins install git:igorjpimenta/manifold@<version> --force
+   --accept-capabilities`. No push setup exists: the harness
    feeds manifold through the registered tools and routes, never the
    reverse. Operator routes (`/manifold/*`) require
    `Authorization: Bearer <MANIFOLD_BEARER>` (gateway env, winch-style).

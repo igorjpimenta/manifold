@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/manifold",
-  "version": "2026.10.26-beta.1",
+  "version": "2026.11.8-beta.1",
   "private": true,
   "license": "UNLICENSED",
   "description": "LangGraph-style pipeline executor for openclaw. Loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs, dispatching nodes to agents via runtime.subagent.run with explicit state-graph routing.",
@@ -15,6 +15,14 @@
     "./state/paths": "./state/paths.js",
     "./state/batch-writer": "./state/batch-writer.js",
     "./state/schema": "./state/schema.js"
+  },
+  "openclaw": {
+    "extensions": [
+      "./plugins/openclaw/manifold/index.js"
+    ],
+    "compat": {
+      "openclawMin": "2026.5.6"
+    }
   },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",
