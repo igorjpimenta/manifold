@@ -36,7 +36,7 @@ import { createAdmissionQueueStore } from "../../../state/admission-queue-store.
 import { createExecutor } from "../../../engine/executor.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
-import { getGlobalConcurrencyLimit, _resetForTests as resetChildFanoutCap } from "../../../engine/global-concurrency.js";
+import { getConcurrencyLimit, _resetForTests as resetChildFanoutCap } from "../../../engine/concurrency.js";
 
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
@@ -85,7 +85,7 @@ function makeScoreLikeNode(concurrency) {
 async function makeHarness(concurrency) {
   const runStore = await createRunStore({ dbPath: tmpPath("score-e2e-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("score-e2e-execs"));
-  const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("score-e2e-admission"), getLimit: getGlobalConcurrencyLimit });
+  const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("score-e2e-admission"), getLimit: getConcurrencyLimit });
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, admissionQueueStore, logger });

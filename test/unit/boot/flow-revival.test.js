@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-revival.js";
-import { _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
+import { _resetForTests as resetConcurrency } from "../../../engine/concurrency.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { drainDetachedResumes } from "../../../engine/admission-promotion-resume.js";
 
@@ -24,12 +24,12 @@ async function waitUntil(check, { timeout = 2000, interval = 10 } = {}) {
 
 // The pipeline fixtures below set no per-pipeline limit, so the only number
 // bounding revival here is the shared one — set per test via
-// resetGlobalConcurrency(n) and restored to the module default after every
+// resetConcurrency(n) and restored to the module default after every
 // test so no test's limit leaks into the next. A pipeline CAN opt out of
 // overlap entirely with allowConcurrent:false, a per-pipelineId singleton
 // gate in executor.js's start() independent of this pool (covered in
 // executor.test.js), but nothing here sets it.
-afterEach(() => { resetGlobalConcurrency(); });
+afterEach(() => { resetConcurrency(); });
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -244,7 +244,7 @@ describe("reviveOrphanFlows", () => {
     });
 
     it("revives all agent-kind orphans when the shared limit covers both", async () => {
-      resetGlobalConcurrency(2);
+      resetConcurrency(2);
       const flows = [
         makeFlow({ lastStep: "NODE_A", pipelineId: "p1" }),
         makeFlow({ lastStep: "NODE_B", pipelineId: "p1" }),

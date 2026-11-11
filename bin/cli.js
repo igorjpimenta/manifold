@@ -196,7 +196,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
           label: `CLI · ${process.env.USER ?? "unknown"}`,
           ts: Date.now(),
         };
-        const record = await executor.start(pipelineId, args ?? {}, triggeredBy);
+        const record = await executor.start(pipelineId, args ?? {}, triggeredBy, "cli");
         // Mint a synthetic trigger edge so the lineage tree shows a CLI
         // anchor above this flow — mirrors the HTTP handler's behavior.
         try {

@@ -30,7 +30,7 @@ import { resolveOrCreateChild } from "./spawn-child.js";
 import { areSiblingsAllTerminal } from "./child-resume-trigger.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
 
-// Above the shared admission cap (engine/global-concurrency.js's default of
+// Above the shared admission cap (engine/concurrency.js's default of
 // 8) since this batch size only bounds cheap
 // row-bookkeeping (resolveOrCreateChild, store.get/setQueued), not the
 // actual resource-consuming work that cap protects; low enough to avoid a
@@ -226,7 +226,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
       toDispatch.push(c);
       continue;
     }
-    const admission = await admissionQueueStore.admit({ kind: "child-dispatch", flowId: c.childFlowId, nodeId });
+    const admission = await admissionQueueStore.admit({ kind: "child-dispatch", flowId: c.childFlowId, nodeId, harness: state?.harness ?? null });
     (admission.status === "queued" ? toQueue : toDispatch).push(c);
   }
 

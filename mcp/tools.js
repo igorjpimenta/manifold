@@ -143,6 +143,7 @@ export function createManifoldToolHandlers(ops = {}) {
           args: args?.args ?? {},
           triggeredBy: { kind: "mcp", label: `MCP · ${identitySessionKey(identity)}`, ts: Date.now() },
           pipelinesDir: identity?.pipelinesDir ?? null,
+          harness: identity?.harness ?? null,
         });
         logger?.info?.(`manifold: ${identitySessionKey(identity)} started ${record.flowId} (${record.pipelineId ?? pipelineId})`);
         return ok(JSON.stringify(record), { status: "ok", flowId: record.flowId });

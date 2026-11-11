@@ -23,18 +23,19 @@ import { createExecutor } from "../engine/executor.js";
 import { createGateResolver } from "../gates/gate-resolver.js";
 import { loadPipelines } from "../engine/loader.js";
 import { createEmitter } from "../events/emit.js";
-import { getGlobalConcurrencyLimit } from "../engine/global-concurrency.js";
+import { getConcurrencyLimit, configureConcurrency } from "../engine/concurrency.js";
 import { resolveStorePaths } from "../state/paths.js";
 
-export async function createRealOps({ dbPath = null, pipelinesDir = null, config = null, logger = null } = {}) {
+export async function createRealOps({ dbPath = null, pipelinesDir = null, concurrency = null, config = null, logger = null } = {}) {
   const paths = resolveStorePaths();
   const runtimeDb = dbPath ?? paths.runtimeDb;
   const pipesDir = pipelinesDir ?? paths.pipelinesDir;
+  if (Number.isInteger(concurrency) && concurrency > 0) configureConcurrency({ harness: "default", maxConcurrent: concurrency });
 
   const runStore = createRunStore({ logger, dbPath: runtimeDb });
   const nodeExecutionsStore = getNodeExecutionsStore(runtimeDb);
   const failureStore = createFailureStore({ logger, nodeExecutionsStore });
-  const admissionQueueStore = createAdmissionQueueStore({ logger, getLimit: getGlobalConcurrencyLimit });
+  const admissionQueueStore = createAdmissionQueueStore({ logger, getLimit: getConcurrencyLimit });
   const nodeHealthStore = await createNodeHealthStore({ logger }).catch(() => null);
   const sessionIndex = await createSessionIndex({ logger }).catch(() => null);
 
@@ -130,11 +131,11 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
   });
 
   return {
-    async startRun({ pipelineId, args, triggeredBy, pipelinesDir = null }) {
+    async startRun({ pipelineId, args, triggeredBy, pipelinesDir = null, harness = null }) {
       const dir = pipelinesDir || pipesDir;
       const loaded = await ensurePipelinesLoaded(dir);
       if (loaded && !pipelinesRef.value?.has(pipelineId)) pipelinesRef.value = loaded;
-      const record = await executor.start(pipelineId, args ?? {}, triggeredBy ?? { kind: "mcp", ts: Date.now() });
+      const record = await executor.start(pipelineId, args ?? {}, triggeredBy ?? { kind: "mcp", ts: Date.now() }, harness);
       setImmediate(() => {
         executor.runFlow(record.flowId, "fresh").catch((err) => {
           logger?.warn?.(`manifold: detached runFlow ${record.flowId} failed: ${err?.message ?? err}`);

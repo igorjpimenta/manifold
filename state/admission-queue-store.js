@@ -61,11 +61,12 @@ export function createAdmissionQueueStore(opts = {}) {
 
 async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
   if (typeof getLimit !== "function") {
-    throw new TypeError("admission-queue-store: getLimit() function is required (e.g. global-concurrency.js's getGlobalConcurrencyLimit)");
+    throw new TypeError("admission-queue-store: getLimit() function is required (e.g. concurrency.js's getConcurrencyLimit)");
   }
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
+  try { await client.execute("ALTER TABLE flow_admission_queue ADD COLUMN harness TEXT"); } catch {}
 
   // Runs `fn(tx)` inside one BEGIN IMMEDIATE transaction, committing on
   // success and always closing (which rolls back if not committed) — the
@@ -132,10 +133,15 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
 
     let promoted = null;
     if (self.status === "admitted") {
+      const { rows: selfHarnessRows } = await tx.execute({
+        sql: `SELECT harness FROM flow_admission_queue WHERE id = ?`,
+        args: [id],
+      });
+      const selfHarness = selfHarnessRows[0]?.harness ?? null;
       const { rows: nextRows } = await tx.execute({
         sql: `SELECT id, kind, flow_id, node_id FROM flow_admission_queue
-              WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1`,
-        args: [],
+              WHERE status = 'queued' AND (harness = ? OR (? IS NULL AND harness IS NULL)) ORDER BY created_at ASC LIMIT 1`,
+        args: [selfHarness, selfHarness],
       });
       const next = nextRows[0] ?? null;
       if (next) {
@@ -167,34 +173,35 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
     // release() promotes the row and the releasing call site drives the
     // flow forward through wakePromotedRelease (engine/admission-promotion-
     // resume.js) — flip to 'running', then resume.
-    async admit({ kind, flowId, nodeId = null }) {
+    async admit({ kind, flowId, nodeId = null, harness = null }) {
       if (!kind) throw new TypeError("admission-queue-store.admit: kind is required");
       if (!flowId) throw new TypeError("admission-queue-store.admit: flowId is required");
-      const limit = getLimit();
       return withWriteTx(async (tx) => {
         const { rows: existingRows } = await tx.execute({
           sql: `SELECT id, status FROM flow_admission_queue
                 WHERE kind = ? AND flow_id = ? AND (node_id = ? OR (? IS NULL AND node_id IS NULL))
+                  AND (harness = ? OR (? IS NULL AND harness IS NULL))
                   AND status IN ('admitted', 'queued')
                 LIMIT 1`,
-          args: [kind, flowId, nodeId, nodeId],
+          args: [kind, flowId, nodeId, nodeId, harness, harness],
         });
         if (existingRows[0]) {
           const { id, status } = existingRows[0];
           return { id, status };
         }
+        const limit = getLimit(harness);
         const { rows } = await tx.execute({
-          sql: `SELECT COUNT(*) AS n FROM flow_admission_queue WHERE status = 'admitted'`,
-          args: [],
+          sql: `SELECT COUNT(*) AS n FROM flow_admission_queue WHERE status = 'admitted' AND (harness = ? OR (? IS NULL AND harness IS NULL))`,
+          args: [harness, harness],
         });
         const admittedCount = Number(rows[0]?.n ?? 0);
         const id = randomUUID();
         const now = Date.now();
         const status = admittedCount < limit ? "admitted" : "queued";
         await tx.execute({
-          sql: `INSERT INTO flow_admission_queue (id, kind, flow_id, node_id, status, created_at, admitted_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          args: [id, kind, flowId, nodeId, status, now, status === "admitted" ? now : null],
+          sql: `INSERT INTO flow_admission_queue (id, kind, flow_id, node_id, status, created_at, admitted_at, harness)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          args: [id, kind, flowId, nodeId, status, now, status === "admitted" ? now : null, harness],
         });
         return { id, status };
       });
@@ -251,27 +258,34 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
     // a delete and its promotion) would otherwise sit below its limit with
     // work still queued, until enough unrelated releases happened.
     async fillFreeSlots() {
-      const limit = getLimit();
       return withWriteTx(async (tx) => {
-        const { rows } = await tx.execute({
-          sql: `SELECT COUNT(*) AS n FROM flow_admission_queue WHERE status = 'admitted'`,
+        const { rows: harnessRows } = await tx.execute({
+          sql: `SELECT DISTINCT harness FROM flow_admission_queue WHERE status IN ('admitted', 'queued')`,
           args: [],
         });
-        const free = limit - Number(rows[0]?.n ?? 0);
-        if (free <= 0) return [];
-        const { rows: nextRows } = await tx.execute({
-          sql: `SELECT id, kind, flow_id, node_id FROM flow_admission_queue
-                WHERE status = 'queued' ORDER BY created_at ASC LIMIT ?`,
-          args: [free],
-        });
-        const now = Date.now();
         const promoted = [];
-        for (const next of nextRows) {
-          await tx.execute({
-            sql: `UPDATE flow_admission_queue SET status = 'admitted', admitted_at = ? WHERE id = ?`,
-            args: [now, next.id],
+        for (const hr of harnessRows) {
+          const h = hr.harness ?? null;
+          const limit = getLimit(h);
+          const { rows } = await tx.execute({
+            sql: `SELECT COUNT(*) AS n FROM flow_admission_queue WHERE status = 'admitted' AND (harness = ? OR (? IS NULL AND harness IS NULL))`,
+            args: [h, h],
           });
-          promoted.push({ id: next.id, kind: next.kind, flowId: next.flow_id, nodeId: next.node_id });
+          const free = limit - Number(rows[0]?.n ?? 0);
+          if (free <= 0) continue;
+          const { rows: nextRows } = await tx.execute({
+            sql: `SELECT id, kind, flow_id, node_id FROM flow_admission_queue
+                  WHERE status = 'queued' AND (harness = ? OR (? IS NULL AND harness IS NULL)) ORDER BY created_at ASC LIMIT ?`,
+            args: [h, h, free],
+          });
+          const now = Date.now();
+          for (const next of nextRows) {
+            await tx.execute({
+              sql: `UPDATE flow_admission_queue SET status = 'admitted', admitted_at = ? WHERE id = ?`,
+              args: [now, next.id],
+            });
+            promoted.push({ id: next.id, kind: next.kind, flowId: next.flow_id, nodeId: next.node_id });
+          }
         }
         return promoted;
       });

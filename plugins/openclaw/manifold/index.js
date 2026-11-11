@@ -15,7 +15,7 @@ import { createRunStore } from "../../../state/run-store.js";
 import { getNodeExecutionsStore } from "../../../state/node-executions.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { createExecutor } from "../../../engine/executor.js";
-import { configureGlobalConcurrency, getGlobalConcurrencyLimit } from "../../../engine/global-concurrency.js";
+import { configureConcurrency, getConcurrencyLimit } from "../../../engine/concurrency.js";
 import { createFailureStore } from "../../../state/failure-store.js";
 import { createNodeHealthStore } from "../../../state/node-health-store.js";
 import { createDiscussStore } from "../../../state/discuss-store.js";
@@ -123,10 +123,10 @@ export default definePluginEntry({
           },
         },
       },
-      globalConcurrency: {
+      concurrency: {
         type: "integer",
         minimum: 1,
-        description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8.",
+        description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/concurrency.js). Default: 8.",
       },
     },
   }),
@@ -160,10 +160,10 @@ export default definePluginEntry({
 
     // One shared ceiling for every concurrency mechanism in the engine —
     // agent dispatch, subflow fan-out, and whole-flow-run concurrency alike
-    // (see global-concurrency.js). agentDispatchConcurrency/
+    // (see concurrency.js). agentDispatchConcurrency/
     // childFanoutConcurrency were two independent config keys for what are
-    // now the same number; globalConcurrency replaces both.
-    configureGlobalConcurrency({ maxConcurrent: userCfg.globalConcurrency });
+    // now the same number; concurrency replaces both.
+    configureConcurrency({ harness: "openclaw", maxConcurrent: userCfg.concurrency });
 
     registerManifoldMetaHook(api);
 
@@ -177,10 +177,10 @@ export default definePluginEntry({
     // flow-start share it; see state/admission-queue-store.js's own header
     // for why it's one combined pool, not one per kind. Reads
     // the same runtimeDbPath every other manifold-owned table lives in;
-    // getGlobalConcurrencyLimit is called fresh on every admit(), so a
+    // getConcurrencyLimit is called fresh on every admit(), so a
     // reconfigured limit takes effect immediately, no restart needed.
     const admissionQueueStore = createAdmissionQueueStore({
-      dbPath: runtimeDbPath, getLimit: getGlobalConcurrencyLimit,
+      dbPath: runtimeDbPath, getLimit: getConcurrencyLimit,
     });
     // resumeParentRef.resume is set to executor.resume once the executor
     // exists below — store construction has to come before it, so the

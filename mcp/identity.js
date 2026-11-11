@@ -7,6 +7,8 @@
 // else stamped manifold_agent/manifold_session args. Unstamped calls fail;
 // nothing defaults, ever.
 
+import { configureConcurrency } from "../engine/concurrency.js";
+
 function isUsableLayer(v) {
   return (
     typeof v === "string" &&
@@ -40,7 +42,16 @@ export function assertDeclaration(base) {
     );
   }
   const pd = typeof base?.pipelinesDir === "string" ? base.pipelinesDir.trim() : "";
-  return pd ? { harness: h, pipelinesDir: pd } : { harness: h };
+  const gc = base?.concurrency;
+  const gcVal = (typeof gc === "number" && Number.isInteger(gc) && gc > 0)
+    ? gc
+    : (typeof gc === "string" && gc.trim() !== "" && Number.isInteger(Number(gc.trim())) && Number(gc.trim()) > 0)
+      ? Number(gc.trim())
+      : null;
+  const out = { harness: h };
+  if (pd) out.pipelinesDir = pd;
+  if (gcVal !== null) out.concurrency = gcVal;
+  return out;
 }
 
 export function declaredFromEnv(env = process.env) {
@@ -85,6 +96,10 @@ export function resolveIdentity({ meta, args, base }) {
     source: { harness: "declared", agent: pair.source, session: pair.source },
   };
   if (declared.pipelinesDir) out.pipelinesDir = declared.pipelinesDir;
+  if (declared.concurrency) {
+    out.concurrency = declared.concurrency;
+    configureConcurrency({ harness: declared.harness, maxConcurrent: declared.concurrency });
+  }
   return out;
 }
 
