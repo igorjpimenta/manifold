@@ -68,7 +68,7 @@ async function normalizeChildAsSubflowRow(child, invocation, nodeExecutionsStore
     // Additive — the run-level equivalent of this field (routes/runs.js's
     // RunSummary/RunDetail.statusReason) already reaches clients;
     // per-branch rows never carried it, which is why a queued child's
-    // reason (e.g. "waiting for cross-process lock browser:linkedin")
+    // reason (e.g. "queued for admission")
     // had nowhere to surface once `awaiting` was reserved for gate waits.
     statusReason: child.statusReason ?? null,
     _display: null,

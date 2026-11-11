@@ -140,8 +140,8 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
 
 /**
  * Boot-time orphan recovery for flow_runs left in status='running' (crashed
- * mid-flight) or status='queued' (waiting on a resource-lock, or on a
- * shared admission-pool slot — flow-start or child-dispatch — when the
+ * mid-flight) or status='queued' (waiting on a shared
+ * admission-pool slot — flow-start or child-dispatch — when the
  * process died) after a gateway crash. Called by the manifold-flow-revival
  * service in index.js.
  *
@@ -201,7 +201,7 @@ export async function reviveOrphanFlows({
   // ── Classify orphans (running AND queued, any wait kind) ───────────────────
   // 'running' orphans: process died mid-flight. 'queued' orphans: process
   // died (or restarted) while the flow was waiting on an internal resource —
-  // resource-lock, or the shared flow-start/child-dispatch admission pool.
+  // the shared flow-start/child-dispatch admission pool.
   // All land here uniformly; the skip-direct-dispatch step
   // below and the revive-survivors step's dispatch don't need to know *why*
   // a row was queued, only whether it wants to run.
@@ -239,13 +239,13 @@ export async function reviveOrphanFlows({
   // isAgent for it, via the !dispatchGenuinelyEntered branch below.
   //
   // For a 'queued' orphan, targetNodeId instead comes from waitJson.nodeId
-  // — set by the resource-lock wait BEFORE it acquires the lock, which only
+  // — set by the admission wait before it acquires a slot, which only
   // proves the node was ABOUT to be dispatched, not that dispatch began.
   // hasSessionForNode() still gates isAgent there.
   //
   // f.lastStep is the last COMPLETED node, not the one in flight — using it
   // directly as the crashed node's id is wrong. The real target node is:
-  //   - queued: f.waitJson.nodeId — the resource-lock wait sets it directly
+  //   - queued: f.waitJson.nodeId — the admission wait sets it directly
   //     (executor.js) since a queued flow never got far enough to advance
   //     lastStep at all.
   //   - running: nodeExecutionsStore.findCurrentStep(flowId) — the invocation
@@ -298,11 +298,6 @@ export async function reviveOrphanFlows({
   // admitted → flipped to running and resumed; pool full → queued on its
   // own kind for the normal promotion cycle).
   //
-  // 'queued' orphans on a resource-lock are NOT admission-pool-gated this
-  // way — the revive-survivors step below dispatches them directly:
-  // re-entering the node they were queued on is how THEY retry (the lock
-  // wait lives inside that node's own dispatch path, re-triggered by
-  // resolveEdge, not by anything outside this loop).
   const toRevive = [];
   let queuedForAdmission = 0;
   let readmitted = 0;
