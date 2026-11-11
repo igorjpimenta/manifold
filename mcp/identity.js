@@ -7,6 +7,8 @@
 // else stamped manifold_agent/manifold_session args. Unstamped calls fail;
 // nothing defaults, ever.
 
+import { configureGlobalConcurrency } from "../engine/global-concurrency.js";
+
 function isUsableLayer(v) {
   return (
     typeof v === "string" &&
@@ -94,7 +96,10 @@ export function resolveIdentity({ meta, args, base }) {
     source: { harness: "declared", agent: pair.source, session: pair.source },
   };
   if (declared.pipelinesDir) out.pipelinesDir = declared.pipelinesDir;
-  if (declared.globalConcurrency) out.globalConcurrency = declared.globalConcurrency;
+  if (declared.globalConcurrency) {
+    out.globalConcurrency = declared.globalConcurrency;
+    configureGlobalConcurrency({ maxConcurrent: declared.globalConcurrency });
+  }
   return out;
 }
 
