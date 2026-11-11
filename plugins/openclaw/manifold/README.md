@@ -34,7 +34,7 @@ core runtime version alongside it.
 | `dashboardEnabled` | `true` | boot the read-only HTTP dashboard service |
 | `dashboardPort` / `dashboardHost` | `7430` / `127.0.0.1` | dashboard bind |
 | `discuss.defaultAgent` | — | default agent for gate discuss sessions |
-| `globalConcurrency` | `8` | shared ceiling for agent dispatch, subflow fan-out, and flow-run concurrency |
+| `concurrency` | `8` | shared ceiling for agent dispatch, subflow fan-out, and flow-run concurrency |
 
 Requires OpenClaw ≥ 2026.5.6 (declared as `openclaw.compat.openclawMin`).
 

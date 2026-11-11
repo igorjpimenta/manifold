@@ -61,7 +61,7 @@ export function createAdmissionQueueStore(opts = {}) {
 
 async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
   if (typeof getLimit !== "function") {
-    throw new TypeError("admission-queue-store: getLimit() function is required (e.g. global-concurrency.js's getGlobalConcurrencyLimit)");
+    throw new TypeError("admission-queue-store: getLimit() function is required (e.g. concurrency.js's getConcurrencyLimit)");
   }
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });

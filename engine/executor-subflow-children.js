@@ -30,7 +30,7 @@ import { resolveOrCreateChild } from "./spawn-child.js";
 import { areSiblingsAllTerminal } from "./child-resume-trigger.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
 
-// Above the shared admission cap (engine/global-concurrency.js's default of
+// Above the shared admission cap (engine/concurrency.js's default of
 // 8) since this batch size only bounds cheap
 // row-bookkeeping (resolveOrCreateChild, store.get/setQueued), not the
 // actual resource-consuming work that cap protects; low enough to avoid a

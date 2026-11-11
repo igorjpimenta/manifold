@@ -12,7 +12,7 @@
  * throw, cancelling the just-queued record and returning the same
  * invoked:false/reason:"singleton-busy" shape callers already depend on —
  * this test now drives that path via a REAL createExecutor()/start()/
- * admissionQueueStore, with the shared global concurrency limit set to 1.
+ * admissionQueueStore, with the shared concurrency limit set to 1.
  */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
@@ -25,7 +25,7 @@ import { createStateStore } from "../../../state/state-store.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { createExecutor } from "../../../engine/executor.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
-import { getGlobalConcurrencyLimit, _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
+import { getConcurrencyLimit, _resetForTests as resetConcurrency } from "../../../engine/concurrency.js";
 
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
@@ -34,7 +34,7 @@ function tmpPath(prefix) {
 async function makeHarness() {
   const runStore = await createRunStore({ dbPath: tmpPath("invoke-singleton-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("invoke-singleton-execs"));
-  const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("invoke-singleton-admission"), getLimit: getGlobalConcurrencyLimit });
+  const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("invoke-singleton-admission"), getLimit: getConcurrencyLimit });
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, admissionQueueStore, logger });
@@ -100,7 +100,7 @@ describe("nodeCtx.invokePipeline — singleton-busy detection against the real s
   afterEach(() => {
     harness?.runStore?.close();
     harness?.nodeExecutionsStore?.close();
-    resetGlobalConcurrency();
+    resetConcurrency();
   });
 
   test("second call to an already-active singleton target returns invoked:false, reason:singleton-busy — does not throw", async () => {
@@ -111,7 +111,7 @@ describe("nodeCtx.invokePipeline — singleton-busy detection against the real s
     // limit=2 leaves exactly one free slot for a target flow — enough for
     // the first call to succeed and the second (a genuinely concurrent 2nd
     // instance of the SAME target pipeline) to find the pool full.
-    resetGlobalConcurrency(2);
+    resetConcurrency(2);
     harness = await makeHarness();
     const { executor, runStore, nodeExecutionsStore } = harness;
 

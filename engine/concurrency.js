@@ -1,4 +1,4 @@
-// global-concurrency.js — the single shared concurrency ceiling
+// concurrency.js — the single shared concurrency ceiling
 // state/admission-queue-store.js reads as its getLimit() — the pool of
 // running flow runs: kind:"child-dispatch" (a subflow child) and
 // kind:"flow-start" (a whole flow run, requested by executor.js's start()
@@ -19,11 +19,11 @@ let maxConcurrent = DEFAULT_MAX_CONCURRENT;
 
 // Called once at plugin registration from pluginConfig, if set. A no-op
 // (keeps the current value) for anything not a positive integer.
-export function configureGlobalConcurrency({ maxConcurrent: max } = {}) {
+export function configureConcurrency({ maxConcurrent: max } = {}) {
   if (Number.isInteger(max) && max > 0) maxConcurrent = max;
 }
 
-export function getGlobalConcurrencyLimit() {
+export function getConcurrencyLimit() {
   return maxConcurrent;
 }
 

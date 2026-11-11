@@ -5,7 +5,7 @@ import { NodeFailure } from "../../../engine/executor-errors.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 import { REVIVAL_MSG } from "../../../engine/revival-messages.js";
 import { nodeEmitter } from "../../../events.js";
-import { getGlobalConcurrencyLimit, _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
+import { getConcurrencyLimit, _resetForTests as resetConcurrency } from "../../../engine/concurrency.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import path from "node:path";
 import os from "node:os";
@@ -292,13 +292,13 @@ function makeExecutor(pipelineMap = {}, storeFlows = [], opts = {}) {
 // ── start ─────────────────────────────────────────────────────────────────────
 
 describe("start", () => {
-  // The shared global limit (global-concurrency.js) applies to every
+  // The shared global limit (concurrency.js) applies to every
   // pipeline regardless of allowConcurrent — tests that need a specific
-  // limit set it via resetGlobalConcurrency(n) instead. Restored after every
+  // limit set it via resetConcurrency(n) instead. Restored after every
   // test so no test's limit leaks into the next. allowConcurrent:false is a
   // separate, per-pipelineId gate on top of that shared pool (see tests
   // below).
-  afterEach(() => { resetGlobalConcurrency(); });
+  afterEach(() => { resetConcurrency(); });
 
   it("creates a flow record with status=running", async () => {
     const { executor, store } = makeExecutor({ my_pipeline: makePipeline() });
@@ -317,17 +317,17 @@ describe("start", () => {
   // already had). These 3 tests need a REAL
   // admissionQueueStore (not the file's own always-admits fake) since
   // they're specifically exercising real capacity behavior against
-  // resetGlobalConcurrency(n).
+  // resetConcurrency(n).
   function makeExecutorWithRealAdmission(pipelineMap) {
     const admissionQueueStore = createAdmissionQueueStore({
       dbPath: path.join(os.tmpdir(), `executor-test-admission-${randomUUID()}.sqlite`),
-      getLimit: getGlobalConcurrencyLimit,
+      getLimit: getConcurrencyLimit,
     });
     return makeExecutor(pipelineMap, [], { admissionQueueStore });
   }
 
   it("queues instead of running when the shared concurrency limit (1) is already reached", async () => {
-    resetGlobalConcurrency(1);
+    resetConcurrency(1);
     const { executor, store } = makeExecutorWithRealAdmission({ p: makePipeline() });
     const r1 = await executor.start("p");
     assert.equal(r1.status, "running");
@@ -337,7 +337,7 @@ describe("start", () => {
   });
 
   it("allows multiple flows when the shared limit covers them", async () => {
-    resetGlobalConcurrency(2);
+    resetConcurrency(2);
     const { executor } = makeExecutorWithRealAdmission({ p: makePipeline() });
     const r1 = await executor.start("p");
     const r2 = await executor.start("p");
@@ -347,7 +347,7 @@ describe("start", () => {
   });
 
   it("allows up to N flows when the shared limit is N, queues the (N+1)th", async () => {
-    resetGlobalConcurrency(2);
+    resetConcurrency(2);
     const { executor } = makeExecutorWithRealAdmission({ p: makePipeline() });
     const r1 = await executor.start("p");
     const r2 = await executor.start("p");
@@ -361,7 +361,7 @@ describe("start", () => {
   // flow from a completely different pipeline holding the only slot must
   // still queue a new "p" start, same as a same-pipeline flow would.
   it("a flow from a DIFFERENT pipeline holding the only slot still forces the next start() to queue", async () => {
-    resetGlobalConcurrency(1);
+    resetConcurrency(1);
     const { executor } = makeExecutorWithRealAdmission({ p: makePipeline(), other: makePipeline() });
     const r1 = await executor.start("other");
     assert.equal(r1.status, "running");
@@ -417,7 +417,7 @@ describe("start", () => {
   });
 
   it("does not count a gate-blocked flow toward the concurrency limit (approval waits hold no dispatch slot)", async () => {
-    resetGlobalConcurrency(1);
+    resetConcurrency(1);
     const blockedFlow = { flowId: "existing-blocked", pipelineId: "p", status: "blocked", revision: 1 };
     const { executor } = makeExecutor({ p: makePipeline() }, [blockedFlow]);
     const record = await executor.start("p");

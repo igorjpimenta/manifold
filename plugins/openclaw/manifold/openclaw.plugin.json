@@ -39,10 +39,10 @@
           }
         }
       },
-      "globalConcurrency": {
+      "concurrency": {
         "type": "integer",
         "minimum": 1,
-        "description": "Shared ceiling for every flow-run concurrency mechanism \u2014 agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+        "description": "Shared ceiling for every flow-run concurrency mechanism \u2014 agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/concurrency.js). Default: 8."
       }
     }
   }

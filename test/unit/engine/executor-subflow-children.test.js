@@ -15,7 +15,7 @@ import { createNodeExecutionsStore } from "../../../state/node-executions.js";
 import { createStateStore } from "../../../state/state-store.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { dispatchSubflowChildren } from "../../../engine/executor-subflow-children.js";
-import { getGlobalConcurrencyLimit, _resetForTests as resetChildFanoutCap } from "../../../engine/global-concurrency.js";
+import { getConcurrencyLimit, _resetForTests as resetChildFanoutCap } from "../../../engine/concurrency.js";
 
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
@@ -24,13 +24,13 @@ function tmpPath(prefix) {
 async function makeHarness() {
   const runStore = await createRunStore({ dbPath: tmpPath("loop-children-runs") });
   const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("loop-children-execs"));
-  // Real admissionQueueStore, same shared getGlobalConcurrencyLimit()
+  // Real admissionQueueStore, same shared getConcurrencyLimit()
   // singleton every test here already drives via resetChildFanoutCap(n) —
   // dispatchSubflowChildren has a hard dependency on a real store now, not
   // a fake, since these tests exercise the actual admit/queue/promote cycle
   // end to end (same rationale as admission-queue-store.test.js's own
   // "real tmp-sqlite, not mocks" convention).
-  const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("loop-children-admission"), getLimit: getGlobalConcurrencyLimit });
+  const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("loop-children-admission"), getLimit: getConcurrencyLimit });
   const store = createStateStore({}, "test-owner", { runStore, admissionQueueStore });
   return { runStore, nodeExecutionsStore, store, admissionQueueStore };
 }

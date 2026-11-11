@@ -7,7 +7,7 @@
 // else stamped manifold_agent/manifold_session args. Unstamped calls fail;
 // nothing defaults, ever.
 
-import { configureGlobalConcurrency } from "../engine/global-concurrency.js";
+import { configureConcurrency } from "../engine/concurrency.js";
 
 function isUsableLayer(v) {
   return (
@@ -42,7 +42,7 @@ export function assertDeclaration(base) {
     );
   }
   const pd = typeof base?.pipelinesDir === "string" ? base.pipelinesDir.trim() : "";
-  const gc = base?.globalConcurrency;
+  const gc = base?.concurrency;
   const gcVal = (typeof gc === "number" && Number.isInteger(gc) && gc > 0)
     ? gc
     : (typeof gc === "string" && gc.trim() !== "" && Number.isInteger(Number(gc.trim())) && Number(gc.trim()) > 0)
@@ -50,7 +50,7 @@ export function assertDeclaration(base) {
       : null;
   const out = { harness: h };
   if (pd) out.pipelinesDir = pd;
-  if (gcVal !== null) out.globalConcurrency = gcVal;
+  if (gcVal !== null) out.concurrency = gcVal;
   return out;
 }
 
@@ -96,9 +96,9 @@ export function resolveIdentity({ meta, args, base }) {
     source: { harness: "declared", agent: pair.source, session: pair.source },
   };
   if (declared.pipelinesDir) out.pipelinesDir = declared.pipelinesDir;
-  if (declared.globalConcurrency) {
-    out.globalConcurrency = declared.globalConcurrency;
-    configureGlobalConcurrency({ maxConcurrent: declared.globalConcurrency });
+  if (declared.concurrency) {
+    out.concurrency = declared.concurrency;
+    configureConcurrency({ maxConcurrent: declared.concurrency });
   }
   return out;
 }
