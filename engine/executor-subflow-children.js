@@ -23,7 +23,7 @@
 // enough that throttling it would only add latency for no protective
 // benefit. The shared pool is deliberately not
 // scoped to any one pipeline, node, or kind, since the resource actually
-// being protected (host CPU/memory, shared gateway Chrome, agent worker
+// being protected (host CPU/memory, a shared account session, agent worker
 // processes) is shared by literally everything.
 
 import { resolveOrCreateChild } from "./spawn-child.js";
