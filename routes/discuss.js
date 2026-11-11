@@ -22,7 +22,7 @@ export async function buildDiscussPrompt({ flow, target, runStore, nodeExecution
       // directly, matching how the engine's own dispatch loop reads
       // state. Fixes a real gap too: this call site never enriched
       // with _subflowGroups before, so a discuss promptBuilder reading
-      // state.loop (the pre-migration field name) always got nothing.
+      // state.loop always got nothing.
       state: await assembleState(flow.flowId, { runStore, nodeExecutionsStore, baseState: flow.stateJson ?? {} }),
       itemId: target.itemId,
       flowId: flow.flowId,
@@ -73,8 +73,7 @@ export function registerDiscussHandlers({
       normalizedItemId = resolveItemId(item.itemId) ?? String(item.itemId);
       gateNodeId = sourceFlow.waitJson?.nodeId;
     } else if (sourceFlow.status === "running") {
-      // Old-model mid-batch path (flow_branches / branchService) removed.
-      // All subflow gates now surface their pending items via waitJson.
+      // All subflow gates surface their pending items via waitJson.
       return { ok: false, status: 503, code: "gate_transition", error: "gate is transitioning, try again shortly" };
     } else {
       return { ok: false, status: 409, code: "no_pending_gate", error: "flow has no pending gate item to discuss" };
@@ -554,7 +553,7 @@ export function registerDiscussHandlers({
     if (!existsSync(audioPath)) {
       res.statusCode = 404;
       res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: false, code: "audio_missing", error: "original audio file no longer on disk" }));
+      res.end(JSON.stringify({ ok: false, code: "audio_missing", error: "original audio file not on disk" }));
       return true;
     }
     const audioUrl = meta.audioUrl;

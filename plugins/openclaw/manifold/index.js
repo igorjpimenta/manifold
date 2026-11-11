@@ -3,15 +3,16 @@
 // Loads pipeline definitions from `workspace/.pipelines/<team>_<name>.js`,
 // drives them against managed `flow_runs`, and dispatches each node:
 //   - `code`        : pure function (state) => stateUpdate
-//   - `single`      : one runtime.subagent.run, output parsed by `apply`
+//   - `agent`       : one harness turn, output parsed by `apply`
 //   - `subflow`     : bounded-parallel fan-out over `.selector(state)`; slot-per-item writes
 //   - `human-gate`  : flow.status='blocked' + wait_json; resumed by CLI approve
-//   - `parallel`    : fixed set of named `.tasks`, all dispatched concurrently
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { createPipelinesLoader } from "../../../engine/loader.js";
 import { createStateStore } from "../../../state/state-store.js";
 import { createRunStore } from "../../../state/run-store.js";
+import { registerOwnerResolver, setLocksDir, withLock, registerSessionOwner, clearSessionOwner, runWithLockOwner } from "./lock.js";
+import { createInvocationOwnerResolver } from "./invocation-owner.js";
 import { getNodeExecutionsStore } from "../../../state/node-executions.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
 import { createExecutor } from "../../../engine/executor.js";
@@ -64,6 +65,8 @@ import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-
 // probe).
 const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 import { registerGatewayReadiness } from "../../../engine/gateway-readiness.js";
+import { registerProfileReadGate } from "./hooks/profile-read-gate.js";
+import { registerProfileWriteLock } from "./hooks/profile-write-lock.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { resolveStorePaths, ensureMigrated, stateFile } from "../../../state/paths.js";
 import { setStateFile } from "../../../gates/paused-flows.js";
@@ -85,7 +88,7 @@ export default definePluginEntry({
   id: "manifold",
   name: "Manifold Pipeline Engine",
   description:
-    "LangGraph-style pipeline executor: loads workspace/.pipelines/<team>_<name>.js definitions and runs them against managed flow_runs. Nodes (code / single / subflow / human-gate / parallel) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. The pipeline tools ship over MCP; the plugin registers no raw tools.",
+    "LangGraph-style pipeline executor: loads pipeline definitions from <pipelinesDir>/<team>_<name>/index.js and runs them against managed flow_runs. Nodes (code / agent / subflow / human-gate) advance via explicit edges with conditional routing. CLI surface: `openclaw manifold list / start / status / approve / runs`. The pipeline tools ship over MCP; the plugin registers no raw tools.",
   configSchema: () => ({
     type: "object",
     additionalProperties: false,
@@ -96,7 +99,7 @@ export default definePluginEntry({
       },
       ownerSessionKey: {
         type: "string",
-        description: "Session key used to scope flow_run ownership. Default: agent:main:explicit:manifold-owner",
+        description: "Session key that scopes flow_run ownership. Default: agent:main:explicit:manifold-owner",
       },
       dashboardEnabled: {
         type: "boolean",
@@ -128,14 +131,25 @@ export default definePluginEntry({
         minimum: 1,
         description: "Shared ceiling for every flow-run concurrency mechanism — agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8.",
       },
+      profilePath: {
+        type: "string",
+        description: "Absolute path of the PROFILE.md file guarded by the before_tool_call read gate and edit lock (hooks/profile-read-gate.js, hooks/profile-write-lock.js). Default: ~/.openclaw/workspace/.shared/freelance/profile/PROFILE.md",
+      },
+      profileEditResultsDir: {
+        type: "string",
+        description: "Directory the edit lock writes one <runId>.json outcome marker per guarded PROFILE.md edit into (hooks/profile-write-lock.js). Default: ~/.openclaw/locks/profile-edit-results",
+      },
     },
   }),
   register: (api) => {
     const userCfg = api.pluginConfig ?? {};
     // Core owns its store home (state/paths.js): one MANIFOLD_DATA_DIR
-    // move relocates every DB, lock, and pending file.
+    // move relocates every DB, lock, and pending file. Pre-canonical
+    // ~/.openclaw/{runtime.sqlite,ops.sqlite} are copied in once, never
+    // moved, and never read again afterwards.
     const storePaths = resolveStorePaths();
     ensureMigrated({ dataDir: storePaths.dataDir, logger: api.logger });
+    setLocksDir(storePaths.locksDir);
     setStateFile(stateFile(storePaths.dataDir));
     // Pipeline dir resolution (table[harness] → MANIFOLD_PIPELINES_DIR env →
     // config `pipelinesDir` → <dataDir>/workspace/.pipelines). The table lets
@@ -160,11 +174,17 @@ export default definePluginEntry({
 
     // One shared ceiling for every concurrency mechanism in the engine —
     // agent dispatch, subflow fan-out, and whole-flow-run concurrency alike
-    // (see global-concurrency.js). agentDispatchConcurrency/
-    // childFanoutConcurrency were two independent config keys for what are
-    // now the same number; globalConcurrency replaces both.
+    // (see global-concurrency.js).
     configureGlobalConcurrency({ maxConcurrent: userCfg.globalConcurrency });
 
+    // Registered here (rather than deferred) since PROFILE.md reads/edits
+    // can happen from the very first dispatched pipeline run after boot.
+    // Both path options fall through to each hook's own os.homedir() default
+    // when the config key is absent or undefined, so a zero-config install
+    // acquires byte-identical lock names to the workspace-side PROFILE.md
+    // writers (gap-answers.js, prime-nodes.js) it shares that lock with.
+    registerProfileReadGate(api, { profilePath: userCfg.profilePath });
+    registerProfileWriteLock(api, { profilePath: userCfg.profilePath, resultsDir: userCfg.profileEditResultsDir });
     registerManifoldMetaHook(api);
 
     const pipelinesRef = { value: new Map() };
@@ -173,6 +193,10 @@ export default definePluginEntry({
 
     const runStore    = createRunStore({ logger: api.logger, dbPath: runtimeDbPath });
     const nodeExecutionsStore = getNodeExecutionsStore(runtimeDbPath);
+    // Locks taken on behalf of a node invocation (executor-nodes.js's
+    // executeNode, and the harness's own session tool leases of the
+    // sessions it dispatches) stay held until the invocation resolves.
+    registerOwnerResolver("invocation", createInvocationOwnerResolver({ nodeExecutionsStore, runStore }));
     // The single durable admission pool for flow runs — child-dispatch and
     // flow-start share it; see state/admission-queue-store.js's own header
     // for why it's one combined pool, not one per kind. Reads
@@ -183,7 +207,7 @@ export default definePluginEntry({
       dbPath: runtimeDbPath, getLimit: getGlobalConcurrencyLimit,
     });
     // resumeParentRef.resume is set to executor.resume once the executor
-    // exists below — store construction has to come before it, so the
+    // exists below — store construction has to precede it, so the
     // resume-trigger (state-store.js's finish/skip/fail/cancel) reads
     // through this mutable box rather than a captured closure. Currently
     // dormant: no real flow sets parentInvocationId yet, so this hook never
@@ -273,6 +297,7 @@ export default definePluginEntry({
     const executor = createExecutor({
       api,
       config: api.config,
+      locks: { withLock, registerSessionOwner, clearSessionOwner, runWithLockOwner },
       pipelinesDir,
       store,
       pipelinesRef,
@@ -402,6 +427,8 @@ export default definePluginEntry({
           api,
           // Completing an interrupted cancellation needs to cancel flows by
           // their actual ownerKey, not the default manifold-owner key.
+          // graph-flow-owner flows would fail the
+          // cancelFlowByIdForOwner equality check otherwise.
           createCancelStore: (ownerKey) => createStateStore(api, ownerKey, {
             runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger: api.logger,
           }),

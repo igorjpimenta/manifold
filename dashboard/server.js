@@ -53,7 +53,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
   // ── Direct store reads ────────────────────────────────────────────────────
   // Every read below hits manifold's own stores with the same query logic
   // the gateway's /manifold/* routes use — no gateway hop. Payload shapes
-  // match the old gateway responses field-for-field so the React app is untouched.
+  // match the gateway's /manifold/* responses field-for-field so the React
+  // app is untouched.
 
   // Adapter-injected in production; process singleton otherwise (the same
   // binding the gateway routes read through).
@@ -172,7 +173,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
   }
 
   // Subflow rows for a flow — same { subflows: [...] } envelope the
-  // gateway's sendSubflowsList serves (legacy errors column stripped).
+  // gateway's sendSubflowsList serves (the errors column is stripped).
   async function fetchSubflows(flowId) {
     try {
       const grouped = await getAllSubflowGroups({
@@ -473,9 +474,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       }
 
       // /api/runs/:flowId/subflows — subflow rows grouped by groupId,
-      // shaped like the old stateJson.subflows mirror ({[groupId]:
-      // {[subflowKey]: SubflowData}}) so SubflowsCard can consume it
-      // without a shape change on the frontend.
+      // shaped as {[groupId]: {[subflowKey]: SubflowData}} so SubflowsCard
+      // can consume it without a shape change on the frontend.
       const runSubflowsMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/subflows$/i);
       if (req.method === "GET" && runSubflowsMatch) {
         const flowId = runSubflowsMatch[1];
@@ -485,8 +485,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
 
       // /api/runs/:flowId/tree — node-invocation tree, the same
       // shape/endpoint companion clients already consume at the gateway
-      // level. Backs PathTrail/GraphView's executed-path rendering
-      // instead of stateJson._stepHistory.
+      // level. Backs PathTrail/GraphView's executed-path rendering.
       const runTreeMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/tree$/i);
       if (req.method === "GET" && runTreeMatch) {
         const items = await fetchTree(runTreeMatch[1]);
@@ -970,10 +969,10 @@ function summariseSubflowRollup(r) {
 }
 
 function fullRun(r, runErrors = []) {
-  // Strip `errors` — failure_events is now the sole store for error history
-  // ("Eradicate soft errors" Phase 1.5); errorEntries below (runErrors,
-  // read from failureStore) is the normalized replacement. Only historical rows persisted before that
-  // redirect still carry a baked-in errors[] in their stored stateJson.
+  // Strip `errors` — failure_events is the sole store for error history;
+  // errorEntries below (runErrors, read from failureStore) is the
+  // normalized replacement. Rows written before that redirect may still
+  // carry a baked-in errors[] in their stored stateJson.
   const { errors: _errors, ...stateWithoutLegacy } = r.stateJson ?? {};
   return {
     flowId: r.flowId,

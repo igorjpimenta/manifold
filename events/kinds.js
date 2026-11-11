@@ -1,7 +1,7 @@
 // events/kinds.js — canonical Phase-1 event-kind registry.
 //
 // Core emits bare kinds (dots only, no `plugin.` prefix); the gateway
-// boundary adds the prefix. There are no legacy names: a breaking change
+// boundary adds the prefix. There are no alternate names: a breaking change
 // mints a new kind. Every payload contract here is the minimum a consumer
 // can rely on — producers may attach more fields, never fewer.
 

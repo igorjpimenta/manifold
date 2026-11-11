@@ -501,7 +501,7 @@ describe("retryFailureBranch — flow-level: eligibility keys off the CURRENT ex
 
   it("rejects via the execution_id anchor even when a same-named node's Set membership alone would have allowed it", async () => {
     // A stricter check than the Set-only fallback: the failure row's own
-    // execution_id no longer matches DRAFT's latest execution (someone
+    // execution_id doesn't match DRAFT's latest execution (someone
     // retried again since), even though DRAFT still shows up in
     // queryErrorsByFlow's results (its current failed attempt has a
     // DIFFERENT execution_id than the one this stale failure row recorded).
@@ -524,7 +524,7 @@ describe("retryFailureBranch — flow-level: eligibility keys off the CURRENT ex
     assert.deepEqual(executor._ran(), []);
   });
 
-  it("legacy row with no execution_id falls back to the nodeId Set check (pre-migration behavior preserved)", async () => {
+  it("a row with no execution_id falls back to the nodeId Set check", async () => {
     queryErrorsByFlowImpl = () => errorEntries(["DRAFT"]);
     const failure = makeFailure({ branchItemId: null, failureNode: "DRAFT" }); // execution_id defaults to null
     const flow = makeFlow({ status: "blocked", state: { DRAFT: { text: "old" } } });

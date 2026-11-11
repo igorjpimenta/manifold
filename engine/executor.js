@@ -35,16 +35,16 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
-  // Explicit params win; api is the fallback the adapter still
-  // supplies (tests construct with api only).
+export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, locks, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+  // Explicit params win; api is the fallback the adapter supplies when
+  // explicit params are absent (tests construct with api only).
   const _config = config ?? api?.config ?? null;
   const _lineage = api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? _config?.pipelinesDir ?? resolveStorePaths().pipelinesDir;
   // Injectable for tests (defaults to the real singleton in production).
   // A test constructing a real createExecutor() without this override would
   // write its fixture rows into the real store's runtime.sqlite; store/
-  // branchService/failureStore etc. above already follow this DI pattern.
+  // failureStore etc. above already follow this DI pattern.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
 
   // Wraps nodeExecutions.write() for the write-then-fail call sites below —
@@ -84,6 +84,61 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     emit,
   });
 
+  // Direct store.setQueued/setRunning, not the CAS-retry-wrapped
+  // persistQueuedRetrying/persistRunningRetrying — best-effort
+  // observability only: a lost/raced status write never affects
+  // correctness, the lock file itself is what enforces mutual exclusion.
+  //
+  // withLock() hides the acquire->fn() handoff internally (unlike the
+  // semaphore's tryAcquire()/acquire(), called inline in the sibling), so
+  // there's no seam to inject an "acquired after having blocked" step —
+  // instead wrap fn so the flip back to running happens the moment fn is
+  // actually invoked, which only happens post-acquire.
+  async function withCrossProcessLockMaybe(lockName, fn, { flowId, nodeId, cooldownMs, cooldownJitterMs } = {}) {
+    if (!lockName || typeof lockName !== "string") return fn();
+    // The lock service is injected by the harness (createExecutor's `locks`
+    // param): a declared lock with no service refuses loudly at dispatch
+    // time rather than running unlocked.
+    const withLock = locks?.withLock;
+    if (typeof withLock !== "function") {
+      throw new Error(`manifold: refusing dispatch of node "${nodeId}" — cross-process lock "${lockName}" needs a harness lock service (pass locks to createExecutor)`);
+    }
+    let wasQueued = false;
+    const wrappedFn = async () => {
+      if (wasQueued) {
+        const after = await store.get(flowId);
+        if (after) {
+          await store.setRunning({
+            flowId, expectedRevision: after.revision, lastStep: after.lastStep, stateJson: after.stateJson,
+          });
+        }
+      }
+      return fn();
+    };
+    // The lock service is injected by the harness and owns the lock's own
+    // lifecycle — acquire, hold, release — for every acquirer of that
+    // lock, including application code that calls withLock directly
+    // outside the engine's node dispatch.
+    // `logger` is threaded through opts so the service can warn when a
+    // lock isn't held by this acquisition at release.
+    return withLock(lockName, wrappedFn, {
+      cooldownMs,
+      cooldownJitterMs,
+      logger,
+      onWouldBlock: async () => {
+        wasQueued = true;
+        const before = await store.get(flowId);
+        if (!before) return;
+        await store.setQueued({
+          flowId, expectedRevision: before.revision, lastStep: before.lastStep,
+          stateJson: before.stateJson,
+          waitJson: { kind: "resource-lock", resource: lockName, nodeId },
+          statusReason: `queued: waiting for cross-process lock ${lockName} (node ${nodeId})`,
+        });
+      },
+    });
+  }
+
   // nodeCtx is assigned after start/runFlow are defined (see below).
   // Subflow/node runners read it via getter at call time, not at factory-construction
   // time, so the undefined-at-construction gap is safe.
@@ -104,13 +159,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     // selector silently sees undefined subflow groups and resolves to zero
     // items regardless of how many upstream branches actually succeeded.
     //
-    // assembleState(baseState: state) computes _subflowGroups here (the
-    // same getAllSubflowGroups call, folded in) and additionally overlays
-    // each node's resultJson on top of the real stateJson passed as
-    // baseState. The overlay is a no-op against real flows (resultJson-derived
-    // values are byte-identical to state_json's), so the enrichment stays
-    // scoped to the single narrowest read site (node.selector) rather than
-    // all 5 root call sites at once.
+    // assembleState(baseState: state) overlays each node's resultJson on top
+    // of the entry-only stateJson passed as baseState and attaches
+    // _subflowGroups (the getAllSubflowGroups call, folded in).
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
     return dispatchSubflowChildren({
       node, nodeId, flowId, state: enrichedState, store, runStore, nodeExecutionsStore: nodeExecutions,
@@ -120,7 +171,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
 
   const { executeNode } = createNodeRunner({
     maybeBudgetGate, dispatchAgentWithRetry, executeSubflowNode,
-    api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, logger,
+    withCrossProcessLockMaybe, locks, api, config: _config, lineage: _lineage, pipelinesDir: _pipelinesDir, logger,
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
@@ -149,8 +200,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     // Per-pipeline singleton gate. Default (unset) is unlimited — the
     // shared admission pool below is the only gate almost every pipeline
     // needs. `allowConcurrent: false` opts a pipeline out of overlap
-    // entirely (e.g. a browser-automation poller that would race itself
-    // over shared session/gate state): reject this run before it ever
+    // entirely (e.g. a poller that would race itself over shared
+    // session/gate state): reject this run before it ever
     // competes for an admission slot if another non-terminal run of the
     // same pipelineId already exists.
     if (pipeline.allowConcurrent === false) {
@@ -227,7 +278,11 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // that would naturally re-request admission; it would just dispatch
       // lastStep's outbound edge unconditionally, bypassing the pool
       // entirely. Return immediately — admission-queue-store's own
-      // release()/promotion wakes it later.
+      // release()/promotion wakes it later. Deliberately NOT the same for
+      // resource-lock (or no waitJson at all): that wait lives INSIDE this
+      // same node's own re-entered dispatch path (withCrossProcessLockMaybe),
+      // so falling through and re-resolving the edge is exactly how a
+      // boot-revived queued orphan on a lock is meant to retry.
       if (isQueued(flow.status) && (flow.waitJson?.kind === "flow-start" || flow.waitJson?.kind === "child-dispatch")) {
         logger.info(`manifold [${flowId.slice(0, 8)}] queued at ${flow.lastStep} on ${flow.waitJson?.kind}`);
         return;
@@ -263,12 +318,13 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // gateway restart for free — it's just persisted state_json, same as
       // every other field the executor writes.
       const cascadeError = state?._cascadeError?.nodeId === lastStep ? state._cascadeError : null;
-      // Edge functions read via assembleState(baseState: state), not raw
-      // state — the single call site every edge decision in the engine goes
-      // through (root and child flows alike, since they share this one
-      // runFlow loop). A separate local var, not a reassignment of `state`
-      // itself — `state` is still what gets persisted below; only the value
-      // handed to the edge function changes.
+      // Fourth root dispatch-loop read site cut over: edge functions now
+      // read via assembleState(baseState: state) instead of raw state — the
+      // single call site every edge decision in the engine goes through
+      // (root and child flows alike, since they share this one runFlow
+      // loop). A separate local var, not a reassignment of `state` itself —
+      // `state` is still what gets persisted below; only the value handed
+      // to the edge function changes.
       const edgeState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
       const nextNodeId = resolveEdge(pipeline.edges, lastStep, edgeState, {
         logger, flowId,
@@ -297,9 +353,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       if (nextNodeId === "__end__") {
         // This root read site carries the same resultJson-replay need as
         // every other: pipeline.display() and successCriteria() both read
-        // node output through here. assembleState() adds _subflowGroups AND
-        // replays resultJson onto raw `state` — both are needed, because
-        // state_json is entry-only and carries no node output of its own.
+        // node output through here — `state_json` is entry-only, so a node's
+        // own output only exists through that replay.
         const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
         await runAuditIfConfigured({ flowId, pipeline, state: enrichedState, logger });
         // failureStore.recordFromTerminalState's soft-marker scan was
@@ -381,8 +436,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       logger.info(`manifold [${flowId.slice(0, 8)}] → ${nextNodeId} (${node.kind})`);
 
       const enteredAt = Date.now();
-      // Computed once per dispatch, from this flow's
-      // own last-dispatched node — see executor-helpers.js's isFreshNodeEntry
+      // computed once per dispatch, from this flow's own last-dispatched
+      // node — see executor-helpers.js's isFreshNodeEntry
       // for the full reasoning. execKind is the actual value threaded to every write()
       // call below in this iteration (only one ever fires per iteration) —
       // a genuinely fresh node entry is always "fresh" regardless of why
@@ -391,10 +446,10 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       const lastNodeId = await nodeExecutions.findCurrentStep(flowId);
       const forceNew = isFreshNodeEntry(lastNodeId, nextNodeId);
       const execKind = forceNew ? "fresh" : kind;
-      // Create the invocation row before execution: "last invocation for
-      // this flow" tracks the in-flight node even during execution, not
-      // just after completion — this is how the currently-running node is
-      // identified.
+      // Create the invocation row pre-execution: "last invocation for this
+      // flow" now correctly tracks the in-flight node even during
+      // execution, not just after completion. Replaces markExecuting() as the
+      // mechanism for identifying the currently-running node.
       const enterResult = await nodeExecutions.enter({
         flowId, pipelineId: state.pipelineId ?? null,
         nodeId: nextNodeId, subflowKey: null, kind: execKind,
@@ -415,7 +470,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       try {
         // "needs:" resolution is lazy, via ctx.needs(varName) called
         // from inside the node's own run()/promptBuilder()/selector(), NOT
-        // checked here ahead of the dispatch. executor-nodes.js/executor-subflow-children.js
+        // pre-checked here. executor-nodes.js/executor-subflow-children.js
         // build that accessor (needs-resolver.js's makeNeedsCtx) and pass
         // it through as part of ctx — nothing to do at this call site
         // beyond letting a NodeBlocked(_kind:"needs-not-ready") thrown from
@@ -481,8 +536,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
             // Every throw persists a permanent failure_events row
             // IMMEDIATELY, right here, regardless of what the edge
             // decides next — not just on eventual give-up. This is the one
-            // gap the persistFailRetrying->recordEngineFailure path never
-            // covers (a cascade-continuing throw never reaches
+            // gap the pre-existing persistFailRetrying->recordEngineFailure
+            // path never covered (a cascade-continuing throw never reaches
             // persistFailRetrying at all). If this attempt turns out to be
             // the cascade's final one, the `!nextNodeId` branch at the top
             // of this loop reuses this SAME invocationId/executionId when
@@ -620,8 +675,10 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
           });
           return;
         }
-        // The wait summary is synthesized by describeWaitFallback(waitJson,
-        // nextNodeId) — no pipeline-visible render hook feeds this log line.
+        // node.renderForOperator was an optional hook nothing in this
+        // codebase ever implemented (see describeWaitFallback's own header
+        // comment) — removed rather than keep computing a wide state merge
+        // just to feed an argument no pipeline reads.
         const summary = describeWaitFallback(waitJson, nextNodeId);
         logger.info(`manifold [${flowId.slice(0, 8)}] ${reentrant ? "reentrant gate" : "gate"} → blocked\n${summary}`);
         await persistWaitingRetrying({
@@ -641,20 +698,27 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       // last_step is what boot-time orphan revival and the pipeline-
       // concurrency dequeue path both trust as "this node completed" — they
       // jump straight to resolving its outbound edge without re-running
-      // apply(). Writing the result first makes that invariant crash-safe:
-      // a restart landing before last_step advances leaves last_step
-      // pointing at the previous node, so revival re-runs this node's
-      // apply() again — a duplicate call, not a silent failure.
+      // apply(). Under the order where state persist comes first (result write
+      // second) a restart landing between the two left last_step durably
+      // pointing at a node whose result_json was never committed, so the
+      // edge function read an empty state.<nodeId> and returned null — the
+      // engine surfaced this as "edge <nodeId> returned no next node"
+      // (SCORE_LLM, live in production). Writing the result first makes that
+      // invariant crash-safe: if a restart now lands in the new gap
+      // instead, last_step simply never advances and revival re-runs this
+      // node's apply() again — a duplicate call, not a silent failure.
       //
-      // Also still AWAITED, not fire-and-forget: state_json is entry-only,
-      // so the very next loop iteration's assembleState() call (line ~288,
-      // feeding the edge function) is the ONLY way this node's own output
+      // Also still AWAITED, not fire-and-forget: once the state-write
+      // filter cutover stopped persisting the full state_json blob, the
+      // very next loop iteration's assembleState() call (line ~288, feeding
+      // the edge function) became the ONLY way this node's own output
       // becomes visible again — if
       // that read raced ahead of this write, the edge function would see
       // this node's output as still-missing, some edges then re-route back
-      // to the same node (or worse), producing a tight busy-loop.
-      // Awaiting costs one DB round-trip per dispatch, already priced into
-      // every other persist call this loop makes.
+      // to the same node (or worse), producing a tight busy-loop. Found
+      // live: 4 real E2E suites spun at ~45% CPU indefinitely once this
+      // filter shipped. Awaiting costs one DB round-trip per dispatch,
+      // already priced into every other persist call this loop makes.
       const resultWrite = await nodeExecutions.writeResult(invocationId, stateUpdate).catch(() => null);
       if (!resultWrite || !resultWrite.ok) {
         const reason = resultWrite?.reason ?? "threw";
@@ -710,8 +774,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   nodeCtx = Object.freeze({
     async invokePipeline(targetPipelineId, args = {}) {
       const record = await start(targetPipelineId, args);
-      // start() does not throw when the shared admission pool is full —
-      // it queues instead (see start()'s own comment). Preserves the
+      // start() queues when the shared admission pool is full (see
+      // start()'s own comment). Preserves the
       // "singleton-busy" contract at this call site specifically: a caller
       // handling invoked:false is expected to retry invokePipeline itself
       // later, not rely on this record being silently promoted and run out
@@ -807,7 +871,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
    * the agent no way to know it already tried this once, risking a
    * duplicate side effect. Instead this sends REVIVAL_MSG to the SAME
    * deterministic session key the original dispatch used, so the agent can
-   * check its own prior turns and decide whether to finish or resume.
+   * check its own history and decide whether to finish or resume.
    */
   // nodeId is the crashed/in-flight node — the caller (boot/flow-revival.js)
   // resolves it from f.currentStep/waitJson.nodeId, since flow.lastStep is
@@ -927,14 +991,15 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       const { _cascadeError, ...rest } = entryState;
       entryState = rest;
     }
-    // The main loop writes a node's result BEFORE advancing last_step, so a
-    // crash-then-revival never reads a stale/empty result for the node it
-    // just resumed. This revival path resumes the SAME crashed dispatch (no
-    // fresh nodeExecutions.enter() call here — the invocation row already
-    // exists from the original, interrupted attempt) and carries no
-    // writeResult() call of its own, so it writes the result here: without
-    // it, last_step has already advanced to `nodeId` while its result_json
-    // stayed empty from the interrupted attempt. The very next runFlow() iteration's
+    // A gap surfaced live (SCORE_LLM "edge returned no next node" during a
+    // gateway restart storm): the main loop's fix writes a
+    // node's result BEFORE advancing last_step so a crash-then-revival never
+    // reads a stale/empty result for the node it just resumed. This revival
+    // path resumes the SAME crashed dispatch (no fresh nodeExecutions.enter()
+    // call here — the invocation row already exists from the original,
+    // interrupted attempt) but was never given the matching writeResult()
+    // call, so last_step advanced to `nodeId` while its result_json stayed
+    // empty from the pre-crash attempt. The very next runFlow() iteration's
     // assembleState() then read nothing for this node, and resolveEdge()
     // dead-ended with "no next node" — deterministic on every revived
     // agent-node whose outbound edge depends on its own output, not a race.

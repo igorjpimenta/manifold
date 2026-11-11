@@ -1,42 +1,52 @@
 # manifold
 
 LangGraph-style pipeline runtime for openclaw. Plugin id: `manifold`.
-Live installs land at `~/.openclaw/extensions/manifold/`; the source lives
-in the private repo `igorjpimenta/manifold`. This README is written
-for LLM agents doing engineering work in this plugin or building new
+The source lives in the private repo `igorjpimenta/manifold`. This README is
+written for LLM agents doing engineering work in this plugin or building new
 pipelines that target it.
 
 **Source and install.** Install/update a release with
 `openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install`
-(see `RELEASING.md` for the release process).
+(see `RELEASING.md` for the release process). Managed installs land under
+`~/.openclaw/git/` — never under `extensions/`.
 Development clone: `~/.dev/job/igorpimenta/manifold`. Story worktrees are
-created at `<clone>/.doppler/worktrees/<story>`, and each story ships as its
-own PR (base `feat/plugin`).
+created at `<clone>/.doppler/.worktrees/<story>`, and each story ships as its
+own PR (base `main`).
 
 ## Public API
 
-Consumers (oc-config, and later stories) install this repo as the
-`@igorjpimenta/manifold` git dependency and import **only** through these
-subpaths. Deep file paths are not a contract — only this table is.
+Consumers install this repo as the `@igorjpimenta/manifold` git dependency and
+import **only** through these subpaths. Deep file paths are not a contract —
+only this table is.
 
-| Subpath | Exports | Consumed by |
-| --- | --- | --- |
-| `@igorjpimenta/manifold` | plugin entry (default) | openclaw runtime |
-| `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
-| `…/elevation` | `invokeElevated` | oc-config |
-| `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
-| `…/tool-handoff` | structured result rendezvous (`writePendingResult`, `readPendingResult`, `clearPendingResult`, `waitForToolResult`) | oc-config |
-| `…/routes/bearer-auth` | `authorizeBearerRequest`, `sendUnauthorized` (MANIFOLD_BEARER, winch-style) | sibling extension |
-| `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
-| `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
-| `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeExecutions`, …) | sibling extension |
+| Subpath | Exports |
+| --- | --- |
+| `@igorjpimenta/manifold` | plugin entry (default) |
+| `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers |
+| `…/elevation` | `invokeElevated` |
+| `…/tool-handoff` | structured result rendezvous (`writePendingResult`, `readPendingResult`, `clearPendingResult`, `waitForToolResult`) |
+| `…/routes/bearer-auth` | `authorizeBearerRequest`, `sendUnauthorized` (MANIFOLD_BEARER, winch-style) |
+| `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` |
+| `…/state/paths` | `resolveStorePaths`, `resolveDataDir`, `runtimeDbPath`, `opsDbPath`, `locksDir`, `pipelinesDir`, `stateFile`, `ensureMigrated` |
+| `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` |
+| `…/state/schema` | drizzle tables (`flowRuns`, `flowNodeInvocations`, `flowNodeExecutions`, `failureEvents`, …) |
+| `@igorjpimenta/manifold-openclaw/lock` | `withLock`, `lockNameForFile`, `acquireLock`, `readLock` |
+| `@igorjpimenta/manifold-openclaw/profile-lock` | `registerProfileWriteLock`, `profileEditResultPathFor` |
+| `@igorjpimenta/manifold-openclaw/invocation-owner` | `createInvocationOwnerResolver` |
 
-The map is pinned by `test/unit/api/public-exports.test.js`; adding or
-removing an entry is a breaking change for the consumers above.
+The core-package half of this map is pinned by
+`test/unit/api/public-exports.test.js`; adding or removing an entry is a
+breaking change for every consumer that imports through these subpaths.
 
 Two companion docs hold deep-dive material split out of this file to keep
 it focused on orientation and quick reference:
 
+- **`ENGINE_INTERNALS.md`** — full executor state-machine detail (store
+  model, every persistence call, status-transition map, subflow data flow).
+  Read when debugging executor behaviour or touching `engine/executor.js`.
+- **`SUBFLOW_NODES.md`** — full `kind:"subflow"` authoring guide (shape,
+  sub-node calling convention, deriving `subflowKey`, locks, retrying one
+  item, nesting). Read before writing or modifying a subflow node.
 
 ## Index
 
@@ -61,6 +71,7 @@ it focused on orientation and quick reference:
 - [If you see…](#if-you-see)
 - [Operational quirks](#operational-quirks)
 - [Plugin config (default values)](#plugin-config-default-values)
+- [Database migrations](#database-migrations)
 - [SQLite shape (for direct queries / surgery)](#sqlite-shape-for-direct-queries--surgery)
 
 ## Quick orientation
@@ -73,16 +84,16 @@ it focused on orientation and quick reference:
 
 | You need…                               | Look at                                        |
 | --------------------------------------- | ---------------------------------------------- |
-| Plugin entry (wires everything)         | `index.js`                                     |
-| Run loop / node dispatch                | `executor.js: runFlow`, `runStep`              |
+| Plugin entry (wires everything)         | `plugins/openclaw/manifold/index.js`            |
+| Run loop / node dispatch                | `engine/executor.js: runFlow`, `engine/executor-nodes.js: executeNode` |
 | Pipeline file discovery + validation    | `loader.js`                                    |
-| sqlite persistence (`flow_runs` table)  | `state-store.js`                               |
-| CLI command implementations             | `cli.js`                                       |
-| Agent-facing tools                      | `tool.js`                                      |
-| Approval helpers (CLI + dashboard)      | `gates.js`                                     |
+| sqlite persistence (`flow_runs` table)  | `state/state-store.js`                         |
+| CLI command implementations             | `bin/cli.js`                                   |
+| Agent-facing tools (MCP)               | `mcp/tools.js`                                 |
+| Approval helpers (CLI + dashboard)      | `gates/gate-resolver.js`                       |
 | Dashboard server                        | `dashboard/server.js`                          |
 | Dashboard frontend                      | `dashboard/src/`                               |
-| Plugin manifest (tools + config schema) | `openclaw.plugin.json`                         |
+| Plugin manifest (config schema)         | `plugins/openclaw/manifold/openclaw.plugin.json` |
 
 ## Glossary
 
@@ -100,6 +111,11 @@ it focused on orientation and quick reference:
 
 ## Run lifetime
 
+> Full state-machine detail (store model, every persistence call, the
+> status-transition diagram, and the subflow read/write data-flow) moved to
+> **`ENGINE_INTERNALS.md`** — read that when debugging executor behaviour
+> or touching `engine/executor.js` itself. Summary below is enough for
+> ordinary pipeline authoring.
 
 A flow is created `running` at `__start__` (`store.create`). The executor
 loop repeatedly resolves `edges[lastStep](state)` to the next node id,
@@ -107,16 +123,17 @@ dispatches it per its `kind` (`code` runs `node.run`; `agent` builds a
 prompt and dispatches an agent turn; `subflow` fans `.selector(state)` out
 into real child `flow_runs`, one per item, and blocks until every sibling
 is terminal; `human-gate` builds `waitJson` and blocks), and persists the
-outcome — a `stateUpdate` advances and loops again, a thrown error or
-`_error` sentinel fails/blocks the flow, `__end__` runs `runAudit` and
+outcome — a `stateUpdate` advances and loops again, a thrown error
+fails/blocks the flow, `__end__` runs `runAudit` and
 writes the terminal status (`succeeded`/`failed`/`skipped`). Blocked flows
 resume via `POST /manifold/resume-from-gate`; any non-terminal flow can be
-cancelled by an operator.
+cancelled by an operator. See `ENGINE_INTERNALS.md` for the exact
+persistence call at each step and the full status-transition map.
 
 ## Pipeline schema (canonical)
 
 ```js
-// ~/.openclaw/workspace/.pipelines/<pipelineId>/index.js
+// <dataDir>/workspace/.pipelines/<pipelineId>/index.js
 export default {
   id: "my-pipeline",                          // string, file-system safe
   goal: "one-line description",               // shown in the dashboard
@@ -154,7 +171,7 @@ export default {
 ```
 
 **Required exports:** `id`, `state`, `nodes`, `edges`. Validation rules
-in `loader.js:80-130`.
+in `engine/loader.js:187-319` (`validatePipeline`).
 
 **Reserved node ids:** `__start__`, `__end__`. Never appear in `nodes`;
 must appear in `edges` (at least `__start__`).
@@ -178,7 +195,7 @@ after a success (typically by checking presence/absence of its own
 output in `state`). There is no separate "retry from start" reset and no
 engine-level "terminal" check: an edge function that has exhausted every
 option it wants to try simply returns no next node, which the
-existing `!nextNodeId` → `persistFailRetrying` path already handles
+pre-existing `!nextNodeId` → `persistFailRetrying` path already handles
 — giving up is just an ordinary edge decision, not a special case.
 
 ```js
@@ -200,12 +217,12 @@ export default {
 
 Author-side responsibilities: exhaustion (when to stop trying and let
 the flow fail) and any retry-count cap are entirely up to the edge
-functions — nothing bespoke is needed since `state/node-executions.js`'s
-`queryErrorsByFlow`/`queryByNode` already let an edge consult prior
-attempts on this flow if it needs more than presence/absence in `state`.
+functions — nothing bespoke is needed since `state/failure-store.js`'s
+`queryErrorsByFlow` already lets an edge consult prior failures on this
+flow if it needs more than presence/absence in `state`.
 
 **`NodeFailure` and 2-arg edge functions** (`engine/executor-errors.js`,
-`engine/executor-helpers.js`'s `resolveEdge` — "Eradicate soft errors"):
+`engine/executor-helpers.js`'s `resolveEdge`):
 a cascade node's own `run()`/`apply()`
 throws `NodeFailure(message, { errorType })` instead of soft-returning
 `{ok: false, error_type}` on failure — `errorType` reuses the existing
@@ -239,28 +256,29 @@ or a rest param collapses `fn.length` back down, silently falling to
 1-arg mode with no error at all. Declare the parameter plainly.
 
 **Attempt counting across dispatches**: there is no supported built-in way
-to do this today. `_stepHistory` is not a `state_json` field, and nothing
-provides it for pipeline-author use (`ctx` exposes no execution-count
-accessor, and `assembleState()` never adds one to `state`). A
-`NodeFailure` throw also never merges `state[nodeId]`, so a self-tracked
-counter on the throwing node's own output can't survive a failing attempt
-either — the same "no room for an arbitrary counter" problem this section
-already calls out. An `infra_unavailable` failure ends a cascade
-directly, same as any other failure class, and the operator retries
-manually via the flow's own Retry action once infra is actually healthy.
-If a pipeline genuinely needs a bounded automatic retry count, the only
-sound pattern is a sibling `code` node in the same cascade that never
-throws and always merges into `state` on every pass — have *that* node's
-own `run()` increment its own attempts field, and have the throwing
-node's edge read that (capped) instead of trying to count its own
-dispatches or looping unconditionally.
+to do this today. `ctx` exposes no execution-count accessor, and
+`assembleState()` never adds one to `state`. A `NodeFailure` throw also
+never merges `state[nodeId]`, so a self-tracked counter on the throwing
+node's own output can't survive a failing attempt either — the same "no
+room for an arbitrary counter" problem this section already calls out.
+`freelance_workana-proposal`/`-reply`/`-touch-cadence`'s
+`SUBMIT_CODE`/`SEND_REPLY_CODE`/`SEND_NUDGE_CODE` cascades have no
+infra-unavailable auto-recovery loop: `infra_unavailable` ends each of
+these three cascades directly, same as any other
+failure class, and the operator retries manually via the flow's own
+Retry action once infra is actually healthy. If a future pipeline
+genuinely needs a bounded automatic retry count, the only sound pattern
+is a sibling `code` node in the same cascade that never throws and
+always merges into `state` on every pass — have *that* node's own
+`run()` increment its own attempts field, and have the throwing node's
+edge read that (capped) instead of trying to count its own dispatches or
+looping unconditionally.
 
-**Generalized engine-wide**: every `kind:"agent"` node's `node.retry`
-config is inert — `dispatchAgentWithRetry` (`engine/agent-dispatch.js`)
-does not retry, for any agent dispatch, anywhere. Every agent node is a
-single attempt; a failure throws immediately, records as a normal failure
-event, and the operator retries manually — no exceptions, no per-node
-opt-out. Any `retry: {...}` left on a node definition is ignored.
+**Engine-wide**: `dispatchAgentWithRetry` (`engine/agent-dispatch.js`) does
+not retry, for any agent dispatch, anywhere. Every agent node is a single
+attempt; a failure throws immediately, records as a normal failure event,
+and the operator retries manually — no exceptions, no per-node opt-out.
+Any `retry: {...}` left on a node definition is inert and ignored.
 
 **Presence-check pattern for a single-outcome leg**: when a leg either
 throws or returns real payload data with no need to classify *why* it
@@ -269,49 +287,6 @@ soft-returning an error field, say), its edge collapses to a presence
 check: `(state) => (state.AGENT_ID !== undefined ? "__end__" : null)` — a
 throw never merges `state[nodeId]`, so presence alone (any shape) is the
 success signal.
-
-### Optional: `recoveryActions`
-
-Pipelines can declare custom operator-recovery actions surfaced on the
-operator Failures inbox. Each entry is a `kind` (URL slug + dispatch
-key) → descriptor + handler. The framework merges these with three
-always-on defaults (`retry`, `ignore`, `unignore`) and exposes the
-result per failure row as `available_actions[]`; clients render verbatim,
-no pipeline-id awareness.
-
-```js
-recoveryActions: {
-  skip: {
-    label: "Skip",
-    icon: "tray.and.arrow.down.fill",   // SF Symbol — rendered verbatim by clients that support them
-    tint: "danger",                     // info | warning | danger | neutral
-    destructive: true,                  // optional; UI may confirm before firing
-    requiresBranch: true,               // optional; hides on flow-level failures
-    appliesTo: ["skip-only", "redraft", "investigate"],  // recovery_hint filter
-    handler: async ({ failure, body, api, logger }) => {
-      // failure : the failure_events row (see SQLite shape below)
-      // body    : parsed JSON POST body (e.g. { via?, reason? })
-      // returns : { ok: true, ...arbitrary } or throws
-    },
-  },
-},
-```
-
-**Kinds reserved for the framework:** `retry`, `ignore`, `unignore`.
-Pipelines that declare these are silently dropped from the merge — use
-custom kinds (`skip`, `archive`, `mark-spam`, whatever your pipeline's
-semantic is).
-
-**Auto-resolve:** after a custom handler succeeds, the framework
-resolves any open failure rows for the same `(pipeline_id,
-branch_item_id)` tuple with `resolved_via = "auto:operator-<kind>"` —
-pipelines don't have to touch the failure store themselves.
-
-Live example: `freelance_workana-proposal/index.js`'s `skip` handler
-writes `workspace/.shared/freelance/workana/skipped/<jobId>.md` so
-future FILTER passes exclude the listing. Implementation lives in
-`recovery-actions.js` (descriptor merge + handler lookup); HTTP
-dispatch in `index.js: /manifold/failures/<id>/action/<kind>`.
 
 ## Common author mistakes (read this before writing a pipeline)
 
@@ -323,13 +298,13 @@ If you've written pipelines for other graph runtimes (LangGraph, n8n, Airflow, e
 | `subflow: { subgraph: { nodes, edges } }` | `subflow: { flow: { nodes, edges } }` | Loader error: `node X (subflow) missing .flow`. |
 | `description: "..."` (top-level) | `goal: "..."` | Silently ignored — dashboard renders `goal`. Cosmetic only, but the pipeline list looks empty. |
 | `buildBrief: ({ state, item }) => "string"` | `promptBuilder: (state) => "string"` | Runtime calls `node.promptBuilder(state)` positionally, always single-arg — your function gets `state` not `{state, item}`. Subagent receives garbage. Inside a `subflow` sub-node, the item is `state.item`, not a second argument. |
-| `apply: ({ state, output }) => ({...})` (object destructure) | `apply: (state, output) => ({...})` | Same as above — runtime calls positionally, always `(state, output)`, whether the node is top-level or a `subflow` sub-node (`applyResult` also accepted for `agent` kind). There is no `subCtx` and no 3-arg form — a `subflow` sub-node is dispatched exactly like a top-level node; the item lives at `state.item`. |
-| Gate node with `apply: …`, `buildPayload: …`, `delivery: …`, `buttons: […]` | Gate node with `approvalRequestBuilder: (state, itemId) => ({title, description})` only | Gate's apply path is owned by `gate-resolver.js` (a consumer bridge wires the callback). A decision lands in `state.approvedIds`/`state.rejectedIds` (or `state.approvalPending[itemId]` mid-flight) — read it in your edge function, e.g. `edges.GATE: (state) => state.approvedIds?.includes(state.item?.id) ? "STAMP" : "STAMP_REJECT"`. |
+| `apply: ({ state, output }) => ({...})` (object destructure) | `apply: (state, output) => ({...})` | Both forms are supported: the runtime detects a named-params apply and calls `apply({ state, output, item, meta, needs })`, otherwise it calls positionally. A `subflow` sub-node is dispatched exactly like a top-level node; the item lives at `state.item` (and at `item` in the named form). |
+| Gate node with `buildPayload: …`, `delivery: …`, `buttons: […]` | Gate node with `approvalRequestBuilder: (state, itemId) => ({title, description})` | A human-gate may also declare `apply`. A decision lands in `state.approvedIds`/`state.rejectedIds` (or `state.approvalPending[itemId]` mid-flight) — read it in your edge function, e.g. `edges.GATE: (state) => state.approvedIds?.includes(state.item?.id) ? "STAMP" : "STAMP_REJECT"`. |
 | Edge function reads `flow.data` or a `subCtx` argument inside a `subflow` sub-node | Edge function reads `state` directly — same as top-level | There is no `subCtx`. Inside a subflow sub-node: `edges.GATE: (state) => state.GATE?.decision === "approve" ? "STAMP" : "__end__"` (or read `state.approvedIds`, per the row above) — the subflow item is `state.item`. |
 | Fallback pair declared via naming convention only | Add a `groups:` entry tying the pair | The dashboard won't render them as a compound parent. See *Groups (compound parents in the dashboard)* below. |
 | Node id with hyphen (`send-cr`) | Node id with underscore/upper (`SEND_CR`) | See *Node IDs are token-style — no hyphens* below. |
 
-### What the validator catches (loader.js)
+### What the validator catches (`engine/loader.js`)
 
 These are hard-stops at pipeline load time — the gateway log shows `manifold loader: <id>/ failed to load: <reason>`:
 
@@ -353,7 +328,8 @@ Past the loader, these only surface during a real flow:
 - **`promptBuilder` returning a non-string** — the agent will see `[object Object]`. Stringify your inputs into a prompt.
 - **`apply` returning a non-object** — runtime expects a `stateUpdate`, wrapped under your own node id, whether the node is top-level or a `subflow` sub-node (see *Subflow nodes (childFlows)*). Returning `null` or `undefined` is fine (no update). Returning a number / string throws.
 - **`pendingSelector` for `gate`/`human-gate` returning items that don't match what the operator's decision keys against** — gate-resolver can't map decisions back to items. For a `subflow`'s own gate sub-node, this means returning something other than `state.item?.id` (a childFlows child is always exactly one item).
-- **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`*.
+- **Forgetting `itemKey` on `subflow` when the item's natural key isn't `.id`/`.listingId`** — `deriveSubflowKey` falls through to `String(item)`, which is almost never what you want for an object. See *Deriving `subflowKey`* in `SUBFLOW_NODES.md`.
+- **Cross-process lock with no installed lock service** — `crossProcessLock: "acct:foo"` requires the openclaw plugin package (its `lock.js` supplies the service). Already present in stock installs.
 
 ### Two gotchas that *look* like bugs but aren't
 
@@ -414,8 +390,9 @@ export default {
   //                Apple's SF Symbols app). Falls back to "tray.fill" when
   //                omitted, so this field is optional but recommended.
   //   displayName — human label used everywhere a pipeline is named.
-  identity: { emoji: "🧩", sfSymbol: "puzzlepiece.fill", displayName: "My flow" },
-  schedule: ["0 9 * * *"],            // optional cron(s), GMT-3 if your gateway is in BR
+  emoji: "🧩",
+  sfSymbol: "puzzlepiece.fill",
+  displayName: "My flow",
 
   // Static state shape. Merged with run args at flow start. Don't add an
   // `errors` array here — errors are never a stateJson field; every node
@@ -493,8 +470,7 @@ export default {
 | `code`              | `run(state, ctx) => stateUpdate \| Promise<stateUpdate>` — `ctx` exposes `invokePipeline` (see below) | `stateUpdate`          | normal edge                               |
 | `agent`             | `agent`, `promptBuilder(state)`, `applyResult(state, output)`. Optional `circuitBreaker: true` — see *Circuit breaker* below. | `stateUpdate`          | normal edge                               |
 | `subflow`           | `selector(state) => Item[]`, `flow: { nodes, edges }` (required — no other shape). Never set `.groupId` — it's always the node's own id; the loader throws if you set it. See *Subflow nodes (childFlows)* below for the full authoring guide. | one real child `flow_runs` per item; parent blocks (`waitJson.kind:"children-pending"`) until every sibling child is terminal, then auto-resumes **if `mode` is satisfied** — otherwise the parent is failed directly, with a real retryable `failure_events` row | normal edge, once all children terminal and `mode` satisfied |
-| `human-gate`        | `pendingSelector(state) => Item[]`. Each item is `string` *or* `{ id: string, reason?, hint?, text?, editable? }` — see *Human-gate pending item shape* below | sets `waitJson`; flow → `blocked` | resumes via CLI `approve` / `respond` *or* dashboard GateForm |
-| `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the gateway broadcasts `manifold.gate.opened` / `manifold.gate.closed` over WS with the full payload, and each consumer decides how to surface it (inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into a discuss surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
+| `human-gate`        | `pendingSelector(state) => Item[]`. Each item is `string` *or* `{ id: string, reason?, hint?, text?, editable? }` — see *Human-gate pending item shape* below | sets `waitJson`; flow → `blocked` | resumes via CLI `approve` *or* dashboard GateForm |
 
 A `code`-then-`agent` fallback (deterministic primary path, LLM-driven
 recovery leg) is not a distinct node kind — author it as a
@@ -505,10 +481,14 @@ so the engine fails the parent automatically if neither leg succeeds. See
 *Optional: `kind: "cascade"`* above for the underlying mechanic and a
 worked `CODE_LOGIN`/`AGENT_LOGIN` example.
 
-Detailed dispatch logic: `executor.js` lines 380–730.
+Detailed dispatch logic: `engine/executor-nodes.js`.
 
 ## Subflow nodes (childFlows)
 
+> Full authoring guide (minimal shape, sub-node calling convention, deriving
+> `subflowKey`, reading results downstream, locks/concurrency, retrying one
+> item, nesting) moved to **`SUBFLOW_NODES.md`** — read that before writing
+> or modifying any `kind:"subflow"` node.
 
 A `subflow` node fans a `.selector(state)` array out into one real,
 independent flow per item — each item's own `flow_runs` row, driven by the
@@ -569,8 +549,8 @@ is broken).
 
 Gated purely on the flag — a node that never sets `circuitBreaker` is a
 complete no-op through this whole path, so plain agent nodes are
-unaffected unless they opt in. Every cascade sub-node needs this flag set
-explicitly — see `ensure-login-node.js` factories and `submit-agent.js`
+unaffected unless they opt in. Every cascade sub-node needs this flag
+set explicitly — see `ensure-login-node.js` factories and `submit-agent.js`
 files under `workspace/.pipelines/` and `workspace/.shared/` for worked
 examples.
 
@@ -625,6 +605,28 @@ return {
 };
 ```
 
+### Lock modifier (any node)
+
+One lock primitive:
+
+| Field                       | Scope                | Acquired before  | Released after           |
+| --------------------------- | --------------------- | ---------------- | ------------------------ |
+| `crossProcessLock: "kind:id"` | cross-process      | node body runs | node body returns/throws |
+
+The lock name is manifold's contract; whoever runs the flow provides the mechanism behind it. A holder's lock file (`<name>.lock`) is honored across processes, so it serializes against everything that touches the same resource: sibling children of a `subflow` node, other top-level nodes in the same flow, other pipelines, and any standalone script that declares the same lock name.
+
+```js
+SUBMIT_CODE: {
+  kind: "code",
+  crossProcessLock: "acct:freelance",    // cross-process mutex on a named resource
+  run: async (state, ctx) => { /* ... */ }
+}
+```
+
+No script should self-lock internally (`withLock(...)` wrapping its own `main()`) — that only creates a deadlock risk against a pipeline node holding the same lock name across the spawn boundary (a child OS process can't see the parent's held lock). The pipeline node that spawns the script should declare `crossProcessLock` itself, for the full duration of the dispatch.
+
+The lock is atomic via `O_EXCL`, crash-safe via PID-liveness check + a `staleMs` floor (default 6 h), and released synchronously on `process.exit`. Standalone scripts use the lock helper for the same name (`@igorjpimenta/manifold-openclaw/lock`).
+
 ### Code-node `ctx` argument
 
 `code`-kind nodes receive a `ctx` object as the LAST positional argument — always `run(state, ctx)`, whether the node is top-level or a `subflow` sub-node (the subflow item, if any, is `state.item` — not a separate positional arg). Existing nodes that ignore the trailing arg keep working unchanged.
@@ -636,7 +638,7 @@ return {
 | `ctx.log.info(msg)` / `.warn(msg)` / `.error(msg)` | Logs with the flow/node prefix already applied — prefer this over a bare `console.log` so log lines are attributable. |
 | `ctx.artifact(name, content)` | Writes a file under this run's own artifact directory (`workspace/.pipelines/<pipelineId>/runs/<runId>/<name>`). Throws if `state.runId`/`state.pipelineId` aren't set yet (i.e. before `start()` has stamped them). |
 | `ctx.readArtifact(name)` | Reads a file back from the same directory. Same throw condition as `ctx.artifact`. |
-| `ctx.blocked(reason, hint)` | Throws `NodeBlocked({reason, hint})`. **Despite the name and the class's own doc comment ("blocks the flow with retry-on-resume semantics"), this actually fails the flow, not pauses it** — verified directly against `executor.js`'s own catch logic: a `NodeBlocked` reaches a real wait/pause only if its `_blocked._kind` is set, and `ctx.blocked()` never sets one (`internal/needs-resolver.js`'s `needs:` mechanism does, by explicitly stamping `_kind: "needs-not-ready"` before throwing — that's the one real example of the pause path firing). Calling `ctx.blocked(reason, hint)` today is equivalent to `throw new Error(reason)` with a slightly different message shape, not a way to pause a node — this looks like a real gap between the helper's intent and its actual behavior, not a documented design choice. |
+| `ctx.blocked(reason, hint)` | Throws `NodeBlocked({reason, hint})` — the flow parks as `blocked` with the block as its `waitJson` and resumes when that block is resolved. The block's `_kind` decides the resume path: `needs-not-ready` (stamped by `engine/needs-resolver.js`'s `needs:` accessor) retries on resume, `needs-gateway-handoff` waits for a scope-gap fix. |
 | `ctx.needs(varName)` | Resolves a `needs:` declaration — see below. Only present/meaningful if the node itself declares `needs:`. |
 
 Return shape of `ctx.invokePipeline`:
@@ -689,7 +691,7 @@ The dashboard's `GateForm` reads these to decide which buttons to show:
 
 If neither `text` nor `editable` is present, the row shows approve/reject only. Approve and reject are always available.
 
-Submitting an edit goes through `applyApproval` (`gates.js`) and writes
+Submitting an edit goes through `recordItemDecision` (`gates/gate-resolver.js`) and writes
 `state.editedTexts[itemId]` — downstream nodes that should honor an
 edited result must read from there.
 
@@ -741,7 +743,7 @@ GATE: {
         draft ? `Current draft:\n${draft}` : "",
         `When the operator asks for a revision, spawn Cyrano (content-writer)`,
         `with the task and instruct them to propose through the pipeline's`,
-        `discuss tooling (oc-config). End your turn immediately — do NOT call sessions_yield.`,
+        `discuss tooling. End your turn immediately — do NOT call sessions_yield.`,
       ].filter(Boolean).join("\n");
     },
   },
@@ -768,39 +770,19 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 
 **Pipeline authors:** `promptBuilder` is your contract surface. Inline the
 listing context, current draft, and orchestration rules the agent needs.
-Point the agent at oc-config's discuss tooling — not at `<draft>` tags or
+Point the agent at the pipeline's discuss tooling — not at `<draft>` tags or
 `subagent_run`. Keep the prompt under ~2 KB.
 
-### needs-info: free-text vs button choices
+### Blocking a node from code
 
-A `code` node that returns `{ _blocked: { reason, needed, hint } }` puts
-the flow into `status=waiting`, `waitJson.kind="needs-info"`. The
-dashboard renders a `RespondForm` with a textarea by default; the
-operator's reply gets appended to `state.userAnswers[nodeId]` and the
-node re-runs.
+A `code` node that returns `{ _blocked: { reason, needed, hint } }` parks the
+flow: it goes to `status=blocked` with the block as its `waitJson`, and the
+executor loop exits until the flow is resumed (`POST /manifold/resume-from-gate`).
 
-Pipeline authors can opt into a **button-only** form by passing
-`choices: string[]` in the `_blocked` payload:
-
-```js
-return {
-  _blocked: {
-    reason: "approve to ship this proposal",
-    choices: ["approve", "deny"],   // ← opt-in: dashboard renders 2 buttons
-  },
-};
-```
-
-The dashboard's RespondForm renders one button per choice (each
-submits the choice label as the response text) and skips the textarea.
-The node is responsible for interpreting the choice in its next run
-via `state.userAnswers[nodeId].at(-1).text`. If `choices` is omitted,
-the textarea remains.
-
-`choices` is invisible to the CLI (`manifold respond` still takes
-free text) and to companion Live Activity surfaces (which carry their own
-approve/deny opinion regardless of `choices`). It's a dashboard-form
-hint, not a contract.
+`choices: string[]` inside the `_blocked` payload is passed through to
+`waitJson.choices` verbatim — a client may render one button per choice. It is
+a hint for the client, not a contract: the node decides how to read the
+answer.
 
 ## Groups (compound parents in the dashboard)
 
@@ -844,7 +826,7 @@ has to be wholly nested in one place.
 
 A node cannot be a member of more than one group.
 
-Code paths: `loader.js: validateGroups` (validation),
+Code paths: `engine/loader.js: validatePipeline` (validation),
 `dashboard/src/components/GraphView.tsx` (rendering — nests
 subflow-internal group compounds inside their subflow node).
 
@@ -890,23 +872,23 @@ fallback). Slugs may (and usually do) contain hyphens.
 
 **Why:** openclaw's config validator at `dist/io-…js: validateConfigObjectWithPluginsBase` builds plugin-config issue paths as `plugins.entries.<id>.config.*`. Flat keys fail strict validation with `Unrecognized key: "<name>"`.
 
-### 4. Singleton — one active run per pipelineId (opt-out via `allowConcurrent`)
+### 4. Singleton — one active run per pipelineId (opt-in via `allowConcurrent: false`)
 
-**Rule:** `executor.start(pipelineId, args)` throws if any flow for
-that pipeline is `running`, `blocked`, or `waiting`. Cancel or finish
-the existing flow before starting a new one.
+**Rule:** a pipeline that declares `allowConcurrent: false` has at most one
+non-terminal flow at a time. `executor.start(pipelineId, args)` skips the new
+run when another flow for that pipeline is still active. A pipeline that
+declares nothing runs unlimited concurrent flows — the shared admission pool
+is the only ceiling by default.
 
-**Why:** Pipelines own real-world resources (a browser profile, a
+**Why:** some pipelines own real-world resources (a shared account session, a
 marketplace login, operator attention via push notification). Parallel runs
-race for those. `executor.js: start` lines 95–111.
+race for those. `engine/executor.js: start`.
 
-**Opt-out:** add `allowConcurrent: true` on the pipeline definition.
-The singleton check is skipped; multiple active flows for the same
-pipelineId become a normal operating state. Use when each flow owns
-an independent slice of state — e.g., one flow per inbound reply,
-each gated independently by the operator. Don't use for pipelines
-that share a real-world resource (browser, login, etc.); the
-serialization is doing real work there.
+**Opt-in:** add `allowConcurrent: false` on the pipeline definition.
+Use it when each flow owns an independent slice of state — e.g., one flow per
+inbound reply, each gated independently by the operator — but the pipeline
+must not share a real-world resource (a shared account, a login, etc.) with
+its own other runs.
 
 ## Session keys (agent nodes dispatched by manifold)
 
@@ -914,8 +896,8 @@ Manifold does not mint session ids: the harness owns the id format, so an
 agent node declares its own key and manifold passes it through verbatim.
 
 ```
-node.sessionKey                          // static
-node.sessionKeyBuilder(state, flowId)    // derived
+entry.session                            // static
+entry.sessionBuilder(state, flowId)      // derived
 ```
 
 `dispatchAgentEntry` refuses an agent node that declares neither —
@@ -943,21 +925,21 @@ Keys the executor writes; the dashboard reads:
 | `startedAt`     | number (ms epoch)                          | Set at `start`.                                                                  |
 | `endedAt`       | number (ms epoch)                          | Set at terminal transition.                                                      |
 | `args`          | object                                     | The JSON passed via `start --args '…'`. Merged into initial state, not mutable. |
-| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` — dual-mode: real `flow_runs` children for any subflow node, `flow_branches` fallback for flows that have no `flow_runs` children. Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
+| `_subflowGroups` | `{ [groupId]: { [subflowKey]: SubflowData } }`     | **Transient, never persisted.** Computed fresh each step by `assembleState()` from the subflow node's real `flow_runs` children (see `SUBFLOW_NODES.md` and `ENGINE_INTERNALS.md`'s SUBFLOW DATA FLOW section). Pipeline code reads `state._subflowGroups?.GROUP?.[key]?.data?.<subNodeId>`. See `SubflowData` in `dashboard/src/api/types.ts`. |
 
 The dashboard derives the path-trail from `GET
 /manifold/runs/:flowId/tree` (`flow_node_invocations`/`flow_node_executions`),
 one row per invocation rather than one entry per dispatch — a retried node
 collapses to a single pill instead of showing consecutive duplicates. Also
-worth knowing: `state_json` holds no key per
-dispatched node at all — the table above is the complete list of what's
-actually in it; a node's own output lives in
+worth knowing: `state_json` itself accumulates no key per dispatched node
+at all — the table above is the complete list of what's actually in it; a
+node's own output lives in
 `flow_node_invocations.result_json`, reconstructed on read by
 `assembleState()`, never in the raw column.
 
 Errors are NOT a state field — pipeline code never writes them directly.
 Every node failure (top-level or inside a `subflow`) is recorded to
-`flow_node_executions` (via `nodeExecutionsStore.write(..., error)`) and
+`failure_events` and
 served normalized as `errorEntries: [{ nodeId, subflowKey, message, at, executionId, invocationId }]` —
 a top-level field sibling to `stateJson` on `GET /manifold/runs/:flowId`
 and on each row of `GET /manifold/runs/:flowId/subflows`, not something
@@ -998,21 +980,21 @@ stateDiagram-v2
 | ------------- | ------------------------------------------------------------------------------------------------ |
 | `running`     | Executor loop is (or should be) driving this flow.                                               |
 | `blocked`     | `waitJson` is set; an operator/external actor must clear it (human-gate, `ctx.needs()` not-ready, children-pending). Executor exited the loop. |
-| `queued`      | Waiting on an *internal* resource that frees itself (agent-dispatch semaphore, cross-process lock) — distinct from `blocked` specifically so consumers can tell "needs a human" from "will resolve on its own" without inspecting `wait_json.kind`. |
+| `queued`      | Waiting on an admission slot (the shared pool's `flow-start` / `child-dispatch` kinds) or a cross-process lock — distinct from `blocked` specifically so consumers can tell "needs a human" from "will resolve on its own" without inspecting `wait_json.kind`. |
 | `succeeded`   | Reached `__end__` cleanly. Terminal.                                                             |
-| `failed`      | A node threw, or an applyResult rejected. Terminal. Also where a bare `ctx.blocked()` call ends up today — see *Code-node `ctx` argument* above. |
+| `failed`      | A node threw, or an applyResult rejected. Terminal. |
 | `skipped`     | Pipeline ran but produced no output (nothing to score, all filtered, cap reached). Terminal.     |
-| `cancelled`   | Operator-initiated termination via tool / SQL (no CLI command yet — see *Operational quirks*).   |
+| `cancelled`   | Operator-initiated termination — CLI `manifold cancel <flowId>`, `POST /manifold/cancel`, or the dashboard's cancel action. |
 
 ## CLI
 
 ```
 openclaw manifold list
 openclaw manifold runs
-openclaw manifold start <pipelineId> [--args <json>] [--detach]
+openclaw manifold start <pipelineId> [--args <json>]
 openclaw manifold status <flowId>
-openclaw manifold respond <flowId> <text>
 openclaw manifold approve <flowId> <itemId> <decision>
+openclaw manifold cancel <flowId>
 openclaw manifold retry <flowId>
 openclaw manifold pause <flowId>
 openclaw manifold resume <flowId>
@@ -1022,53 +1004,43 @@ openclaw manifold node-health status [pipelineId] [--all]
 openclaw manifold node-health reset <pipelineId> <nodeId>
 ```
 
-Implementation: `cli.js`.
+Implementation: `bin/cli.js`.
 
 ## Tool surface (agent-facing)
 
-Declared in `openclaw.plugin.json`, one tool per file under `agent/tools/`
-(barrel re-export in `agent/tools/index.js`):
+Manifold's pipeline tools are served over MCP: `mcp/stdio.js` (stdio) and
+`mcp/http.js` (streamable HTTP). The definitions live in `mcp/tools.js` —
+`TOOL_DEFS` carries each tool's name, description and JSON-schema input, and
+`createManifoldToolHandlers(ops)` returns the dispatcher that answers them.
+The host connects the server; the openclaw plugin registers no raw tool of its
+own.
 
-| Tool                      | File                                    | Signature input fields        | Purpose                                             |
-| ------------------------- | ---------------------------------------- | ------------------------------ | ---------------------------------------------------- |
-| `manifold_start`          | `agent/tools/manifold-start.js`          | `pipelineId`, optional `args` | Start a flow. Returns `flowId`.                     |
+| Tool | Input | Purpose |
+| --- | --- | --- |
+| `manifold_start` | `pipelineId`, optional `args` | Start a run of a registered pipeline. Returns the flow record. |
+| `manifold_status` | `flowId` | One flow record, or null. |
+| `manifold_runs` | optional `pipelineId`, `status`, `limit` | List flows. |
+| `manifold_approve` | `flowId`, `itemId`, `decision`, `text` | Resolve a blocked gate. |
+| `manifold_cancel` | `flowId`, `reason` | Cancel a running flow. |
+| `manifold_deliver_result` | `sessionKey`, `runId`, `agent`, `kind`, `payload` | Hand a structured tool result to the dispatching node. |
 
-Pipeline-specific tools (`propose_*`, `submit_*`, `report_*`) live in
-oc-config, not here — core keeps only the harness-agnostic surface.
-
-Shared helpers (`toolErr`) live in `agent/tools/shared.js`.
+The caller identity is the resolved `identity` — never a tool parameter — so
+an agent cannot start runs or approve gates under another agent's name.
 
 ### Adding a new tool
 
-1. New file under `agent/tools/`, one `registerXTool({ api, ...deps })`
-   export per file.
-2. Add the tool name to `contracts.tools` in `openclaw.plugin.json` — the
-   loader rejects registration for undeclared names.
-3. Register with `api.registerTool({ name: "...", ... })` — **prefer the
-   object form**. Only reach for the factory form
-   (`api.registerTool((ctx) => ({ name: "...", ... }))`, as `manifold_start`
-   does) when you actually need `ctx` (e.g. `ctx.sessionKey`) in closure.
-4. **If you use the factory form, you MUST pass `{ name: "..." }` as the
-   second argument**: `api.registerTool((ctx) => ({...}), { name: "..." })`.
-   Object-form registrations get their `names` populated automatically from
-   the object's own `.name` field; factory-form registrations do not — the
-   core loader never inspects what the factory *returns*, only
-   `opts.name`/`opts.names`. Omitting this on a factory-form tool leaves its
-   registry entry with an empty `names` array, which falls back to matching
-   the *whole plugin's* declared tool list. Combined with `Array.find()`
-   picking the *first* matching registry entry, a single factory-form tool
-   registered without `opts.name` can silently hijack lookups for every
-   *other* tool in the plugin — surfacing as `plugin tool runtime missing
-   (manifold): <unrelated-tool-name>` at call time for tools that are
-otherwise correctly registered.
-5. Wire the register call into `index.js`.
-6. Add a test file under `test/unit/agent/tools/<tool-name>.test.js`
-   mirroring the source file 1:1.
+1. Add the definition to `TOOL_DEFS` in `mcp/tools.js` — name, description,
+   `inputSchema`.
+2. Add its handler to `createManifoldToolHandlers` — the dispatcher switches
+   on the tool name.
+3. Wire the ops it needs in `mcp/wire-ops.js` (`createRealOps`).
+4. Add a test mirroring the definition 1:1.
 
 ## Dashboard
 
-Mostly read-only web UI with one actuation endpoint
-(`POST /api/runs/:flowId/approve`) that resolves a blocked human-gate.
+Mostly read-only web UI with a handful of actuation endpoints —
+`POST /api/runs/:flowId/approve` (resolve a blocked human-gate), plus
+`/cancel`, `/rerun`, `/pause`, `/resume` and `POST /api/runs/bulk-cancel`.
 Listens on `dashboardHost:dashboardPort` (default `127.0.0.1:7430`).
 Behind tailscale serve at `https://<tailnet>/graph/` when configured
 (`tailscale serve --set-path=/graph`).
@@ -1079,22 +1051,32 @@ API endpoints:
 GET  /api/health
 GET  /api/pipelines
 GET  /api/pipelines/:id
+GET  /api/pipelines/:id/nodes/:nodeId/stats
+GET  /api/search?q=
 GET  /api/runs?status=&pipelineId=&limit=
 GET  /api/runs/:flowId
+GET  /api/runs/:flowId/cost
 GET  /api/runs/:flowId/events
 GET  /api/runs/:flowId/artifacts
 GET  /api/runs/:flowId/artifacts/:name
 GET  /api/runs/:flowId/transcripts
 GET  /api/runs/:flowId/compare
+GET  /api/runs/:flowId/summary
+GET  /api/runs/:flowId/subflows
+GET  /api/runs/:flowId/tree
 GET  /api/stats
+GET  /api/stats/cost
 GET  /api/stats/pipelines/:id
+GET  /api/stats/pipelines/:id/cost
 GET  /api/stats/pipelines/:id/views?sinceDays=N    (pipeline-declared view payloads — see below)
-GET  /api/events    (SSE: flow_created | flow_changed | flow_terminated | pipelines_changed)
+GET  /api/events/ws (WebSocket: run.created | run.updated | run.ended | pipeline.catalog.updated)
 
 POST /api/runs/:flowId/approve     body: { itemId, decision: "approve"|"reject"|"edit", text? }
-                                   → 200 { decision, itemId, stillPending, status: "blocked"|"resumed" }
+                                   → 200 { decision, itemId, status }
                                    → 400 invalid body | 404 flow not found
                                    → 409 not awaiting / itemId not pending / store write race
+POST /api/runs/:flowId/cancel | /rerun | /pause | /resume
+POST /api/runs/bulk-cancel
 ```
 
 Source: `dashboard/server.js`. Frontend uses hash routing (`#/`,
@@ -1112,7 +1094,7 @@ a new view, as long as the kind + source pair is already supported.
 ```ts
 type ViewDeclaration = {
   id: string;              // pipeline-unique, stable across reloads
-  kind: "funnel";          // currently the only supported kind
+  kind: "funnel" | "metric" | "table";
   label: string;           // card title
   source: SourceDeclaration;
   stages: StageDeclaration[];
@@ -1241,9 +1223,9 @@ the `byOutcome` breakdown, and overall `created → won` %.
 
 ### Add a new pipeline
 
-1. Create `~/.openclaw/workspace/.pipelines/<id>/index.js`.
+1. Create `<dataDir>/workspace/.pipelines/<id>/index.js`.
 2. Default-export an object matching *Pipeline schema (canonical)*.
-3. No restart needed — `pipelines-watcher.js` reloads on change.
+3. No restart needed — `engine/pipelines-watcher.js` reloads on change.
 4. Verify with `openclaw manifold list` or
    `GET /api/pipelines/<id>`.
 
@@ -1253,9 +1235,7 @@ the `byOutcome` breakdown, and overall `created → won` %.
 openclaw manifold start my-pipeline --args '{"someInput":"x"}'
 ```
 
-Without `--detach`, the CLI blocks driving the executor loop until
-the flow terminates or hits a gate. **With `--detach`, the flow record
-is created but never driven** (see *Operational quirks*).
+The CLI drives the executor loop until the flow terminates or hits a gate.
 
 ### Seed a pipeline with operator-supplied state
 
@@ -1264,7 +1244,7 @@ pipeline's normal SCAN/ENUMERATE stage wouldn't produce — e.g. "run
 the proposal flow for *this* listing URL" — neither `--args` nor the
 `manifold_start` tool fits: the pipeline's discovery stage still
 runs. Instead, insert a `flow_runs` row at `status='running'` +
-`current_step='__start__'` with pre-populated `state_json`. The
+`last_step='__start__'` with pre-populated `state_json`. The
 gateway's *revival service* catches it at the next boot (~15s delay)
 and drives forward; the pipeline's start-edge typically short-circuits
 past discovery when its readiness condition is already satisfied (e.g.
@@ -1273,12 +1253,6 @@ past discovery when its readiness condition is already satisfied (e.g.
 Procedure lives in Vulcan's `seed-pipeline-flow` skill —
 `workspace/agents/agent-forger/skills/seed-pipeline-flow/SKILL.md`.
 
-**⚠ Infra-skip gotcha.** Skipping `ENSURE_LOGIN_CODE` /
-`LAUNCH_BROWSER` / etc. via a pre-populated state leaves downstream
-CDP-dependent nodes failing with `ECONNREFUSED 127.0.0.1:9222`. Either
-run the infra step manually before seeding, or set the row's
-`current_step` to that infra node (revival starts there).
-
 ### Inspect why a flow failed
 
 ```
@@ -1286,50 +1260,32 @@ openclaw manifold status <flowId>          # shows status, currentStep, waitJson
 ```
 
 Or open the dashboard at `#/runs/<flowId>`:
-- `errors` card lists `errorEntries[*]` (top-level, sourced from `flow_node_executions` — not a `stateJson` field)
+- `errors` card lists `errorEntries[*]` (top-level, sourced from `failure_events` — not a `stateJson` field)
 - `transcripts` card shows the full subagent conversation per session
 - `state` tree shows the full `stateJson`
 
-### Failures feed + operator recovery actions (operator Inbox)
+### Failures feed (operator Inbox)
 
-A separate `failures.sqlite` store (sibling of `runtime.sqlite`)
-records one row per distinct branch- or flow-level failure on terminal
-`__end__`. Powers the operator Inbox's Recover/Done buckets and the dashboard
-"Needs Attention" strip. Dedup via `UNIQUE(flow_id, branch_item_id,
-failure_node)`; UPSERT semantics on re-records (see
-`failure-store.js:215-235`).
+The `failure_events` table in `runtime.sqlite` records one row per failed node
+execution. Powers the operator Inbox's Recover/Done buckets and the dashboard
+"Needs Attention" strip.
 
 ```bash
-# Open rows (default: not resolved, not ignored)
+# Open rows (default: not resolved)
 curl -H "Authorization: Bearer $TOKEN" \
   http://127.0.0.1:18789/manifold/failures
 
-# Include resolved + ignored — what Inbox clients fetch in one shot
+# Include resolved rows — what Inbox clients fetch in one shot
 curl -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:18789/manifold/failures?resolved=all&ignored=all&limit=200'
+  'http://127.0.0.1:18789/manifold/failures?resolved=all&limit=200'
 ```
 
-Each row carries an `available_actions[]` array — descriptor list of
-operator actions Inbox clients render (kind / label / icon / tint /
-destructive). Framework defaults always present; pipeline-declared
-actions opt in via the `recoveryActions` map (see *Pipeline schema*
-above).
-
-**Action dispatch endpoints** (gateway, port 18789):
+**Retry endpoint** (gateway, port 18789):
 
 ```bash
-# Generic dispatch — for any kind the row's available_actions exposes.
-# Includes pipeline-declared kinds (e.g. `skip` on workana-proposal)
-# and would include future custom kinds without code changes here.
 curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"via":"app"}' \
-  http://127.0.0.1:18789/manifold/failures/<id>/action/<kind>
-
-# Framework-default routes — same semantics, dedicated URLs:
-curl -X POST .../manifold/failures/<id>/retry      # surgical branch retry
-curl -X POST .../manifold/failures/<id>/ignore     # snooze
-curl -X POST .../manifold/failures/<id>/unignore   # restore
-curl -X POST .../manifold/failures/<id>/skip       # dedicated URL for the skip action
+  http://127.0.0.1:18789/manifold/failures/<id>/retry
 ```
 
 `/retry` walks the failure's own flow (a top-level flow, OR a `subflow`
@@ -1339,11 +1295,11 @@ first node with a currently-live error, clears that node and everything
 downstream from `stateJson`, bumps `_attemptNumber`, and resumes — the
 executor re-enters at the failing node only, skipping nothing upstream of
 it that already succeeded. Refuses if the flow isn't in a terminal-ish
-state (`running`/`blocked`/`waiting`/`succeeded`/`failed`/`cancelled`/
+state (`running`/`blocked`/`queued`/`succeeded`/`failed`/`cancelled`/
 `skipped` only — never races a live executor iteration), or if the
 recorded `failure_node` doesn't match a current error (already
 resolved by an earlier retry). There is no separate itemId-keyed branch
-retry.
+retry — see `SUBFLOW_NODES.md`'s *Retrying, resuming, and gating one item*.
 Implementation: `routes/operator-retry.js: retryFailureBranch`.
 
 ### Resume a gated flow
@@ -1354,7 +1310,6 @@ Three surfaces, same underlying operation:
 # CLI
 openclaw manifold approve <flowId> <itemId> approve            # human-gate / gate
 openclaw manifold approve <flowId> <itemId> edit --text "..."  # replace agent output
-openclaw manifold respond <flowId> "the answer"                # needs-info (free-form)
 
 # Dashboard: open #/runs/<flowId> → "waiting on …" card. Approve/reject buttons are
 # always rendered; the edit button shows only when the pending item has
@@ -1369,7 +1324,7 @@ curl -X POST -H 'Content-Type: application/json' \
 
 `itemId` must match the `id` of an entry returned by the node's
 `pendingSelector`. Both the CLI and the dashboard endpoint share
-`gates.js: applyApproval` so the resulting state mutation is identical.
+`gates/gate-resolver.js: recordItemDecision` so the resulting state mutation is identical.
 
 ### Rerun a flow or a single subflow item
 
@@ -1405,20 +1360,18 @@ curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/jso
 where `<id>` is the failure event recorded against the child's own
 `flow_id` — `state/failure-store.js: recordEngineFailure` fires from
 within the CHILD's own executor iteration and records this way for any
-genuine thrown error. Every `subflow` sub-node failure throws (zero soft
-`{ _error }` returns survive anywhere in this codebase), so every
-subflow-item failure ends up recorded this way and is directly
-retryable. `branch_item_id` on the wire
+genuine thrown error. Every `subflow` sub-node failure throws now
+(zero soft `{ _error }` returns survive anywhere in this codebase), so
+every subflow-item failure ends up
+recorded this way and is directly retryable. `branch_item_id` on the wire
 (derived read-time from `flow_node_invocations.subflow_key`) is purely
-descriptive — it
-doesn't gate whether a failure can be retried (see
-`routes/operator-retry.js`'s own comment).
+descriptive — it doesn't gate whether a failure can be retried.
 
-**One real caveat**:
+**One real caveat now**:
 `recordEngineFailure` *can* also fire against the **parent's** own
 `flow_id` — `engine/child-resume-trigger.js`'s `maybeResumeParent`
-calls it directly (`failure_kind: "subflow-mode-not-satisfied"`) when
-every sibling child has reached a terminal status but the subflow node's own
+calls it directly (`error_type: "subflow-mode-not-satisfied"`) when
+every sibling child has gone terminal but the subflow node's own
 `mode` ("any"/"all") isn't satisfied. That's a policy decision, not a
 throw — nothing in the parent's own dispatch failed. Retrying *that*
 failure event doesn't re-run the parent (it already dispatched
@@ -1430,14 +1383,9 @@ nested propagations first.
 This walks
 the child's own topology back to the failing node exactly like a
 flow-level retry (see *Failures feed + operator recovery actions*
-above) — no manual `runtime.sqlite` surgery, no
-`branch.step`/`flow.currentStep` rewind math, no gateway restart. The
-parent flow is untouched and stays blocked on `children-pending` until
-this one child (re-)reaches a terminal status.
-
-`routes/operator-retry.js` returns a clean `not_found` for any failure
-event whose `itemId` refers to a `flow_branches` row — there is no
-branch-row retry path.
+above) — no manual `runtime.sqlite` surgery, no step-rewind math, no
+gateway restart. The parent flow is untouched and stays blocked on
+`children-pending` until this one child (re-)reaches a terminal status.
 
 **C. Whole pipeline, custom initial state (operator-supplied input
 the pipeline's discovery wouldn't produce):** see *Seed a pipeline
@@ -1447,9 +1395,9 @@ with operator-supplied state* above.
 
 | Symptom                                                                                             | Likely cause + where to look                                                                  |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `pipeline "<id>" already has 1 active flow(s)`                                                       | Singleton guard. Cancel/finish the prior run. `executor.js: start` line 105.                  |
+| `pipeline "<id>" already has an active run`                                                          | The `allowConcurrent: false` guard. Cancel/finish the prior run. `engine/executor.js: start`.   |
 | `Unrecognized key: "<name>"` from `openclaw doctor` or gateway start                                 | Plugin config not nested under `.config`. See *Conventions §3*.                                |
-| Flow stuck at `__start__` in `running` for forever                                                   | `--detach` was used. CLI never invoked `runFlow`. Restart the gateway (revival picks orphans) or re-run without `--detach`. |
+| Flow stuck at `__start__` in `running` for forever                                                   | The executor never ran the flow. Restart the gateway (revival picks orphans) or re-run it. |
 | `manifold: flow not found: <shortId>`                                                              | CLI commands take full UUID, not the dashboard's 8-char display id.                            |
 | Dashboard transcript pane shows long messy nodeId, no item                                           | Pipeline uses a node id with a hyphen. Fix the node id. See *Conventions §1*.                  |
 | Dashboard pipeline detail renders blank black                                                        | `pipeline.nodes` is an array instead of an object keyed by id. Fix the export shape.            |
@@ -1457,16 +1405,10 @@ with operator-supplied state* above.
 
 ## Operational quirks
 
-- **`--detach` is a footgun.** It creates the flow record without
-  driving the executor loop. The flow stays at `__start__` in
-  `running` until something fires `executor.runFlow(flowId)`. The
-  gateway's *revival service* (registered in `index.js: manifold-flow-revival`)
-  picks up orphans at gateway boot. Practical fix: run without
-  `--detach` inside a background shell instead.
-- **No `cancel` CLI command.** Terminal status is only `succeeded` /
-  `failed`. To force-stop a flow today, the only path is direct sqlite
-  surgery against `runtime.sqlite` (`UPDATE flow_runs SET status='cancelled', ended_at=<ms> …`).
-  This is on the *actuation* roadmap (`POST /api/runs/:id/cancel`).
+- **Cancel** — CLI `manifold cancel <flowId>`, `POST /manifold/cancel`, or
+  the dashboard's cancel action. The gateway's *revival service*
+  (registered in `plugins/openclaw/manifold/index.js: manifold-flow-revival`)
+  picks up orphans at gateway boot.
 - **Per-run artifacts** live in `<pipelinesDir>/<id>/runs/<runId>/`,
   not under the dashboard. The dashboard's `/api/runs/:flowId/artifacts`
   endpoint reads from there.
@@ -1480,7 +1422,7 @@ with operator-supplied state* above.
 "plugins.entries.manifold": {
   "enabled": true,
   "config": {
-    "pipelinesDir":      "~/.openclaw/workspace/.pipelines",   // discovery root
+    "pipelinesDir":      "~/.manifold/workspace/.pipelines",   // discovery root
     "ownerSessionKey":   "agent:main:explicit:manifold-owner",
     "dashboardEnabled":  true,
     "dashboardPort":     7430,
@@ -1509,10 +1451,9 @@ Manifold owns `flow_runs`, `flow_node_invocations`, and
 `flow_node_executions`, all in `runtime.sqlite` — the sole read/write
 store for the dashboard, revival, gate-resolver, and executor.
 `registry.sqlite` is the platform's own store and is never written by
-manifold. All direct SQL surgery should target `runtime.sqlite`. Use the
-[`dql` skill](../../.claude/skills/dql) (`oc-dql`) for read-only
-inspection — it's the safe default; only reach for raw `sqlite3` when you
-actually intend to write.
+manifold. All direct SQL surgery should target `runtime.sqlite`. Use a
+read-only SQL client for inspection — it's the safe default; only reach for
+raw `sqlite3` when you actually intend to write.
 
 ```
 file: <store home>/runtime.sqlite   ← manifold read/write store (use this)
@@ -1521,11 +1462,11 @@ table: flow_runs
 flow_id             TEXT PRIMARY KEY
 pipeline_id         TEXT  (the pipeline that owns this flow — top-level id,
                             or "<parentPipelineId>::<subflowNodeId>" for a childFlows child)
-status              TEXT  ('running' | 'blocked' | 'waiting' | 'succeeded' | 'failed' | 'skipped' | 'cancelled')
-current_step        TEXT  (node currently in flight; NULL when idle or terminal)
+status              TEXT  ('running' | 'blocked' | 'queued' | 'succeeded' | 'failed' | 'skipped' | 'cancelled')
 last_step           TEXT  (last completed node; NULL on creation)
 revision            INTEGER
-state_json          TEXT  (JSON; the full mutable state)
+state_json          TEXT  (JSON; the entry-only state — a node's own output
+                            lives in flow_node_invocations.result_json)
 wait_json           TEXT  (JSON; null when not gated)
 status_reason       TEXT  (reason for the current status — blocked/queued/failed/skipped,
                             optional on cancelled; always NULL for running/succeeded)
@@ -1574,10 +1515,13 @@ id            TEXT PRIMARY KEY
 invocation_id TEXT NOT NULL     (FK → flow_node_invocations.id)
 entered_at    INTEGER NOT NULL
 exited_at     INTEGER NOT NULL
-error         TEXT              (NULL on success — this is also the source
-                                  of the wire-level errorEntries[], never a
-                                  stateJson field, see State conventions)
+kind          TEXT              (why this attempt ran: fresh | retry |
+                                  revival | recheck)
 ```
+
+Error content is not here — `failure_events` is the only place "which node
+errored, and with what" is recorded. The wire-level `errorEntries[]` served
+by `GET /manifold/runs/:flowId` is derived from it.
 
 For dry-run-then-commit destructive SQL, wrap in `BEGIN TRANSACTION;
 … ; ROLLBACK;` first, inspect, then re-run with `COMMIT;`.

@@ -21,8 +21,8 @@
 //
 // The turn itself runs through injected runTurn (the adapter closes over
 // invokeElevated → /manifold/_elev/discuss, the same elevation the HTTP
-// route uses). No pending files: the old discuss-turns markers were
-// write-only, and discussStore's turn_status is the live record.
+// route uses). No pending files: discussStore's turn_status is the live
+// record.
 import http from "node:http";
 import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";

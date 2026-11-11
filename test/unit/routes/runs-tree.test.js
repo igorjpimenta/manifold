@@ -22,7 +22,7 @@ let listInvocationsForFlowImpl = () => [];
 let getInvocationImpl = () => null;
 let listExecutionsForInvocationImpl = () => [];
 let hasInvocationsImpl = () => new Set();
-// Phase 1.5:
+// Error content:
 // flow_node_executions carries no error content at all — buildTreeNodeRows/
 // sendInvocationDetail cross-reference failureStore.queryErrorsByFlow
 // instead. ErrorEntry-shaped rows (executionId/invocationId/message) tests
@@ -197,12 +197,9 @@ describe("GET /manifold/runs/:flowId/tree", () => {
 
   test("the LAST invocation with no error mirrors the flow's own live status (running/blocked/queued) — independent of any currentStep field", async () => {
     resetMocks();
-    // Real flow_runs rows never carry a currentStep field (column dropped
-    // in migration v7, state/run-store.js "Phase 2.5") — deliberately
-    // omitted here so this test can't silently pass for the wrong reason
-    // the way the old version did (it hand-built a currentStep field the
-    // real code path never receives, so it kept passing even after the
-    // comparison it was meant to exercise became permanently dead code).
+    // Real flow_runs rows never carry a currentStep field (state/run-store.js)
+    // — deliberately omitted here so this test can't silently pass for the
+    // wrong reason.
     const flow = { flowId: "flow-c", status: "blocked", stateJson: { pipelineId: "team_pipe" } };
     listInvocationsForFlowImpl = () => [
       { invocationId: "inv-1", nodeId: "CACHE_CHECK", subflowKey: null, visitSeq: 1, invokedAt: 100, executionCount: 1, enteredAt: 100, exitedAt: 110, latestExecutionId: null, kind: "fresh" },
@@ -739,7 +736,7 @@ describe("GET /manifold/runs/:flowId/tree/invocation/:invocationId", () => {
       { executionId: "e1", enteredAt: 100, exitedAt: 110, kind: "fresh" },
       { executionId: "e2", enteredAt: 200, exitedAt: 230, kind: "retry" },
     ] : [];
-    // Error content is cross-referenced from failureStore now (Phase 1.5) —
+    // Error content is cross-referenced from failureStore —
     // sendInvocationDetail merges message onto the matching executionId.
     queryErrorsByFlowImpl = () => [{ nodeId: "SCORE_LLM", subflowKey: null, message: "timeout", at: 110, executionId: "e1", invocationId: "inv-retried" }];
     const { api, routes } = createMockApi();

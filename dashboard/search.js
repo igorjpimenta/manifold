@@ -1,33 +1,31 @@
 // In-memory substring search across the dashboard's flow_runs view.
 //
-// Why in-memory and not SQLite FTS5: manifold's dashboard opens
-// registry.sqlite read-only (see sql-store.js) and is not the schema
-// owner. Adding an FTS5 mirror table requires writes + triggers managed
-// by whoever owns the schema, which the dashboard explicitly does not.
+// Why in-memory and not SQLite FTS5: the dashboard reads flows through
+// run-store's listRunsPage and is not the schema owner. Adding an FTS5
+// mirror table requires writes + triggers managed by whoever owns the
+// schema, which the dashboard explicitly does not.
 // An in-memory walk avoids the cross-process coordination problem
 // entirely. Upgrade to FTS5 if (a) row count grows past ~10k or
 // (b) query latency on `top-level state stringify` becomes a problem —
 // both checkable on the search endpoint's response.
 //
-// Scope (v1):
+// Scope:
 //   ✓ Structured fields: flowId, pipelineId, status,
 //     lastStep, statusReason, waitJson.hint, waitJson.reason
-//   ✓ errorEntries[*].{nodeId,message} — sourced from flow_node_executions
-//     (Phase 1.5), not the old state.errors[]. This closes a real gap:
-//     flow_node_executions unifies root-level and subflow-level errors in
-//     one table, so subflow failures are now searchable for free — the old
-//     state.errors[]-only approach never indexed subflow sub-state at all.
+//   ✓ errorEntries[*].{nodeId,message} — sourced from failure_events,
+//     which unifies root-level and subflow-level errors in one table, so
+//     subflow failures are searchable too.
 //   ✗ Top-level state keys — not searchable: dashboard/server.js's
-//     fetchAllRuns() goes through the gateway's /manifold/runs LIST
-//     route, which never selects the raw state_json column (only
-//     flowId/pipelineId/status/lastStep/statusReason/timestamps +
-//     _display-derived fields); adaptRun() synthesizes stateJson as
-//     {pipelineId} for every row. Reintroducing per-node output search
-//     would mean a dedicated gateway-side route backed by assembleState()
-//     (mirroring routes/runs.js's single-run detail path), not a loop
-//     over a field this route never populates.
+//     fetchAllRuns() reads through run-store's listRunsPage, which never
+//     selects the raw state_json column (only flowId/pipelineId/status/
+//     lastStep/statusReason/timestamps + _display-derived fields);
+//     adaptRun() synthesizes stateJson as {pipelineId} for every row.
+//     Reintroducing per-node output search would mean a dedicated
+//     gateway-side route backed by assembleState() (mirroring
+//     routes/runs.js's single-run detail path), not a loop over a field
+//     this read never populates.
 //   ✗ Transcripts — would require walking session JSONL files per
-//     query × per run. Deferred to v2 with an offline indexer.
+//     query × per run. Deferred with an offline indexer.
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_CONTEXT_CHARS = 40;
@@ -36,7 +34,7 @@ export function searchRuns(runs, query, opts = {}) {
   const limit = opts.limit ?? DEFAULT_LIMIT;
   const contextChars = opts.contextChars ?? DEFAULT_CONTEXT_CHARS;
   // Map<flowId, ErrorEntry[]> — caller fetches once via the gateway's
-  // GET /manifold/errors (failureStore.queryErrorsByFlowIds, Phase 1.5)
+  // GET /manifold/errors (failureStore.queryErrorsByFlowIds)
   // so this stays a pure function, DB-free.
   const errorsByFlow = opts.errorsByFlow ?? new Map();
   // Structured status filter applied BEFORE the free-text match —

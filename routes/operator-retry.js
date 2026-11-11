@@ -199,10 +199,9 @@ export function createRetryFailure({
       // (added for failure_events invocation-linking) makes this exact
       // instead of inferred from string/nodeId equality alone.
       //
-      // queryErrorsByFlow moved from nodeExecutionsStore to failureStore
-      // ("Eradicate soft errors") — flow_node_executions no longer stores
-      // error content at all, failure_events is the only place "which
-      // nodes errored" can be answered from now. getLatestExecutionForNode
+      // flow_node_executions stores no error content at all —
+      // failure_events is the only place "which
+      // nodes errored" can be answered from. getLatestExecutionForNode
       // stays on nodeExecutionsStore below — it's identity/timing only,
       // unaffected.
       const nodeExecutionsStore = getNodeExecutionsStore();

@@ -94,7 +94,7 @@ describe("createRunTurn — the turn", () => {
     );
   });
 
-  test("a startup refusal is no longer a request-scope handoff", async () => {
+  test("a startup refusal is not a request-scope handoff", async () => {
     const raw = makeRuntime({ waitForRun: async () => { throw STARTUP(); } });
     const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
     await assert.rejects(

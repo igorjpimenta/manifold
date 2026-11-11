@@ -26,18 +26,18 @@ import { TERMINAL_STATUS_SET } from "../state/run-store.js";
 // occurring hours into uptime would otherwise go undetected until the next
 // restart.
 //
-// Also reaps admitted rows of kinds this engine does not admit — see the
-// unresumable-kind pass below for why skipping those is what wedged the whole
+// Also reaps admitted rows of kinds the engine doesn't admit — see the
+// retired-kind pass below for why skipping those is what wedged the whole
 // pool shut, not a safe no-op.
 export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, api, logger, minAgeMs = 30_000 }) {
   if (!admissionQueueStore) return { stuckAdmissionsResumed: 0, stuckAdmissionsFailed: 0, retiredKindReaped: 0 };
   const now = Date.now();
   const admittedRows = await admissionQueueStore.listByStatus("admitted");
 
-  // Reap admitted rows whose kind this engine does not admit. Such a kind
+  // Reap admitted rows of kinds the engine doesn't admit. A retired kind
   // can never be driven: resumePromotedAdmission refuses non-resumable
   // kinds, and every flow transition releases by the flow's CURRENT
-  // admission kind, so releaseByFlow never matches such a row either.
+  // admission kind, so releaseByFlow never matches a retired row either.
   // "Unresumable" therefore makes the row a permanent pool leak, not a safe
   // skip — admit()'s and fillFreeSlots()'s admitted-count queries have no
   // kind filter, so zombie rows count against the ceiling forever and wedge
@@ -45,7 +45,7 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
   // effect, promotes the globally-oldest queued row, which
   // wakePromotedRelease then drives — the freed capacity goes back to work
   // in the same pass instead of idling until some unrelated release.
-  // A QUEUED row of such a kind is left here (it holds no slot), but
+  // A QUEUED row of a retired kind is left here (it holds no slot), but
   // fillFreeSlots() can promote one into 'admitted'; this pass is what
   // reclaims it after that, past the same grace window.
   let retiredKindReaped = 0;
@@ -54,12 +54,12 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
     if (isEngineResumableKind(row.kind)) { resumableRows.push(row); continue; }
     if (row.admittedAt && now - row.admittedAt < minAgeMs) continue;
     const flow = await runStore.get(row.flowId);
-    // A flow still 'running' owns the slot legitimately and releases it
-    // through its own transition path; reclaiming the row underneath it
-    // would transiently over-admit the pool. Missing or terminal flows are
-    // reaped: no live process can release them (the terminal-leak sweep
-    // above only runs at boot, and release() is a safe no-op if it already
-    // did).
+    // A flow still 'running' under the code that admitted this row owns
+    // the slot legitimately and releases it through its own retired-kind
+    // transition path; reclaiming the row underneath it would transiently
+    // over-admit the pool. Missing or terminal flows are reaped: no live
+    // process can release them (the terminal-leak sweep above only runs at
+    // boot, and release() is a safe no-op if it already did).
     if (flow?.status === "running") continue;
     try {
       const result = await admissionQueueStore.release(row.id);
@@ -154,9 +154,8 @@ export async function reviveOrphanFlows({
   runStore, nodeExecutionsStore, maybeResolveFlow, sessionIndex, admissionQueueStore, api,
   // Threaded through to the stuck-promotion reconciliation call below —
   // exists mainly so tests can exercise that pass without waiting out its
-  // real-world grace window (a genuine boot's admission rows are all older
-  // than this process's own start, so the default is trivially satisfied
-  // there;
+  // real-world grace window (a genuine boot's admission rows all predate
+  // this process's own start, so the default is trivially satisfied there;
   // a unit test that admits a row moments before calling this function is
   // not so lucky).
   stuckAdmissionMinAgeMs,
@@ -169,6 +168,11 @@ export async function reviveOrphanFlows({
   // Uses the same completeCancellation path as executor.cancel() — step 1 is
   // already done, so f.revision is already the post-requestCancel value and is
   // passed directly to completeCancellation as the expectedRevision for setRunning.
+  //
+  // createCancelStore(ownerKey) creates a store bound to the flow's actual ownerKey
+  // so that cancelFlowByIdForOwner's equality check passes regardless of which
+  // plugin originally created the flow (e.g. a graph-flow-owner flow is
+  // rejected by the default manifold-owner store but succeeds with its own key).
   const cancelledByRevival = new Set();
   const terminalStatuses = new Set(["cancelled", "failed", "succeeded"]);
   const cancelStores = new Map();
@@ -248,8 +252,8 @@ export async function reviveOrphanFlows({
   //   - queued: f.waitJson.nodeId — the admission wait sets it directly
   //     (executor.js) since a queued flow never got far enough to advance
   //     lastStep at all.
-  //   - running: nodeExecutionsStore.findCurrentStep(flowId) — the invocation
-  //     row is created (enter()) before executeNode() runs, so
+  //   - running: nodeExecutionsStore.findCurrentStep(flowId) — invocation
+  //     pre-creation (enter()) happens before executeNode() runs, so
   //     the last invocation's node_id correctly identifies the in-flight node
   //     even across a crash. Falls back to resolveEdge(lastStep) if the query
   //     returns null (first iteration of a brand-new flow with no invocations).
@@ -290,8 +294,8 @@ export async function reviveOrphanFlows({
   // needed. Throttling happens atomically at the moment each flow admits,
   // not as a bulk post-hoc displacement correction here.
   //
-  // A 'queued' orphan on waitJson.kind:"agent-dispatch" — a kind this engine
-  // does not admit (state/admission-queue-store.js's migration deletes its
+  // A 'queued' orphan on waitJson.kind:"agent-dispatch" — not an
+  // admission kind (state/admission-queue-store.js's migration deletes its
   // rows) — gave its own run slot back when it queued, so it holds nothing.
   // Re-entering it directly would run it outside the pool; instead it
   // re-requests its own run slot (flipToRunningAndResume with the store:
@@ -445,7 +449,7 @@ export async function reviveOrphanFlows({
   // is already terminal is definitionally a leak, regardless of which bug
   // produced it. statusByFlowId is built from `all` (already loaded above)
   // plus cancelledByRevival (flows this very call just finished cancelling,
-  // whose stale status in `all` is older than that) — no extra flow_runs reads.
+  // whose stale status in `all` predates that) — no extra flow_runs reads.
   // Own terminal-status set, not the narrower `terminalStatuses` above
   // (cancelled/failed/succeeded only, scoped to that phase's specific
   // re-cancel check) — this sweep must also catch "skipped" (FILTER's

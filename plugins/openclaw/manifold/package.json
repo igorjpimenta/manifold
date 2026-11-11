@@ -1,9 +1,12 @@
 {
   "name": "@igorjpimenta/manifold-openclaw",
   "version": "2026.10.26-beta.1",
-  "description": "OpenClaw companion for manifold: registers pipeline agent tools, discuss routes, the WS dialog door, and boot services on the gateway.",
+  "description": "OpenClaw companion for manifold: serves the discuss routes, the WS dialog door and the boot services (pipeline loader, flow revival, gateway readiness, PROFILE.md guards) on the gateway.",
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./profile-lock": "./hooks/profile-write-lock.js",
+    "./lock": "./lock.js",
+    "./invocation-owner": "./invocation-owner.js"
   },
   "license": "UNLICENSED",
   "type": "module",
@@ -14,22 +17,22 @@
   },
   "files": [
     "README.md",
-    "agent/tools/index.js",
-    "agent/tools/manifold-start.js",
-    "agent/tools/propose-draft-meta.js",
-    "agent/tools/propose-draft.js",
-    "agent/tools/report-draft-blocked.js",
-    "agent/tools/report-draft-skip.js",
-    "agent/tools/shared.js",
-    "agent/tools/submit-draft.js",
-    "agent/tools/submit-score.js",
-    "hooks/score-tool-wake.js",
+    "hooks/profile-read-gate.js",
+    "hooks/profile-write-lock.js",
     "index.js",
+    "invocation-owner.js",
+    "invocation-owner.test.js",
+    "lock.js",
+    "lock.test.js",
     "meta.js",
+    "meta.test.js",
     "openclaw.plugin.json",
     "run-turn.js",
+    "run-turn.test.js",
     "session-keys.js",
-    "sessions.js"
+    "session-keys.test.js",
+    "sessions.js",
+    "sessions.test.js"
   ],
   "openclaw": {
     "extensions": [
@@ -41,5 +44,8 @@
   },
   "dependencies": {
     "@igorjpimenta/manifold": "^2026.10.26-beta.1"
+  },
+  "scripts": {
+    "test": "node --experimental-test-module-mocks --test-timeout=60000 --test '*.test.js' 'hooks/*.test.js'"
   }
 }

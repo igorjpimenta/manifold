@@ -205,7 +205,7 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
     // combined pool, not scoped to the releasing entry's own kind, matching
     // the one-pool design. Returns { released, promoted }; promoted is
     // either null or { id, flowId, nodeId, kind } for the caller to wake
-    // via wakePromotedRelease. A release() for an id that no longer exists
+    // via wakePromotedRelease. A release() for an id that doesn't exist
     // (already released, or never existed) is a safe no-op —
     // { released: false, promoted: null } — never throws, since a caller
     // racing its own cleanup against a process restart shouldn't have to

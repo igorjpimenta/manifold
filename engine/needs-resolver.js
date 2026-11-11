@@ -1,4 +1,4 @@
-// needs-resolver.js — Option B, per-node "needs:": a node declares
+// needs-resolver.js — per-node "needs:": a node declares
 // `needs: { varName: {hops, nodeId} }`, keyed by the local variable name
 // it'll be read as (an ORM-style relation declaration, not an array) —
 // and resolves each one lazily, only when `ctx.needs(varName)` is actually

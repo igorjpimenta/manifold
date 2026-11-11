@@ -402,7 +402,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     async isGateLocked() {
       // Awaits attachment in place instead of throwing when the client
       // isn't attached yet — a cold store on the first call after a reload
-      // is no longer a special "transient wait" case the caller has to
+      // isn't a special "transient wait" case the caller has to
       // park on and something else has to remember to wake; it's just a
       // normal await, same as run-store.js's Proxy factory already does
       // for every other store in this codebase. getSharedDb (state/db.js)

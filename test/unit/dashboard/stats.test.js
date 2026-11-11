@@ -1,5 +1,5 @@
 /**
- * Unit tests for dashboard/stats.js's error-tracking redirect (Phase 1.5):
+ * Unit tests for dashboard/stats.js's error-tracking redirect:
  * resolveDisplayStep/extractError/stepImpactHistogram now take an
  * already-fetched ErrorEntry[] (or Map<flowId, ErrorEntry[]>) instead of
  * reading run.stateJson.errors directly — stats.js stays DB-free.
@@ -57,14 +57,13 @@ describe("resolveDisplayStep()", () => {
 
 describe("computeGlobalStats() — failureStops threading", () => {
   test("a bare-string-originated error (already normalized to .message by the DB layer) clusters cleanly", () => {
-    // Simulates a legacy mixed-shape flow_branches.errors entry —
-    // by the time it reaches stats.js it's already a flat ErrorEntry with
-    // a plain string .message (Part A's _toErrorEntry / lastErrorMessage
-    // normalize this at the DB layer), so there's no object-vs-string
-    // branching left for stats.js to get wrong.
-    const run = makeRun({ flowId: "flow-legacy", status: "failed", lastStep: "SUBMIT_CODE" });
+    // A bare-string error is already normalized to .message by the DB layer,
+    // so by the time it reaches stats.js it's a flat ErrorEntry with a plain
+    // string .message — there's no object-vs-string branching left for
+    // stats.js to get wrong.
+    const run = makeRun({ flowId: "flow-bare-string", status: "failed", lastStep: "SUBMIT_CODE" });
     const errorsByFlow = new Map([
-      ["flow-legacy", [errEntry("SUBMIT_CODE", "weekly-cap-reached (18/0 sent)")]],
+      ["flow-bare-string", [errEntry("SUBMIT_CODE", "weekly-cap-reached (18/0 sent)")]],
     ]);
     const result = computeGlobalStats([run], errorsByFlow);
     assert.equal(result.failureStops.length, 1);
@@ -111,9 +110,9 @@ describe("computePipelineStats() — failureStops threading", () => {
   });
 });
 
-// Phase 3a: the default auto-funnel's
+// The default auto-funnel's
 // per-node visit check reads visitedByFlow (a Map<flowId, Set<nodeId>> the
-// caller fetches in one batched round-trip) instead of state._stepHistory.
+// caller fetches in one batched round-trip).
 describe("computePipelineStats() — auto-funnel visitedByFlow", () => {
   const FUNNEL_PIPELINE = {
     id: "test_pipe",
@@ -169,11 +168,9 @@ describe("computePipelineStats() — auto-funnel visitedByFlow", () => {
   });
 });
 
-// Phase 3c: computeNodeStats' visit
-// count reads visitedByFlow (same batched Map the auto-funnel uses) instead
-// of state._stepHistory — a consumer the original Phase 3 scoping missed
-// entirely (it's a separate function from the auto-funnel, both in this
-// file), caught by a repo-wide sweep after the write was removed.
+// computeNodeStats' visit
+// count reads visitedByFlow (same batched Map the auto-funnel uses) —
+// a separate function from the auto-funnel, so it needs its own fetch.
 describe("computeNodeStats() — visitedByFlow", () => {
   test("a run whose visitedByFlow set contains the node counts as a visit", () => {
     const run = makeRun({ flowId: "flow-1", lastStep: "GATE" });
@@ -228,7 +225,7 @@ describe("computePipelineStats() — auto-funnel lineageByNodeId (rename continu
   test("an old run recorded under the node's PRE-rename id still counts toward the current stage", async () => {
     const run = makeRun({ flowId: "flow-old", status: "succeeded" });
     // This run dispatched before the rename — its invocation was recorded
-    // as VERIFY_SUBMIT, which no longer exists as a stage id at all.
+    // as VERIFY_SUBMIT, which isn't a stage id at all.
     const visitedByFlow = new Map([["flow-old", new Set(["PRIME", "VERIFY_SUBMIT"])]]);
     const lineageByNodeId = new Map([["SUBMIT_SUMMARY", new Set(["SUBMIT_SUMMARY", "VERIFY_SUBMIT"])]]);
     const result = await computePipelineStats([run], "test_pipe", RENAMED_PIPELINE, null, null, null, visitedByFlow, lineageByNodeId);

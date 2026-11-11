@@ -1,46 +1,40 @@
 # @igorjpimenta/manifold-openclaw
 
-OpenClaw companion for [manifold](https://github.com/igorjpimenta/manifold). Three jobs:
+The openclaw plugin for [manifold](https://github.com/igorjpimenta/manifold).
 
-1. **MCP surface** — manifold's pipeline tools (`manifold_start`, `_status`,
-   `_runs`, `_approve`, `_cancel`) ship as an MCP server
-   (`mcp/stdio.js`, `mcp/http.js`). The plugin registers no raw tools of its
-   own; the host connects the MCP server. Pipeline-specific tools live in
-   oc-config.
-2. **Discuss surface** — serves the operator discuss routes and the WS dialog
-   door (message transport into open discuss sessions; bearer-guarded).
-3. **Boot services** — pipeline loader + watcher, flow revival, gateway
-   readiness capture, and the PROFILE.md read/write guards.
+The pipeline schema, node kinds, tool surface, CLI, dashboard, store model and
+authoring rules are documented in the [root README](../../../README.md). This
+file covers only what is specific to the plugin package.
 
-## Install
+## What the plugin does
 
-```sh
-openclaw plugins install @igorjpimenta/manifold-openclaw --accept-capabilities
-```
+- **Discuss surface** — the operator discuss routes and the WS dialog door
+  (message transport into open discuss sessions; bearer-guarded).
+- **Boot services** — pipeline loader and watcher, flow revival, gateway
+  readiness capture, and the PROFILE.md read/write guards.
 
-The manifest declares `activation.onStartup`, so the plugin loads at gateway
-boot (without it the host never calls `register()` and no tool or route
-binds).
-
-The plugin depends on `@igorjpimenta/manifold`, so npm resolves and pins the
-core runtime version alongside it.
+The pipeline tools are served over MCP by the core package (`mcp/stdio.js`,
+`mcp/http.js`); the plugin registers no raw tools of its own.
 
 ## Config
 
-| key | default | meaning |
-|---|---|---|
-| `pipelinesDir` | `~/.openclaw/workspace/.pipelines` | directory to scan for pipeline definitions |
-| `ownerSessionKey` | `agent:main:explicit:manifold-owner` | session key scoping flow-run ownership |
-| `dashboardEnabled` | `true` | boot the read-only HTTP dashboard service |
-| `dashboardPort` / `dashboardHost` | `7430` / `127.0.0.1` | dashboard bind |
-| `discuss.defaultAgent` | — | default agent for gate discuss sessions |
-| `globalConcurrency` | `8` | shared ceiling for agent dispatch, subflow fan-out, and flow-run concurrency |
+The plugin's config lives under `plugins.entries.manifold.config` in
+`~/.openclaw/openclaw.json` — flat keys on the plugin entry fail openclaw's
+validator. Keys: `pipelinesDir`, `ownerSessionKey`, `dashboardEnabled`,
+`dashboardPort`, `dashboardHost`, `discuss.defaultAgent`, `globalConcurrency`,
+`profilePath`, `profileEditResultsDir`. Defaults and meanings live in
+`openclaw.plugin.json`.
 
-Requires OpenClaw ≥ 2026.5.6 (declared as `openclaw.compat.openclawMin`).
+## Install
 
-## Releases
+Managed installs of a release tag:
 
-Ships on its own line, independent of the core package:
-`manifold-openclaw-<semver>` tags publish `@igorjpimenta/manifold-openclaw`.
-Bump this package's `version` and its `@igorjpimenta/manifold` dependency
-floor together.
+```sh
+openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install
+```
+
+## Release line
+
+Ships on its own line: `manifold-openclaw-<semver>` tags publish
+`@igorjpimenta/manifold-openclaw`. Bump this package's `version` and its
+`@igorjpimenta/manifold` dependency floor together.

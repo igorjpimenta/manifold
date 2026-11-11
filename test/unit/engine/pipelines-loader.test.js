@@ -2,7 +2,7 @@
  * Unit tests for engine/loader.js's createPipelinesLoader.
  *
  * Regression coverage for the 2026-08-04 boot race: manifold-flow-revival
- * (and executor.js's per-flow fallback) used to each independently check
+ * (and executor.js's per-flow fallback) each independently check
  * `pipelinesRef.value.size > 0` and start their own loadPipelines() pass if
  * they observed it still empty — so a caller arriving while the
  * "manifold-loader" service's own load was still in flight would kick off a

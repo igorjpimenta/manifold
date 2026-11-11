@@ -191,7 +191,7 @@ describe("reviveOrphanFlows", () => {
       assert.equal(result.revivedAgent, 1);
       assert.equal(executor.revivedAgent[0], flow.flowId);
       assert.equal(executor.revived.length, 0, "agent-kind orphans go through reviveAgentKindOrphan, not runFlow");
-      assert.equal(store.failed.length, 0, "no longer auto-failed");
+      assert.equal(store.failed.length, 0, "not auto-failed");
     });
 
     it("revives a 'running' agent-kind orphan via reviveAgentKindOrphan even with no session record yet", async () => {
@@ -313,7 +313,7 @@ describe("reviveOrphanFlows", () => {
       assert.equal(store.failed.length, 0);
     });
 
-    it("revives all code-kind orphans regardless of count — the admission-pool skip step no longer caps revival by count (that's the shared admission pool's job, live and durable across the crash, not a boot-time re-derivation)", async () => {
+    it("revives all code-kind orphans regardless of count — the admission-pool skip step doesn't cap revival by count (that's the shared admission pool's job, live and durable across the crash, not a boot-time re-derivation)", async () => {
       const flows = [1, 2, 3].map((n) => makeFlow({ lastStep: "STEP", revision: n }));
       const pipelines = makePipelines({
         p1: { nodes: { STEP: { kind: "code" } } },

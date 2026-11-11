@@ -11,8 +11,8 @@ import { getSubflowGroup, getAllSubflowGroups } from "../../../state/subflow-sta
 
 // ── fake run-store / node-executions-store ─────────────────────────────────
 
-// An invocation's own nodeId IS the group/loop-node id
-// (see subflow-state.js's normalizeChildAsSubflowRow comment) — fixtures below
+// Post-group_id-drop, an invocation's own nodeId IS the group/loop-node id
+// (see subflow-state.js's normalizeChildAsBranchRow comment) — fixtures below
 // use `nodeId` as the group id.
 function fakeStores({ invocations = [], children = [] } = {}) {
   const nodeExecutionsStore = {
@@ -54,7 +54,7 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.equal(result["item-1"].flowId, "child-1");
   });
 
-  test("maps status/data/timing fields onto the old row shape", async () => {
+  test("maps status/data/timing fields onto the row shape", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
       invocations: [{ id: "inv-1", flowId, nodeId: "group1", subflowKey: "item-1" }],
@@ -74,7 +74,7 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.deepEqual(result["item-1"].data, { foo: "bar" });
   });
 
-  test("folds 'blocked' status into 'running', matching the old model", async () => {
+  test("folds 'blocked' status into 'running'", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
       invocations: [{ id: "inv-1", flowId, nodeId: "group1", subflowKey: "item-1" }],
@@ -87,10 +87,9 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.equal(result["item-1"].status, "running");
   });
 
-  // Phase 4: unlike 'blocked', 'queued'
-  // has no old-model analogue to fold into "running" — it's an internal-
-  // resource wait (an admission slot), not a gate,
-  // so it's passed through unchanged along with its reason text.
+  // Unlike 'blocked', 'queued'
+  // is an internal-resource wait (crossProcessLock, an admission slot), not
+  // a gate, so it's passed through unchanged along with its reason text.
   test("passes 'queued' status through unchanged, with statusReason carried onto the row", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
@@ -98,15 +97,15 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
       children: [
         {
           flowId: "child-2", parentInvocationId: "inv-2", status: "queued", lastStep: "DRAFT", updatedAt: 5,
-          waitJson: { kind: "admission-slot", nodeId: "SCRAPE_PROFILE" },
-          statusReason: "queued: waiting for an admission slot (node SCRAPE_PROFILE)",
+          waitJson: { kind: "resource-lock", resource: "acct:linkedin", nodeId: "SCRAPE_PROFILE" },
+          statusReason: "queued: waiting for cross-process lock acct:linkedin (node SCRAPE_PROFILE)",
         },
       ],
     });
 
     const result = await getSubflowGroup({ flowId, groupId: "group1", runStore, nodeExecutionsStore });
     assert.equal(result["item-2"].status, "queued");
-    assert.equal(result["item-2"].statusReason, "queued: waiting for an admission slot (node SCRAPE_PROFILE)");
+    assert.equal(result["item-2"].statusReason, "queued: waiting for cross-process lock acct:linkedin (node SCRAPE_PROFILE)");
     // A queued child's wait_json is not gate-shaped — it must not populate
     // `awaiting` (reserved for human-gate payloads with a subNodeId).
     assert.equal(result["item-2"].awaiting, null);

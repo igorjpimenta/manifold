@@ -1,9 +1,7 @@
-// Unit tests for state/node-executions.js (renamed from step-timings.js) —
-// getNodeExecutionsStore singleton, write(), listInvocationsForFlow(),
-// listExecutionsForInvocation(), no-op fallback, v2 rebuild-and-backfill
-// migration (id retype to UUID4, branch_item -> branch_key rename,
-// flow_branches error backfill), lastErrorMessage(). As of Phase 1.5 this store
-// carries no error content at all — see state/failure-store.js instead.
+// Unit tests for state/node-executions.js — getNodeExecutionsStore
+// singleton, write(), listInvocationsForFlow(), listExecutionsForInvocation(),
+// no-op fallback, lastErrorMessage(). This store carries no error content
+// at all — see state/failure-store.js instead.
 
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
@@ -36,7 +34,7 @@ async function makeIsolatedStore() {
 
 // Joins invocation+execution for raw-SQL test assertions that need columns
 // (pipeline_id, the execution's own id) no public store method exposes —
-// mirrors the store's own internal join shape (Phase 2's invocation/
+// mirrors the store's own internal join shape (the invocation/
 // execution split, see node-executions.js's header).
 async function rawExecutionRows(store, flowId) {
   const { rows } = await store._db.execute({
@@ -242,8 +240,8 @@ describe("write()", () => {
   });
 });
 
-// queryByFlow()/queryByNode() were deleted in Phase 1.5 — flow_node_executions
-// no longer stores error content, and nothing else called them (confirmed via
+// queryByFlow()/queryByNode() were deleted — flow_node_executions
+// doesn't store error content, and nothing else called them (confirmed via
 // repo-wide grep before deletion). queryByPipeline() survives unchanged
 // (never selected error) and has its own coverage further down via
 // summarizeChildrenByFlowIds()'s harness where relevant.
@@ -287,7 +285,7 @@ describe("writeResult()", () => {
     assert.deepEqual(JSON.parse(rows[0].result_json), { attempt: 2 });
   });
 
-  test("a result well over the old 64KB cap is stored in full, byte-for-byte, resultTooLargeBytes stays null", async () => {
+  test("a result well over 64KB is stored in full, byte-for-byte, resultTooLargeBytes stays null", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "SCAN", enteredAt: 1, exitedAt: 2, kind: "fresh" });
@@ -305,7 +303,7 @@ describe("writeResult()", () => {
     };
     const result = await store.writeResult(invocationId, big);
     assert.equal(result.ok, true);
-    assert.ok(result.bytes > 64 * 1024, "sanity: this really is bigger than the old cap");
+    assert.ok(result.bytes > 64 * 1024, "sanity: this really is bigger than 64KB");
     const { rows } = await store._db.execute({
       sql: `SELECT result_json, result_too_large_bytes FROM flow_node_invocations WHERE id = ?`,
       args: [invocationId],
@@ -314,7 +312,7 @@ describe("writeResult()", () => {
     assert.deepEqual(JSON.parse(rows[0].result_json), big, "the full result, including `listings`, is stored — nothing dropped");
   });
 
-  test("a bare array well over the old cap is also stored in full — no size-based special-casing left for any result shape", async () => {
+  test("a bare array well over 64KB is also stored in full — no size-based special-casing left for any result shape", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "SCAN", enteredAt: 1, exitedAt: 2, kind: "fresh" });
@@ -707,7 +705,7 @@ describe("schema", () => {
     store.close();
   });
 
-  test("flow_node_executions table is narrowed to invocation_id + attempt timing, no error content (Phase 1.5)", async () => {
+  test("flow_node_executions table is narrowed to invocation_id + attempt timing, no error content", async () => {
     const store = await makeIsolatedStore();
     const { rows: info } = await store._db.execute({ sql: "PRAGMA table_info(flow_node_executions)", args: [] });
     const cols = info.map((r) => r.name);
@@ -791,8 +789,6 @@ describe("lastErrorMessage()", () => {
     assert.equal(lastErrorMessage(json), "second (object)");
   });
 });
-
-// ─── v2 migration: rebuild-and-backfill (id retype, branch_item rename, flow_branches backfill) ──
 
 describe("getExecution()", () => {
   test("returns null for an unknown execution id", async () => {
@@ -1238,9 +1234,8 @@ describe("getLatestExecutionForNode()", () => {
   });
 });
 
-// summarizeChildrenByFlowIds — the dual-mode counterpart to
-// branchService.summarizeByFlowIds, sourced from real flow_runs children
-// instead of flow_branches. flow_node_invocations and flow_runs live in
+// summarizeChildrenByFlowIds — buckets a flow's real flow_runs children
+// by status. flow_node_invocations and flow_runs live in
 // the same physical runtime.sqlite file, so these tests point a
 // createRunStore and a createNodeExecutionsStore at the SAME tmp path
 // (same pattern as engine/executor-loop-children.test.js's harness) and
@@ -1281,7 +1276,7 @@ describe("summarizeChildrenByFlowIds()", () => {
     runStore.close(); nodeExecutionsStore.close();
   });
 
-  test("buckets real children by status, matching branchService.summarizeByFlowIds' shape", async () => {
+  test("buckets real children by status, matching the branch summary's shape", async () => {
     const harness = await makeDualStore();
     const { runStore, nodeExecutionsStore } = harness;
     const flowId = randomUUID();
@@ -1297,12 +1292,12 @@ describe("summarizeChildrenByFlowIds()", () => {
     assert.equal(summary.total, 5);
     assert.equal(summary.succeeded, 2);
     assert.equal(summary.failed, 1);
-    assert.equal(summary.pending, 1, "blocked folds into pending, same as branchService");
+    assert.equal(summary.pending, 1, "blocked folds into pending");
     assert.equal(summary.skipped, 1);
     runStore.close(); nodeExecutionsStore.close();
   });
 
-  test("a flowId with no real children is absent from the Map (falls through to old-model/EMPTY_BRANCHES upstream)", async () => {
+  test("a flowId with no real children is absent from the Map (EMPTY_BRANCHES upstream)", async () => {
     const harness = await makeDualStore();
     const { runStore, nodeExecutionsStore } = harness;
     const flowWithChildren = randomUUID();

@@ -6,9 +6,8 @@
 //
 // Lifecycle is keyed on (pipeline, run?.flowId, run?.revision, tree) so the
 // same instance survives unrelated re-renders but rebuilds when the data
-// changes — tree arrives asynchronously after run (SUBFLOW_PARENT_STATE_
-// ACCESS.design.md's Phase 3b), so it needs its own dependency slot rather
-// than piggybacking on run?.revision.
+// changes — tree arrives asynchronously after run, so it needs its own
+// dependency slot rather than piggybacking on run?.revision.
 
 import { useEffect, useRef } from "react";
 import cytoscape from "cytoscape";
@@ -24,10 +23,9 @@ cytoscape.use(dagre as unknown as (cy: unknown) => void);
 interface GraphViewProps {
   pipeline: Pipeline;
   run?: FlowRunFull | null;
-  /** Executed-path source (SUBFLOW_PARENT_STATE_ACCESS.design.md's Phase
-   *  3b) — GET /manifold/runs/:flowId/tree's items, replacing
-   *  run.stateJson._stepHistory. null/undefined while loading or on a run
-   *  with no history yet; tracedNodes/tracedEdges then stay null too. */
+  /** Executed-path source — GET /manifold/runs/:flowId/tree's items.
+   *  null/undefined while loading or on a run with no history yet;
+   *  tracedNodes/tracedEdges then stay null too. */
   tree?: FlowTreeItem[] | null;
   className?: string;
   onNodeClick?: (nodeId: string) => void;

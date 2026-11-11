@@ -5,9 +5,8 @@
 // expands inline to show per-sub-step outputs, errors, and the
 // transcripts belonging to that subflow.
 //
-// Subflow data comes from GET /api/runs/:flowId/subflows (flow_branches,
-// not stateJson — subflow data hasn't lived on stateJson since the
-// branch-store migration), fetched by RunDetail and passed down.
+// Subflow data comes from GET /api/runs/:flowId/subflows (the run's
+// real child flow_runs), fetched by RunDetail and passed down.
 
 import { Fragment, useState } from "react";
 import { Card, CardHeader } from "./ui/card";
