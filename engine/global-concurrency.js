@@ -10,8 +10,8 @@
 // coarse: a singleton gate in executor.js's start() rejects a run outright if
 // another non-terminal run of the same pipelineId exists. There is no way to
 // raise or lower the ceiling for one pipeline — a pipeline needing tighter
-// serialization than this shared number (e.g. a pipeline colliding on a
-// shared external resource) is handled by the pipeline author.
+// serialization than this shared number has to be handled by the
+// pipeline author (e.g. via allowConcurrent or node-level guards).
 
 const DEFAULT_MAX_CONCURRENT = 8;
 
