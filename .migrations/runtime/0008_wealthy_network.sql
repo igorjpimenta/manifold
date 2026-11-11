@@ -1,0 +1,1 @@
+ALTER TABLE `flow_admission_queue` ADD `harness` text;
