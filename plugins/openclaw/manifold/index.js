@@ -163,7 +163,7 @@ export default definePluginEntry({
     // (see concurrency.js). agentDispatchConcurrency/
     // childFanoutConcurrency were two independent config keys for what are
     // now the same number; concurrency replaces both.
-    configureConcurrency({ maxConcurrent: userCfg.concurrency });
+    configureConcurrency({ harness: "openclaw", maxConcurrent: userCfg.concurrency });
 
     registerManifoldMetaHook(api);
 

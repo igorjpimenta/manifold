@@ -130,7 +130,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
    * Create the flow_run row for a new pipeline run and return the record.
    * Does NOT start the execution loop — call `runFlow(record.flowId)` to drive it.
    */
-  async function start(pipelineId, args = {}, triggeredBy = null) {
+  async function start(pipelineId, args = {}, triggeredBy = null, harness = null) {
     const pipeline = pipelinesRef.value.get(pipelineId);
     if (!pipeline) throw new Error(`unknown pipeline: ${pipelineId}`);
 
@@ -140,6 +140,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       startedAt: Date.now(),
       args,
       triggeredBy: triggeredBy ?? null,
+      harness: harness ?? null,
       ...deepClone(pipeline.state),
     };
 
@@ -176,7 +177,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     // child. state-store.js's
     // release/promotion wiring wakes it the moment a slot frees, no restart
     // or caller retry needed.
-    const admission = await admissionQueueStore.admit({ kind: "flow-start", flowId: record.flowId });
+    const admission = await admissionQueueStore.admit({ kind: "flow-start", flowId: record.flowId, harness: record.stateJson?.harness ?? harness });
     if (admission.status === "queued") {
       logger.info(`manifold [${record.flowId.slice(0, 8)}] start: queued — no admission slot available yet`);
       await store.setQueued({
@@ -709,7 +710,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   // are defined; subflow/node runners read it via getter so the gap is safe.
   nodeCtx = Object.freeze({
     async invokePipeline(targetPipelineId, args = {}) {
-      const record = await start(targetPipelineId, args);
+      const record = await start(targetPipelineId, args, null, null);
       // start() does not throw when the shared admission pool is full —
       // it queues instead (see start()'s own comment). Preserves the
       // "singleton-busy" contract at this call site specifically: a caller
@@ -761,7 +762,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       parentFlowId: sourceFlowId,
       ts: Date.now(),
     };
-    const record = await start(pipelineId, args, triggeredBy);
+    const record = await start(pipelineId, args, triggeredBy, sourceFlow.stateJson?.harness ?? null);
     try {
       const fresh = await store.get(record.flowId);
       if (fresh) {

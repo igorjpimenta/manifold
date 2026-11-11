@@ -226,7 +226,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
       toDispatch.push(c);
       continue;
     }
-    const admission = await admissionQueueStore.admit({ kind: "child-dispatch", flowId: c.childFlowId, nodeId });
+    const admission = await admissionQueueStore.admit({ kind: "child-dispatch", flowId: c.childFlowId, nodeId, harness: state?.harness ?? null });
     (admission.status === "queued" ? toQueue : toDispatch).push(c);
   }
 

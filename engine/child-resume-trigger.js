@@ -103,7 +103,7 @@ export function admissionKindForFlow(flow) {
 // same as any other queued admission.
 export async function admitAndSetRunning({ flowId, expectedRevision, lastStep, stateJson, parentInvocationId, store, admissionQueueStore, runStore, resume, logger, api }) {
   const kind = admissionKindForFlow({ parentInvocationId });
-  const admission = await admissionQueueStore.admit({ kind, flowId });
+  const admission = await admissionQueueStore.admit({ kind, flowId, harness: stateJson?.harness ?? null });
   if (admission.status === "queued") {
     const result = await store.setQueued({
       flowId, expectedRevision, lastStep, stateJson,
@@ -172,7 +172,7 @@ export async function flipToRunningAndResume({ parentFlowId, runStore, resume, l
   let admissionId = null;
   if (admissionQueueStore) {
     const kind = admissionKindForFlow(parentRow);
-    const admission = await admissionQueueStore.admit({ kind, flowId: parentFlowId });
+    const admission = await admissionQueueStore.admit({ kind, flowId: parentFlowId, harness: parentRow?.stateJson?.harness ?? null });
     if (admission.status === "queued") {
       const queued = await runStore.casSetQueued(parentFlowId, {
         expectedRevision,

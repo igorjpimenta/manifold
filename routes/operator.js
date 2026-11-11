@@ -324,7 +324,7 @@ export function registerOperatorRoutes({
           label: `via ${via}`,
           ts: Date.now(),
         };
-        const record = await executor.start(pipelineId, args, triggeredBy);
+        const record = await executor.start(pipelineId, args, triggeredBy, "openclaw");
         try {
           if (parentSessionKey) {
             await api.runtime?.lineage?.recordTrigger?.({

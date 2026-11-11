@@ -30,7 +30,7 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, concur
   const paths = resolveStorePaths();
   const runtimeDb = dbPath ?? paths.runtimeDb;
   const pipesDir = pipelinesDir ?? paths.pipelinesDir;
-  if (Number.isInteger(concurrency) && concurrency > 0) configureConcurrency({ maxConcurrent: concurrency });
+  if (Number.isInteger(concurrency) && concurrency > 0) configureConcurrency({ harness: "default", maxConcurrent: concurrency });
 
   const runStore = createRunStore({ logger, dbPath: runtimeDb });
   const nodeExecutionsStore = getNodeExecutionsStore(runtimeDb);
@@ -131,11 +131,11 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, concur
   });
 
   return {
-    async startRun({ pipelineId, args, triggeredBy, pipelinesDir = null }) {
+    async startRun({ pipelineId, args, triggeredBy, pipelinesDir = null, harness = null }) {
       const dir = pipelinesDir || pipesDir;
       const loaded = await ensurePipelinesLoaded(dir);
       if (loaded && !pipelinesRef.value?.has(pipelineId)) pipelinesRef.value = loaded;
-      const record = await executor.start(pipelineId, args ?? {}, triggeredBy ?? { kind: "mcp", ts: Date.now() });
+      const record = await executor.start(pipelineId, args ?? {}, triggeredBy ?? { kind: "mcp", ts: Date.now() }, harness);
       setImmediate(() => {
         executor.runFlow(record.flowId, "fresh").catch((err) => {
           logger?.warn?.(`manifold: detached runFlow ${record.flowId} failed: ${err?.message ?? err}`);

@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS `flow_admission_queue` (
 	`node_id` text,
 	`status` text NOT NULL,
 	`created_at` integer NOT NULL,
-	`admitted_at` integer
+	`admitted_at` integer,
+	`harness` text
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_admission_status` ON `flow_admission_queue` (`status`);--> statement-breakpoint

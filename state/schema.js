@@ -214,6 +214,7 @@ export const flowAdmissionQueue = sqliteTable('flow_admission_queue', {
   status:     text('status').notNull(),
   createdAt:  integer('created_at').notNull(),
   admittedAt: integer('admitted_at'),
+  harness:    text('harness'),
 }, (table) => [
   index('idx_admission_status').on(table.status),
   index('idx_admission_flow').on(table.flowId),

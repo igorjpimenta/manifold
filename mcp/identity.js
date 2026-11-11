@@ -98,7 +98,7 @@ export function resolveIdentity({ meta, args, base }) {
   if (declared.pipelinesDir) out.pipelinesDir = declared.pipelinesDir;
   if (declared.concurrency) {
     out.concurrency = declared.concurrency;
-    configureConcurrency({ maxConcurrent: declared.concurrency });
+    configureConcurrency({ harness: declared.harness, maxConcurrent: declared.concurrency });
   }
   return out;
 }
