@@ -52,7 +52,7 @@ export async function startMcpServer({ ops, base, logger }) {
   // Identity is refused, never defaulted, at both layers: an undeclared
   // server will not start, and an unstamped, unusable, or mismatched call
   // will not run. Harness comes from the ctor arg or MANIFOLD_HARNESS env.
-  const declared = assertDeclaration(base ?? { harness: process.env.MANIFOLD_HARNESS, pipelinesDir: process.env.MANIFOLD_PIPELINES_DIR, globalConcurrency: process.env.MANIFOLD_GLOBAL_CONCURRENCY });
+  const declared = assertDeclaration(base ?? { harness: process.env.MANIFOLD_HARNESS, pipelinesDir: process.env.MANIFOLD_PIPELINES_DIR });
   const { handle } = createManifoldToolHandlers(ops);
   const server = new McpServer({ name: "manifold", version: "0.1.0" });
 

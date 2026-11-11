@@ -23,14 +23,13 @@ import { createExecutor } from "../engine/executor.js";
 import { createGateResolver } from "../gates/gate-resolver.js";
 import { loadPipelines } from "../engine/loader.js";
 import { createEmitter } from "../events/emit.js";
-import { getGlobalConcurrencyLimit, configureGlobalConcurrency } from "../engine/global-concurrency.js";
+import { getGlobalConcurrencyLimit } from "../engine/global-concurrency.js";
 import { resolveStorePaths } from "../state/paths.js";
 
-export async function createRealOps({ dbPath = null, pipelinesDir = null, globalConcurrency = null, config = null, logger = null } = {}) {
+export async function createRealOps({ dbPath = null, pipelinesDir = null, config = null, logger = null } = {}) {
   const paths = resolveStorePaths();
   const runtimeDb = dbPath ?? paths.runtimeDb;
   const pipesDir = pipelinesDir ?? paths.pipelinesDir;
-  if (Number.isInteger(globalConcurrency) && globalConcurrency > 0) configureGlobalConcurrency({ maxConcurrent: globalConcurrency });
 
   const runStore = createRunStore({ logger, dbPath: runtimeDb });
   const nodeExecutionsStore = getNodeExecutionsStore(runtimeDb);

@@ -121,13 +121,11 @@ export async function startMcpHttpServer({ ops, port = null, host = "127.0.0.1",
       }
       const harness = req.headers["x-manifold-harness"];
       const pipelinesDir = req.headers["x-manifold-pipelines-dir"];
-      const globalConcurrency = req.headers["x-manifold-global-concurrency"];
       let base;
       try {
         base = assertDeclaration({
           harness: Array.isArray(harness) ? harness[0] : harness,
           pipelinesDir: Array.isArray(pipelinesDir) ? pipelinesDir[0] : pipelinesDir,
-          globalConcurrency: Array.isArray(globalConcurrency) ? globalConcurrency[0] : globalConcurrency,
         });
       } catch {
         res.writeHead(400, { "content-type": "application/json" });
