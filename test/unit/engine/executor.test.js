@@ -7,6 +7,7 @@ import { REVIVAL_MSG } from "../../../engine/revival-messages.js";
 import { nodeEmitter } from "../../../events.js";
 import { getGlobalConcurrencyLimit, _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
+import { createRunStore } from "../../../state/run-store.js";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
@@ -319,9 +320,22 @@ describe("start", () => {
   // they're specifically exercising real capacity behavior against
   // resetGlobalConcurrency(n).
   function makeExecutorWithRealAdmission(pipelineMap) {
-    const admissionQueueStore = createAdmissionQueueStore({
-      dbPath: path.join(os.tmpdir(), `executor-test-admission-${randomUUID()}.sqlite`),
-      getLimit: getGlobalConcurrencyLimit,
+    const dbPath = path.join(os.tmpdir(), `executor-test-admission-${randomUUID()}.sqlite`);
+    const store = createAdmissionQueueStore({ dbPath, getLimit: getGlobalConcurrencyLimit });
+    const runStore = createRunStore({ dbPath });
+    const admit = store.admit.bind(store);
+    const admissionQueueStore = new Proxy(store, {
+      get(target, key) {
+        if (key === "admit") {
+          return async (args) => {
+            const runs = await runStore;
+            await runs.insert({ flowId: args.flowId, status: "running" });
+            return admit(args);
+          };
+        }
+        const value = target[key];
+        return typeof value === "function" ? value.bind(target) : value;
+      },
     });
     return makeExecutor(pipelineMap, [], { admissionQueueStore });
   }

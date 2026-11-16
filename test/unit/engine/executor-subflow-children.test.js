@@ -22,17 +22,24 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("loop-children-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("loop-children-execs"));
+  const dbPath = tmpPath("loop-children");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
   // Real admissionQueueStore, same shared getGlobalConcurrencyLimit()
   // singleton every test here already drives via resetChildFanoutCap(n) —
   // dispatchSubflowChildren has a hard dependency on a real store now, not
   // a fake, since these tests exercise the actual admit/queue/promote cycle
   // end to end (same rationale as admission-queue-store.test.js's own
   // "real tmp-sqlite, not mocks" convention).
-  const admissionQueueStore = createAdmissionQueueStore({ dbPath: tmpPath("loop-children-admission"), getLimit: getGlobalConcurrencyLimit });
+  const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: getGlobalConcurrencyLimit });
   const store = createStateStore({}, "test-owner", { runStore, admissionQueueStore });
   return { runStore, nodeExecutionsStore, store, admissionQueueStore };
+}
+
+// The parent run row exists in production before its node fans out.
+async function dispatch(args) {
+  await args.runStore.insert({ flowId: args.flowId, status: "running" });
+  return dispatchSubflowChildren(args);
 }
 
 function allowAllBudgetGate() {
@@ -70,7 +77,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { selector: () => [] };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -87,7 +94,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { selector: () => [{ id: "item-1" }, { id: "item-2" }] };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -125,7 +132,7 @@ describe("dispatchSubflowChildren", () => {
     const node = { selector: () => [{ id: "item-1" }] };
     const state = { pipelineId: "p", shortlist: ["a", "b"], _subflowGroups: { x: 1 } };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state,
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -164,7 +171,7 @@ describe("dispatchSubflowChildren", () => {
     const node = { selector: () => [{ id: "only" }] };
     const state = { pipelineId: "p", item: realListing };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "SUBMIT", flowId, state,
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -183,7 +190,7 @@ describe("dispatchSubflowChildren", () => {
     const node = { selector: () => [{ id: "listing-a" }, { id: "listing-b" }] };
     const state = { pipelineId: "p" }; // no .item — this IS the top-level fan-out
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "PROPOSE", flowId, state,
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -215,7 +222,7 @@ describe("dispatchSubflowChildren", () => {
     // carries its own pipelineId.
     const state = { pipelineId: "parent_pipeline" };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state,
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -233,7 +240,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { selector: () => [{ id: "item-1" }, { id: "item-2" }] };
 
-    const first = await dispatchSubflowChildren({
+    const first = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -241,7 +248,7 @@ describe("dispatchSubflowChildren", () => {
       await store.finish({ flowId: childFlowId, expectedRevision: 0, stateJson: {} });
     }
 
-    const second = await dispatchSubflowChildren({
+    const second = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -256,7 +263,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { selector: () => [{ id: "item-1" }, { id: "item-2" }] };
 
-    const first = await dispatchSubflowChildren({
+    const first = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -265,7 +272,7 @@ describe("dispatchSubflowChildren", () => {
     await flush();
     calls.length = 0;
 
-    const second = await dispatchSubflowChildren({
+    const second = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -291,7 +298,7 @@ describe("dispatchSubflowChildren", () => {
     const node = { selector: () => [{ id: "item-1" }] };
     const maybeBudgetGate = () => ({ skip: false, pause: true, blockedInfo: { reason: "budget" } });
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -310,7 +317,7 @@ describe("dispatchSubflowChildren", () => {
     const node = { selector: () => [{ id: "item-1" }] };
     const maybeBudgetGate = () => ({ skip: true, pause: false });
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -327,7 +334,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { itemKey: "linkedin-id", selector: () => [{ "linkedin-id": "abc123", name: "Someone" }] };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -345,7 +352,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { selector: () => [{ listingId: "job-42" }] };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -363,7 +370,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { itemKey: "missing", selector: () => [{ id: "item-1" }] };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -389,7 +396,7 @@ describe("dispatchSubflowChildren", () => {
       resetChildFanoutCap(2);
       const node = { selector: () => [{ id: "item-1" }, { id: "item-2" }, { id: "item-3" }, { id: "item-4" }] };
 
-      const result = await dispatchSubflowChildren({
+      const result = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -420,7 +427,7 @@ describe("dispatchSubflowChildren", () => {
       resetChildFanoutCap(1);
       const node = { concurrency: false, selector: () => Array.from({ length: 5 }, (_, i) => ({ id: `item-${i}` })) };
 
-      const result = await dispatchSubflowChildren({
+      const result = await dispatch({
         node, nodeId: "EVICT_GATES", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -440,7 +447,7 @@ describe("dispatchSubflowChildren", () => {
       resetChildFanoutCap(2);
       const node = { selector: () => [{ id: "item-1" }, { id: "item-2" }, { id: "item-3" }] };
 
-      const result = await dispatchSubflowChildren({
+      const result = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -462,7 +469,7 @@ describe("dispatchSubflowChildren", () => {
       resetChildFanoutCap(2);
 
       const flowIdA = randomUUID();
-      const resultA = await dispatchSubflowChildren({
+      const resultA = await dispatch({
         node: { selector: () => [{ id: "a-1" }, { id: "a-2" }] },
         nodeId: "SCORE", flowId: flowIdA, state: { pipelineId: "pipeline-a" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
@@ -472,7 +479,7 @@ describe("dispatchSubflowChildren", () => {
       assert.equal(aRows.filter((r) => r.status === "running").length, 2, "pipeline-a's own 2 items exactly fill the shared cap of 2");
 
       const flowIdB = randomUUID();
-      const resultB = await dispatchSubflowChildren({
+      const resultB = await dispatch({
         node: { selector: () => [{ id: "b-1" }] },
         nodeId: "FETCH_PROFILES", flowId: flowIdB, state: { pipelineId: "pipeline-b" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
@@ -500,7 +507,7 @@ describe("dispatchSubflowChildren", () => {
       resetChildFanoutCap(1);
       const node = { selector: () => [{ id: "item-1" }] };
 
-      const first = await dispatchSubflowChildren({
+      const first = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -517,7 +524,7 @@ describe("dispatchSubflowChildren", () => {
       assert.equal((await runStore.get(item1FlowId)).status, "blocked");
 
       calls.length = 0;
-      const second = await dispatchSubflowChildren({
+      const second = await dispatch({
         node: { selector: () => [{ id: "item-1" }, { id: "item-2" }] },
         nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
@@ -538,7 +545,7 @@ describe("dispatchSubflowChildren", () => {
       resetChildFanoutCap(3);
       const node = { selector: () => [{ id: "item-1" }, { id: "item-2" }] };
 
-      const result = await dispatchSubflowChildren({
+      const result = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -558,14 +565,14 @@ describe("dispatchSubflowChildren", () => {
       resetChildFanoutCap(1);
       const node = { selector: () => [{ id: "item-1" }, { id: "item-2" }] };
 
-      const first = await dispatchSubflowChildren({
+      const first = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
       await flush();
       calls.length = 0;
 
-      const second = await dispatchSubflowChildren({
+      const second = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -591,7 +598,7 @@ describe("dispatchSubflowChildren", () => {
     const flowId = randomUUID();
     const node = { selector: () => [{ id: "item-1" }] };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "LOOP", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
@@ -621,7 +628,7 @@ describe("dispatchSubflowChildren", () => {
     };
     const failIfCalled = () => { throw new Error("maybeBudgetGate must not be called for a cascade-shape node"); };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "ENSURE_LOGIN", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: failIfCalled, runFlow, logger, admissionQueueStore,
     });
@@ -653,7 +660,7 @@ describe("dispatchSubflowChildren", () => {
       return { pause: true, blockedInfo: { _kind: "budget-gate-approval", reason: "daily budget cap reached" } };
     };
 
-    const result = await dispatchSubflowChildren({
+    const result = await dispatch({
       node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
       store, runStore, nodeExecutionsStore, maybeBudgetGate: lockedGate, runFlow, logger, admissionQueueStore,
     });
@@ -682,7 +689,7 @@ describe("dispatchSubflowChildren", () => {
         dispatchGuard: async (item) => item.id !== "listing-1",
       };
 
-      const result = await dispatchSubflowChildren({
+      const result = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -709,7 +716,7 @@ describe("dispatchSubflowChildren", () => {
         dispatchGuard: async () => false,
       };
 
-      const result = await dispatchSubflowChildren({
+      const result = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
@@ -728,7 +735,7 @@ describe("dispatchSubflowChildren", () => {
       const flowId = randomUUID();
       const node = { selector: () => [{ id: "listing-1" }, { id: "listing-2" }] };
 
-      const result = await dispatchSubflowChildren({
+      const result = await dispatch({
         node, nodeId: "SCORE", flowId, state: { pipelineId: "p" },
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });

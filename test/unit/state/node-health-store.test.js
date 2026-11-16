@@ -16,7 +16,23 @@ function tmpDb() {
 }
 
 async function makeStore(overrides = {}) {
-  return createNodeHealthStore({ dbPath: tmpDb(), ...overrides });
+  const store = await createNodeHealthStore({ dbPath: tmpDb(), ...overrides });
+  const now = Date.now();
+  for (const pipelineId of ["pipe_a", "pipe_b"]) {
+    await store._db.execute({
+      sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+      args: [pipelineId, pipelineId, now, now],
+    });
+  }
+  for (const flowId of ["flow-1", "flow-2"]) {
+    await store._db.execute({
+      sql: `INSERT INTO flow_runs (flow_id, status, pipeline_id, created_at, updated_at)
+            VALUES (?, 'running', 'pipe_a', ?, ?) ON CONFLICT(flow_id) DO NOTHING`,
+      args: [flowId, now, now],
+    });
+  }
+  return store;
 }
 
 describe("createNodeHealthStore — schema", () => {

@@ -29,9 +29,33 @@ function tmpDb() {
 const UUID4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // createNodeExecutionsStore opens its own isolated DB — bypasses the singleton.
-// Exposes _db for raw SQL assertions.
+// Exposes _db for raw SQL assertions. The parent run row exists in production
+// before any node executes, so seed it on the same DB.
 async function makeIsolatedStore() {
-  return createNodeExecutionsStore(tmpDb());
+  const dbPath = tmpDb();
+  const store = await createNodeExecutionsStore(dbPath);
+  const runStore = await createRunStore({ dbPath });
+  const seed = async (flowId) => {
+    if (typeof flowId === "string") await runStore.insert({ flowId, status: "running" });
+  };
+  const find = store.findOrCreateInvocation.bind(store);
+  const write = store.write.bind(store);
+  const writeGateRecord = store.writeGateRecord.bind(store);
+  return new Proxy(store, {
+    get(target, key) {
+      if (key === "findOrCreateInvocation") {
+        return async (args) => { await seed(args.flowId); return find(args); };
+      }
+      if (key === "write") {
+        return async (args) => { await seed(args.flowId); return write(args); };
+      }
+      if (key === "writeGateRecord") {
+        return async (flowId, ...rest) => { await seed(flowId); return writeGateRecord(flowId, ...rest); };
+      }
+      const value = target[key];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 // Joins invocation+execution for raw-SQL test assertions that need columns
@@ -54,6 +78,11 @@ async function rawExecutionRows(store, flowId) {
 // default, so the real ~/.openclaw dir is never written to.
 const SINGLETON_TEMP_PATH = path.join(os.tmpdir(), `gf-ne-singleton-${randomUUID()}.sqlite`);
 before(async () => { await getNodeExecutionsStore(SINGLETON_TEMP_PATH); });
+
+async function seedSingletonRun(flowId) {
+  const runStore = await createRunStore({ dbPath: SINGLETON_TEMP_PATH });
+  await runStore.insert({ flowId, status: "running" });
+}
 
 describe("getNodeExecutionsStore — singleton", () => {
   test("returns the same object on repeated calls with no args", async () => {
@@ -82,6 +111,7 @@ describe("singleton DB", () => {
   test("singleton is writable — write + listInvocationsForFlow round-trip succeeds", async () => {
     const store = await getNodeExecutionsStore();
     const flowId = randomUUID();
+    await seedSingletonRun(flowId);
     await store.write({ flowId, nodeId: "TEST_NODE", enteredAt: 1000, exitedAt: 2000, kind: "fresh" });
     const rows = await store.listInvocationsForFlow(flowId);
     assert.equal(rows.length, 1, "written row should be readable back from singleton store");
@@ -90,6 +120,7 @@ describe("singleton DB", () => {
   test("mkdirSync created the parent directory (store is functional, not a no-op)", async () => {
     const store = await getNodeExecutionsStore();
     const flowId = randomUUID();
+    await seedSingletonRun(flowId);
     await store.write({ flowId, nodeId: "DIR_CHECK", enteredAt: 1, exitedAt: 2, kind: "fresh" });
     const rows = await store.listInvocationsForFlow(flowId);
     assert.ok(rows.length > 0, "DB is writable, confirming mkdirSync succeeded");
@@ -879,6 +910,11 @@ describe("findOrCreateInvocation()", () => {
     const flowId = randomUUID();
     const winnerId = randomUUID();
     await store._db.execute({
+      sql: `INSERT INTO flow_runs (flow_id, owner_key, revision, status, state_json, created_at, updated_at)
+            VALUES (?, '', 0, 'running', '{}', ?, ?)`,
+      args: [flowId, Date.now(), Date.now()],
+    });
+    await store._db.execute({
       sql: `INSERT INTO flow_node_invocations (id, flow_id, pipeline_id, node_id, subflow_key, visit_seq, invoked_at)
        VALUES (?, ?, NULL, ?, ?, 1, ?)`,
       args: [winnerId, flowId, "SUBMIT", "item-1", Date.now()],
@@ -1257,9 +1293,9 @@ describe("summarizeChildrenByFlowIds()", () => {
 
   async function spawnChild({ runStore, nodeExecutionsStore }, { flowId, nodeId, subflowKey, status }) {
     const store = {
-      create: ({ pipelineId, initialState, parentInvocationId }) => {
+      create: async ({ pipelineId, initialState, parentInvocationId }) => {
         const childFlowId = randomUUID();
-        runStore.insert({
+        await runStore.insert({
           flowId: childFlowId, ownerKey: "test-owner", pipelineId, revision: 0,
           status, currentStep: null, lastStep: null, stateJson: initialState ?? {},
           createdAt: Date.now(), updatedAt: Date.now(), parentInvocationId,
@@ -1267,6 +1303,7 @@ describe("summarizeChildrenByFlowIds()", () => {
         return { flowId: childFlowId };
       },
     };
+    await runStore.insert({ flowId, status: "running", pipelineId: "team_pipe" });
     return resolveOrCreateChild({
       flowId, pipelineId: "team_pipe", nodeId, subflowKey,
       childPipelineId: `team_pipe::${nodeId}`, initialState: {},

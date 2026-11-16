@@ -20,10 +20,18 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("spawn-child-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("spawn-child-execs"));
+  const dbPath = tmpPath("spawn-child");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
   const store = createStateStore({}, "test-owner", { runStore });
   return { runStore, nodeExecutionsStore, store };
+}
+
+// The parent run row exists in production before a node dispatches its
+// children; the FK requires it here too.
+async function spawn(args) {
+  await args.runStore.insert({ flowId: args.flowId, status: "running" });
+  return resolveOrCreateChild(args);
 }
 
 describe("resolveOrCreateChild", () => {
@@ -38,7 +46,7 @@ describe("resolveOrCreateChild", () => {
     const { runStore, nodeExecutionsStore, store } = harness;
     const flowId = randomUUID();
 
-    const result = await resolveOrCreateChild({
+    const result = await spawn({
       flowId, pipelineId: "parent_pipe", nodeId: "LOOP", subflowKey: "item-1",
       childPipelineId: "parent_pipe::LOOP", initialState: { item: "item-1" },
       store, runStore, nodeExecutionsStore,
@@ -63,8 +71,8 @@ describe("resolveOrCreateChild", () => {
       store, runStore, nodeExecutionsStore,
     };
 
-    const first = await resolveOrCreateChild(args);
-    const second = await resolveOrCreateChild(args);
+    const first = await spawn(args);
+    const second = await spawn(args);
 
     assert.equal(first.created, true);
     assert.equal(second.created, false);
@@ -81,8 +89,8 @@ describe("resolveOrCreateChild", () => {
       childPipelineId: "parent_pipe::LOOP", store, runStore, nodeExecutionsStore,
     };
 
-    const a = await resolveOrCreateChild({ ...base, subflowKey: "item-1", initialState: { item: "item-1" } });
-    const b = await resolveOrCreateChild({ ...base, subflowKey: "item-2", initialState: { item: "item-2" } });
+    const a = await spawn({ ...base, subflowKey: "item-1", initialState: { item: "item-1" } });
+    const b = await spawn({ ...base, subflowKey: "item-2", initialState: { item: "item-2" } });
 
     assert.notEqual(a.invocationId, b.invocationId);
     assert.notEqual(a.childFlowId, b.childFlowId);
@@ -100,8 +108,8 @@ describe("resolveOrCreateChild", () => {
       store, runStore, nodeExecutionsStore,
     };
 
-    const first = await resolveOrCreateChild(args);
-    const second = await resolveOrCreateChild(args);
+    const first = await spawn(args);
+    const second = await spawn(args);
 
     assert.equal(second.created, false);
     assert.equal(second.childFlowId, first.childFlowId);
@@ -121,7 +129,7 @@ describe("resolveOrCreateChild", () => {
       store, runStore, nodeExecutionsStore,
     };
 
-    const results = await Promise.all(Array.from({ length: 5 }, () => resolveOrCreateChild(args)));
+    const results = await Promise.all(Array.from({ length: 5 }, () => spawn(args)));
     const uniqueChildIds = new Set(results.map((r) => r.childFlowId));
     assert.equal(uniqueChildIds.size, 1, "all calls should resolve to the same single child");
     assert.equal(results.filter((r) => r.created).length, 1, "exactly one call should have created the child");
@@ -136,7 +144,7 @@ describe("resolveOrCreateChild", () => {
     const { runStore, nodeExecutionsStore, store } = harness;
     const flowId = randomUUID();
 
-    const result = await resolveOrCreateChild({
+    const result = await spawn({
       flowId, pipelineId: "parent_pipe", nodeId: "SCORE", subflowKey: "listing-1",
       childPipelineId: "parent_pipe::SCORE", initialState: { item: "listing-1" },
       store, runStore, nodeExecutionsStore,
@@ -154,7 +162,7 @@ describe("resolveOrCreateChild", () => {
     const { runStore, nodeExecutionsStore, store } = harness;
     const flowId = randomUUID();
 
-    const result = await resolveOrCreateChild({
+    const result = await spawn({
       flowId, pipelineId: "parent_pipe", nodeId: "SCORE", subflowKey: "listing-1",
       childPipelineId: "parent_pipe::SCORE", initialState: { item: "listing-1" },
       store, runStore, nodeExecutionsStore,

@@ -48,11 +48,17 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
   const sqlite = new Database(dbPath);
   try {
     sqlite.exec("PRAGMA journal_mode = WAL;");
-    sqlite.exec("PRAGMA foreign_keys = ON;");
+    // Snapshot rebuilds copy rows that predate the constraints (SQLite cannot
+    // add an FK in place), and drizzle wraps every snapshot in one
+    // transaction — a PRAGMA inside it is a no-op, so the posture has to be
+    // set here, around the whole run. Enforcement resumes before the handle
+    // closes; opening a migrated file never re-validates existing rows.
+    sqlite.exec("PRAGMA foreign_keys = OFF;");
     // 30000 to match the house busy posture (state/db.js), not winch's
     // 5000 — the contended moment is a second process mid-migration.
     sqlite.exec("PRAGMA busy_timeout = 30000;");
     migrate(drizzle(sqlite, { schema: SCHEMAS.get(migrationsFolder) ?? {} }), { migrationsFolder });
+    sqlite.exec("PRAGMA foreign_keys = ON;");
   } catch (err) {
     throw new Error(
       `migrate: ${migrationsFolder} snapshot failed on ${dbPath}: ${err?.message ?? err}`,

@@ -165,7 +165,14 @@ describe("snapshots — forward safety", () => {
   });
 
   test("no DROP COLUMN or RENAME without manual review", () => {
+    // Adding a FK to an existing SQLite table requires the 12-step table
+    // rebuild: create __new, copy, DROP, RENAME. There is no ALTER form.
+    // 0008 is the reviewed retrofit (14 FK edges + the pipelines registry
+    // backfill); future snapshots stay subject to the rule.
+    const reviewedRebuilds = new Set(["0008_wealthy_thundra.sql"]);
     for (const stmt of snapshotSql()) {
+      const file = stmt.slice(0, stmt.indexOf(":"));
+      if (reviewedRebuilds.has(file)) continue;
       assert.ok(
         !/DROP COLUMN|RENAME (COLUMN|TO)/i.test(stmt.replace(/^[^:]+: /, "")),
         `DROP/RENAME needs manual review (no IF EXISTS form in SQLite): ${stmt}`,

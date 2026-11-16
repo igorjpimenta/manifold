@@ -174,6 +174,18 @@ async function _createStore(dbPath) {
     }
     const id = randomUUID();
     queries.push({
+      sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
+            VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+      args: [pipelineId, pipelineId, now, now],
+    });
+    if (pipeline._parentPipelineId) {
+      queries.push({
+        sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
+              VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+        args: [pipeline._parentPipelineId, pipeline._parentPipelineId, now, now],
+      });
+    }
+    queries.push({
       sql: `INSERT INTO pipeline_versions
               (id, pipeline_id, kind, allow_concurrent, is_synthetic, parent_pipeline_id, source_path, content_hash, registered_at, retired_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,

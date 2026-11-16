@@ -1,6 +1,17 @@
 import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 import { sql, desc } from 'drizzle-orm';
 
+export const pipelines = sqliteTable('pipelines', {
+  id:        text('id').primaryKey(),
+  name:      text('name').notNull(),
+  harness:   text('harness'),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+  deletedAt: integer('deleted_at'),
+}, (table) => [
+  index('idx_pipelines_harness_name').on(table.harness, table.name),
+]);
+
 export const flowRuns = sqliteTable('flow_runs', {
   flowId:             text('flow_id').primaryKey(),
   ownerKey:           text('owner_key').notNull().default(''),
@@ -15,7 +26,7 @@ export const flowRuns = sqliteTable('flow_runs', {
   updatedAt:          integer('updated_at').notNull(),
   endedAt:            integer('ended_at'),
   parentInvocationId: text('parent_invocation_id'),
-  pipelineId:         text('pipeline_id'),
+  pipelineId:         text('pipeline_id').references(() => pipelines.id, { onDelete: 'set null' }),
 }, (table) => [
   index('idx_pfr_status').on(table.status).where(sql`${table.endedAt} IS NULL`),
   index('idx_pfr_updated').on(desc(table.updatedAt)),
@@ -26,7 +37,7 @@ export const flowRuns = sqliteTable('flow_runs', {
 
 export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   id:         text('id').primaryKey(),
-  flowId:     text('flow_id').notNull(),
+  flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   pipelineId: text('pipeline_id'),
   nodeId:     text('node_id').notNull(),
   subflowKey: text('subflow_key'),
@@ -62,7 +73,7 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
 // recheck) — never what went wrong.
 export const flowNodeExecutions = sqliteTable('flow_node_executions', {
   id:           text('id').primaryKey(),
-  invocationId: text('invocation_id').notNull(),
+  invocationId: text('invocation_id').notNull().references(() => flowNodeInvocations.id, { onDelete: 'cascade' }),
   enteredAt:    integer('entered_at').notNull(),
   exitedAt:     integer('exited_at').notNull(),
   kind:         text('kind').notNull().default('legacy'),
@@ -82,11 +93,11 @@ export const flowNodeExecutions = sqliteTable('flow_node_executions', {
 // (see failure-store.js's deriveFailureContext), not stored here.
 export const failureEvents = sqliteTable('failure_events', {
   id:             text('id').primaryKey(),
-  flowId:         text('flow_id').notNull(),
+  flowId:         text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   failedAt:       integer('failed_at').notNull(),
   failureSummary: text('failure_summary').notNull(),
-  invocationId:   text('invocation_id'),
-  executionId:    text('execution_id'),
+  invocationId:   text('invocation_id').references(() => flowNodeInvocations.id, { onDelete: 'set null' }),
+  executionId:    text('execution_id').references(() => flowNodeExecutions.id, { onDelete: 'set null' }),
   // Error content lives here, not in flow_node_executions, so it is not
   // derivable via a join. NodeFailure vocabulary: never_attempted|
   // confirmed_absent|inconclusive|infra_unavailable|blocked — plus
@@ -103,7 +114,7 @@ export const failureEvents = sqliteTable('failure_events', {
 ]);
 
 export const discussState = sqliteTable('discuss_state', {
-  flowId:         text('flow_id').notNull(),
+  flowId:         text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   itemId:         text('item_id').notNull(),
   messagesJson:   text('messages_json').notNull().default('[]'),
   turnStatus:     text('turn_status').notNull().default('idle'),
@@ -121,7 +132,7 @@ export const discussState = sqliteTable('discuss_state', {
 
 export const flowSessions = sqliteTable('flow_sessions', {
   id:           text('id').primaryKey(),
-  flowId:       text('flow_id').notNull(),
+  flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   session:     text('session_key').notNull(),
   nodeId:       text('node_id'),
   branchItemId: text('branch_item_id'),
@@ -135,7 +146,7 @@ export const flowSessions = sqliteTable('flow_sessions', {
 // the coordinates — never by parsing the session id. Replaces the
 // per-thread JSON sidecars: the roster is the map, the harness owns the id.
 export const discussThreads = sqliteTable('discuss_threads', {
-  flowId:      text('flow_id').notNull(),
+  flowId:      text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   gateNodeId:  text('gate_node_id').notNull(),
   itemId:      text('item_id').notNull(),
   agentId:     text('agent_id'),
@@ -147,11 +158,11 @@ export const discussThreads = sqliteTable('discuss_threads', {
 
 export const nodeHealth = sqliteTable('node_health', {
   id:              text('id').primaryKey(),
-  pipelineId:      text('pipeline_id').notNull(),
+  pipelineId:      text('pipeline_id').notNull().references(() => pipelines.id, { onDelete: 'restrict' }),
   nodeId:          text('node_id').notNull(),
   status:          text('status').notNull(),
   reason:          text('reason').notNull(),
-  blockedByFlowId: text('blocked_by_flow_id'),
+  blockedByFlowId: text('blocked_by_flow_id').references(() => flowRuns.flowId, { onDelete: 'set null' }),
   resolvedVia:     text('resolved_via'),
   createdAt:       integer('created_at').notNull(),
   updatedAt:       integer('updated_at').notNull(),
@@ -165,7 +176,7 @@ export const nodeHealth = sqliteTable('node_health', {
 // sibling gates never share a key that can go stale. Written/read via raw
 // SQL (like flow_branches below); the def exists so snapshots cover it.
 export const gateRecords = sqliteTable('gate_records', {
-  flowId:     text('flow_id').notNull(),
+  flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   nodeId:     text('node_id').notNull(),
   recordJson: text('record_json').notNull(),
   updatedAt:  integer('updated_at').notNull(),
@@ -175,11 +186,11 @@ export const gateRecords = sqliteTable('gate_records', {
 
 export const pipelineVersions = sqliteTable('pipeline_versions', {
   id:               text('id').primaryKey(),
-  pipelineId:       text('pipeline_id').notNull(),
+  pipelineId:       text('pipeline_id').notNull().references(() => pipelines.id, { onDelete: 'restrict' }),
   kind:             text('kind'),
   allowConcurrent:  text('allow_concurrent'),
   isSynthetic:      integer('is_synthetic').notNull(),
-  parentPipelineId: text('parent_pipeline_id'),
+  parentPipelineId: text('parent_pipeline_id').references(() => pipelines.id, { onDelete: 'set null' }),
   sourcePath:       text('source_path'),
   contentHash:      text('content_hash').notNull(),
   registeredAt:     integer('registered_at').notNull(),
@@ -191,8 +202,8 @@ export const pipelineVersions = sqliteTable('pipeline_versions', {
 
 export const pipelineNodeVersions = sqliteTable('pipeline_node_versions', {
   id:                text('id').primaryKey(),
-  pipelineVersionId: text('pipeline_version_id').notNull().references(() => pipelineVersions.id),
-  pipelineId:        text('pipeline_id').notNull(),
+  pipelineVersionId: text('pipeline_version_id').notNull().references(() => pipelineVersions.id, { onDelete: 'cascade' }),
+  pipelineId:        text('pipeline_id').notNull().references(() => pipelines.id, { onDelete: 'restrict' }),
   nodeName:          text('node_name').notNull(),
   nodeId:            text('node_id'),
   kind:              text('kind').notNull(),
@@ -209,7 +220,7 @@ export const pipelineNodeVersions = sqliteTable('pipeline_node_versions', {
 export const flowAdmissionQueue = sqliteTable('flow_admission_queue', {
   id:         text('id').primaryKey(),
   kind:       text('kind').notNull(),
-  flowId:     text('flow_id').notNull(),
+  flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   nodeId:     text('node_id'),
   status:     text('status').notNull(),
   createdAt:  integer('created_at').notNull(),
@@ -222,7 +233,7 @@ export const flowAdmissionQueue = sqliteTable('flow_admission_queue', {
 
 export const flowEvents = sqliteTable('flow_events', {
   id:         text('id').primaryKey(),
-  flowId:     text('flow_id').notNull(),
+  flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   eventType:  text('event_type').notNull(),
   prevStep:   text('prev_step'),
   currStep:   text('curr_step'),
