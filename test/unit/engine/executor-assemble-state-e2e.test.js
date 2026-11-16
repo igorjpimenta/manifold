@@ -54,8 +54,9 @@ function flush(ms = 60) {
 }
 
 async function makeHarness(pipelineDef) {
-  const runStore = await createRunStore({ dbPath: tmpPath("e2e-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("e2e-execs"));
+  const dbPath = tmpPath("e2e");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, logger });

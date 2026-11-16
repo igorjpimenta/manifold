@@ -73,9 +73,10 @@ function makeFixturePipeline() {
 }
 
 async function makeHarness({ runTurn } = {}) {
-  const runStore = await createRunStore({ dbPath: tmpPath("fr-agent-e2e-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("fr-agent-e2e-execs"));
-  const sessionIndex = await createSessionIndex({ dbPath: tmpPath("fr-agent-e2e-sessions") });
+  const dbPath = tmpPath("fr-agent-e2e");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
+  const sessionIndex = await createSessionIndex({ dbPath });
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, logger });

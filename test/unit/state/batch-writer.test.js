@@ -15,8 +15,9 @@ import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createNodeExecutionsStore } from "../../../state/node-executions.js";
+import { createRunStore } from "../../../state/run-store.js";
 import { getSharedDb } from "../../../state/db.js";
-import { flowNodeExecutions } from "../../../state/schema.js";
+import { flowNodeExecutions, flowNodeInvocations } from "../../../state/schema.js";
 import { eq } from "drizzle-orm";
 import { enqueue, enqueueRaw, flush, flushAll, _resetForTests } from "../../../state/batch-writer.js";
 
@@ -31,23 +32,38 @@ function tmpDb() {
 // store (for read-back assertions via getExecution()) and the shared
 // drizzle `db` handle (so enqueue() gets the same query-builder instance
 // production code would) — both backed by the same getSharedDb() connection.
+let fixtureInvocationId = null;
+
 async function migratedDb(dbPath) {
   const store = await createNodeExecutionsStore(dbPath);
-  // createNodeExecutionsStore() returns a lazy proxy synchronously — awaiting
-  // it does NOT wait for the underlying migration to finish (its "then" trap
-  // returns undefined, so `await` on the proxy resolves immediately without
-  // waiting on the store's real setup promise). store.ready() is the actual
-  // "migration has completed" signal; skipping it races enqueue()'s writes
-  // against CREATE TABLE and intermittently fails with "no such table".
   await store.ready();
   const { db } = await getSharedDb(dbPath);
+  const runStore = await createRunStore({ dbPath });
+  const flowId = randomUUID();
+  await runStore.insert({ flowId, status: "running" });
+  fixtureInvocationId = randomUUID();
+  await db.insert(flowNodeInvocations).values({
+    id: fixtureInvocationId, flowId, nodeId: "NODE", visitSeq: 1, invokedAt: Date.now(),
+  });
   return { store, db };
+}
+
+async function seedInvocation(dbPath) {
+  const runStore = await createRunStore({ dbPath });
+  const flowId = randomUUID();
+  await runStore.insert({ flowId, status: "running" });
+  const { db } = await getSharedDb(dbPath);
+  const invocationId = randomUUID();
+  await db.insert(flowNodeInvocations).values({
+    id: invocationId, flowId, nodeId: "NODE", visitSeq: 1, invokedAt: Date.now(),
+  });
+  return invocationId;
 }
 
 function insertExecQuery(db, overrides = {}) {
   return db.insert(flowNodeExecutions).values({
     id: randomUUID(),
-    invocationId: overrides.invocationId ?? randomUUID(),
+    invocationId: overrides.invocationId ?? fixtureInvocationId ?? randomUUID(),
     enteredAt: overrides.enteredAt ?? Date.now(),
     exitedAt: overrides.exitedAt ?? Date.now(),
     kind: overrides.kind ?? "fresh",
@@ -120,7 +136,7 @@ describe("batch-writer — FIFO ordering", () => {
     const dbPath = tmpDb();
     const { store, db } = await migratedDb(dbPath);
     const id = randomUUID();
-    const invocationId = randomUUID();
+    const invocationId = await seedInvocation(dbPath);
 
     // First insert, then an UPDATE on the same row queued in the same
     // window — db.batch() runs its array in enqueue order inside one
@@ -172,9 +188,11 @@ describe("batch-writer — per-dbPath isolation", () => {
     const { store: storeB, db: dbB } = await migratedDb(dbPathB);
     const idA = randomUUID();
     const idB = randomUUID();
+    const invocationA = await seedInvocation(dbPathA);
+    const invocationB = await seedInvocation(dbPathB);
 
-    enqueue(dbPathA, insertExecQuery(dbA, { id: idA }), { flushIntervalMs: 60_000 });
-    enqueue(dbPathB, insertExecQuery(dbB, { id: idB }), { flushIntervalMs: 60_000 });
+    enqueue(dbPathA, insertExecQuery(dbA, { id: idA, invocationId: invocationA }), { flushIntervalMs: 60_000 });
+    enqueue(dbPathB, insertExecQuery(dbB, { id: idB, invocationId: invocationB }), { flushIntervalMs: 60_000 });
 
     await flushAll();
 
@@ -191,7 +209,7 @@ describe("batch-writer — raw statements (enqueueRaw)", () => {
     const dbPath = tmpDb();
     const { store } = await migratedDb(dbPath);
     const id = randomUUID();
-    const invocationId = randomUUID();
+    const invocationId = await seedInvocation(dbPath);
 
     enqueueRaw(
       dbPath,
@@ -214,7 +232,7 @@ describe("batch-writer — raw statements (enqueueRaw)", () => {
     const { store, db } = await migratedDb(dbPath);
     const drizzleId = randomUUID();
     const rawId = randomUUID();
-    const invocationId = randomUUID();
+    const invocationId = await seedInvocation(dbPath);
 
     enqueue(dbPath, insertExecQuery(db, { id: drizzleId }), { flushIntervalMs: 60_000 });
     enqueueRaw(
