@@ -27,6 +27,7 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as runtimeSchema from "./schema.js";
 import * as opsSchema from "./schema.ops.js";
+import { mergeOpsTables } from "./ops-merge.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, "..");
@@ -65,6 +66,9 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
     );
   } finally {
     sqlite.close();
+  }
+  if (migrationsFolder === RUNTIME_MIGRATIONS_FOLDER) {
+    mergeOpsTables({ runtimeDbPath: dbPath, logger });
   }
   migratedPaths.add(dbPath);
   logger?.info?.(`migrate: snapshots current at ${dbPath}`);
