@@ -25,7 +25,7 @@ export const flowRuns = sqliteTable('flow_runs', {
   createdAt:          integer('created_at').notNull(),
   updatedAt:          integer('updated_at').notNull(),
   endedAt:            integer('ended_at'),
-  parentInvocationId: text('parent_invocation_id'),
+  parentInvocationId: text('parent_invocation_id').references(() => flowNodeInvocations.id, { onDelete: 'set null' }),
   pipelineId:         text('pipeline_id').references(() => pipelines.id, { onDelete: 'set null' }),
 }, (table) => [
   index('idx_pfr_status').on(table.status).where(sql`${table.endedAt} IS NULL`),
@@ -280,7 +280,7 @@ export const pipelineDirs = sqliteTable('pipeline_dirs', {
 // Latest write wins; the dispatch consumes the row for its own turn.
 export const toolResults = sqliteTable('tool_results', {
   session:  text('session_key').primaryKey(),
-  runId:       text('run_id'),
+  runId:       text('run_id').references(() => flowRuns.flowId, { onDelete: 'set null' }),
   agentId:     text('agent_id'),
   kind:        text('kind'),
   payloadJson: text('payload_json').notNull(),

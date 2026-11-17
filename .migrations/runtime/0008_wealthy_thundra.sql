@@ -185,6 +185,7 @@ CREATE TABLE IF NOT EXISTS `__new_flow_runs` (
 	`ended_at` integer,
 	`parent_invocation_id` text,
 	`pipeline_id` text,
+	FOREIGN KEY (`parent_invocation_id`) REFERENCES `flow_node_invocations`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`pipeline_id`) REFERENCES `pipelines`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
@@ -269,7 +270,8 @@ CREATE TABLE IF NOT EXISTS `__new_tool_results` (
 	`agent_id` text,
 	`kind` text,
 	`payload_json` text NOT NULL,
-	`updated_at` integer NOT NULL
+	`updated_at` integer NOT NULL,
+	FOREIGN KEY (`run_id`) REFERENCES `flow_runs`(`flow_id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 INSERT INTO `__new_tool_results`("session_key", "run_id", "agent_id", "kind", "payload_json", "updated_at") SELECT "session_key", "run_id", "agent_id", "kind", "payload_json", "updated_at" FROM `tool_results`;--> statement-breakpoint

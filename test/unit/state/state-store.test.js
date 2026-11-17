@@ -14,6 +14,7 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createRunStore } from "../../../state/run-store.js";
 import { createStateStore } from "../../../state/state-store.js";
+import { createNodeExecutionsStore } from "../../../state/node-executions.js";
 import { resolveOrCreateChild } from "../../../engine/spawn-child.js";
 import { gateEmitter, flowEmitter } from "../../../events.js";
 
@@ -21,42 +22,10 @@ function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
 }
 
-// In-memory fake for node-executions — matches the surface used by
-// resolveOrCreateChild (findOrCreateInvocation) and maybeResumeParent
-// (listInvocationIdsForNode, getInvocation). node-executions.js is not yet
-// migrated to async, so using the real store here would trigger a dangling
-// async error from openDb() returning a Promise into sync code.
-function makeFakeNodeExecutions() {
-  const byKey = new Map();  // `${flowId}:${nodeId}:${subflowKey}` → record
-  const byId  = new Map();  // invocationId → record
-  const byFN  = new Map();  // `${flowId}:${nodeId}` → invocationId[]
-
-  return {
-    findOrCreateInvocation({ flowId, pipelineId, nodeId, subflowKey }) {
-      const key = `${flowId}:${nodeId}:${subflowKey}`;
-      if (!byKey.has(key)) {
-        const id = randomUUID();
-        const rec = { id, flowId, nodeId, subflowKey };
-        byKey.set(key, rec);
-        byId.set(id, rec);
-        const fnKey = `${flowId}:${nodeId}`;
-        if (!byFN.has(fnKey)) byFN.set(fnKey, []);
-        byFN.get(fnKey).push(id);
-      }
-      return byKey.get(key).id;
-    },
-    listInvocationIdsForNode(flowId, nodeId) {
-      return byFN.get(`${flowId}:${nodeId}`) ?? [];
-    },
-    getInvocation(id) { return byId.get(id) ?? null; },
-    queryErrorsByFlow() { return []; },
-    close() {},
-  };
-}
-
 async function makeHarness({ withResumeHook = true } = {}) {
-  const runStore = await createRunStore({ dbPath: tmpPath("state-store-runs") });
-  const nodeExecutionsStore = makeFakeNodeExecutions();
+  const dbPath = tmpPath("state-store-runs");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = createNodeExecutionsStore(dbPath);
   const resumed = [];
   const resumeParentRef = { resume: withResumeHook ? async (flowId) => { resumed.push(flowId); } : null };
   const store = createStateStore({}, "test-owner", {
