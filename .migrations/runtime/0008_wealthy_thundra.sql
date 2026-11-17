@@ -9,13 +9,23 @@
 -- as-is and stay violations until cleaned. pipelines is backfilled from the
 -- union of every pipeline_id column before any rebuilt table references it.
 
+CREATE TABLE IF NOT EXISTS `harnesses` (
+	`id` text PRIMARY KEY NOT NULL,
+	`created_at` integer NOT NULL,
+	`updated_at` integer NOT NULL
+);
+--> statement-breakpoint
+INSERT OR IGNORE INTO `harnesses` (`id`, `created_at`, `updated_at`)
+SELECT `harness`, `created_at`, `created_at` FROM `pipeline_dirs` WHERE `harness` IS NOT NULL;--> statement-breakpoint
+
 CREATE TABLE IF NOT EXISTS `pipelines` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`harness` text,
 	`created_at` integer NOT NULL,
 	`updated_at` integer NOT NULL,
-	`deleted_at` integer
+	`deleted_at` integer,
+	FOREIGN KEY (`harness`) REFERENCES `harnesses`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
 CREATE INDEX IF NOT EXISTS `idx_pipelines_harness_name` ON `pipelines` (`harness`,`name`);--> statement-breakpoint
@@ -28,6 +38,18 @@ FROM (
 	UNION SELECT `pipeline_id` FROM `node_health`
 	UNION SELECT `parent_pipeline_id` FROM `pipeline_versions` WHERE `parent_pipeline_id` IS NOT NULL
 );--> statement-breakpoint
+INSERT OR IGNORE INTO `harnesses` (`id`, `created_at`, `updated_at`)
+SELECT `harness`, `created_at`, `created_at` FROM `pipelines` WHERE `harness` IS NOT NULL;--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS `__new_pipeline_dirs` (
+	`harness` text PRIMARY KEY NOT NULL,
+	`path` text NOT NULL,
+	`created_at` integer NOT NULL,
+	FOREIGN KEY (`harness`) REFERENCES `harnesses`(`id`) ON UPDATE no action ON DELETE cascade
+);
+--> statement-breakpoint
+INSERT INTO `__new_pipeline_dirs`("harness", "path", "created_at") SELECT "harness", "path", "created_at" FROM `pipeline_dirs`;--> statement-breakpoint
+DROP TABLE `pipeline_dirs`;--> statement-breakpoint
+ALTER TABLE `__new_pipeline_dirs` RENAME TO `pipeline_dirs`;--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS `__new_pipeline_node_versions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`pipeline_version_id` text NOT NULL,

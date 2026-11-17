@@ -1,10 +1,16 @@
 import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 import { sql, desc } from 'drizzle-orm';
 
+export const harnesses = sqliteTable('harnesses', {
+  id:        text('id').primaryKey(),
+  createdAt: integer('created_at').notNull(),
+  updatedAt: integer('updated_at').notNull(),
+});
+
 export const pipelines = sqliteTable('pipelines', {
   id:        text('id').primaryKey(),
   name:      text('name').notNull(),
-  harness:   text('harness'),
+  harness:   text('harness').references(() => harnesses.id, { onDelete: 'set null' }),
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
   deletedAt: integer('deleted_at'),
@@ -269,7 +275,7 @@ export const modelHealth = sqliteTable('model_health', {
 // read once at boot to resolve the pipelines dir. No expiry: removing an
 // override is a delete, not a flag.
 export const pipelineDirs = sqliteTable('pipeline_dirs', {
-  harness:   text('harness').primaryKey(),
+  harness:   text('harness').primaryKey().references(() => harnesses.id, { onDelete: 'cascade' }),
   path:      text('path').notNull(),
   createdAt: integer('created_at').notNull(),
 });

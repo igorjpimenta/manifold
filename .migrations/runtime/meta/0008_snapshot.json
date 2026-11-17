@@ -1258,7 +1258,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "pipeline_dirs_harness_harnesses_id_fk": {
+          "name": "pipeline_dirs_harness_harnesses_id_fk",
+          "tableFrom": "pipeline_dirs",
+          "tableTo": "harnesses",
+          "columnsFrom": [
+            "harness"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
@@ -1520,6 +1534,37 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "harnesses": {
+      "name": "harnesses",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
     "pipelines": {
       "name": "pipelines",
       "columns": {
@@ -1576,7 +1621,21 @@
           "isUnique": false
         }
       },
-      "foreignKeys": {},
+      "foreignKeys": {
+        "pipelines_harness_harnesses_id_fk": {
+          "name": "pipelines_harness_harnesses_id_fk",
+          "tableFrom": "pipelines",
+          "tableTo": "harnesses",
+          "columnsFrom": [
+            "harness"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
