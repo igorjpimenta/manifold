@@ -15,6 +15,7 @@ import os from "node:os";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "./lib.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { ensureSessionKeys } from "../state/session-keys.js";
+import { ensurePipelineNodes } from "../state/attribution-registries.js";
 
 const STORE_DIR = path.join(os.homedir(), ".openclaw");
 const DB_PATH = path.join(STORE_DIR, "ops.sqlite");
@@ -397,6 +398,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       const now = Date.now();
       await withSharedWrite(runtimeDbPath, async () => {
         await ensureSessionKeys(runtimeClient, [enqueuerSessionKey]);
+        await ensurePipelineNodes(runtimeClient, [[pipelineId, node ?? pipeline ?? null]]);
         return runtimeClient.execute({
           sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
@@ -470,6 +472,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       const id = randomUUID();
       await withSharedWrite(runtimeDbPath, async () => {
         await ensureSessionKeys(runtimeClient, [enqueuerSessionKey]);
+        await ensurePipelineNodes(runtimeClient, [[pipelineId, nodeId]]);
         return runtimeClient.execute({
           sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
