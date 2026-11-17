@@ -71,6 +71,13 @@
       "when": 1794931266372,
       "tag": "0009_lying_shocker",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794933659627,
+      "tag": "0010_solid_phantom_reporter",
+      "breakpoints": true
     }
   ]
 }

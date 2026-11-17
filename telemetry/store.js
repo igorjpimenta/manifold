@@ -7,6 +7,7 @@ import { getSharedDb, withSharedWrite, resolveStorePaths } from "../state/db.js"
 import fs from "node:fs";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
+import { ensureSessionKeys, ENSURE_SESSION_SQL } from "../state/session-keys.js";
 
 // Lineage/cost now live in runtime.sqlite so flow_id and pipeline_id can
 // carry FKs; resolve per call so MANIFOLD_DATA_DIR set after import wins.
@@ -60,25 +61,28 @@ function makeStore(client, dbPath) {
     _client: client,
     async upsertLineage(row) {
       try {
-        await withSharedWrite(dbPath, () => client.execute({
-          sql: UPSERT_LINEAGE_SQL,
-          args: [
-            row.child_session_key,
-            row.parent_session_key ?? null,
-            row.root_session_key,
-            row.kind,
-            row.root_kind,
-            row.root_label ?? null,
-            row.agent_id ?? null,
-            row.pipeline_id ?? null,
-            row.flow_id ?? null,
-            row.run_id ?? null,
-            row.node_id ?? null,
-            row.item_key ?? null,
-            row.first_seen_at ?? Date.now(),
-            row.source,
-          ],
-        }));
+        await withSharedWrite(dbPath, async () => {
+          await ensureSessionKeys(client, [row.child_session_key, row.parent_session_key, row.root_session_key]);
+          return client.execute({
+            sql: UPSERT_LINEAGE_SQL,
+            args: [
+              row.child_session_key,
+              row.parent_session_key ?? null,
+              row.root_session_key,
+              row.kind,
+              row.root_kind,
+              row.root_label ?? null,
+              row.agent_id ?? null,
+              row.pipeline_id ?? null,
+              row.flow_id ?? null,
+              row.run_id ?? null,
+              row.node_id ?? null,
+              row.item_key ?? null,
+              row.first_seen_at ?? Date.now(),
+              row.source,
+            ],
+          });
+        });
       } catch { /* best-effort */ }
     },
     async getLineage(childKey) {
@@ -95,6 +99,10 @@ function makeStore(client, dbPath) {
     // immediate because a closely-timed child session's getLineage() can
     // depend on a parent's just-written row).
     insertCost(row) {
+      const now = Date.now();
+      for (const k of [row.session_key, row.root_session_key]) {
+        if (typeof k === "string" && k.length > 0) enqueueRaw(dbPath, ENSURE_SESSION_SQL, [k, now]);
+      }
       enqueueRaw(dbPath, INSERT_COST_SQL, [
         row.session_id,
         row.msg_id,

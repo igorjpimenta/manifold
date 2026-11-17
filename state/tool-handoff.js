@@ -37,6 +37,7 @@ import { getSharedDb, withSharedWrite } from "./db.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { toolResults, flowRuns } from "./schema.js";
 import { resolveStorePaths } from "./paths.js";
+import { ensureSessionKeys } from "./session-keys.js";
 
 // One shared client per DB path, migrated once. Concurrent first callers
 // share the same promise, so the migration never races itself. Cross-
@@ -80,10 +81,11 @@ function toRow(r) {
 export async function writePendingResult({ session, runId = null, agentId = null, kind = null, payload, dbPath = null } = {}) {
   if (!session || payload === undefined) return;
   const path = dbPath ?? storeDbPath();
-  const { db } = await toolDb(path);
+  const { db, client } = await toolDb(path);
   let payloadJson;
   try { payloadJson = JSON.stringify(payload); } catch { return; }
   await withSharedWrite(path, async () => {
+    await ensureSessionKeys(client, [session]);
     // run_id carries an FK; a result may legitimately arrive for a run this
     // process never saw (late delivery, resumed session, different worker).
     // Keep the result and the session rendezvous, drop only the dangling
@@ -111,7 +113,7 @@ export async function writePendingResult({ session, runId = null, agentId = null
 export async function readPendingResult(session, { dbPath = null } = {}) {
   if (!session) return null;
   const path = dbPath ?? storeDbPath();
-  const { db } = await toolDb(path);
+  const { db, client } = await toolDb(path);
   const rows = await db.select().from(toolResults).where(eq(toolResults.session, session)).limit(1);
   return toRow(rows[0] ?? null);
 }
@@ -120,7 +122,7 @@ export async function readPendingResult(session, { dbPath = null } = {}) {
 export async function clearPendingResult(session, { dbPath = null } = {}) {
   if (!session) return;
   const path = dbPath ?? storeDbPath();
-  const { db } = await toolDb(path);
+  const { db, client } = await toolDb(path);
   await withSharedWrite(path, () =>
     db.delete(toolResults).where(eq(toolResults.session, session))
   );

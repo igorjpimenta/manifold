@@ -18,6 +18,20 @@ export const pipelines = sqliteTable('pipelines', {
   index('idx_pipelines_harness_name').on(table.harness, table.name),
 ]);
 
+// Session keys are assigned by the harness, outside this database, so a
+// key can be referenced (parent/root lineage, cost attribution, dispatch
+// session) before any table of ours has seen it. This registry is the
+// target that makes those pointers FKs; writers insert OR IGNORE the keys
+// they are about to reference, and state/session-keys.js backfills the
+// union on migration. Rows are never pruned — a key is an identity, not a
+// live record.
+export const sessions = sqliteTable('sessions', {
+  sessionKey:  text('session_key').primaryKey(),
+  firstSeenAt: integer('first_seen_at').notNull(),
+}, (table) => [
+  index('idx_sessions_first_seen').on(table.firstSeenAt),
+]);
+
 export const flowRuns = sqliteTable('flow_runs', {
   flowId:             text('flow_id').primaryKey(),
   ownerKey:           text('owner_key').notNull().default(''),
@@ -139,7 +153,7 @@ export const discussState = sqliteTable('discuss_state', {
 export const flowSessions = sqliteTable('flow_sessions', {
   id:           text('id').primaryKey(),
   flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
-  session:     text('session_key').notNull(),
+  session:     text('session_key').notNull().references(() => sessions.sessionKey),
   nodeId:       text('node_id'),
   branchItemId: text('branch_item_id'),
   spawnedAt:    integer('spawned_at').notNull(),
@@ -156,7 +170,7 @@ export const discussThreads = sqliteTable('discuss_threads', {
   gateNodeId:  text('gate_node_id').notNull(),
   itemId:      text('item_id').notNull(),
   agentId:     text('agent_id'),
-  session:     text('session_key').notNull(),
+  session:     text('session_key').notNull().references(() => sessions.sessionKey),
   updatedAt:   integer('updated_at').notNull(),
 }, (table) => [
   uniqueIndex('idx_discuss_threads_unique').on(table.flowId, table.gateNodeId, table.itemId),
@@ -285,7 +299,7 @@ export const pipelineDirs = sqliteTable('pipeline_dirs', {
 // agent and the waiting dispatch both know — no invocationId resolution.
 // Latest write wins; the dispatch consumes the row for its own turn.
 export const toolResults = sqliteTable('tool_results', {
-  session:  text('session_key').primaryKey(),
+  session:  text('session_key').primaryKey().references(() => sessions.sessionKey),
   runId:       text('run_id').references(() => flowRuns.flowId, { onDelete: 'set null' }),
   agentId:     text('agent_id'),
   kind:        text('kind'),
@@ -318,7 +332,7 @@ export const queueItems = sqliteTable('queue_items', {
   pipelineId:       text('pipeline_id').references(() => pipelines.id, { onDelete: 'set null' }),
   pipelineArgs:     text('pipeline_args'),
   flowId:           text('flow_id').references(() => flowRuns.flowId, { onDelete: 'set null' }),
-  enqueuerSession:  text('enqueuer_session_key'),
+  enqueuerSession:  text('enqueuer_session_key').references(() => sessions.sessionKey, { onDelete: 'set null' }),
   kind:             text('kind'),
 }, (table) => [
   index('idx_status').on(table.status),
@@ -327,9 +341,9 @@ export const queueItems = sqliteTable('queue_items', {
 ]);
 
 export const sessionLineage = sqliteTable('session_lineage', {
-  childSession:     text('child_session_key').primaryKey(),
-  parentSessionKey: text('parent_session_key'),
-  rootSessionKey:   text('root_session_key').notNull(),
+  childSession:     text('child_session_key').primaryKey().references(() => sessions.sessionKey),
+  parentSessionKey: text('parent_session_key').references(() => sessions.sessionKey, { onDelete: 'set null' }),
+  rootSessionKey:   text('root_session_key').notNull().references(() => sessions.sessionKey),
   kind:             text('kind').notNull(),
   rootKind:         text('root_kind').notNull(),
   rootLabel:        text('root_label'),
@@ -366,9 +380,9 @@ export const costByCall = sqliteTable('cost_by_call', {
   costCacheRead:    real('cost_cache_read'),
   costCacheWrite:   real('cost_cache_write'),
   costTotal:        real('cost_total').notNull(),
-  session:          text('session_key'),
+  session:          text('session_key').references(() => sessions.sessionKey, { onDelete: 'set null' }),
   agentId:          text('agent_id'),
-  rootSessionKey:   text('root_session_key'),
+  rootSessionKey:   text('root_session_key').references(() => sessions.sessionKey, { onDelete: 'set null' }),
   rootKind:         text('root_kind'),
   rootLabel:        text('root_label'),
   pipelineId:       text('pipeline_id').references(() => pipelines.id, { onDelete: 'set null' }),
