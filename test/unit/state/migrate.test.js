@@ -169,7 +169,9 @@ describe("snapshots — forward safety", () => {
     // rebuild: create __new, copy, DROP, RENAME. There is no ALTER form.
     // 0008 is the reviewed retrofit (14 FK edges + the pipelines registry
     // backfill); future snapshots stay subject to the rule.
-    const reviewedRebuilds = new Set(["0008_wealthy_thundra.sql"]);
+    // 0010 rebuilds the six session-keyed tables to point at the sessions
+    // registry (and creates it); reviewed the same way as 0008.
+    const reviewedRebuilds = new Set(["0008_wealthy_thundra.sql", "0010_solid_phantom_reporter.sql"]);
     for (const stmt of snapshotSql()) {
       const file = stmt.slice(0, stmt.indexOf(":"));
       if (reviewedRebuilds.has(file)) continue;

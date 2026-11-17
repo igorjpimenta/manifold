@@ -28,6 +28,7 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as runtimeSchema from "./schema.js";
 import * as opsSchema from "./schema.ops.js";
 import { mergeOpsTables } from "./ops-merge.js";
+import { SESSION_KEYS_FROM_ROWS_SQL } from "./session-keys.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, "..");
@@ -69,6 +70,17 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
   }
   if (migrationsFolder === RUNTIME_MIGRATIONS_FOLDER) {
     mergeOpsTables({ runtimeDbPath: dbPath, logger });
+    // The registry must hold every key already referenced before the FKs
+    // are consulted; rows copied by mergeOpsTables carry keys of their own,
+    // so this runs after it rather than inside the migration snapshot.
+    const backfill = new Database(dbPath);
+    try {
+      backfill.prepare(SESSION_KEYS_FROM_ROWS_SQL).run(Date.now());
+    } catch (err) {
+      throw new Error(`migrate: sessions backfill failed on ${dbPath}: ${err?.message ?? err}`);
+    } finally {
+      backfill.close();
+    }
   }
   migratedPaths.add(dbPath);
   logger?.info?.(`migrate: snapshots current at ${dbPath}`);

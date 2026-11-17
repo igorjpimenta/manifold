@@ -14,6 +14,7 @@ import path from "node:path";
 import os from "node:os";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "./lib.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
+import { ensureSessionKeys } from "../state/session-keys.js";
 
 const STORE_DIR = path.join(os.homedir(), ".openclaw");
 const DB_PATH = path.join(STORE_DIR, "ops.sqlite");
@@ -394,16 +395,19 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       }
       const id = randomUUID();
       const now = Date.now();
-      await withSharedWrite(runtimeDbPath, () => runtimeClient.execute({
-        sql: `INSERT INTO queue_items
+      await withSharedWrite(runtimeDbPath, async () => {
+        await ensureSessionKeys(runtimeClient, [enqueuerSessionKey]);
+        return runtimeClient.execute({
+          sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
                  pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        args: [id, label, agent, agentEmoji, trigger, costLow, costHigh, brief ?? null,
-               JSON.stringify(modelChain), pipeline ?? pipelineId, node ?? null,
-               tokenEstimate ?? null, pipelineId, JSON.stringify(pipelineArgs ?? {}),
-               enqueuerSessionKey ?? null, now],
-      }));
+          args: [id, label, agent, agentEmoji, trigger, costLow, costHigh, brief ?? null,
+                 JSON.stringify(modelChain), pipeline ?? pipelineId, node ?? null,
+                 tokenEstimate ?? null, pipelineId, JSON.stringify(pipelineArgs ?? {}),
+                 enqueuerSessionKey ?? null, now],
+        });
+      });
       try {
         await emit("approval.requested", { id });
       } catch {}
@@ -464,16 +468,19 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
                                 trigger = "cron", brief, costLow = 0, costHigh = 0,
                                 modelChain = [], tokenEstimate = null, enqueuerSessionKey = null, kind = "node" }) {
       const id = randomUUID();
-      await withSharedWrite(runtimeDbPath, () => runtimeClient.execute({
-        sql: `INSERT INTO queue_items
+      await withSharedWrite(runtimeDbPath, async () => {
+        await ensureSessionKeys(runtimeClient, [enqueuerSessionKey]);
+        return runtimeClient.execute({
+          sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
                  pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        args: [id, label, agent ?? "manifold", agentEmoji ?? "🔁", trigger,
-               costLow, costHigh, brief ?? null, JSON.stringify(modelChain ?? []),
-               pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
-               pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
-      }));
+          args: [id, label, agent ?? "manifold", agentEmoji ?? "🔁", trigger,
+                 costLow, costHigh, brief ?? null, JSON.stringify(modelChain ?? []),
+                 pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
+                 pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
+        });
+      });
       try {
         await emit("approval.requested", { id, flowId: flowId ?? null });
       } catch {}
