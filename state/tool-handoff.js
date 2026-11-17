@@ -35,7 +35,7 @@
 import { eq } from "drizzle-orm";
 import { getSharedDb, withSharedWrite } from "./db.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
-import { toolResults } from "./schema.js";
+import { toolResults, flowRuns } from "./schema.js";
 import { resolveStorePaths } from "./paths.js";
 
 // One shared client per DB path, migrated once. Concurrent first callers
@@ -83,18 +83,28 @@ export async function writePendingResult({ session, runId = null, agentId = null
   const { db } = await toolDb(path);
   let payloadJson;
   try { payloadJson = JSON.stringify(payload); } catch { return; }
-  await withSharedWrite(path, () =>
-    db.insert(toolResults).values({
-      session, runId: runId ?? null, agentId: agentId ?? null,
+  await withSharedWrite(path, async () => {
+    // run_id carries an FK; a result may legitimately arrive for a run this
+    // process never saw (late delivery, resumed session, different worker).
+    // Keep the result and the session rendezvous, drop only the dangling
+    // pointer — the FK must not turn a late write into a constraint error.
+    let safeRunId = runId ?? null;
+    if (safeRunId !== null) {
+      const known = await db.select({ flowId: flowRuns.flowId }).from(flowRuns)
+        .where(eq(flowRuns.flowId, safeRunId)).limit(1);
+      if (known.length === 0) safeRunId = null;
+    }
+    return db.insert(toolResults).values({
+      session, runId: safeRunId, agentId: agentId ?? null,
       kind: kind ?? null, payloadJson, updatedAt: Date.now(),
     }).onConflictDoUpdate({
       target: toolResults.session,
       set: {
-        runId: runId ?? null, agentId: agentId ?? null, kind: kind ?? null,
+        runId: safeRunId, agentId: agentId ?? null, kind: kind ?? null,
         payloadJson, updatedAt: Date.now(),
       },
-    })
-  );
+    });
+  });
 }
 
 /** The unconsumed result for one session, or null. */

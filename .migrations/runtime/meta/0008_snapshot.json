@@ -845,6 +845,19 @@
         }
       },
       "foreignKeys": {
+        "flow_runs_parent_invocation_id_flow_node_invocations_id_fk": {
+          "name": "flow_runs_parent_invocation_id_flow_node_invocations_id_fk",
+          "tableFrom": "flow_runs",
+          "tableTo": "flow_node_invocations",
+          "columnsFrom": [
+            "parent_invocation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "flow_runs_pipeline_id_pipelines_id_fk": {
           "name": "flow_runs_pipeline_id_pipelines_id_fk",
           "tableFrom": "flow_runs",
@@ -1615,7 +1628,21 @@
         }
       },
       "indexes": {},
-      "foreignKeys": {},
+      "foreignKeys": {
+        "tool_results_run_id_flow_runs_flow_id_fk": {
+          "name": "tool_results_run_id_flow_runs_flow_id_fk",
+          "tableFrom": "tool_results",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}

@@ -19,8 +19,29 @@ function tmpDb() {
   return path.join(os.tmpdir(), `run-store-test-${randomUUID()}.sqlite`);
 }
 
+const dbPaths = new WeakMap();
+
 async function makeStore(overrides = {}) {
-  return createRunStore({ dbPath: tmpDb(), ...overrides });
+  const dbPath = overrides.dbPath ?? tmpDb();
+  const store = createRunStore({ ...overrides, dbPath });
+  dbPaths.set(store, dbPath);
+  return store;
+}
+
+// parent_invocation_id carries an FK; give the test invocation a real owning
+// run rather than weakening the constraint the suite is checking.
+async function seedInvocation(store, invocationId, ownerFlowId = null) {
+  let flowId = ownerFlowId;
+  if (flowId === null) {
+    flowId = fakeFlow().flowId;
+    await store.insert(fakeFlow({ flowId }));
+  }
+  const client = createClient({ url: `file:${dbPaths.get(store)}` });
+  await client.execute({
+    sql: "INSERT INTO flow_node_invocations (id, flow_id, node_id, invoked_at) VALUES (?, ?, ?, ?)",
+    args: [invocationId, flowId, "SEED", Date.now()],
+  });
+  client.close();
 }
 
 function fakeFlow(overrides = {}) {
@@ -465,7 +486,9 @@ describe("createRunStore — list / listFor", () => {
   test("list excludes childFlows children (parentInvocationId set), includes top-level rows only", async () => {
     const store = await makeStore();
     const invocationId = "inv-list-exclude-test";
-    await store.insert(fakeFlow({ pipelineId: "team_pipe" }));
+    const topLevel = fakeFlow({ pipelineId: "team_pipe" });
+    await store.insert(topLevel);
+    await seedInvocation(store, invocationId, topLevel.flowId);
     await store.insert(fakeFlow({ pipelineId: "team_pipe::LOOP", parentInvocationId: invocationId }));
     const rows = await store.list();
     assert.equal(rows.length, 1, "only the top-level row should be returned");
@@ -515,6 +538,7 @@ describe("createRunStore — getByParentInvocationId", () => {
   test("returns the child row for a matching invocation", async () => {
     const store = await makeStore();
     const invocationId = randomUUID();
+    await seedInvocation(store, invocationId);
     await store.insert(fakeFlow({ parentInvocationId: invocationId }));
     const found = await store.getByParentInvocationId(invocationId);
     assert.ok(found);
@@ -534,6 +558,9 @@ describe("createRunStore — listForParentInvocations", () => {
     const inv1 = randomUUID();
     const inv2 = randomUUID();
     const inv3 = randomUUID();
+    await seedInvocation(store, inv1);
+    await seedInvocation(store, inv2);
+    await seedInvocation(store, inv3);
     const f1 = fakeFlow({ parentInvocationId: inv1 });
     const f2 = fakeFlow({ parentInvocationId: inv2 });
     const f3 = fakeFlow({ parentInvocationId: inv3 });

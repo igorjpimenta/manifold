@@ -463,6 +463,13 @@ describe("computeResolvedAt — via get()", () => {
     // flow_runs row with a parent_invocation_id pointing at the parent's
     // per-item dispatch of "SUBMIT" with subflowKey "job-1".
     await seedFlowRun(store, { flowId: failingFlowId, status: "failed" });
+    const parentFlowId = randomUUID();
+    await seedFlowRun(store, { flowId: parentFlowId, status: "running" });
+    await store._db.execute({
+      sql: `INSERT INTO flow_node_invocations (id, flow_id, node_id, visit_seq, invoked_at)
+            VALUES (?, ?, 'SUBMIT', 1, ?)`,
+      args: [parentInvocationId, parentFlowId, Date.now()],
+    });
     await store._db.execute({
       sql: `UPDATE flow_runs SET parent_invocation_id = ? WHERE flow_id = ?`,
       args: [parentInvocationId, failingFlowId],
