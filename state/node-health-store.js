@@ -20,7 +20,7 @@
 import { randomUUID } from "node:crypto";
 import { eq, and } from "drizzle-orm";
 import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
-import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
+import { enqueue, enqueueRaw, flush as flushBatchWriter } from "./batch-writer.js";
 import { nodeHealth } from "./schema.js";
 import path from "node:path";
 import os from "node:os";
@@ -73,11 +73,13 @@ export async function createNodeHealthStore({ logger, dbPath = defaultDbPath() }
   function markUnhealthy(pipelineId, nodeId, { reason, flowId } = {}) {
     if (!pipelineId || !nodeId) return;
     const now = Date.now();
-    enqueue(dbPath, db.insert(nodeHealth).values({
-      id: randomUUID(), pipelineId, nodeId, status: "blocked",
-      reason: reason ?? "unknown failure", blockedByFlowId: flowId ?? null,
-      createdAt: now, updatedAt: now,
-    }).onConflictDoNothing());
+    // Raw on both statements: the batch-writer flushes drizzle and raw items
+    // as separate round-trips, and the registry row must land first.
+    enqueueRaw(dbPath, "INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)", [pipelineId, nodeId, now]);
+    enqueueRaw(dbPath, `INSERT OR IGNORE INTO node_health
+      (id, pipeline_id, node_id, status, reason, blocked_by_flow_id, created_at, updated_at)
+      VALUES (?, ?, ?, 'blocked', ?, ?, ?, ?)`,
+      [randomUUID(), pipelineId, nodeId, reason ?? "unknown failure", flowId ?? null, now, now]);
   }
 
   async function reset(pipelineId, nodeId, { via } = {}) {

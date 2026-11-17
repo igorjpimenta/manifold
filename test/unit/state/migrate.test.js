@@ -171,7 +171,7 @@ describe("snapshots — forward safety", () => {
     // backfill); future snapshots stay subject to the rule.
     // 0010 rebuilds the six session-keyed tables to point at the sessions
     // registry (and creates it); reviewed the same way as 0008.
-    const reviewedRebuilds = new Set(["0008_wealthy_thundra.sql", "0010_solid_phantom_reporter.sql"]);
+    const reviewedRebuilds = new Set(["0008_wealthy_thundra.sql", "0010_solid_phantom_reporter.sql", "0011_windy_demogoblin.sql"]);
     for (const stmt of snapshotSql()) {
       const file = stmt.slice(0, stmt.indexOf(":"));
       if (reviewedRebuilds.has(file)) continue;

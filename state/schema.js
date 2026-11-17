@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey, foreignKey } from 'drizzle-orm/sqlite-core';
 import { sql, desc } from 'drizzle-orm';
 
 export const harnesses = sqliteTable('harnesses', {
@@ -30,6 +30,35 @@ export const sessions = sqliteTable('sessions', {
   firstSeenAt: integer('first_seen_at').notNull(),
 }, (table) => [
   index('idx_sessions_first_seen').on(table.firstSeenAt),
+]);
+
+// Attribution keys (item, node name, harness turn run) are written by the
+// engine/hook frames, not owned by a row of ours, so these three registries
+// are their materialized key set. Every writer registers what it is about
+// to attribute (state/attribution-registries.js), and migration backfills
+// the union, so a key is never dangling. Rows are append-only: a pruned
+// flow must not erase the attribution that names it.
+export const flowItems = sqliteTable('flow_items', {
+  flowId:      text('flow_id').notNull(),
+  itemKey:     text('item_key').notNull(),
+  firstSeenAt: integer('first_seen_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.flowId, table.itemKey] }),
+  index('idx_flow_items_key').on(table.itemKey),
+]);
+
+export const turnRuns = sqliteTable('turn_runs', {
+  runId:       text('run_id').primaryKey(),
+  firstSeenAt: integer('first_seen_at').notNull(),
+});
+
+export const pipelineNodes = sqliteTable('pipeline_nodes', {
+  pipelineId:  text('pipeline_id').notNull().references(() => pipelines.id, { onDelete: 'cascade' }),
+  nodeName:    text('node_name').notNull(),
+  firstSeenAt: integer('first_seen_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.pipelineId, table.nodeName] }),
+  index('idx_pipeline_nodes_name').on(table.nodeName),
 ]);
 
 export const flowRuns = sqliteTable('flow_runs', {
@@ -158,6 +187,7 @@ export const flowSessions = sqliteTable('flow_sessions', {
   branchItemId: text('branch_item_id'),
   spawnedAt:    integer('spawned_at').notNull(),
 }, (table) => [
+  foreignKey({ columns: [table.flowId, table.branchItemId], foreignColumns: [flowItems.flowId, flowItems.itemKey] }),
   index('idx_flow_sessions_flow_id').on(table.flowId),
   uniqueIndex('idx_flow_sessions_uniq').on(table.flowId, table.session),
 ]);
@@ -188,6 +218,7 @@ export const nodeHealth = sqliteTable('node_health', {
   updatedAt:       integer('updated_at').notNull(),
   endedAt:         integer('ended_at'),
 }, (table) => [
+  foreignKey({ columns: [table.pipelineId, table.nodeId], foreignColumns: [pipelineNodes.pipelineId, pipelineNodes.nodeName] }),
   uniqueIndex('idx_node_health_one_active').on(table.pipelineId, table.nodeId).where(sql`${table.status} = 'blocked'`),
   index('idx_node_health_pipeline').on(table.pipelineId, table.status),
 ]);
@@ -335,6 +366,7 @@ export const queueItems = sqliteTable('queue_items', {
   enqueuerSession:  text('enqueuer_session_key').references(() => sessions.sessionKey, { onDelete: 'set null' }),
   kind:             text('kind'),
 }, (table) => [
+  foreignKey({ columns: [table.pipelineId, table.node], foreignColumns: [pipelineNodes.pipelineId, pipelineNodes.nodeName] }),
   index('idx_status').on(table.status),
   index('idx_created_at').on(desc(table.createdAt)),
   index('idx_flow_node').on(table.flowId, table.node),
@@ -354,8 +386,10 @@ export const sessionLineage = sqliteTable('session_lineage', {
   itemKey:          text('item_key'),
   firstSeenAt:      integer('first_seen_at').notNull(),
   source:           text('source').notNull(),
-  runId:            text('run_id'),
+  runId:            text('run_id').references(() => turnRuns.runId, { onDelete: 'set null' }),
 }, (table) => [
+  foreignKey({ columns: [table.pipelineId, table.nodeId], foreignColumns: [pipelineNodes.pipelineId, pipelineNodes.nodeName] }),
+  foreignKey({ columns: [table.flowId, table.itemKey], foreignColumns: [flowItems.flowId, flowItems.itemKey] }),
   index('idx_lineage_root').on(table.rootSessionKey),
   index('idx_lineage_parent').on(table.parentSessionKey),
   index('idx_lineage_pipeline').on(table.pipelineId),
@@ -391,6 +425,8 @@ export const costByCall = sqliteTable('cost_by_call', {
   itemKey:          text('item_key'),
 }, (table) => [
   primaryKey({ columns: [table.sessionId, table.msgId] }),
+  foreignKey({ columns: [table.pipelineId, table.nodeId], foreignColumns: [pipelineNodes.pipelineId, pipelineNodes.nodeName] }),
+  foreignKey({ columns: [table.flowId, table.itemKey], foreignColumns: [flowItems.flowId, flowItems.itemKey] }),
   index('idx_cost_ts').on(table.ts),
   index('idx_cost_root_key').on(table.rootSessionKey),
   index('idx_cost_root_kind_ts').on(table.rootKind, table.ts),

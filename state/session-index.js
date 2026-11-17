@@ -16,6 +16,7 @@ import path from "node:path";
 import os from "node:os";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { ensureSessionKeys } from "./session-keys.js";
+import { ensureFlowItems } from "./attribution-registries.js";
 
 function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
@@ -40,6 +41,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     try {
       await withSharedWrite(dbPath, async () => {
         await ensureSessionKeys(client, [session]);
+        await ensureFlowItems(client, [[flowId, branchItemId]]);
         return db.insert(flowSessions).values({
           id: randomUUID(), flowId, session,
           nodeId: nodeId ?? null, branchItemId: branchItemId ?? null,

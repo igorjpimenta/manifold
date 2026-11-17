@@ -8,6 +8,7 @@ import fs from "node:fs";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
 import { ensureSessionKeys, ENSURE_SESSION_SQL } from "../state/session-keys.js";
+import { ensureFlowItems, ensureTurnRuns, ensurePipelineNodes } from "../state/attribution-registries.js";
 
 // Lineage/cost now live in runtime.sqlite so flow_id and pipeline_id can
 // carry FKs; resolve per call so MANIFOLD_DATA_DIR set after import wins.
@@ -63,6 +64,9 @@ function makeStore(client, dbPath) {
       try {
         await withSharedWrite(dbPath, async () => {
           await ensureSessionKeys(client, [row.child_session_key, row.parent_session_key, row.root_session_key]);
+          await ensureFlowItems(client, [[row.flow_id, row.item_key]]);
+          await ensureTurnRuns(client, [row.run_id]);
+          await ensurePipelineNodes(client, [[row.pipeline_id, row.node_id]]);
           return client.execute({
             sql: UPSERT_LINEAGE_SQL,
             args: [
@@ -103,6 +107,8 @@ function makeStore(client, dbPath) {
       for (const k of [row.session_key, row.root_session_key]) {
         if (typeof k === "string" && k.length > 0) enqueueRaw(dbPath, ENSURE_SESSION_SQL, [k, now]);
       }
+      if (row.flow_id && row.item_key) enqueueRaw(dbPath, "INSERT OR IGNORE INTO flow_items (flow_id, item_key, first_seen_at) VALUES (?, ?, ?)", [row.flow_id, row.item_key, now]);
+      if (row.pipeline_id && row.node_id) enqueueRaw(dbPath, "INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)", [row.pipeline_id, row.node_id, now]);
       enqueueRaw(dbPath, INSERT_COST_SQL, [
         row.session_id,
         row.msg_id,

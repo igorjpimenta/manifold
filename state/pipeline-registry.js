@@ -223,6 +223,14 @@ async function _createStore(dbPath) {
 
   // See _reconcileOnePipeline's comment — same deferred-write pattern.
   async function _reconcileOneNode(pipelineVersionId, pipelineId, nodeName, node, now, queries) {
+    // The runtime node name is the attribution key the engine writes
+    // (flow_node_invocations, node_health, lineage, telemetry), so it must
+    // exist before the first turn runs — register it on every reconcile,
+    // including a content-green one.
+    queries.push({
+      sql: `INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)`,
+      args: [pipelineId, nodeName, now],
+    });
     const hash = nodeContentHash(node);
     const active = await _activeNodeRow(pipelineId, nodeName);
     if (active && active.content_hash === hash) return;
