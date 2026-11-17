@@ -124,9 +124,11 @@ export async function execGet(client, sql, args = []) {
   return rows[0] ?? null;
 }
 
-export async function hasFlowsAttached(client) {
+export async function hasFlowRuns(client) {
   try {
-    const rows = await execAll(client, `PRAGMA database_list`);
-    return rows.some((r) => r.name === "flows");
+    const rows = await execAll(client,
+      "SELECT 1 FROM sqlite_master WHERE type='table' AND name='flow_runs' LIMIT 1"
+    );
+    return rows.length > 0;
   } catch { return false; }
 }

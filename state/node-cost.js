@@ -1,4 +1,4 @@
-// node-cost.js — lazy-singleton reader over lineage's cost_by_call table.
+// node-cost.js — lazy-singleton reader over cost_by_call (runtime.sqlite).
 // No new storage: lineage already tags every LLM call with pipeline_id +
 // node_id. This just exposes a percentile query so estimateNodeCost can
 // return historically-grounded low/high bounds instead of a static range.
@@ -8,7 +8,7 @@ import { getSharedDb, resolveStorePaths } from "./db.js";
 import os from "node:os";
 
 function defaultDbPath() {
-  return resolveStorePaths().opsDb;
+  return resolveStorePaths().runtimeDb;
 }
 
 const COST_SQL = `

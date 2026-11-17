@@ -3,13 +3,16 @@
 // MIGRATIONS entry is one applied step; never edit a past entry in place.
 
 import path from "node:path";
-import { getSharedDb, withSharedWrite } from "../state/db.js";
-import os from "node:os";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "../state/db.js";
 import fs from "node:fs";
-import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+// Lineage/cost now live in runtime.sqlite so flow_id and pipeline_id can
+// carry FKs; resolve per call so MANIFOLD_DATA_DIR set after import wins.
+export function defaultDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
 const UPSERT_LINEAGE_SQL = `
   INSERT INTO session_lineage
@@ -45,23 +48,11 @@ const INSERT_COST_SQL = `
   VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?,?, ?,?,?,?)
 `;
 
-export async function openStore({ dbPath = DEFAULT_DB_PATH } = {}) {
+export async function openStore({ dbPath = defaultDbPath() } = {}) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
-  await attachFlowsDb(client);
   return makeStore(client, dbPath);
-}
-
-/** Cross-DB JOIN target: manifold's flow_runs lives in a sibling sqlite.
- *  Attached read-only so ROI queries (status × cost) work in a single hop.
- *  Silent if absent — installations without manifold keep working. */
-async function attachFlowsDb(client) {
-  const flowsPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-  if (!fs.existsSync(flowsPath)) return;
-  try {
-    await client.execute(`ATTACH DATABASE '${flowsPath.replace(/'/g, "''")}' AS flows`);
-  } catch { /* attach failed — ROI queries will skip the JOIN */ }
 }
 
 function makeStore(client, dbPath) {
@@ -98,7 +89,7 @@ function makeStore(client, dbPath) {
     },
     // Deferred via batch-writer: one call per LLM call with cost data
     // (telemetry/index.js's before_message_write hook), likely the
-    // highest-volume write in ops.sqlite. Already best-effort (errors
+    // highest-volume write in runtime.sqlite. Already best-effort (errors
     // swallowed, no caller inspects a return value or re-reads the row in
     // the same hook invocation — unlike upsertLineage() above, which stays
     // immediate because a closely-timed child session's getLineage() can
@@ -137,8 +128,6 @@ function makeStore(client, dbPath) {
       await flushBatchWriter(dbPath);
     },
     close() { try { client.close(); } catch { /* ignore */ } },
-    DEFAULT_DB_PATH,
   };
 }
 
-export { DEFAULT_DB_PATH };
