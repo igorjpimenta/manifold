@@ -30,6 +30,7 @@ import * as opsSchema from "./schema.ops.js";
 import { mergeOpsTables } from "./ops-merge.js";
 import { SESSION_KEYS_FROM_ROWS_SQL } from "./session-keys.js";
 import { BACKFILL_ATTRIBUTION_SQL, BACKFILL_LEGACY_BRANCH_ITEMS_SQL } from "./attribution-registries.js";
+import { dropMovedOpsTables } from "./drop-moved-ops.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, "..");
@@ -46,6 +47,16 @@ const migratedPaths = new Set();
 
 export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
   if (migratedPaths.has(dbPath)) return { applied: false };
+  // The ops file's moved tables are dropped after the copy. Opening ops
+  // therefore migrates the runtime sibling first, which is what performs
+  // the merge and the registry backfill; without that, the drop guard has
+  // nothing to compare against and keeps the tables.
+  if (migrationsFolder === OPS_MIGRATIONS_FOLDER && path.basename(dbPath) === "ops.sqlite") {
+    const runtimeDbPath = path.join(path.dirname(dbPath), "runtime.sqlite");
+    if (existsSync(runtimeDbPath)) {
+      migrateDatabase({ dbPath: runtimeDbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger });
+    }
+  }
   const dir = path.dirname(dbPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const sqlite = new Database(dbPath);
@@ -88,6 +99,9 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
     } finally {
       backfill.close();
     }
+  }
+  if (migrationsFolder === OPS_MIGRATIONS_FOLDER) {
+    dropMovedOpsTables(dbPath, { logger });
   }
   migratedPaths.add(dbPath);
   logger?.info?.(`migrate: snapshots current at ${dbPath}`);

@@ -18,9 +18,30 @@ function tmpPair() {
   return { dir, runtimeDb: path.join(dir, "runtime.sqlite"), opsDb: path.join(dir, "ops.sqlite") };
 }
 
+// The current ops snapshot no longer declares the three moved tables; an
+// old file has them, so the fixture builds that shape by hand.
+async function createLegacyOpsTables(client) {
+  await client.execute(`CREATE TABLE queue_items (
+    id TEXT PRIMARY KEY, label TEXT NOT NULL, agent TEXT NOT NULL,
+    agent_emoji TEXT NOT NULL DEFAULT '🤖', trigger TEXT NOT NULL DEFAULT 'manual',
+    cost_low REAL NOT NULL DEFAULT 0, cost_high REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL,
+    pipeline_id TEXT, flow_id TEXT, enqueuer_session_key TEXT)`);
+  await client.execute(`CREATE TABLE session_lineage (
+    child_session_key TEXT PRIMARY KEY, parent_session_key TEXT,
+    root_session_key TEXT NOT NULL, kind TEXT NOT NULL, root_kind TEXT NOT NULL,
+    first_seen_at INTEGER NOT NULL, source TEXT NOT NULL,
+    pipeline_id TEXT, flow_id TEXT)`);
+  await client.execute(`CREATE TABLE cost_by_call (
+    session_id TEXT NOT NULL, msg_id TEXT NOT NULL, ts INTEGER NOT NULL,
+    cost_total REAL NOT NULL, pipeline_id TEXT, flow_id TEXT,
+    PRIMARY KEY (session_id, msg_id))`);
+}
+
 async function seedOps(opsDb) {
   await migrateDatabase({ dbPath: opsDb, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   const client = createClient({ url: `file:${opsDb}` });
+  await createLegacyOpsTables(client);
   await client.execute({
     sql: `INSERT INTO queue_items (id, label, agent, created_at, pipeline_id, flow_id)
           VALUES (?, ?, ?, ?, ?, ?)`,

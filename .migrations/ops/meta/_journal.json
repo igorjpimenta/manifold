@@ -8,6 +8,13 @@
       "when": 1792696076489,
       "tag": "0000_futuristic_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1795035782344,
+      "tag": "0001_low_maximus",
+      "breakpoints": true
     }
   ]
 }
