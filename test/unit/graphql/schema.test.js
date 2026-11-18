@@ -43,14 +43,6 @@ const stubRunStore = {
 
 async function seedOps(dbPath) {
   const db = createClient({ url: `file:${dbPath}` });
-  await db.execute(`CREATE TABLE queue_items (
-    id TEXT PRIMARY KEY, label TEXT NOT NULL, agent TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-    created_at INTEGER NOT NULL, flow_id TEXT, node TEXT
-  )`);
-  await db.execute({
-    sql: "INSERT INTO queue_items (id, label, agent, status, created_at, flow_id, node) VALUES (?, ?, ?, 'pending', ?, ?, ?)",
-    args: ["q1", "SCORE", "scout", 2500, "flow-1", "SCORE"],
-  });
   await db.execute(`CREATE TABLE gate_state (
     id TEXT NOT NULL PRIMARY KEY DEFAULT 'singleton', locked INTEGER NOT NULL DEFAULT 0, day TEXT
   )`);
@@ -60,6 +52,14 @@ async function seedOps(dbPath) {
 
 async function seedRuntime(dbPath) {
   const db = createClient({ url: `file:${dbPath}` });
+  await db.execute(`CREATE TABLE queue_items (
+    id TEXT PRIMARY KEY, label TEXT NOT NULL, agent TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL, flow_id TEXT, node TEXT
+  )`);
+  await db.execute({
+    sql: "INSERT INTO queue_items (id, label, agent, status, created_at, flow_id, node) VALUES (?, ?, ?, 'pending', ?, ?, ?)",
+    args: ["q1", "SCORE", "scout", 2500, "flow-1", "SCORE"],
+  });
   await db.execute(`CREATE TABLE gate_records (
     flow_id TEXT NOT NULL, node_id TEXT NOT NULL, record_json TEXT NOT NULL,
     updated_at INTEGER NOT NULL, PRIMARY KEY (flow_id, node_id)

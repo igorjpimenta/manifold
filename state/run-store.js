@@ -15,7 +15,7 @@ import { mkdirSync } from "node:fs";
 import { eq, and, notInArray, inArray, isNull, isNotNull, ne, desc, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { getSharedDb, withSharedWrite, resolveStorePaths } from "./db.js";
-import { flowRuns, flowNodeInvocations } from "./schema.js";
+import { flowRuns, flowNodeInvocations, pipelines } from "./schema.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { enqueue, flush as flushBatchWriter } from "./batch-writer.js";
 
@@ -66,18 +66,26 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
     async insert({ flowId, ownerKey, pipelineId, revision, status,
                    lastStep, stateJson, createdAt, updatedAt, parentInvocationId }) {
       try {
-        await withSharedWrite(dbPath, () => db.insert(flowRuns).values({
-          flowId,
-          ownerKey:           ownerKey ?? "",
-          pipelineId:         pipelineId ?? null,
-          revision:           revision ?? 0,
-          status,
-          lastStep:           lastStep ?? null,
-          stateJson:          _str(stateJson) ?? "{}",
-          createdAt:          createdAt ?? Date.now(),
-          updatedAt:          updatedAt ?? Date.now(),
-          parentInvocationId: parentInvocationId ?? null,
-        }).onConflictDoNothing());
+        await withSharedWrite(dbPath, async () => {
+          if (pipelineId != null) {
+            const now = Date.now();
+            await db.insert(pipelines).values({
+              id: pipelineId, name: pipelineId, createdAt: now, updatedAt: now,
+            }).onConflictDoNothing();
+          }
+          await db.insert(flowRuns).values({
+            flowId,
+            ownerKey:           ownerKey ?? "",
+            pipelineId:         pipelineId ?? null,
+            revision:           revision ?? 0,
+            status,
+            lastStep:           lastStep ?? null,
+            stateJson:          _str(stateJson) ?? "{}",
+            createdAt:          createdAt ?? Date.now(),
+            updatedAt:          updatedAt ?? Date.now(),
+            parentInvocationId: parentInvocationId ?? null,
+          }).onConflictDoNothing();
+        });
       } catch {}
     },
 

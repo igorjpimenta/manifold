@@ -57,6 +57,34 @@
       "when": 1794056584544,
       "tag": "0007_ambiguous_chronomancer",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1794852798506,
+      "tag": "0008_wealthy_thundra",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1794931266372,
+      "tag": "0009_lying_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1794933659627,
+      "tag": "0010_solid_phantom_reporter",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1794952176746,
+      "tag": "0011_windy_demogoblin",
+      "breakpoints": true
     }
   ]
 }

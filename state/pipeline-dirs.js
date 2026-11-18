@@ -42,10 +42,18 @@ export function createPipelineDirsStore({ dbPath, logger = null } = {}) {
     if (!st?.isDirectory()) throw new Error(`pipeline-dirs: not a directory: ${resolved}`);
     const now = Date.now();
     withDb((db) => {
-      db.prepare(
-        `INSERT INTO pipeline_dirs (harness, path, created_at) VALUES (?, ?, ?)
-         ON CONFLICT(harness) DO UPDATE SET path = excluded.path`
-      ).run(harnessName, resolved, now);
+      // pipeline_dirs.harness carries an FK; an operator registering the
+      // first override for a harness must not hit a constraint error.
+      db.transaction(() => {
+        db.prepare(
+          `INSERT INTO harnesses (id, created_at, updated_at) VALUES (?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at`
+        ).run(harnessName, now, now);
+        db.prepare(
+          `INSERT INTO pipeline_dirs (harness, path, created_at) VALUES (?, ?, ?)
+           ON CONFLICT(harness) DO UPDATE SET path = excluded.path`
+        ).run(harnessName, resolved, now);
+      })();
     });
     return { harness: harnessName, path: resolved };
   }

@@ -3,13 +3,18 @@
 // MIGRATIONS entry is one applied step; never edit a past entry in place.
 
 import path from "node:path";
-import { getSharedDb, withSharedWrite } from "../state/db.js";
-import os from "node:os";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "../state/db.js";
 import fs from "node:fs";
-import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js";
+import { ensureSessionKeys, ENSURE_SESSION_SQL } from "../state/session-keys.js";
+import { ensureFlowItems, ensureTurnRuns, ensurePipelineNodes } from "../state/attribution-registries.js";
 
-const DEFAULT_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+// Lineage/cost now live in runtime.sqlite so flow_id and pipeline_id can
+// carry FKs; resolve per call so MANIFOLD_DATA_DIR set after import wins.
+export function defaultDbPath() {
+  return resolveStorePaths().runtimeDb;
+}
 
 const UPSERT_LINEAGE_SQL = `
   INSERT INTO session_lineage
@@ -45,23 +50,11 @@ const INSERT_COST_SQL = `
   VALUES (?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ?,?, ?,?,?, ?,?,?,?)
 `;
 
-export async function openStore({ dbPath = DEFAULT_DB_PATH } = {}) {
+export async function openStore({ dbPath = defaultDbPath() } = {}) {
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
+  await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
-  await attachFlowsDb(client);
   return makeStore(client, dbPath);
-}
-
-/** Cross-DB JOIN target: manifold's flow_runs lives in a sibling sqlite.
- *  Attached read-only so ROI queries (status × cost) work in a single hop.
- *  Silent if absent — installations without manifold keep working. */
-async function attachFlowsDb(client) {
-  const flowsPath = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-  if (!fs.existsSync(flowsPath)) return;
-  try {
-    await client.execute(`ATTACH DATABASE '${flowsPath.replace(/'/g, "''")}' AS flows`);
-  } catch { /* attach failed — ROI queries will skip the JOIN */ }
 }
 
 function makeStore(client, dbPath) {
@@ -69,25 +62,31 @@ function makeStore(client, dbPath) {
     _client: client,
     async upsertLineage(row) {
       try {
-        await withSharedWrite(dbPath, () => client.execute({
-          sql: UPSERT_LINEAGE_SQL,
-          args: [
-            row.child_session_key,
-            row.parent_session_key ?? null,
-            row.root_session_key,
-            row.kind,
-            row.root_kind,
-            row.root_label ?? null,
-            row.agent_id ?? null,
-            row.pipeline_id ?? null,
-            row.flow_id ?? null,
-            row.run_id ?? null,
-            row.node_id ?? null,
-            row.item_key ?? null,
-            row.first_seen_at ?? Date.now(),
-            row.source,
-          ],
-        }));
+        await withSharedWrite(dbPath, async () => {
+          await ensureSessionKeys(client, [row.child_session_key, row.parent_session_key, row.root_session_key]);
+          await ensureFlowItems(client, [[row.flow_id, row.item_key]]);
+          await ensureTurnRuns(client, [row.run_id]);
+          await ensurePipelineNodes(client, [[row.pipeline_id, row.node_id]]);
+          return client.execute({
+            sql: UPSERT_LINEAGE_SQL,
+            args: [
+              row.child_session_key,
+              row.parent_session_key ?? null,
+              row.root_session_key,
+              row.kind,
+              row.root_kind,
+              row.root_label ?? null,
+              row.agent_id ?? null,
+              row.pipeline_id ?? null,
+              row.flow_id ?? null,
+              row.run_id ?? null,
+              row.node_id ?? null,
+              row.item_key ?? null,
+              row.first_seen_at ?? Date.now(),
+              row.source,
+            ],
+          });
+        });
       } catch { /* best-effort */ }
     },
     async getLineage(childKey) {
@@ -98,12 +97,18 @@ function makeStore(client, dbPath) {
     },
     // Deferred via batch-writer: one call per LLM call with cost data
     // (telemetry/index.js's before_message_write hook), likely the
-    // highest-volume write in ops.sqlite. Already best-effort (errors
+    // highest-volume write in runtime.sqlite. Already best-effort (errors
     // swallowed, no caller inspects a return value or re-reads the row in
     // the same hook invocation — unlike upsertLineage() above, which stays
     // immediate because a closely-timed child session's getLineage() can
     // depend on a parent's just-written row).
     insertCost(row) {
+      const now = Date.now();
+      for (const k of [row.session_key, row.root_session_key]) {
+        if (typeof k === "string" && k.length > 0) enqueueRaw(dbPath, ENSURE_SESSION_SQL, [k, now]);
+      }
+      if (row.flow_id && row.item_key) enqueueRaw(dbPath, "INSERT OR IGNORE INTO flow_items (flow_id, item_key, first_seen_at) VALUES (?, ?, ?)", [row.flow_id, row.item_key, now]);
+      if (row.pipeline_id && row.node_id) enqueueRaw(dbPath, "INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)", [row.pipeline_id, row.node_id, now]);
       enqueueRaw(dbPath, INSERT_COST_SQL, [
         row.session_id,
         row.msg_id,
@@ -137,8 +142,6 @@ function makeStore(client, dbPath) {
       await flushBatchWriter(dbPath);
     },
     close() { try { client.close(); } catch { /* ignore */ } },
-    DEFAULT_DB_PATH,
   };
 }
 
-export { DEFAULT_DB_PATH };

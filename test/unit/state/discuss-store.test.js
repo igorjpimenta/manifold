@@ -10,6 +10,7 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createDiscussStore } from "../../../state/discuss-store.js";
+import { createRunStore } from "../../../state/run-store.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -18,7 +19,22 @@ function tmpDb() {
 }
 
 async function makeStore(overrides = {}) {
-  return createDiscussStore({ dbPath: tmpDb(), ...overrides });
+  const dbPath = tmpDb();
+  const store = await createDiscussStore({ dbPath, ...overrides });
+  const runStore = await createRunStore({ dbPath });
+  const seed = async (flowId) => {
+    if (typeof flowId === "string") await runStore.insert({ flowId, status: "running" });
+  };
+  return new Proxy(store, {
+    get(target, key) {
+      const value = target[key];
+      if (typeof value !== "function") return value;
+      return async (...args) => {
+        if (typeof args[0] === "string") await seed(args[0]);
+        return value.apply(target, args);
+      };
+    },
+  });
 }
 
 // ─── createDiscussStore — schema + migration ──────────────────────────────────
@@ -55,7 +71,10 @@ describe("createDiscussStore — DB setup", () => {
     // errors must be swallowed, not thrown.
     const dbPath = tmpDb();
     const s1 = await createDiscussStore({ dbPath });
-    await s1.setComponent(randomUUID(), randomUUID(), { kind: "x" });
+    const flowId = randomUUID();
+    const runs = await createRunStore({ dbPath });
+    await runs.insert({ flowId, status: "running" });
+    await s1.setComponent(flowId, randomUUID(), { kind: "x" });
     // Re-open: migration re-runs ALTER TABLE → duplicate column → must not throw
     const s2 = await createDiscussStore({ dbPath });
     assert.ok(s2); // still alive
@@ -467,6 +486,8 @@ describe("one row per (flowId, itemId)", () => {
     const store = await createDiscussStore({ dbPath });
     const flowId = randomUUID();
     const itemId = randomUUID();
+    const runs = await createRunStore({ dbPath });
+    await runs.insert({ flowId, status: "running" });
     await Promise.all([
       store.appendMessage(flowId, itemId, { role: "operator", text: "one" }),
       store.appendMessage(flowId, itemId, { role: "operator", text: "two" }),
@@ -717,6 +738,8 @@ describe("tryParse — invalid JSON / null handling", () => {
     const store = await createDiscussStore({ dbPath });
     const flowId = randomUUID();
     const itemId = randomUUID();
+    const runs = await createRunStore({ dbPath });
+    await runs.insert({ flowId, status: "running" });
     await store.appendMessage(flowId, itemId, { role: "operator", text: "seed" });
 
     // Access internal DB to corrupt messages_json
@@ -738,6 +761,8 @@ describe("tryParse — invalid JSON / null handling", () => {
     const store = await createDiscussStore({ dbPath });
     const flowId = randomUUID();
     const itemId = randomUUID();
+    const runs = await createRunStore({ dbPath });
+    await runs.insert({ flowId, status: "running" });
     await store.setComponent(flowId, itemId, { kind: "x" });
 
     const corruptClient = createClient({ url: `file:${dbPath}` });

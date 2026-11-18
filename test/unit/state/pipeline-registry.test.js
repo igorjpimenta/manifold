@@ -24,6 +24,14 @@ function makeStore() {
   return createPipelineRegistryStore(tmpDb());
 }
 
+async function ensurePipeline(store, id) {
+  await store._db.execute({
+    sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
+          VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
+    args: [id, id, Date.now(), Date.now()],
+  });
+}
+
 function pipelinesMap(entries) {
   return new Map(entries.map((p) => [p.id, p]));
 }
@@ -42,6 +50,7 @@ describe("createPipelineRegistryStore — schema", () => {
 
   test("only one active (retired_at IS NULL) row per pipeline_id is allowed", async () => {
     const store = makeStore();
+    await ensurePipeline(store, "p1");
     await store._db.execute({
       sql: `INSERT INTO pipeline_versions (id, pipeline_id, is_synthetic, content_hash, registered_at, retired_at)
             VALUES (?, 'p1', 0, 'h1', 1000, NULL)`,
@@ -58,6 +67,7 @@ describe("createPipelineRegistryStore — schema", () => {
   test("only one active row per (pipeline_id, node_name) is allowed", async () => {
     const store = makeStore();
     const pvId = randomUUID();
+    await ensurePipeline(store, "p1");
     await store._db.execute({
       sql: `INSERT INTO pipeline_versions (id, pipeline_id, is_synthetic, content_hash, registered_at, retired_at)
             VALUES (?, 'p1', 0, 'h1', 1000, NULL)`,

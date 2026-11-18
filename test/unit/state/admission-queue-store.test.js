@@ -11,6 +11,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
+import { createRunStore } from "../../../state/run-store.js";
 import { getSharedDb } from "../../../state/db.js";
 
 function tmpDb() {
@@ -18,7 +19,23 @@ function tmpDb() {
 }
 
 function makeStore(limit, overrides = {}) {
-  return createAdmissionQueueStore({ dbPath: tmpDb(), getLimit: () => limit, ...overrides });
+  const dbPath = tmpDb();
+  const store = createAdmissionQueueStore({ dbPath, getLimit: () => limit, ...overrides });
+  const runStore = createRunStore({ dbPath });
+  const admit = store.admit.bind(store);
+  return new Proxy(store, {
+    get(target, key) {
+      if (key === "admit") {
+        return async (args) => {
+          const runs = await runStore;
+          await runs.insert({ flowId: args.flowId, status: "running" });
+          return admit(args);
+        };
+      }
+      const value = target[key];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 describe("admission-queue-store — factory", () => {
@@ -345,7 +362,12 @@ describe("admission-queue-store — concurrent admit() under real contention", (
 describe("admission-queue-store — fillFreeSlots()", () => {
   test("promotes oldest queued rows into free capacity, up to the limit, and returns them", async () => {
     let limit = 1;
-    const store = createAdmissionQueueStore({ dbPath: tmpDb(), getLimit: () => limit });
+    const dbPath = tmpDb();
+    const store = createAdmissionQueueStore({ dbPath, getLimit: () => limit });
+    const runs = await createRunStore({ dbPath });
+    for (const flowId of ["held", "q1", "q2", "q3"]) {
+      await runs.insert({ flowId, status: "running" });
+    }
     await store.admit({ kind: "flow-start", flowId: "held" });
     const q1 = await store.admit({ kind: "flow-start", flowId: "q1" });
     await new Promise((r) => setTimeout(r, 5));

@@ -4,6 +4,9 @@
 // generates .migrations/ops snapshots from this file; state/migrate.js
 // applies them at open. Raw-SQL readers stay as they are — defs exist so
 // snapshots cover every table, not to force ORM queries.
+// queueItems / sessionLineage / costByCall below are the frozen shape of
+// the old ops file. They live in state/schema.js now (runtime.sqlite) so
+// flow_id and pipeline_id can carry FKs; nothing writes these copies.
 import { sqliteTable, text, integer, real, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
 import { desc, sql } from 'drizzle-orm';
 

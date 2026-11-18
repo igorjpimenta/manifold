@@ -1,21 +1,33 @@
 // budget — approval queue module absorbed into manifold.
 //
-// Owns the SQLite store at ~/.openclaw/ops.sqlite (DB_PATH). Registers HTTP
+// Owns gate_state and budget alerts in ~/.openclaw/ops.sqlite; the approval
+// queue moved to runtime.sqlite with the other FK-bearing telemetry. Registers HTTP
 // routes under /manifold/budget/*. Sets api.runtime.approvalQueue with the
 // async API that executor.js calls per-node (isGateLocked,
 // lookupNodeDecision, enqueueNodeApproval).
 
 import { mkdirSync } from "node:fs";
-import { getSharedDb, withSharedWrite } from "../state/db.js";
+import { getSharedDb, withSharedWrite, resolveStorePaths } from "../state/db.js";
 import { createEmitter } from "../events/emit.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "./lib.js";
-import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
+import { migrateDatabase, OPS_MIGRATIONS_FOLDER, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
+import { ensureSessionKeys } from "../state/session-keys.js";
+import { ensurePipelineNodes } from "../state/attribution-registries.js";
 
 const STORE_DIR = path.join(os.homedir(), ".openclaw");
 const DB_PATH = path.join(STORE_DIR, "ops.sqlite");
+
+// queue_items lives in runtime.sqlite beside ops.sqlite. Alternate dbPaths
+// (tests, one-off stores) get their own sibling so two fixtures never share
+// a /tmp/runtime.sqlite.
+function runtimeSibling(dbPath) {
+  return path.basename(dbPath) === "ops.sqlite"
+    ? path.join(path.dirname(dbPath), "runtime.sqlite")
+    : `${dbPath}.runtime.sqlite`;
+}
 
 const MOCK_ITEMS = [
   {
@@ -75,7 +87,7 @@ const MOCK_ITEMS = [
 // suite) instead of only ever testing through a fully-fake openStore DI
 // override that bypasses this function — and by extension getSharedDb —
 // entirely.
-export async function openStore({ dbPath = DB_PATH } = {}) {
+export async function openStore({ dbPath = DB_PATH, runtimeDbPath = runtimeSibling(dbPath) } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   const { client } = await getSharedDb(dbPath);
@@ -83,6 +95,13 @@ export async function openStore({ dbPath = DB_PATH } = {}) {
   // The singleton row is runtime state, not schema: every gate_state reader
   // assumes it exists, so seed it unconditionally on every open.
   await client.execute(`INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`);
+  // queue_items moved to runtime with the rest of the FK-bearing telemetry;
+  // gate_state and the alert tables stay here. The extra handle rides on the
+  // ops client so callers that only inject one fake still work.
+  await migrateDatabase({ dbPath: runtimeDbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
+  const { client: runtimeClient } = await getSharedDb(runtimeDbPath);
+  client.runtime = runtimeClient;
+  client.runtimePath = runtimeDbPath;
   return client;
 }
 
@@ -115,7 +134,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
   // loopback. Absent (tests), per-node resume is skipped but the decision
   // still commits and broadcasts.
   const { emit } = createEmitter({ getBroadcast, logger: api.logger });
+  let runtimeDbPath = runtimeSibling(DB_PATH);
   let client;
+  let runtimeClient;
   let clientPromise = null;
 
   // `client` must NOT be attached only from registerService's start() — a
@@ -142,6 +163,8 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       clientPromise = openStoreFn()
         .then((c) => {
           client = c;
+          runtimeClient = c.runtime ?? c;
+          runtimeDbPath = c.runtimePath ?? runtimeDbPath;
           api.logger.info("[manifold/budget] store ready at " + DB_PATH);
           return c;
         })
@@ -169,7 +192,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "GET") { res.statusCode = 405; res.end("method not allowed"); return true; }
-      const { rows } = await client.execute(
+      const { rows } = await runtimeClient.execute(
         "SELECT * FROM queue_items WHERE status='pending' ORDER BY created_at ASC"
       );
       res.statusCode = 200;
@@ -198,7 +221,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       let updated = 0;
       const updatedIds = [];
       for (const id of ids) {
-        const r = await withSharedWrite(DB_PATH, () => client.execute({
+        const r = await withSharedWrite(runtimeDbPath, () => runtimeClient.execute({
           sql: "UPDATE queue_items SET status=?, decided_at=?, decision=? WHERE id=? AND status='pending'",
           args: [classifyDecisionStatus(decision), now, decision, id],
         }));
@@ -206,7 +229,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       }
       if (updatedIds.length > 0) {
         const ph = updatedIds.map(() => "?").join(",");
-        const { rows: decided } = await client.execute({
+        const { rows: decided } = await runtimeClient.execute({
           sql: `SELECT id, pipeline_id, pipeline_args, flow_id, node, enqueuer_session_key FROM queue_items WHERE id IN (${ph})`,
           args: updatedIds,
         });
@@ -252,7 +275,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "GET") { res.statusCode = 405; res.end("method not allowed"); return true; }
-      const { rows } = await client.execute(
+      const { rows } = await runtimeClient.execute(
         "SELECT * FROM queue_items WHERE status != 'pending' ORDER BY decided_at DESC LIMIT 50"
       );
       res.statusCode = 200;
@@ -276,7 +299,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       for (let i = 0; i < count; i++) {
         const t = MOCK_ITEMS[i];
         const id = randomUUID();
-        await withSharedWrite(DB_PATH, () => client.execute({
+        await withSharedWrite(runtimeDbPath, () => runtimeClient.execute({
           sql: `INSERT OR REPLACE INTO queue_items
                   (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain, pipeline, node, token_estimate, kind, status, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'node', 'pending', ?)`,
@@ -373,16 +396,20 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       }
       const id = randomUUID();
       const now = Date.now();
-      await withSharedWrite(DB_PATH, () => client.execute({
-        sql: `INSERT INTO queue_items
+      await withSharedWrite(runtimeDbPath, async () => {
+        await ensureSessionKeys(runtimeClient, [enqueuerSessionKey]);
+        await ensurePipelineNodes(runtimeClient, [[pipelineId, node ?? pipeline ?? null]]);
+        return runtimeClient.execute({
+          sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
                  pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        args: [id, label, agent, agentEmoji, trigger, costLow, costHigh, brief ?? null,
-               JSON.stringify(modelChain), pipeline ?? pipelineId, node ?? null,
-               tokenEstimate ?? null, pipelineId, JSON.stringify(pipelineArgs ?? {}),
-               enqueuerSessionKey ?? null, now],
-      }));
+          args: [id, label, agent, agentEmoji, trigger, costLow, costHigh, brief ?? null,
+                 JSON.stringify(modelChain), pipeline ?? pipelineId, node ?? null,
+                 tokenEstimate ?? null, pipelineId, JSON.stringify(pipelineArgs ?? {}),
+                 enqueuerSessionKey ?? null, now],
+        });
+      });
       try {
         await emit("approval.requested", { id });
       } catch {}
@@ -432,7 +459,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
     async lookupNodeDecision({ flowId, nodeId }) {
       if (!flowId || !nodeId) return null;
-      const { rows } = await client.execute({
+      const { rows } = await runtimeClient.execute({
         sql: `SELECT status, decision FROM queue_items WHERE flow_id=? AND node=?
               ORDER BY created_at DESC LIMIT 1`,
         args: [flowId, nodeId],
@@ -443,16 +470,20 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
                                 trigger = "cron", brief, costLow = 0, costHigh = 0,
                                 modelChain = [], tokenEstimate = null, enqueuerSessionKey = null, kind = "node" }) {
       const id = randomUUID();
-      await withSharedWrite(DB_PATH, () => client.execute({
-        sql: `INSERT INTO queue_items
+      await withSharedWrite(runtimeDbPath, async () => {
+        await ensureSessionKeys(runtimeClient, [enqueuerSessionKey]);
+        await ensurePipelineNodes(runtimeClient, [[pipelineId, nodeId]]);
+        return runtimeClient.execute({
+          sql: `INSERT INTO queue_items
                 (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain,
                  pipeline, node, token_estimate, pipeline_id, flow_id, enqueuer_session_key, kind, status, created_at)
               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-        args: [id, label, agent ?? "manifold", agentEmoji ?? "🔁", trigger,
-               costLow, costHigh, brief ?? null, JSON.stringify(modelChain ?? []),
-               pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
-               pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
-      }));
+          args: [id, label, agent ?? "manifold", agentEmoji ?? "🔁", trigger,
+                 costLow, costHigh, brief ?? null, JSON.stringify(modelChain ?? []),
+                 pipeline ?? pipelineId ?? null, nodeId, tokenEstimate ?? null,
+                 pipelineId ?? null, flowId, enqueuerSessionKey ?? null, kind, Date.now()],
+        });
+      });
       try {
         await emit("approval.requested", { id, flowId: flowId ?? null });
       } catch {}

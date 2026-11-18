@@ -18,6 +18,8 @@ import {
   clearPendingResult,
   waitForToolResult,
 } from "../../../state/tool-handoff.js";
+import { createRunStore } from "../../../state/run-store.js";
+import { resolveStorePaths } from "../../../state/paths.js";
 
 let tmpDir;
 before(() => {
@@ -27,6 +29,11 @@ before(() => {
 
 function session() {
   return `agent:test:${randomUUID()}`;
+}
+
+async function seedRun(flowId) {
+  const store = createRunStore({ dbPath: resolveStorePaths().runtimeDb });
+  await store.insert({ flowId, status: "running" });
 }
 
 describe("writePendingResult / readPendingResult", () => {
@@ -42,6 +49,7 @@ describe("writePendingResult / readPendingResult", () => {
   test("write then read round-trips kind, agent, runId and payload", async () => {
     const key = session();
     const payload = { score: 78, reasons: ["stack overlap"], nested: { ok: true } };
+    await seedRun("run-1");
     await writePendingResult({ session: key, runId: "run-1", agentId: "scout", kind: "score", payload });
     const row = await readPendingResult(key);
     assert.equal(row.session, key);
@@ -49,6 +57,16 @@ describe("writePendingResult / readPendingResult", () => {
     assert.equal(row.agentId, "scout");
     assert.equal(row.kind, "score");
     assert.deepEqual(row.payload, payload);
+    await clearPendingResult(key);
+  });
+
+  test("a late result for an unknown run id keeps the payload and drops only the dangling runId", async () => {
+    const key = session();
+    await writePendingResult({ session: key, runId: "run-that-is-gone", agentId: "scout", kind: "score", payload: { late: true } });
+    const row = await readPendingResult(key);
+    assert.equal(row.runId, null);
+    assert.equal(row.session, key);
+    assert.deepEqual(row.payload, { late: true });
     await clearPendingResult(key);
   });
 
