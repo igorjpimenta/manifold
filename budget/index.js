@@ -1,7 +1,7 @@
 // budget — approval queue module absorbed into manifold.
 //
-// Owns gate_state and budget alerts in ~/.openclaw/ops.sqlite; the approval
-// queue moved to runtime.sqlite with the other FK-bearing telemetry. Registers HTTP
+// Owns gate_state and budget alerts in the store home's ops.sqlite; the
+// approval queue lives in the sibling runtime.sqlite. Registers HTTP
 // routes under /manifold/budget/*. Sets api.runtime.approvalQueue with the
 // async API that executor.js calls per-node (isGateLocked,
 // lookupNodeDecision, enqueueNodeApproval).
@@ -95,9 +95,9 @@ export async function openStore({ dbPath = DB_PATH, runtimeDbPath = runtimeSibli
   // The singleton row is runtime state, not schema: every gate_state reader
   // assumes it exists, so seed it unconditionally on every open.
   await client.execute(`INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`);
-  // queue_items moved to runtime with the rest of the FK-bearing telemetry;
-  // gate_state and the alert tables stay here. The extra handle rides on the
-  // ops client so callers that only inject one fake still work.
+  // queue_items lives in runtime.sqlite; gate_state and the alert tables stay
+  // in ops. The extra handle rides on the ops client so callers that only
+  // inject one fake still work.
   await migrateDatabase({ dbPath: runtimeDbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { client: runtimeClient } = await getSharedDb(runtimeDbPath);
   client.runtime = runtimeClient;

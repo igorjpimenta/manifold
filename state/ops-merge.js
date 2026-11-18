@@ -6,10 +6,10 @@
 // and is idempotent: rows already in runtime win (INSERT OR IGNORE), and a
 // non-empty runtime table means the merge already happened.
 //
-// Columns are intersected rather than assumed equal: the live ops file
-// predates a column its baseline migration declares (queue_items.kind), and
-// CREATE TABLE IF NOT EXISTS never added it. A missing column merges as its
-// default/NULL instead of failing the whole boot.
+// Columns are intersected rather than assumed equal: an ops file can lack a
+// column its baseline migration declares (queue_items.kind), because CREATE
+// TABLE IF NOT EXISTS never adds columns to a table that already exists. A
+// missing column merges as its default/NULL instead of failing the boot.
 
 import path from "node:path";
 import { existsSync } from "node:fs";

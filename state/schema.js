@@ -32,8 +32,8 @@ export const sessions = sqliteTable('sessions', {
   index('idx_sessions_first_seen').on(table.firstSeenAt),
 ]);
 
-// Attribution keys (item, node name, harness turn run) are written by the
-// engine/hook frames, not owned by a row of ours, so these three registries
+// Attribution keys (item, node name, turn run) are written by engine and
+// telemetry frames, not owned by a row of ours, so these three registries
 // are their materialized key set. Every writer registers what it is about
 // to attribute (state/attribution-registries.js), and migration backfills
 // the union, so a key is never dangling. Rows are append-only: a pruned

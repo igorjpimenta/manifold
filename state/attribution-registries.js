@@ -1,5 +1,5 @@
-// Attribution registries: item keys, node names and harness turn-run ids are
-// written by engine/hook frames, so no table of ours owns the key space.
+// Attribution registries: item keys, node names and turn-run ids are written
+// by engine and telemetry frames, so no table of ours owns the key space.
 // These helpers materialize the key set — writers register what they are
 // about to attribute, in the same write; the migration backfills the union
 // so historical rows keep their attribution and the FKs are satisfiable.
@@ -54,8 +54,8 @@ export async function ensurePipelineNodes(client, rows, now = Date.now()) {
 // Union backfill, one pass. Node names also come from the version registry
 // so a pipeline's declared nodes are known before their first turn. Each
 // batch item is one statement; the legacy flow_branches table is read only
-// when it exists (v7 no longer creates it, but old files still carry the
-// branch keys that item attribution was originally written against).
+// when it exists, because files created before v7 still carry the branch
+// keys that item attribution was written against.
 export const BACKFILL_FLOW_ITEMS_SQL = `
   INSERT OR IGNORE INTO flow_items (flow_id, item_key, first_seen_at)
   SELECT flow_id, item_key, ? FROM (
