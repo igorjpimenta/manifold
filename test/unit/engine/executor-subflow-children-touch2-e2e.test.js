@@ -129,9 +129,8 @@ function makeTouchLikeNode() {
 }
 
 async function makeHarness() {
-  const dbPath = tmpPath("touch2-e2e");
-  const runStore = await createRunStore({ dbPath });
-  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
+  const runStore = await createRunStore({ dbPath: tmpPath("touch2-e2e-runs") });
+  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("touch2-e2e-execs"));
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, logger });

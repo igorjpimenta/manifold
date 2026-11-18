@@ -15,8 +15,6 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
-import { ensureSessionKeys } from "./session-keys.js";
-import { ensureFlowItems } from "./attribution-registries.js";
 
 function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
@@ -39,15 +37,13 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     void agent;
     if (!flowId || !session) return;
     try {
-      await withSharedWrite(dbPath, async () => {
-        await ensureSessionKeys(client, [session]);
-        await ensureFlowItems(client, [[flowId, branchItemId]]);
-        return db.insert(flowSessions).values({
+      await withSharedWrite(dbPath, () =>
+        db.insert(flowSessions).values({
           id: randomUUID(), flowId, session,
           nodeId: nodeId ?? null, branchItemId: branchItemId ?? null,
           spawnedAt: Date.now(),
-        }).onConflictDoNothing();
-      });
+        }).onConflictDoNothing()
+      );
     } catch (err) {
       logger?.warn?.(`manifold session-index: record failed: ${err?.message ?? err}`);
     }
@@ -123,9 +119,8 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
   async function recordThread({ flowId, gateNodeId, itemId, agentId = null, session } = {}) {
     if (!flowId || !gateNodeId || !itemId || !session) return;
     try {
-      await withSharedWrite(dbPath, async () => {
-        await ensureSessionKeys(client, [session]);
-        return db.insert(discussThreads).values({
+      await withSharedWrite(dbPath, () =>
+        db.insert(discussThreads).values({
           flowId, gateNodeId, itemId,
           agentId: agentId ?? null, session,
           updatedAt: Date.now(),
@@ -135,8 +130,8 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
             agentId: agentId ?? null, session,
             updatedAt: Date.now(),
           },
-        });
-      });
+        })
+      );
     } catch (err) {
       logger?.warn?.(`manifold session-index: recordThread failed: ${err?.message ?? err}`);
     }

@@ -7,7 +7,6 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createSessionIndex } from "../../../state/session-index.js";
-import { createRunStore } from "../../../state/run-store.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -16,24 +15,7 @@ function tmpDb() {
 }
 
 async function makeIndex(overrides = {}) {
-  const dbPath = tmpDb();
-  const idx = await createSessionIndex({ dbPath, ...overrides });
-  const runStore = await createRunStore({ dbPath });
-  const seed = async (flowId) => {
-    if (typeof flowId === "string") await runStore.insert({ flowId, status: "running" });
-  };
-  return new Proxy(idx, {
-    get(target, key) {
-      const value = target[key];
-      if (key === "record") {
-        return async (args = {}) => { await seed(args.flowId); return value.call(target, args); };
-      }
-      if (key === "recordThread") {
-        return async (args = {}) => { await seed(args.flowId); return value.call(target, args); };
-      }
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
+  return createSessionIndex({ dbPath: tmpDb(), ...overrides });
 }
 
 // ─── createSessionIndex — DB setup ──────────────────────────────────────────
@@ -441,8 +423,6 @@ describe("record persistence roundtrip", () => {
     const dbPath = tmpDb();
     const idx1 = await createSessionIndex({ dbPath });
     const flowId = randomUUID();
-    const runs = await createRunStore({ dbPath });
-    await runs.insert({ flowId, status: "running" });
     await idx1.record({ flowId, session: "persistent-sess", nodeId: "N1" });
     idx1.close();
 

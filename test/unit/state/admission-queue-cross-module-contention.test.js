@@ -97,7 +97,7 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
       const admissions = [];
       for (let i = 0; i < CALLER_COUNT; i++) {
         ops.push(
-          admissionQueueStore.admit({ kind: "child-dispatch", flowId: flowIds[i % flowIds.length], nodeId: `N-${round}-${i}` })
+          admissionQueueStore.admit({ kind: "child-dispatch", flowId: `contention-${round}-${i}`, nodeId: "N" })
             .then((r) => { admissions.push(r); })
             .catch((err) => errors.push(`admit: ${err?.message ?? err}`)),
         );

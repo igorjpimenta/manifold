@@ -11,7 +11,7 @@ import {
   sessionKindForRoot,
   formatSessionChildLabel,
   bootstrapForecast,
-  hasFlowRuns,
+  hasFlowsAttached,
 } from "../../../telemetry/http-helpers.js";
 
 // ── ATTR_* constants ──────────────────────────────────────────────────────────
@@ -186,21 +186,19 @@ describe("bootstrapForecast", () => {
   });
 });
 
-// ── hasFlowRuns ──────────────────────────────────────────────────────────
+// ── hasFlowsAttached ──────────────────────────────────────────────────────────
 
-describe("hasFlowRuns", () => {
-  it("returns false when the db has no flow_runs table", async () => {
+describe("hasFlowsAttached", () => {
+  it("returns false for a plain sqlite db with no attached 'flows' schema", async () => {
     const dbPath = join(tmpdir(), `http-helpers-test-${randomUUID()}.sqlite`);
     const client = createClient({ url: `file:${dbPath}` });
     await client.execute("CREATE TABLE dummy (id INTEGER PRIMARY KEY)");
-    assert.equal(await hasFlowRuns(client), false);
-    await client.execute("CREATE TABLE flow_runs (flow_id TEXT PRIMARY KEY)");
-    assert.equal(await hasFlowRuns(client), true);
+    assert.equal(await hasFlowsAttached(client), false);
     client.close();
   });
 
   it("returns false when client.execute throws", async () => {
     const fakeClient = { execute: async () => { throw new Error("no db"); } };
-    assert.equal(await hasFlowRuns(fakeClient), false);
+    assert.equal(await hasFlowsAttached(fakeClient), false);
   });
 });

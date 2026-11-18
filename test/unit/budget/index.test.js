@@ -4,19 +4,11 @@ import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { registerBudgetRoutes, openStore } from "../../../budget/index.js";
-import { createRunStore } from "../../../state/run-store.js";
 import { todayLocal } from "../../../budget/lib.js";
 
 // registerBudgetRoutes's real store (openStore(), hitting ~/.openclaw/ops.sqlite)
 // is swapped for a fake via the `openStore` DI param — tests run without
 // touching real sqlite or the gateway's service-registration lifecycle.
-
-// queue_items.flow_id/pipeline_id carry FKs to runtime parents; the
-  // fixture flows are real rows now, not just strings.
-  async function seedFlow(dbPath, flowId, pipelineId = "p") {
-    const store = createRunStore({ dbPath: `${dbPath}.runtime.sqlite` });
-    await store.insert({ flowId, pipelineId, status: "running" });
-  }
 
 function makeFakeApi() {
   const services = [];
@@ -116,7 +108,6 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
     return () => openStore({ dbPath });
   }
 
-
   it("a second generation against the same dbPath sees data written by the first, with no separate migration failure", async () => {
     const dbPath = tmpDbPath();
     const gen1Api = makeFakeApi();
@@ -125,7 +116,6 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
     // maybeBudgetGate), which is what attaches `client` — enqueueNodeApproval
     // has no readiness guard of its own, matching production call order.
     await gen1Api.runtime.approvalQueue.isGateLocked();
-    await seedFlow(dbPath, "flow-1");
 
     const itemId = await gen1Api.runtime.approvalQueue.enqueueNodeApproval({
       flowId: "flow-1", nodeId: "SCORE_LLM", pipelineId: "p", label: "SCORE_LLM",
@@ -193,10 +183,8 @@ describe("registerBudgetRoutes — canonical emissions", () => {
 
   it("decide emits budget.queue.updated with decision + count", async () => {
     const { api, calls, getBroadcast } = makeApiWithBroadcast();
-    const dbPath = tmpDbPath();
-    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), getBroadcast });
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath(), legacyDbPath: null }), getBroadcast });
     await api.runtime.approvalQueue.isGateLocked();
-    await seedFlow(dbPath, "flow-1");
 
     const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
       flowId: "flow-1", nodeId: "SCORE_LLM", pipelineId: "p", label: "SCORE_LLM",
@@ -213,10 +201,8 @@ describe("registerBudgetRoutes — canonical emissions", () => {
 
   it("enqueue emits approval.requested with id", async () => {
     const { api, calls, getBroadcast } = makeApiWithBroadcast();
-    const dbPath = tmpDbPath();
-    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), getBroadcast });
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath() }), getBroadcast });
     await api.runtime.approvalQueue.isGateLocked();
-    await seedFlow(dbPath, "flow-1");
 
     const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
       flowId: "flow-1", nodeId: "SCORE_LLM", pipelineId: "p", label: "SCORE_LLM",
@@ -230,14 +216,12 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     const { api, calls, getBroadcast } = makeApiWithBroadcast();
     const resumes = [];
     const onFlowResume = async (args) => { resumes.push(args); return { ok: true }; };
-    const dbPath = tmpDbPath();
     registerBudgetRoutes(api, {
-      openStore: () => openStore({ dbPath }),
+      openStore: () => openStore({ dbPath: tmpDbPath(), legacyDbPath: null }),
       getBroadcast,
       onFlowResume,
     });
     await api.runtime.approvalQueue.isGateLocked();
-    await seedFlow(dbPath, "flow-9");
 
     const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
       flowId: "flow-9", nodeId: "SUBMIT", pipelineId: "p", label: "SUBMIT",
@@ -253,11 +237,10 @@ describe("registerBudgetRoutes — canonical emissions", () => {
   it("queue items carry kind tags: node by default, run-start when passed", async () => {
     const dbPath = tmpDbPath();
     const { api } = makeApiWithBroadcast();
-    const client = await openStore({ dbPath });
+    const client = await openStore({ dbPath, legacyDbPath: null });
     registerBudgetRoutes(api, { openStore: async () => client });
     // Attachment happens on first isGateLocked(), same as production call order.
     await api.runtime.approvalQueue.isGateLocked();
-    await seedFlow(dbPath, "flow-1");
 
     const nodeItem = await api.runtime.approvalQueue.enqueueNodeApproval({
       flowId: "flow-1", nodeId: "SCORE_LLM", pipelineId: "p", label: "SCORE_LLM",
@@ -267,7 +250,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
       kind: "run-start",
     });
 
-    const { rows } = await client.runtime.execute({ sql: "SELECT id, kind FROM queue_items WHERE id IN (?, ?)", args: [nodeItem, startItem] });
+    const { rows } = await client.execute({ sql: "SELECT id, kind FROM queue_items WHERE id IN (?, ?)", args: [nodeItem, startItem] });
     const byId = new Map(rows.map((r) => [r.id, r.kind]));
     assert.equal(byId.get(nodeItem), "node", "per-node approvals default to kind=node");
     assert.equal(byId.get(startItem), "run-start", "start-gate approvals carry kind=run-start");

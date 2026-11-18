@@ -31,28 +31,10 @@ async function makeStore(overrides = {}) {
   // Always inject a noop nodeExecutionsStore so the unmigrated
   // getNodeExecutionsStore() singleton (which still calls openDb() without
   // await) is never triggered in tests.
-  const store = createFailureStore({
+  return createFailureStore({
     dbPath: tmpDb(),
     nodeExecutionsStore: makeFakeNodeExecutions(),
     ...overrides,
-  });
-  const record = store.recordEngineFailure.bind(store);
-  return new Proxy(store, {
-    get(target, key) {
-      if (key === "recordEngineFailure") {
-        return async (args) => {
-          if (args?.flowId) {
-            await seedFlowRun(target, { flowId: args.flowId, pipelineId: args.pipelineId ?? "pipe" });
-            await seedExecutionChain(target, {
-              flowId: args.flowId, invocationId: args.invocationId, executionId: args.executionId,
-            });
-          }
-          return record(args);
-        };
-      }
-      const value = target[key];
-      return typeof value === "function" ? value.bind(target) : value;
-    },
   });
 }
 
@@ -87,11 +69,6 @@ async function seedFlowRun(store, { flowId, pipelineId = "pipe", status = "runni
       ended_at INTEGER, parent_invocation_id TEXT, pipeline_id TEXT
     )`);
   await store._db.execute({
-    sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
-          VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-    args: [pipelineId, pipelineId, updatedAt, updatedAt],
-  });
-  await store._db.execute({
     sql: `INSERT INTO flow_runs (flow_id, status, pipeline_id, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(flow_id) DO UPDATE SET status = excluded.status, pipeline_id = excluded.pipeline_id, updated_at = excluded.updated_at`,
@@ -101,52 +78,7 @@ async function seedFlowRun(store, { flowId, pipelineId = "pipe", status = "runni
 
 // Raw insert matching the stored shape — used where a test needs to seed
 // a row directly rather than go through recordEngineFailure.
-async function seedExecutionChain(store, { flowId, invocationId = null, executionId = null, at = Date.now() } = {}) {
-  let invId = invocationId;
-  if (invId) {
-    await store._db.execute({
-      sql: `INSERT INTO flow_node_invocations (id, flow_id, node_id, visit_seq, invoked_at)
-            VALUES (?, ?, 'NODE', 1, ?) ON CONFLICT(id) DO NOTHING`,
-      args: [invId, flowId, at],
-    });
-  }
-  if (executionId) {
-    const existingExecution = await store._db.execute({
-      sql: "SELECT invocation_id FROM flow_node_executions WHERE id = ?",
-      args: [executionId],
-    });
-    if (existingExecution.rows.length) return;
-    if (!invId) {
-      const existing = await store._db.execute({
-        sql: "SELECT id FROM flow_node_invocations WHERE flow_id = ? LIMIT 1",
-        args: [flowId],
-      });
-      invId = existing.rows[0]?.id ?? randomUUID();
-      if (!existing.rows.length) {
-        await store._db.execute({
-          sql: `INSERT INTO flow_node_invocations (id, flow_id, node_id, visit_seq, invoked_at)
-                VALUES (?, ?, 'NODE', 1, ?) ON CONFLICT(id) DO NOTHING`,
-          args: [invId, flowId, at],
-        });
-      }
-    }
-    await store._db.execute({
-      sql: `INSERT INTO flow_node_executions (id, invocation_id, entered_at, exited_at, kind)
-            VALUES (?, ?, ?, ?, 'legacy') ON CONFLICT(id) DO NOTHING`,
-      args: [executionId, invId, at, at],
-    });
-  }
-}
-
-async function insertRawRow(store, { id = randomUUID(), flowId = "f1", failedAt = Date.now(), failureSummary = "err", invocationId = null, executionId = null, errorType = null, seedParent = true } = {}) {
-  if (seedParent) {
-    const { rows } = await store._db.execute({
-      sql: "SELECT 1 FROM flow_runs WHERE flow_id = ?",
-      args: [flowId],
-    });
-    if (!rows.length) await seedFlowRun(store, { flowId });
-  }
-  await seedExecutionChain(store, { flowId, invocationId, executionId, at: failedAt });
+async function insertRawRow(store, { id = randomUUID(), flowId = "f1", failedAt = Date.now(), failureSummary = "err", invocationId = null, executionId = null, errorType = null } = {}) {
   await store._db.execute({
     sql: `INSERT INTO failure_events (id, flow_id, failed_at, failure_summary, invocation_id, execution_id, error_type)
           VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -289,12 +221,11 @@ describe("deriveFailureContext — via get()", () => {
     store.close();
   });
 
-  test("a failure row cannot reference a flow_runs row that does not exist", async () => {
+  test("pipeline_id is null when flow_runs has no matching row", async () => {
     const store = await makeStore();
-    await assert.rejects(
-      () => insertRawRow(store, { flowId: "no-such-flow", seedParent: false }),
-      /FOREIGN KEY constraint failed/,
-    );
+    const id = await insertRawRow(store, { flowId: "no-such-flow" });
+    const row = await store.get(id);
+    assert.equal(row.pipeline_id, null);
     store.close();
   });
 
@@ -370,17 +301,10 @@ describe("computeResolvedAt — via get()", () => {
   // same-flow-completion only.
   async function seedChildOutcome(store, { pipelineId = "pipe", nodeId = "SUBMIT", subflowKey = "job-1", invokedAt = Date.now(), childStatus = "succeeded", childUpdatedAt = Date.now() }) {
     await ensureInvocationsTable(store);
-    const parentFlowId = randomUUID();
-    await seedFlowRun(store, { flowId: parentFlowId, pipelineId });
-    await store._db.execute({
-      sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
-            VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-      args: [`${pipelineId}::${nodeId}`, `${pipelineId}::${nodeId}`, childUpdatedAt, childUpdatedAt],
-    });
     const parentInvocationId = randomUUID();
     await store._db.execute({
       sql: `INSERT INTO flow_node_invocations (id, flow_id, pipeline_id, node_id, subflow_key, invoked_at) VALUES (?, ?, ?, ?, ?, ?)`,
-      args: [parentInvocationId, parentFlowId, pipelineId, nodeId, subflowKey, invokedAt],
+      args: [parentInvocationId, randomUUID(), pipelineId, nodeId, subflowKey, invokedAt],
     });
     const childFlowId = randomUUID();
     await store._db.execute(`
@@ -463,13 +387,6 @@ describe("computeResolvedAt — via get()", () => {
     // flow_runs row with a parent_invocation_id pointing at the parent's
     // per-item dispatch of "SUBMIT" with subflowKey "job-1".
     await seedFlowRun(store, { flowId: failingFlowId, status: "failed" });
-    const parentFlowId = randomUUID();
-    await seedFlowRun(store, { flowId: parentFlowId, status: "running" });
-    await store._db.execute({
-      sql: `INSERT INTO flow_node_invocations (id, flow_id, node_id, visit_seq, invoked_at)
-            VALUES (?, ?, 'SUBMIT', 1, ?)`,
-      args: [parentInvocationId, parentFlowId, Date.now()],
-    });
     await store._db.execute({
       sql: `UPDATE flow_runs SET parent_invocation_id = ? WHERE flow_id = ?`,
       args: [parentInvocationId, failingFlowId],
@@ -786,7 +703,6 @@ async function ensureInvocationsTable(store) {
 
 async function seedInvocation(store, { id, flowId = "f1", nodeId = "NODE", subflowKey = null, invokedAt = Date.now() }) {
   await ensureInvocationsTable(store);
-  await seedFlowRun(store, { flowId });
   await store._db.execute({
     sql: `INSERT INTO flow_node_invocations (id, flow_id, node_id, subflow_key, invoked_at) VALUES (?, ?, ?, ?, ?)`,
     args: [id, flowId, nodeId, subflowKey, invokedAt],

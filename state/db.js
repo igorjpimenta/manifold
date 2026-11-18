@@ -18,7 +18,6 @@ export { resolveStorePaths } from './paths.js';
 // process shutdown or on a per-test file that nobody else shares.
 export async function openDb(dbPath, { readonly = false } = {}) {
   const client = createClient({ url: `file:${dbPath}` });
-  await client.execute("PRAGMA foreign_keys = ON");
   if (!readonly) {
     await client.execute("PRAGMA busy_timeout = 30000");
     await client.execute("PRAGMA journal_mode = WAL");

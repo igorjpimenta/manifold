@@ -1,4 +1,4 @@
-// Per-run / per-pipeline cost aggregation backed by runtime.sqlite::cost_by_call.
+// Per-run / per-pipeline cost aggregation backed by ops.sqlite::cost_by_call.
 // The hook writer inserts one row per LLM call with full metadata (flow_id,
 // node_id, item_key, model, tokens, cost_total) so all aggregations are
 // single SQL queries rather than JSONL walks.
@@ -7,7 +7,7 @@
 // bespoke @libsql/client call — connections are cached per (dbPath, readonly)
 // process-wide (see db.js) and reused across calls instead of opened+closed
 // on every invocation, and shared with any other reader of the same file
-// (e.g. state/node-cost.js's cost reader) instead of each keeping its
+// (e.g. state/node-cost.js's ops.sqlite reader) instead of each keeping its
 // own redundant connection. The path mirrors telemetry/store.js's
 // DEFAULT_DB_PATH so cost.js stays in sync with where telemetry writes — if
 // telemetry ever moves its file, update both.
@@ -15,12 +15,10 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { getSharedDb, resolveStorePaths } from "../state/db.js";
+import { getSharedDb } from "../state/db.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 
-function defaultDbPath() {
-  return resolveStorePaths().runtimeDb;
-}
+const OPS_DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
 
 function getClient(dbPath) {
   return getSharedDb(dbPath, { readonly: true });
@@ -46,7 +44,7 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
     bySession: {},
   };
 
-  const dbPath = _dbPath ?? defaultDbPath();
+  const dbPath = _dbPath ?? OPS_DB_PATH;
   if (!existsSync(dbPath)) return result;
 
   const { client } = await getClient(dbPath);
@@ -167,7 +165,7 @@ export async function costForPipeline(runs, pipelineId, { sinceMs = null, untilM
   const flowIds = mine.map((r) => r.flowId).filter(Boolean);
   if (flowIds.length === 0) return empty;
 
-  const dbPath = _dbPath ?? defaultDbPath();
+  const dbPath = _dbPath ?? OPS_DB_PATH;
   if (!existsSync(dbPath)) return empty;
 
   const { client } = await getClient(dbPath);
@@ -412,7 +410,7 @@ export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null
   const flowIds = [...flowToPipeline.keys()];
   if (flowIds.length === 0) return empty;
 
-  const dbPath = _dbPath ?? defaultDbPath();
+  const dbPath = _dbPath ?? OPS_DB_PATH;
   if (!existsSync(dbPath)) {
     // DB absent: still return pipeline entries derived purely from the runs list,
     // all with zero cost (active-in-window gate still applies for run counts).

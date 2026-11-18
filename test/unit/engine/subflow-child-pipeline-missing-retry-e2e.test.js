@@ -109,11 +109,10 @@ async function makeHarness() {
   assert.ok(loaded.has("test_incident_parent::SCORE"), "sanity: loader minted the synthetic child pipeline");
   const pipelinesRef = { value: loaded };
 
-  const dbPath = tmpPath("incident-e2e");
-  const runStore = await createRunStore({ dbPath });
-  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
+  const runStore = await createRunStore({ dbPath: tmpPath("incident-e2e-runs") });
+  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("incident-e2e-execs"));
   sharedNodeExecutionsStore = nodeExecutionsStore;
-  const failureStore = await createFailureStore({ dbPath, nodeExecutionsStore });
+  const failureStore = await createFailureStore({ dbPath: tmpPath("incident-e2e-failures"), nodeExecutionsStore });
   const resumeParentRef = { resume: null };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, logger });
 

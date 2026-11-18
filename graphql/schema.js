@@ -140,7 +140,7 @@ export function createRootValue({
 
   async function queryApprovals() {
     try {
-      const db = await openDb(runtimeDbPath);
+      const db = await openDb(opsDbPath);
       await db.execute("PRAGMA busy_timeout = 30000");
       const { rows } = await db.execute(
         "SELECT id, flow_id, node, label, agent, created_at FROM queue_items WHERE status = 'pending' ORDER BY created_at DESC LIMIT 200",
@@ -155,7 +155,7 @@ export function createRootValue({
       }));
     } catch (err) {
       logger?.warn?.(`graphql: approvals query failed: ${err?.message ?? err}`);
-      noteDbFailure(err, { dbPath: runtimeDbPath, logger });
+      noteDbFailure(err, { dbPath: opsDbPath, logger });
       throw err;
     }
   }
@@ -219,7 +219,7 @@ export function createRootValue({
     const agentByItem = {};
     const labelByItem = {};
     try {
-      const db = await openDb(runtimeDbPath);
+      const db = await openDb(opsDbPath);
       await db.execute("PRAGMA busy_timeout = 30000");
       const q = await db.execute("SELECT id, label, agent FROM queue_items WHERE status = 'pending'");
       for (const r of q.rows) {

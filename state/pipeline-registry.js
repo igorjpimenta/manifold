@@ -174,18 +174,6 @@ async function _createStore(dbPath) {
     }
     const id = randomUUID();
     queries.push({
-      sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
-            VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-      args: [pipelineId, pipelineId, now, now],
-    });
-    if (pipeline._parentPipelineId) {
-      queries.push({
-        sql: `INSERT INTO pipelines (id, name, created_at, updated_at)
-              VALUES (?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`,
-        args: [pipeline._parentPipelineId, pipeline._parentPipelineId, now, now],
-      });
-    }
-    queries.push({
       sql: `INSERT INTO pipeline_versions
               (id, pipeline_id, kind, allow_concurrent, is_synthetic, parent_pipeline_id, source_path, content_hash, registered_at, retired_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
@@ -223,14 +211,6 @@ async function _createStore(dbPath) {
 
   // See _reconcileOnePipeline's comment — same deferred-write pattern.
   async function _reconcileOneNode(pipelineVersionId, pipelineId, nodeName, node, now, queries) {
-    // The runtime node name is the attribution key the engine writes
-    // (flow_node_invocations, node_health, lineage, telemetry), so it must
-    // exist before the first turn runs — register it on every reconcile,
-    // including a content-green one.
-    queries.push({
-      sql: `INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)`,
-      args: [pipelineId, nodeName, now],
-    });
     const hash = nodeContentHash(node);
     const active = await _activeNodeRow(pipelineId, nodeName);
     if (active && active.content_hash === hash) return;

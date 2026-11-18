@@ -27,9 +27,6 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as runtimeSchema from "./schema.js";
 import * as opsSchema from "./schema.ops.js";
-import { mergeOpsTables } from "./ops-merge.js";
-import { SESSION_KEYS_FROM_ROWS_SQL } from "./session-keys.js";
-import { BACKFILL_ATTRIBUTION_SQL, BACKFILL_LEGACY_BRANCH_ITEMS_SQL } from "./attribution-registries.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, "..");
@@ -51,43 +48,17 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
   const sqlite = new Database(dbPath);
   try {
     sqlite.exec("PRAGMA journal_mode = WAL;");
-    // Snapshot rebuilds copy rows that predate the constraints (SQLite cannot
-    // add an FK in place), and drizzle wraps every snapshot in one
-    // transaction — a PRAGMA inside it is a no-op, so the posture has to be
-    // set here, around the whole run. Enforcement resumes before the handle
-    // closes; opening a migrated file never re-validates existing rows.
-    sqlite.exec("PRAGMA foreign_keys = OFF;");
+    sqlite.exec("PRAGMA foreign_keys = ON;");
     // 30000 to match the house busy posture (state/db.js), not winch's
     // 5000 — the contended moment is a second process mid-migration.
     sqlite.exec("PRAGMA busy_timeout = 30000;");
     migrate(drizzle(sqlite, { schema: SCHEMAS.get(migrationsFolder) ?? {} }), { migrationsFolder });
-    sqlite.exec("PRAGMA foreign_keys = ON;");
   } catch (err) {
     throw new Error(
       `migrate: ${migrationsFolder} snapshot failed on ${dbPath}: ${err?.message ?? err}`,
     );
   } finally {
     sqlite.close();
-  }
-  if (migrationsFolder === RUNTIME_MIGRATIONS_FOLDER) {
-    mergeOpsTables({ runtimeDbPath: dbPath, logger });
-    // The registry must hold every key already referenced before the FKs
-    // are consulted; rows copied by mergeOpsTables carry keys of their own,
-    // so this runs after it rather than inside the migration snapshot.
-    const backfill = new Database(dbPath);
-    try {
-      const now = Date.now();
-      backfill.prepare(SESSION_KEYS_FROM_ROWS_SQL).run(now);
-      for (const sql of BACKFILL_ATTRIBUTION_SQL) backfill.prepare(sql).run(now);
-      const hasBranches = backfill
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'flow_branches'")
-        .get();
-      if (hasBranches) backfill.prepare(BACKFILL_LEGACY_BRANCH_ITEMS_SQL).run(now);
-    } catch (err) {
-      throw new Error(`migrate: sessions backfill failed on ${dbPath}: ${err?.message ?? err}`);
-    } finally {
-      backfill.close();
-    }
   }
   migratedPaths.add(dbPath);
   logger?.info?.(`migrate: snapshots current at ${dbPath}`);

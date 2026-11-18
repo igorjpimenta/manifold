@@ -9,7 +9,7 @@
 //   - api.runtime.lineage.recordTrigger / recordSpawn cross-plugin API
 //   - `openclaw lineage` CLI subcommands
 
-import { openStore, defaultDbPath } from "./store.js";
+import { openStore, DEFAULT_DB_PATH } from "./store.js";
 import { makeResolver } from "./resolver.js";
 import { registerCliCommands } from "./cli.js";
 import { resolveCost } from "./pricer.js";
@@ -34,7 +34,7 @@ export function getSharedResolver() {
 let PENDING_CALLS = [];
 
 export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
-  const dbPath = _dbPath ?? defaultDbPath();
+  const dbPath = _dbPath ?? DEFAULT_DB_PATH;
 
   const logger = api.logger;
 

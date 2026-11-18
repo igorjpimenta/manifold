@@ -6,7 +6,7 @@ import {
 import { currentCapUSD } from "./budget-alert.js";
 import {
   ATTR_JOIN, ATTR_ROOT_KIND, ATTR_ROOT_LABEL,
-  bootstrapForecast, hasFlowRuns, execAll, execGet,
+  bootstrapForecast, hasFlowsAttached, execAll, execGet,
 } from "./http-helpers.js";
 
 export function registerCostRoutes({ api, getStore, logger, json, bad, parseRange }) {
@@ -124,7 +124,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
         const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200);
         const pipelineId = url.searchParams.get("pipeline_id");
         const { where: rangeWhere, args } = parseRange(url.searchParams);
-        if (await hasFlowRuns(store._client)) {
+        if (await hasFlowsAttached(store._client)) {
           const where = ["c.flow_id IS NOT NULL", ...rangeWhere.map((w) => `c.${w}`)];
           if (pipelineId) { where.push("c.pipeline_id = ?"); args.push(pipelineId); }
           const sql = `
@@ -135,7 +135,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
                    datetime(MIN(c.ts)/1000, 'unixepoch', 'localtime') AS started_at,
                    MIN(c.ts) AS ts_first, MAX(c.ts) AS ts_last
             FROM cost_by_call c
-            LEFT JOIN flow_runs f ON f.flow_id = c.flow_id
+            LEFT JOIN flows.flow_runs f ON f.flow_id = c.flow_id
             WHERE ${where.join(" AND ")}
             GROUP BY c.flow_id ORDER BY ts_first DESC LIMIT ${limit}
           `;
@@ -389,7 +389,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
             FROM cost_by_call cbc ${ATTR_JOIN}
         )`;
 
-        const flowsAttached = await hasFlowRuns(store._client);
+        const flowsAttached = await hasFlowsAttached(store._client);
         const dims = {
           trigger: {
             sql: `SELECT root_kind AS raw_label, root_kind AS kind_for_label,
@@ -438,7 +438,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
                          COUNT(DISTINCT CASE WHEN f.status NOT IN ('succeeded','failed') AND f.status IS NOT NULL THEN c.flow_id END) AS other_runs,
                          COUNT(DISTINCT c.flow_id) AS total_runs
                   FROM ${ATTRIBUTED} c
-                  LEFT JOIN flow_runs f ON f.flow_id = c.flow_id
+                  LEFT JOIN flows.flow_runs f ON f.flow_id = c.flow_id
                   WHERE 1=1 ${w.replace(/\b(ts|cost_total|root_kind|root_label|model|provider|input_tokens|output_tokens|cache_read_tokens|cache_write_tokens|pipeline_id|flow_id|node_id|item_key|session_id|session_key|agent_id)\b/g, "c.$1")}
                   GROUP BY 1 ORDER BY cost DESC NULLS LAST LIMIT ${limit}`
               : `SELECT COALESCE(pipeline_id, '${UNATTRIBUTED_LABEL}') AS raw_label,

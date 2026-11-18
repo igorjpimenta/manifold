@@ -6,7 +6,6 @@ import os from "node:os";
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "../../../boot/flow-revival.js";
 import { _resetForTests as resetGlobalConcurrency } from "../../../engine/global-concurrency.js";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
-import { createRunStore } from "../../../state/run-store.js";
 import { drainDetachedResumes } from "../../../engine/admission-promotion-resume.js";
 
 // Polls until `check()` returns a truthy value — used by the real-store
@@ -59,26 +58,6 @@ function makeNodeExecutionsStoreFromFlows(flows) {
     getInvocation: () => null,
     listInvocationIdsForNode: () => [],
   };
-}
-
-function makeAdmission(dbPath, limit) {
-  const getLimit = typeof limit === "function" ? limit : () => limit;
-  const store = createAdmissionQueueStore({ dbPath, getLimit });
-  const runStore = createRunStore({ dbPath });
-  const admit = store.admit.bind(store);
-  return new Proxy(store, {
-    get(target, key) {
-      if (key === "admit") {
-        return async (args) => {
-          const runs = await runStore;
-          await runs.insert({ flowId: args.flowId, status: "running" });
-          return admit(args);
-        };
-      }
-      const value = target[key];
-      return typeof value === "function" ? value.bind(target) : value;
-    },
-  });
 }
 
 function makePipelines(defs = {}) {
@@ -293,7 +272,7 @@ describe("reviveOrphanFlows", () => {
       const pipelines = makePipelines({ p1: { nodes: { AGENT_NODE: { kind: "agent" } } } });
       const executor = makeExecutor();
       const dbPath = path.join(os.tmpdir(), `flow-revival-agent-slot-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       const runSlot = await admissionQueueStore.admit({ kind: "flow-start", flowId: flow.flowId });
@@ -586,7 +565,7 @@ describe("reviveOrphanFlows", () => {
       const store = makeStore();
       const executor = makeExecutor();
       const dbPath = path.join(os.tmpdir(), `flow-revival-admission-leak-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       const leaked = await admissionQueueStore.admit({ kind: "flow-start", flowId: terminalFlow.flowId });
@@ -622,7 +601,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [promotedFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-admission-leak-resume-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       const leaked = await admissionQueueStore.admit({ kind: "flow-start", flowId: terminalFlow.flowId });
@@ -651,7 +630,7 @@ describe("reviveOrphanFlows", () => {
       const store = makeStore();
       const executor = makeExecutor();
       const dbPath = path.join(os.tmpdir(), `flow-revival-admission-leak-queued-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "flow-start", flowId: busyFlow.flowId });
@@ -675,7 +654,7 @@ describe("reviveOrphanFlows", () => {
       const store = makeStore();
       const executor = makeExecutor();
       const dbPath = path.join(os.tmpdir(), `flow-revival-admission-no-leak-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "flow-start", flowId: runningFlow.flowId });
@@ -705,7 +684,7 @@ describe("reviveOrphanFlows", () => {
       const store = { ...makeStore(), cancel: async () => ({ cancelled: true }) };
       const executor = makeExecutor();
       const dbPath = path.join(os.tmpdir(), `flow-revival-admission-leak-midcancel-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       const leaked = await admissionQueueStore.admit({ kind: "flow-start", flowId: interruptedFlow.flowId });
@@ -735,7 +714,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [flow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-readmit-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       const result = await reviveOrphanFlows({
@@ -762,7 +741,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [flow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-readmit-full-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
       await admissionQueueStore.admit({ kind: "flow-start", flowId: "occupant" });
 
@@ -791,7 +770,7 @@ describe("reviveOrphanFlows", () => {
       const runStore = makeRunStore([], [queuedFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-fill-${randomUUID()}.sqlite`);
       let limit = 0;
-      const admissionQueueStore = makeAdmission(dbPath, () => limit);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => limit });
       await admissionQueueStore.ready();
       const row = await admissionQueueStore.admit({ kind: "flow-start", flowId: queuedFlow.flowId });
       assert.equal(row.status, "queued");
@@ -826,7 +805,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [stuckFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-stuck-admission-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       const admission = await admissionQueueStore.admit({ kind: "flow-start", flowId: stuckFlow.flowId });
@@ -849,7 +828,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [freshFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-stuck-admission-fresh-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "flow-start", flowId: freshFlow.flowId });
@@ -867,7 +846,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [runningFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-stuck-admission-healthy-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "flow-start", flowId: runningFlow.flowId });
@@ -895,7 +874,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [stuckFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-stuck-admission-agent-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "agent-dispatch", flowId: stuckFlow.flowId, nodeId: "AGENT_NODE" });
@@ -925,7 +904,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [stranded]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-retired-reap-promote-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       // The zombie: an admitted row of a kind nothing admits anymore,
@@ -957,7 +936,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [freshFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-retired-fresh-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "agent-dispatch", flowId: freshFlow.flowId, nodeId: "AGENT_NODE" });
@@ -980,7 +959,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [busyChild]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-stuck-admission-unrelated-wait-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "child-dispatch", flowId: busyChild.flowId });
@@ -1004,7 +983,7 @@ describe("reviveOrphanFlows", () => {
       const executor = makeExecutor();
       const runStore = makeRunStore([], [stuckFlow]);
       const dbPath = path.join(os.tmpdir(), `flow-revival-boot-stuck-admission-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 1);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
       await admissionQueueStore.ready();
 
       await admissionQueueStore.admit({ kind: "flow-start", flowId: stuckFlow.flowId });
@@ -1050,7 +1029,7 @@ describe("reviveOrphanFlows", () => {
       };
 
       const dbPath = path.join(os.tmpdir(), `flow-revival-concurrent-reconcile-${randomUUID()}.sqlite`);
-      const admissionQueueStore = makeAdmission(dbPath, 2);
+      const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 2 });
       await admissionQueueStore.ready();
       await admissionQueueStore.admit({ kind: "flow-start", flowId: slowFlow.flowId });
       await admissionQueueStore.admit({ kind: "flow-start", flowId: fastFlow.flowId });
