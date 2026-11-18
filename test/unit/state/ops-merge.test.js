@@ -10,7 +10,7 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { createClient } from "@libsql/client";
-import { migrateDatabase, OPS_MIGRATIONS_FOLDER, RUNTIME_MIGRATIONS_FOLDER } from "../../../state/migrate.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../../../state/migrate.js";
 import { mergeOpsTables } from "../../../state/ops-merge.js";
 
 function tmpPair() {
@@ -38,8 +38,9 @@ async function createLegacyOpsTables(client) {
     PRIMARY KEY (session_id, msg_id))`);
 }
 
+// No ops migration here: applying it would drop the moved tables, which is
+// the post-copy state. This fixture is the pre-copy file.
 async function seedOps(opsDb) {
-  await migrateDatabase({ dbPath: opsDb, migrationsFolder: OPS_MIGRATIONS_FOLDER });
   const client = createClient({ url: `file:${opsDb}` });
   await createLegacyOpsTables(client);
   await client.execute({
