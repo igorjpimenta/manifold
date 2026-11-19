@@ -132,8 +132,9 @@ function makeProposeLikeNode() {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("propose-e2e-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("propose-e2e-execs"));
+  const dbPath = tmpPath("propose-e2e");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, logger });

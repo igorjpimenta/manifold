@@ -23,8 +23,9 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("resume-trigger-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("resume-trigger-execs"));
+  const dbPath = tmpPath("resume-trigger");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
   const store = createStateStore({}, "test-owner", { runStore });
   return { runStore, nodeExecutionsStore, store };
 }
@@ -33,6 +34,7 @@ async function makeHarness() {
 // ("LOOP"), returning their childFlowIds.
 async function spawnChildren(harness, parentFlowId, count) {
   const { runStore, nodeExecutionsStore, store } = harness;
+  await runStore.insert({ flowId: parentFlowId, status: "running" });
   const ids = [];
   for (let i = 0; i < count; i++) {
     const { childFlowId } = await resolveOrCreateChild({
@@ -544,6 +546,9 @@ describe("flipToRunningAndResume — CAS-lost-after-admitted release drives resu
     const dbPath = path.join(os.tmpdir(), `child-resume-trigger-cas-lost-promote-${randomUUID()}.sqlite`);
     const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
     await admissionQueueStore.ready();
+    const seededRuns = createRunStore({ dbPath });
+    await seededRuns.insert({ flowId: "parent-flow", status: "blocked" });
+    await seededRuns.insert({ flowId: "other-flow", status: "queued" });
 
     const resumed = [];
     const result = await flipToRunningAndResume({
@@ -575,6 +580,9 @@ describe("admitAndSetRunning — CAS-lost-after-admitted release drives resumePr
     const dbPath = path.join(os.tmpdir(), `admit-and-set-running-cas-lost-promote-${randomUUID()}.sqlite`);
     const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 1 });
     await admissionQueueStore.ready();
+    const seededRuns = createRunStore({ dbPath });
+    await seededRuns.insert({ flowId: "target-flow", status: "running" });
+    await seededRuns.insert({ flowId: "other-flow", status: "queued" });
 
     const store = {
       setRunning: async () => {

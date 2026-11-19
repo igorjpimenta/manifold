@@ -33,14 +33,19 @@ function tmpDb(name) {
 
 async function seedOps(dbPath) {
   const db = createClient({ url: `file:${dbPath}` });
-  await db.execute(`CREATE TABLE queue_items (
-    id TEXT PRIMARY KEY, label TEXT NOT NULL, agent TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-    created_at INTEGER NOT NULL, flow_id TEXT, node TEXT
-  )`);
   await db.execute(`CREATE TABLE gate_state (
     id TEXT NOT NULL PRIMARY KEY DEFAULT 'singleton', locked INTEGER NOT NULL DEFAULT 0, day TEXT
   )`);
   await db.execute("INSERT INTO gate_state (id, locked) VALUES ('singleton', 0)");
+  db.close();
+}
+
+async function seedRuntime(dbPath) {
+  const db = createClient({ url: `file:${dbPath}` });
+  await db.execute(`CREATE TABLE queue_items (
+    id TEXT PRIMARY KEY, label TEXT NOT NULL, agent TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL, flow_id TEXT, node TEXT
+  )`);
   db.close();
 }
 
@@ -88,6 +93,7 @@ describe("registerGraphqlRoutes — registration", () => {
       runStore: { listRunsPage: async () => [], get: async () => null },
     });
     await seedOps(deps.opsDbPath);
+    await seedRuntime(deps.runtimeDbPath);
     registerGraphqlRoutes(deps);
     const res = createMockRes();
     await routes[0].handler(postReq({ query: "{ snapshot { failures { id } runningCount } }" }), res);

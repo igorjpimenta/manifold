@@ -11,6 +11,10 @@ import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createAdmissionQueueStore } from "../../../state/admission-queue-store.js";
+import { createRunStore } from "../../../state/run-store.js";
+import { createNodeExecutionsStore } from "../../../state/node-executions.js";
+import { flush as flushBatchWriter } from "../../../state/batch-writer.js";
+import { createFailureStore } from "../../../state/failure-store.js";
 import { getSharedDb } from "../../../state/db.js";
 
 function tmpDb() {
@@ -18,7 +22,23 @@ function tmpDb() {
 }
 
 function makeStore(limit, overrides = {}) {
-  return createAdmissionQueueStore({ dbPath: tmpDb(), getLimit: () => limit, ...overrides });
+  const dbPath = tmpDb();
+  const store = createAdmissionQueueStore({ dbPath, getLimit: () => limit, ...overrides });
+  const runStore = createRunStore({ dbPath });
+  const admit = store.admit.bind(store);
+  return new Proxy(store, {
+    get(target, key) {
+      if (key === "admit") {
+        return async (args) => {
+          const runs = await runStore;
+          await runs.insert({ flowId: args.flowId, status: "running" });
+          return admit(args);
+        };
+      }
+      const value = target[key];
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 describe("admission-queue-store — factory", () => {
@@ -345,7 +365,12 @@ describe("admission-queue-store — concurrent admit() under real contention", (
 describe("admission-queue-store — fillFreeSlots()", () => {
   test("promotes oldest queued rows into free capacity, up to the limit, and returns them", async () => {
     let limit = 1;
-    const store = createAdmissionQueueStore({ dbPath: tmpDb(), getLimit: () => limit });
+    const dbPath = tmpDb();
+    const store = createAdmissionQueueStore({ dbPath, getLimit: () => limit });
+    const runs = await createRunStore({ dbPath });
+    for (const flowId of ["held", "q1", "q2", "q3"]) {
+      await runs.insert({ flowId, status: "running" });
+    }
     await store.admit({ kind: "flow-start", flowId: "held" });
     const q1 = await store.admit({ kind: "flow-start", flowId: "q1" });
     await new Promise((r) => setTimeout(r, 5));
@@ -376,3 +401,136 @@ describe("admission-queue-store — fillFreeSlots()", () => {
   });
 });
 
+// ── cross-module contention on the shared connection ────────────────────────
+//
+// Two hazards the write serialization has to work around:
+//   1. A plain execute()/update()/batch() issued on a connection while a
+//      transaction() (or a raw BEGIN/COMMIT) is open fails instantly,
+//      bypassing busy_timeout, and can corrupt the holder's own commit.
+//   2. Across separate connections to the same file, concurrent calls queued
+//      on one client each pay close to the full busy_timeout instead of
+//      exiting as soon as the real lock clears.
+// admission-queue-store, run-store, batch-writer (node-executions' path) and
+// failure-store serialize through state/db.js's withSharedWrite. The other
+// getSharedDb() users — node-health-store, session-index, discuss-store,
+// pipeline-registry — are not on it yet.
+
+describe("admission-queue-store.js vs. other state/*.js writers — real cross-module contention on the SAME shared connection", () => {
+  test("concurrent admissionQueueStore admit()/release(), runStore CAS writes, nodeExecutionsStore batched writes, and failureStore writes against the same dbPath never throw a transaction-corruption error, and admission counts stay exact", async () => {
+    const dbPath = tmpDb();
+    // Constructed and awaited-ready SEQUENTIALLY, not concurrently — boot
+    // opens share one connection, and overlapping transactions on it fail
+    // ("cannot start a transaction within a transaction") regardless of
+    // which API opened them. Keeping boot sequential isolates what THIS
+    // test checks, which is LIVE-OPERATION contention after all stores
+    // are already up and their schemas exist.
+    const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 5 });
+    await admissionQueueStore.ready();
+    const runStore = createRunStore({ dbPath });
+    await runStore.ready();
+    const nodeExecutionsStore = createNodeExecutionsStore(dbPath);
+    await nodeExecutionsStore.ready();
+    // No explicit ready() on this store's Proxy — every method call already
+    // awaits its own async init internally on first use. A harmless read
+    // forces it to finish here, sequentially, before the concurrent round
+    // below.
+    const failureStore = createFailureStore({
+      dbPath,
+      nodeExecutionsStore: { getInvocation: () => null },
+    });
+    await failureStore.list({ limit: 1 });
+
+    // Real flow_runs rows for runStore's CAS writes to have a genuine
+    // target — an update against a nonexistent row would just return
+    // {applied:false} harmlessly, which wouldn't exercise the write path
+    // for real (no actual row-lock/UPDATE statement would need to run).
+    const flowIds = Array.from({ length: 20 }, () => randomUUID());
+    await Promise.all(flowIds.map((flowId) => runStore.insert({
+      flowId, ownerKey: "test", pipelineId: "p", revision: 0, status: "running",
+      lastStep: "__start__", stateJson: {},
+    })));
+
+    const errors = [];
+    const CALLER_COUNT = 30;
+    const ROUNDS = 5;
+
+    for (let round = 0; round < ROUNDS; round++) {
+      const ops = [];
+
+      // Category 1: real admission-queue-store.js transactions — the ONLY
+      // client.transaction() user in the codebase. Mix of admit + release
+      // so both the read-then-INSERT path and the delete-then-promote path
+      // (release()'s own internal SELECT + UPDATE inside the same
+      // transaction) both fire concurrently.
+      const admissions = [];
+      for (let i = 0; i < CALLER_COUNT; i++) {
+        ops.push(
+          admissionQueueStore.admit({ kind: "child-dispatch", flowId: flowIds[i % flowIds.length], nodeId: `N-${round}-${i}` })
+            .then((r) => { admissions.push(r); })
+            .catch((err) => errors.push(`admit: ${err?.message ?? err}`)),
+        );
+      }
+
+      // Category 2: real run-store.js single-shot CAS writes (db.update(),
+      // no held-open transaction) against real rows, fired at the exact
+      // same time as category 1's open transactions.
+      for (let i = 0; i < CALLER_COUNT; i++) {
+        const flowId = flowIds[i % flowIds.length];
+        ops.push(
+          runStore.casSetRunning(flowId, { expectedRevision: 0, lastStep: `STEP_${round}_${i}`, stateJson: {} })
+            .catch((err) => errors.push(`casSetRunning: ${err?.message ?? err}`)),
+        );
+      }
+
+      // Category 3: real node-executions.js writes — routed through
+      // batch-writer.js's enqueue()/db.batch(), the other real consumer of
+      // this shared connection. Deliberately not awaited individually
+      // (matches every real call site's own fire-and-forget contract) —
+      // collected via the returned promise-less call, then force-flushed
+      // below to guarantee the db.batch() round-trip actually overlaps
+      // this round's open admission-queue-store transactions instead of
+      // happening to land in some later, uncontended window.
+      for (let i = 0; i < CALLER_COUNT; i++) {
+        ops.push(
+          nodeExecutionsStore.write({
+            flowId: flowIds[i % flowIds.length], nodeId: `N${i}`, kind: "fresh",
+            enteredAt: Date.now(), exitedAt: Date.now(),
+          }).catch((err) => errors.push(`nodeExecutions.write: ${err?.message ?? err}`)),
+        );
+      }
+      // Force the batch-writer flush to actually run NOW, concurrently
+      // with the still-in-flight admit()/casSetRunning calls above, rather
+      // than waiting for its own flush timer (which could land after this
+      // round's transactions have all already committed, silently
+      // defeating the point of this test).
+      ops.push(flushBatchWriter(dbPath).catch((err) => errors.push(`flushBatchWriter: ${err?.message ?? err}`)));
+
+      // Category 4: real failure-store.js writes (recordEngineFailure ->
+      // upsertFailureRow) mixed into the same contention round — a burst
+      // of these must not corrupt an unrelated admission-queue-store
+      // release() transaction.
+      for (let i = 0; i < CALLER_COUNT; i++) {
+        ops.push(
+          failureStore.recordEngineFailure({
+            flowId: flowIds[i % flowIds.length], pipelineId: "p",
+            failureNode: `N${i}`, message: `contention failure ${round}-${i}`,
+          }).catch((err) => errors.push(`recordEngineFailure: ${err?.message ?? err}`)),
+        );
+      }
+
+      await Promise.all(ops);
+
+      // Release everything admitted this round so the pool doesn't fill up
+      // across rounds and start masking real admit() behavior as "queued"
+      // for a reason unrelated to what this test is actually checking.
+      await Promise.all(admissions.map((a) => admissionQueueStore.release(a.id).catch((err) => errors.push(`release: ${err?.message ?? err}`))));
+    }
+
+    assert.deepEqual(errors, [], "no cross-module transaction-corruption error (e.g. 'cannot commit transaction - SQL statements in progress') across 5 rounds of 30-way concurrent admission-queue-store + run-store + node-executions + failure-store writes on the same connection");
+
+    // Sanity: the pool is empty again (every admission from every round was
+    // released) — confirms admission-queue-store.js's own bookkeeping
+    // stayed internally consistent throughout, not just error-free.
+    assert.deepEqual(await admissionQueueStore._stats(), { admitted: 0, queued: 0 });
+  });
+});

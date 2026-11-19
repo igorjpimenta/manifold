@@ -125,8 +125,9 @@ function makeReplyLikeNode({ sendFailsInfraPersistently = false } = {}) {
 }
 
 async function makeHarness({ sendFailsInfraPersistently = false } = {}) {
-  const runStore = await createRunStore({ dbPath: tmpPath("reply-e2e-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("reply-e2e-execs"));
+  const dbPath = tmpPath("reply-e2e");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
   const resumeParentRef = { resume: null };
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
   const store = createStateStore({}, "test-owner", { runStore, nodeExecutionsStore, resumeParentRef, logger });

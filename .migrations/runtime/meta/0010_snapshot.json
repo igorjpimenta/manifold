@@ -1,0 +1,2562 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "10eaff27-07dc-4508-8333-8702f3822af6",
+  "prevId": "9fd7e891-08e5-4218-88dc-5555c76aa36e",
+  "tables": {
+    "cost_by_call": {
+      "name": "cost_by_call",
+      "columns": {
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "msg_id": {
+          "name": "msg_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ts": {
+          "name": "ts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "model": {
+          "name": "model",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "input_tokens": {
+          "name": "input_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "output_tokens": {
+          "name": "output_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cache_read_tokens": {
+          "name": "cache_read_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cache_write_tokens": {
+          "name": "cache_write_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "total_tokens": {
+          "name": "total_tokens",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_input": {
+          "name": "cost_input",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_output": {
+          "name": "cost_output",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_cache_read": {
+          "name": "cost_cache_read",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_cache_write": {
+          "name": "cost_cache_write",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cost_total": {
+          "name": "cost_total",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_key": {
+          "name": "session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "root_session_key": {
+          "name": "root_session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "root_kind": {
+          "name": "root_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "root_label": {
+          "name": "root_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "item_key": {
+          "name": "item_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_cost_ts": {
+          "name": "idx_cost_ts",
+          "columns": [
+            "ts"
+          ],
+          "isUnique": false
+        },
+        "idx_cost_root_key": {
+          "name": "idx_cost_root_key",
+          "columns": [
+            "root_session_key"
+          ],
+          "isUnique": false
+        },
+        "idx_cost_root_kind_ts": {
+          "name": "idx_cost_root_kind_ts",
+          "columns": [
+            "root_kind",
+            "ts"
+          ],
+          "isUnique": false
+        },
+        "idx_cost_pipeline_ts": {
+          "name": "idx_cost_pipeline_ts",
+          "columns": [
+            "pipeline_id",
+            "ts"
+          ],
+          "isUnique": false
+        },
+        "idx_cost_flow_node": {
+          "name": "idx_cost_flow_node",
+          "columns": [
+            "flow_id",
+            "node_id"
+          ],
+          "isUnique": false
+        },
+        "idx_cost_model_ts": {
+          "name": "idx_cost_model_ts",
+          "columns": [
+            "model",
+            "ts"
+          ],
+          "isUnique": false
+        },
+        "idx_cost_session": {
+          "name": "idx_cost_session",
+          "columns": [
+            "session_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "cost_by_call_session_key_sessions_session_key_fk": {
+          "name": "cost_by_call_session_key_sessions_session_key_fk",
+          "tableFrom": "cost_by_call",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "cost_by_call_root_session_key_sessions_session_key_fk": {
+          "name": "cost_by_call_root_session_key_sessions_session_key_fk",
+          "tableFrom": "cost_by_call",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "root_session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "cost_by_call_pipeline_id_pipelines_id_fk": {
+          "name": "cost_by_call_pipeline_id_pipelines_id_fk",
+          "tableFrom": "cost_by_call",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "cost_by_call_flow_id_flow_runs_flow_id_fk": {
+          "name": "cost_by_call_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "cost_by_call",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "cost_by_call_session_id_msg_id_pk": {
+          "columns": [
+            "session_id",
+            "msg_id"
+          ],
+          "name": "cost_by_call_session_id_msg_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "discuss_state": {
+      "name": "discuss_state",
+      "columns": {
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "messages_json": {
+          "name": "messages_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "turn_status": {
+          "name": "turn_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'idle'"
+        },
+        "active_turn_id": {
+          "name": "active_turn_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pending_json": {
+          "name": "pending_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "components_json": {
+          "name": "components_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        }
+      },
+      "indexes": {
+        "idx_discuss_updated": {
+          "name": "idx_discuss_updated",
+          "columns": [
+            "updated_at"
+          ],
+          "isUnique": false
+        },
+        "idx_discuss_state_unique": {
+          "name": "idx_discuss_state_unique",
+          "columns": [
+            "flow_id",
+            "item_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "discuss_state_flow_id_flow_runs_flow_id_fk": {
+          "name": "discuss_state_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "discuss_state",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "discuss_threads": {
+      "name": "discuss_threads",
+      "columns": {
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "gate_node_id": {
+          "name": "gate_node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "session_key": {
+          "name": "session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_discuss_threads_unique": {
+          "name": "idx_discuss_threads_unique",
+          "columns": [
+            "flow_id",
+            "gate_node_id",
+            "item_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "discuss_threads_flow_id_flow_runs_flow_id_fk": {
+          "name": "discuss_threads_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "discuss_threads",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "discuss_threads_session_key_sessions_session_key_fk": {
+          "name": "discuss_threads_session_key_sessions_session_key_fk",
+          "tableFrom": "discuss_threads",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "failure_events": {
+      "name": "failure_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "failed_at": {
+          "name": "failed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "failure_summary": {
+          "name": "failure_summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocation_id": {
+          "name": "invocation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "execution_id": {
+          "name": "execution_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_type": {
+          "name": "error_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_failures_flow": {
+          "name": "idx_failures_flow",
+          "columns": [
+            "flow_id"
+          ],
+          "isUnique": false
+        },
+        "idx_failures_failed_at": {
+          "name": "idx_failures_failed_at",
+          "columns": [
+            "\"failed_at\" desc"
+          ],
+          "isUnique": false
+        },
+        "idx_failures_invocation": {
+          "name": "idx_failures_invocation",
+          "columns": [
+            "invocation_id"
+          ],
+          "isUnique": false
+        },
+        "idx_failures_execution": {
+          "name": "idx_failures_execution",
+          "columns": [
+            "execution_id"
+          ],
+          "isUnique": true,
+          "where": "\"failure_events\".\"execution_id\" IS NOT NULL"
+        }
+      },
+      "foreignKeys": {
+        "failure_events_flow_id_flow_runs_flow_id_fk": {
+          "name": "failure_events_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "failure_events",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "failure_events_invocation_id_flow_node_invocations_id_fk": {
+          "name": "failure_events_invocation_id_flow_node_invocations_id_fk",
+          "tableFrom": "failure_events",
+          "tableTo": "flow_node_invocations",
+          "columnsFrom": [
+            "invocation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "failure_events_execution_id_flow_node_executions_id_fk": {
+          "name": "failure_events_execution_id_flow_node_executions_id_fk",
+          "tableFrom": "failure_events",
+          "tableTo": "flow_node_executions",
+          "columnsFrom": [
+            "execution_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "flow_admission_queue": {
+      "name": "flow_admission_queue",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "admitted_at": {
+          "name": "admitted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_admission_status": {
+          "name": "idx_admission_status",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "idx_admission_flow": {
+          "name": "idx_admission_flow",
+          "columns": [
+            "flow_id"
+          ],
+          "isUnique": false
+        },
+        "idx_admission_status_created": {
+          "name": "idx_admission_status_created",
+          "columns": [
+            "status",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "flow_admission_queue_flow_id_flow_runs_flow_id_fk": {
+          "name": "flow_admission_queue_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "flow_admission_queue",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "flow_events": {
+      "name": "flow_events",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "event_type": {
+          "name": "event_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "prev_step": {
+          "name": "prev_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "curr_step": {
+          "name": "curr_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "prev_status": {
+          "name": "prev_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "curr_status": {
+          "name": "curr_status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wait_kind": {
+          "name": "wait_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_flow_events_flow_id": {
+          "name": "idx_flow_events_flow_id",
+          "columns": [
+            "flow_id"
+          ],
+          "isUnique": false
+        },
+        "idx_flow_events_occurred_at": {
+          "name": "idx_flow_events_occurred_at",
+          "columns": [
+            "occurred_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "flow_events_flow_id_flow_runs_flow_id_fk": {
+          "name": "flow_events_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "flow_events",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "flow_node_executions": {
+      "name": "flow_node_executions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "invocation_id": {
+          "name": "invocation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entered_at": {
+          "name": "entered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "exited_at": {
+          "name": "exited_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'legacy'"
+        }
+      },
+      "indexes": {
+        "idx_fne_invocation": {
+          "name": "idx_fne_invocation",
+          "columns": [
+            "invocation_id"
+          ],
+          "isUnique": false
+        },
+        "idx_fne_exited": {
+          "name": "idx_fne_exited",
+          "columns": [
+            "exited_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "flow_node_executions_invocation_id_flow_node_invocations_id_fk": {
+          "name": "flow_node_executions_invocation_id_flow_node_invocations_id_fk",
+          "tableFrom": "flow_node_executions",
+          "tableTo": "flow_node_invocations",
+          "columnsFrom": [
+            "invocation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "flow_node_invocations": {
+      "name": "flow_node_invocations",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subflow_key": {
+          "name": "subflow_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "visit_seq": {
+          "name": "visit_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "invoked_at": {
+          "name": "invoked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "result_json": {
+          "name": "result_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "result_written_at": {
+          "name": "result_written_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "result_too_large_bytes": {
+          "name": "result_too_large_bytes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_invocations_flow": {
+          "name": "idx_invocations_flow",
+          "columns": [
+            "flow_id"
+          ],
+          "isUnique": false
+        },
+        "idx_invocations_node_subflow": {
+          "name": "idx_invocations_node_subflow",
+          "columns": [
+            "node_id",
+            "subflow_key"
+          ],
+          "isUnique": false
+        },
+        "idx_invocations_pipe_node": {
+          "name": "idx_invocations_pipe_node",
+          "columns": [
+            "pipeline_id",
+            "node_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "flow_node_invocations_flow_id_flow_runs_flow_id_fk": {
+          "name": "flow_node_invocations_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "flow_node_invocations",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "flow_runs": {
+      "name": "flow_runs",
+      "columns": {
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "owner_key": {
+          "name": "owner_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "''"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_step": {
+          "name": "last_step",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status_reason": {
+          "name": "status_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "state_json": {
+          "name": "state_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'{}'"
+        },
+        "wait_json": {
+          "name": "wait_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cancel_requested_at": {
+          "name": "cancel_requested_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "parent_invocation_id": {
+          "name": "parent_invocation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_pfr_status": {
+          "name": "idx_pfr_status",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false,
+          "where": "\"flow_runs\".\"ended_at\" IS NULL"
+        },
+        "idx_pfr_updated": {
+          "name": "idx_pfr_updated",
+          "columns": [
+            "\"updated_at\" desc"
+          ],
+          "isUnique": false
+        },
+        "idx_pfr_created": {
+          "name": "idx_pfr_created",
+          "columns": [
+            "\"created_at\" desc"
+          ],
+          "isUnique": false
+        },
+        "idx_pfr_parent_invocation": {
+          "name": "idx_pfr_parent_invocation",
+          "columns": [
+            "parent_invocation_id"
+          ],
+          "isUnique": true,
+          "where": "\"flow_runs\".\"parent_invocation_id\" IS NOT NULL"
+        },
+        "idx_flow_runs_pipeline_id": {
+          "name": "idx_flow_runs_pipeline_id",
+          "columns": [
+            "pipeline_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "flow_runs_parent_invocation_id_flow_node_invocations_id_fk": {
+          "name": "flow_runs_parent_invocation_id_flow_node_invocations_id_fk",
+          "tableFrom": "flow_runs",
+          "tableTo": "flow_node_invocations",
+          "columnsFrom": [
+            "parent_invocation_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "flow_runs_pipeline_id_pipelines_id_fk": {
+          "name": "flow_runs_pipeline_id_pipelines_id_fk",
+          "tableFrom": "flow_runs",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "flow_sessions": {
+      "name": "flow_sessions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_key": {
+          "name": "session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "branch_item_id": {
+          "name": "branch_item_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "spawned_at": {
+          "name": "spawned_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_flow_sessions_flow_id": {
+          "name": "idx_flow_sessions_flow_id",
+          "columns": [
+            "flow_id"
+          ],
+          "isUnique": false
+        },
+        "idx_flow_sessions_uniq": {
+          "name": "idx_flow_sessions_uniq",
+          "columns": [
+            "flow_id",
+            "session_key"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "flow_sessions_flow_id_flow_runs_flow_id_fk": {
+          "name": "flow_sessions_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "flow_sessions",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "flow_sessions_session_key_sessions_session_key_fk": {
+          "name": "flow_sessions_session_key_sessions_session_key_fk",
+          "tableFrom": "flow_sessions",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "gate_records": {
+      "name": "gate_records",
+      "columns": {
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "record_json": {
+          "name": "record_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "gate_records_flow_id_flow_runs_flow_id_fk": {
+          "name": "gate_records_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "gate_records",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "gate_records_flow_id_node_id_pk": {
+          "columns": [
+            "flow_id",
+            "node_id"
+          ],
+          "name": "gate_records_flow_id_node_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "harnesses": {
+      "name": "harnesses",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "model_health": {
+      "name": "model_health",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ref": {
+          "name": "ref",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "down_since": {
+          "name": "down_since",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "until_ms": {
+          "name": "until_ms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "probing": {
+          "name": "probing",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "strike_level": {
+          "name": "strike_level",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "strike_ended_at": {
+          "name": "strike_ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "node_health": {
+      "name": "node_health",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "blocked_by_flow_id": {
+          "name": "blocked_by_flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "resolved_via": {
+          "name": "resolved_via",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_node_health_one_active": {
+          "name": "idx_node_health_one_active",
+          "columns": [
+            "pipeline_id",
+            "node_id"
+          ],
+          "isUnique": true,
+          "where": "\"node_health\".\"status\" = 'blocked'"
+        },
+        "idx_node_health_pipeline": {
+          "name": "idx_node_health_pipeline",
+          "columns": [
+            "pipeline_id",
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "node_health_pipeline_id_pipelines_id_fk": {
+          "name": "node_health_pipeline_id_pipelines_id_fk",
+          "tableFrom": "node_health",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "node_health_blocked_by_flow_id_flow_runs_flow_id_fk": {
+          "name": "node_health_blocked_by_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "node_health",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "blocked_by_flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "pipeline_dirs": {
+      "name": "pipeline_dirs",
+      "columns": {
+        "harness": {
+          "name": "harness",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "path": {
+          "name": "path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "pipeline_dirs_harness_harnesses_id_fk": {
+          "name": "pipeline_dirs_harness_harnesses_id_fk",
+          "tableFrom": "pipeline_dirs",
+          "tableTo": "harnesses",
+          "columnsFrom": [
+            "harness"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "pipeline_node_versions": {
+      "name": "pipeline_node_versions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pipeline_version_id": {
+          "name": "pipeline_version_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_name": {
+          "name": "node_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "mode": {
+          "name": "mode",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "registered_at": {
+          "name": "registered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_pnv_lookup": {
+          "name": "idx_pnv_lookup",
+          "columns": [
+            "pipeline_id",
+            "node_name",
+            "registered_at"
+          ],
+          "isUnique": false
+        },
+        "idx_pnv_active": {
+          "name": "idx_pnv_active",
+          "columns": [
+            "pipeline_id",
+            "node_name"
+          ],
+          "isUnique": true,
+          "where": "\"pipeline_node_versions\".\"retired_at\" IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "pipeline_node_versions_pipeline_version_id_pipeline_versions_id_fk": {
+          "name": "pipeline_node_versions_pipeline_version_id_pipeline_versions_id_fk",
+          "tableFrom": "pipeline_node_versions",
+          "tableTo": "pipeline_versions",
+          "columnsFrom": [
+            "pipeline_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "pipeline_node_versions_pipeline_id_pipelines_id_fk": {
+          "name": "pipeline_node_versions_pipeline_id_pipelines_id_fk",
+          "tableFrom": "pipeline_node_versions",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "pipeline_versions": {
+      "name": "pipeline_versions",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "allow_concurrent": {
+          "name": "allow_concurrent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_synthetic": {
+          "name": "is_synthetic",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "parent_pipeline_id": {
+          "name": "parent_pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_path": {
+          "name": "source_path",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "registered_at": {
+          "name": "registered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "retired_at": {
+          "name": "retired_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_pv_lookup": {
+          "name": "idx_pv_lookup",
+          "columns": [
+            "pipeline_id",
+            "registered_at"
+          ],
+          "isUnique": false
+        },
+        "idx_pv_active": {
+          "name": "idx_pv_active",
+          "columns": [
+            "pipeline_id"
+          ],
+          "isUnique": true,
+          "where": "\"pipeline_versions\".\"retired_at\" IS NULL"
+        }
+      },
+      "foreignKeys": {
+        "pipeline_versions_pipeline_id_pipelines_id_fk": {
+          "name": "pipeline_versions_pipeline_id_pipelines_id_fk",
+          "tableFrom": "pipeline_versions",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
+        "pipeline_versions_parent_pipeline_id_pipelines_id_fk": {
+          "name": "pipeline_versions_parent_pipeline_id_pipelines_id_fk",
+          "tableFrom": "pipeline_versions",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "parent_pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "pipelines": {
+      "name": "pipelines",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "harness": {
+          "name": "harness",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_pipelines_harness_name": {
+          "name": "idx_pipelines_harness_name",
+          "columns": [
+            "harness",
+            "name"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "pipelines_harness_harnesses_id_fk": {
+          "name": "pipelines_harness_harnesses_id_fk",
+          "tableFrom": "pipelines",
+          "tableTo": "harnesses",
+          "columnsFrom": [
+            "harness"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "queue_items": {
+      "name": "queue_items",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent": {
+          "name": "agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "agent_emoji": {
+          "name": "agent_emoji",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'🤖'"
+        },
+        "trigger": {
+          "name": "trigger",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'manual'"
+        },
+        "cost_low": {
+          "name": "cost_low",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "cost_high": {
+          "name": "cost_high",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "brief": {
+          "name": "brief",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "model_chain": {
+          "name": "model_chain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pipeline": {
+          "name": "pipeline",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "node": {
+          "name": "node",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "token_estimate": {
+          "name": "token_estimate",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "decision": {
+          "name": "decision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pipeline_args": {
+          "name": "pipeline_args",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "enqueuer_session_key": {
+          "name": "enqueuer_session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_status": {
+          "name": "idx_status",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "idx_created_at": {
+          "name": "idx_created_at",
+          "columns": [
+            "\"created_at\" desc"
+          ],
+          "isUnique": false
+        },
+        "idx_flow_node": {
+          "name": "idx_flow_node",
+          "columns": [
+            "flow_id",
+            "node"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "queue_items_pipeline_id_pipelines_id_fk": {
+          "name": "queue_items_pipeline_id_pipelines_id_fk",
+          "tableFrom": "queue_items",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "queue_items_flow_id_flow_runs_flow_id_fk": {
+          "name": "queue_items_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "queue_items",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "queue_items_enqueuer_session_key_sessions_session_key_fk": {
+          "name": "queue_items_enqueuer_session_key_sessions_session_key_fk",
+          "tableFrom": "queue_items",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "enqueuer_session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "session_lineage": {
+      "name": "session_lineage",
+      "columns": {
+        "child_session_key": {
+          "name": "child_session_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "parent_session_key": {
+          "name": "parent_session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "root_session_key": {
+          "name": "root_session_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "root_kind": {
+          "name": "root_kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "root_label": {
+          "name": "root_label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pipeline_id": {
+          "name": "pipeline_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "flow_id": {
+          "name": "flow_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "node_id": {
+          "name": "node_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "item_key": {
+          "name": "item_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_lineage_root": {
+          "name": "idx_lineage_root",
+          "columns": [
+            "root_session_key"
+          ],
+          "isUnique": false
+        },
+        "idx_lineage_parent": {
+          "name": "idx_lineage_parent",
+          "columns": [
+            "parent_session_key"
+          ],
+          "isUnique": false
+        },
+        "idx_lineage_pipeline": {
+          "name": "idx_lineage_pipeline",
+          "columns": [
+            "pipeline_id"
+          ],
+          "isUnique": false
+        },
+        "idx_lineage_flow": {
+          "name": "idx_lineage_flow",
+          "columns": [
+            "flow_id"
+          ],
+          "isUnique": false
+        },
+        "idx_lineage_root_kind": {
+          "name": "idx_lineage_root_kind",
+          "columns": [
+            "root_kind"
+          ],
+          "isUnique": false
+        },
+        "idx_lineage_run": {
+          "name": "idx_lineage_run",
+          "columns": [
+            "run_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "session_lineage_child_session_key_sessions_session_key_fk": {
+          "name": "session_lineage_child_session_key_sessions_session_key_fk",
+          "tableFrom": "session_lineage",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "child_session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "session_lineage_parent_session_key_sessions_session_key_fk": {
+          "name": "session_lineage_parent_session_key_sessions_session_key_fk",
+          "tableFrom": "session_lineage",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "parent_session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "session_lineage_root_session_key_sessions_session_key_fk": {
+          "name": "session_lineage_root_session_key_sessions_session_key_fk",
+          "tableFrom": "session_lineage",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "root_session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "session_lineage_pipeline_id_pipelines_id_fk": {
+          "name": "session_lineage_pipeline_id_pipelines_id_fk",
+          "tableFrom": "session_lineage",
+          "tableTo": "pipelines",
+          "columnsFrom": [
+            "pipeline_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "session_lineage_flow_id_flow_runs_flow_id_fk": {
+          "name": "session_lineage_flow_id_flow_runs_flow_id_fk",
+          "tableFrom": "session_lineage",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "flow_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "sessions": {
+      "name": "sessions",
+      "columns": {
+        "session_key": {
+          "name": "session_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_sessions_first_seen": {
+          "name": "idx_sessions_first_seen",
+          "columns": [
+            "first_seen_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "tool_results": {
+      "name": "tool_results",
+      "columns": {
+        "session_key": {
+          "name": "session_key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "run_id": {
+          "name": "run_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "agent_id": {
+          "name": "agent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payload_json": {
+          "name": "payload_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tool_results_session_key_sessions_session_key_fk": {
+          "name": "tool_results_session_key_sessions_session_key_fk",
+          "tableFrom": "tool_results",
+          "tableTo": "sessions",
+          "columnsFrom": [
+            "session_key"
+          ],
+          "columnsTo": [
+            "session_key"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "tool_results_run_id_flow_runs_flow_id_fk": {
+          "name": "tool_results_run_id_flow_runs_flow_id_fk",
+          "tableFrom": "tool_results",
+          "tableTo": "flow_runs",
+          "columnsFrom": [
+            "run_id"
+          ],
+          "columnsTo": [
+            "flow_id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {
+      "idx_failures_failed_at": {
+        "columns": {
+          "\"failed_at\" desc": {
+            "isExpression": true
+          }
+        }
+      },
+      "idx_pfr_updated": {
+        "columns": {
+          "\"updated_at\" desc": {
+            "isExpression": true
+          }
+        }
+      },
+      "idx_pfr_created": {
+        "columns": {
+          "\"created_at\" desc": {
+            "isExpression": true
+          }
+        }
+      },
+      "idx_created_at": {
+        "columns": {
+          "\"created_at\" desc": {
+            "isExpression": true
+          }
+        }
+      }
+    }
+  }
+}

@@ -26,8 +26,8 @@ import {
   parse,
   validate,
 } from "graphql";
-import { failureEvents, flowRuns } from "../state/schema.js";
-import { queueItems, gateState } from "../state/schema.ops.js";
+import { failureEvents, flowRuns, queueItems } from "../state/schema.js";
+import { gateState } from "../state/schema.ops.js";
 import { getSharedDb } from "../state/db.js";
 import { objectType } from "./columns.js";
 import { noteDbFailure } from "../state/db-guard.js";
@@ -140,7 +140,7 @@ export function createRootValue({
 
   async function queryApprovals() {
     try {
-      const db = await openDb(opsDbPath);
+      const db = await openDb(runtimeDbPath);
       await db.execute("PRAGMA busy_timeout = 30000");
       const { rows } = await db.execute(
         "SELECT id, flow_id, node, label, agent, created_at FROM queue_items WHERE status = 'pending' ORDER BY created_at DESC LIMIT 200",
@@ -155,7 +155,7 @@ export function createRootValue({
       }));
     } catch (err) {
       logger?.warn?.(`graphql: approvals query failed: ${err?.message ?? err}`);
-      noteDbFailure(err, { dbPath: opsDbPath, logger });
+      noteDbFailure(err, { dbPath: runtimeDbPath, logger });
       throw err;
     }
   }
@@ -219,7 +219,7 @@ export function createRootValue({
     const agentByItem = {};
     const labelByItem = {};
     try {
-      const db = await openDb(opsDbPath);
+      const db = await openDb(runtimeDbPath);
       await db.execute("PRAGMA busy_timeout = 30000");
       const q = await db.execute("SELECT id, label, agent FROM queue_items WHERE status = 'pending'");
       for (const r of q.rows) {

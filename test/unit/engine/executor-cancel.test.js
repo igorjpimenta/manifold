@@ -99,14 +99,16 @@ function tmpPath(prefix) {
 }
 
 async function makeHarness() {
-  const runStore = await createRunStore({ dbPath: tmpPath("cancel-cascade-runs") });
-  const nodeExecutionsStore = await createNodeExecutionsStore(tmpPath("cancel-cascade-execs"));
+  const dbPath = tmpPath("cancel-cascade");
+  const runStore = await createRunStore({ dbPath });
+  const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
   const store = createStateStore({}, "test-owner", { runStore });
   return { runStore, nodeExecutionsStore, store };
 }
 
 async function spawnChild(harness, parentFlowId, subflowKey, { nodeId = "LOOP" } = {}) {
   const { store, runStore, nodeExecutionsStore } = harness;
+  await runStore.insert({ flowId: parentFlowId, status: "running", pipelineId: "p" });
   const { childFlowId } = await resolveOrCreateChild({
     flowId: parentFlowId, pipelineId: "p", nodeId, subflowKey,
     childPipelineId: "p::LOOP", initialState: {}, store, runStore, nodeExecutionsStore,
