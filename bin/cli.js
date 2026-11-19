@@ -758,6 +758,7 @@ function browserOpenCommand(url) {
 
 const USAGE = `usage: manifold <command>
 
+  serve [--pipelines-dir DIR]          boot the manifold app (API, executor, dashboard)
   serve --mcp stdio|http [--port N] [--host H] [--pipelines-dir DIR]
                                        serve the pipeline tools over MCP stdio or Streamable HTTP
                                        (stdio harness from MANIFOLD_HARNESS env only; agent+session stamped per call;
@@ -810,10 +811,19 @@ export async function runCli(argv) {
         fail(`manifold: --mcp must be stdio or http, got ${JSON.stringify(values.mcp)}`);
       }
       const modes = ["ws", "mcp"].filter((k) => values[k]);
-      if (modes.length !== 1) {
-        fail("usage: manifold serve (--ws | --mcp stdio|http) [--port N] [--host H]");
+      if (modes.length > 1) {
+        fail("usage: manifold serve [--pipelines-dir DIR] | --ws | --mcp stdio|http");
       }
       const logger = stderrLogger();
+      if (modes.length === 0) {
+        // No mode flag: the full app — stores, executor, pipelines watcher,
+        // revival, HTTP API and dashboard — as its own process. The harness
+        // adapter spawns exactly this and bridges agent turns over HTTP.
+        if (values["pipelines-dir"]) process.env.MANIFOLD_PIPELINES_DIR = values["pipelines-dir"];
+        const { serve } = await import("../server/serve.js");
+        await serve({ logger }).catch((err) => fail(`manifold serve: ${err?.message ?? err}`, 1));
+        return;
+      }
       const host = values.host ?? "127.0.0.1";
       const port = values.port ? Number(values.port) : undefined;
       if (port !== undefined && !(Number.isInteger(port) && port >= 1 && port <= 65535)) {

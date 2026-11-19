@@ -1,13 +1,14 @@
 # manifold
 
-LangGraph-style pipeline runtime for openclaw. Plugin id: `manifold`.
-Live installs land at `~/.openclaw/extensions/manifold/`; the source lives
-in the private repo `igorjpimenta/manifold`. This README is written
+LangGraph-style pipeline runtime. The engine runs as its own process
+(`manifold serve`: HTTP API, executor, dashboard, plus an MCP server for
+tools); the openclaw adapter (`plugins/openclaw/manifold`) starts it,
+supervises it, and bridges agent turns back into the gateway. This README is written
 for LLM agents doing engineering work in this plugin or building new
 pipelines that target it.
 
 **Source and install.** Install/update a release with
-`openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install`
+`openclaw plugins install npm:@igorjpimenta/manifold-openclaw@<version> --force --accept-capabilities`
 (see `RELEASING.md` for the release process).
 Development clone: `~/.dev/job/igorpimenta/manifold`. Story worktrees are
 created at `<clone>/.doppler/worktrees/<story>`, and each story ships as its

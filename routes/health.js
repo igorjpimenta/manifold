@@ -4,18 +4,19 @@
 // here instead of the harness status surface. `ok` is the AND of every
 // check: a degraded database reports ok:false with the failing file
 // named, never a blanket ok over silent rot. No harness contact.
-import os from "node:os";
-import path from "node:path";
 import { createRequire } from "node:module";
 import { checkDb } from "../state/db-health.js";
+import { resolveStorePaths } from "../state/paths.js";
 import { noteDbFailure } from "../state/db-guard.js";
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
 const require = createRequire(import.meta.url);
 const MANIFOLD_VERSION = require("../package.json").version;
 
-const RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-const OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
+// The app's own store home (MANIFOLD_DATA_DIR / MANIFOLD_*_DB), never a
+// harness default: the health answer must describe the files this process
+// actually reads.
+const DB_PATHS = () => resolveStorePaths();
 
 export function registerHealthRoutes({ api }) {
   api.registerHttpRoute({
@@ -33,7 +34,8 @@ export function registerHealthRoutes({ api }) {
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       const db = {};
       let ok = true;
-      for (const [name, dbPath] of [["runtime", RUNTIME_DB()], ["ops", OPS_DB()]]) {
+      const paths = DB_PATHS();
+      for (const [name, dbPath] of [["runtime", paths.runtimeDb], ["ops", paths.opsDb]]) {
         const check = checkDb(dbPath);
         db[name] = check.ok ? { ok: true, latencyMs: check.latencyMs } : { ok: false, error: check.error };
         if (!check.ok) {

@@ -2,7 +2,7 @@
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { registerGatewayReadiness, createReadinessState } from "../../../engine/gateway-readiness.js";
+import { registerGatewayReadiness, createReadinessState } from "../../../../../plugins/openclaw/manifold/gateway-readiness.js";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 

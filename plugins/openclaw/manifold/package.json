@@ -23,13 +23,15 @@
     "agent/tools/shared.js",
     "agent/tools/submit-draft.js",
     "agent/tools/submit-score.js",
+    "gateway-readiness.js",
     "hooks/score-tool-wake.js",
     "index.js",
     "meta.js",
     "openclaw.plugin.json",
     "run-turn.js",
     "session-keys.js",
-    "sessions.js"
+    "sessions.js",
+    "telemetry.js"
   ],
   "openclaw": {
     "extensions": [
