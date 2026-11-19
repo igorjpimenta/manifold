@@ -38,5 +38,13 @@
   },
   "bin": {
     "manifold": "bin/manifold.js"
+  },
+  "openclaw": {
+    "extensions": [
+      "./plugins/openclaw/manifold/index.js"
+    ],
+    "compat": {
+      "openclawMin": "2026.5.6"
+    }
   }
 }
