@@ -98,14 +98,16 @@ jobs:
         if: '!cancelled()'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         # `prepare` builds dashboard/dist before the tarball is packed.
-        run: npm publish --registry https://npm.pkg.github.com
+        run: npm publish --registry https://npm.pkg.github.com --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
 
       - name: Publish openclaw adapter to GitHub Packages
         if: '!cancelled()'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: cd plugins/openclaw/manifold && npm publish --registry https://npm.pkg.github.com
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: cd plugins/openclaw/manifold && npm publish --registry https://npm.pkg.github.com --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
 
       - name: Publish GitHub release
         if: '!cancelled()'
