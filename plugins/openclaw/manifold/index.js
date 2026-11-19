@@ -21,6 +21,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { wrapSubagentKeys } from "./session-keys.js";
 import { createRunTurn } from "./run-turn.js";
 import { registerManifoldMetaHook } from "./meta.js";
+import { registerTelemetryHooks } from "./telemetry.js";
 import { registerGatewayReadiness } from "./gateway-readiness.js";
 
 const DEFAULT_CORE_API_PORT = 7431;
@@ -56,6 +57,7 @@ export function buildCoreEnv({
     MANIFOLD_API_PORT: String(coreApiPort),
     MANIFOLD_TURN_URL: turnUrl,
     MANIFOLD_TURN_TOKEN: turnToken,
+    MANIFOLD_INGEST_TOKEN: turnToken,
     MANIFOLD_DASHBOARD_ENABLED: userCfg.dashboardEnabled === false ? "false" : "true",
     MANIFOLD_DASHBOARD_PORT: String(dashboardPort),
     MANIFOLD_DASHBOARD_HOST: dashboardHost,
@@ -177,6 +179,11 @@ export default definePluginEntry({
     const turnUrl = userCfg.turnUrl || `http://127.0.0.1:${gatewayPort}${TURN_PATH}`;
 
     registerManifoldMetaHook(api);
+    registerTelemetryHooks(api, {
+      ingestUrl: `http://127.0.0.1:${coreApiPort}/manifold/telemetry/event`,
+      token: turnToken,
+      logger: api.logger,
+    });
 
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
     const moduleState = { workingSubagent: null };

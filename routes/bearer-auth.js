@@ -28,14 +28,16 @@ function tokensEqual(a, b) {
  * (missing/non-Bearer scheme), "empty-token", "no-secret" (MANIFOLD_BEARER
  * unset — fail-closed), "no-match".
  */
-export function authorizeBearerRequest(req, { logger = null } = {}) {
+export function authorizeBearerRequest(req, { logger = null, secret: secretOverride = null } = {}) {
   const raw = req?.headers?.authorization ?? "";
   if (typeof raw !== "string" || !raw.toLowerCase().startsWith("bearer ")) {
     return { ok: false, reason: "no-bearer" };
   }
   const token = raw.slice(7).trim();
   if (!token) return { ok: false, reason: "empty-token" };
-  const secret = process.env.MANIFOLD_BEARER ?? "";
+  // A caller may pin its own secret (the telemetry ingest token the core
+  // mints for its adapter) without touching the operator-wide bearer.
+  const secret = secretOverride ?? process.env.MANIFOLD_BEARER ?? "";
   if (!secret) {
     if (!warnedNoSecret) {
       warnedNoSecret = true;

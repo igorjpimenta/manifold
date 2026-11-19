@@ -15,6 +15,8 @@ import { registerCliCommands } from "./cli.js";
 import { resolveCost } from "./pricer.js";
 import { checkBudget, initCapStore } from "./budget-alert.js";
 import { registerHttpRoutes } from "./http.js";
+import { applyTelemetryEvent } from "./ingest.js";
+import { authorizeBearerRequest, sendUnauthorized } from "../routes/bearer-auth.js";
 import { createEmitter } from "../events/emit.js";
 // Hoisted to module-level so every call's hook closures share the same
 // store/resolver. The SDK can call register() repeatedly (config reload,
@@ -88,143 +90,45 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     },
   });
 
-  // ── before_agent_start ─────────────────────────────────────────────────────
+  // ── Ingest ─────────────────────────────────────────────────────────────────
+  // Harnesses observe their own lifecycle; core decides what those
+  // observations mean. Adapters post semantic events (lineage.session,
+  // lineage.spawn, cost.usage) and ingest.js derives the rows.
+  const ingestToken = process.env.MANIFOLD_INGEST_TOKEN || process.env.MANIFOLD_BEARER || "";
 
-  api.on("before_agent_start", async (event, ctx) => {
-    const store = SHARED_STORE, resolver = SHARED_RESOLVER;
-    try {
-      if (!store || !resolver) return;
-      // Core `session`; the harness names these wire fields `sessionKey`.
-      const session = event?.sessionKey || ctx?.sessionKey;
-      if (!session) return;
-      const existing = await store.getLineage(session);
-      if (existing && existing.source === "spawn_hook") return;
-      const row = await resolver.resolve(session, { source: "start_hook" });
-      if (!row) return;
-      row.agent_id = row.agent_id || event?.agentId || ctx?.agentId || null;
-      if (ctx?.requesterSessionKey) row.parent_session_key = ctx.requesterSessionKey;
-      await store.upsertLineage(row);
-    } catch (err) {
-      logger.warn(`telemetry[before_agent_start]: ${err?.message ?? err}`);
-    }
-  });
-
-  // ── subagent_spawned ───────────────────────────────────────────────────────
-
-  api.on("subagent_spawned", async (event, ctx) => {
-    logger.info(`telemetry[subagent_spawned] FIRED child=${event?.childSessionKey ?? "?"}`);
-    const store = SHARED_STORE, resolver = SHARED_RESOLVER;
-    try {
-      if (!store || !resolver) return;
-      // Core `session`; the harness names this wire field `childSessionKey`.
-      const childSession = event?.childSessionKey;
-      const parentKey = ctx?.requesterSessionKey || null;
-      if (!childSession) return;
-
-      const row = (await resolver.resolve(childSession, { source: "spawn_hook" })) || {};
-      row.child_session_key = childSession;
-      row.parent_session_key = parentKey || row.parent_session_key || null;
-      row.agent_id = row.agent_id || event.agentId || null;
-
-      if (parentKey) {
-        const pChain = await resolver.walk(parentKey);
-        if (pChain.length) {
-          const pRoot = pChain[pChain.length - 1];
-          row.root_session_key = pRoot.key;
-          row.root_kind = pRoot.kind;
-          row.root_label = pRoot.rootLabel ?? pRoot.key;
-        }
+  api.registerHttpRoute({
+    path: "/manifold/telemetry/event",
+    auth: "plugin",
+    match: "exact",
+    handler: async (req, res) => {
+      if (req.method !== "POST") {
+        res.statusCode = 405;
+        res.setHeader("Allow", "POST");
+        res.end("method not allowed");
+        return true;
       }
-      row.kind = row.kind || "unknown";
-      row.root_kind = row.root_kind || row.kind;
-      row.root_session_key = row.root_session_key || childSession;
-      row.source = "spawn_hook";
-      await store.upsertLineage(row);
-    } catch (err) {
-      logger.warn(`telemetry[subagent_spawned]: ${err?.message ?? err}`);
-    }
-  });
-
-  // ── session_start ──────────────────────────────────────────────────────────
-
-  api.on("session_start", async (event, ctx) => {
-    logger.info(`telemetry[session_start] FIRED sid=${event?.sessionId ?? "?"} key=${(event?.sessionKey ?? ctx?.sessionKey ?? "?").slice(0, 80)}`);
-    const store = SHARED_STORE, resolver = SHARED_RESOLVER;
-    try {
-      if (!store || !resolver) return;
-      // Core `session`; the harness names these wire fields `sessionKey`.
-      const session = event?.sessionKey || ctx?.sessionKey;
-      if (!session) return;
-      const existing = await store.getLineage(session);
-      if (existing && existing.source === "spawn_hook") return;
-      const row = await resolver.resolve(session, { source: "session_start_hook" });
-      if (!row) return;
-      row.agent_id = row.agent_id || event.agentId || ctx?.agentId || null;
-      await store.upsertLineage(row);
-    } catch (err) {
-      logger.warn(`telemetry[session_start]: ${err?.message ?? err}`);
-    }
-  });
-
-  // ── before_message_write ───────────────────────────────────────────────────
-
-  api.on("before_message_write", async (event, ctx) => {
-    const hasCost = event?.message?.usage?.cost?.total != null;
-    const store = SHARED_STORE, resolver = SHARED_RESOLVER;
-    if (!hasCost) return;
-    try {
-      if (!store || !resolver) { logger.warn(`telemetry[bmw] store/resolver not ready`); return; }
-      const msg = event?.message;
-      if (!msg || typeof msg !== "object") return;
-      const usage = msg.usage || msg?.message?.usage;
-      if (!usage) return;
-      const provider = msg.provider ?? msg?.message?.provider ?? null;
-      const model = msg.model ?? msg?.message?.model ?? null;
-      const cost = resolveCost({ provider, model, usage });
-      if (!cost || typeof cost.total !== "number") return;
-
-      // Core `session`; the harness names these wire fields `sessionKey`.
-      const session = event.sessionKey ?? ctx?.sessionKey ?? null;
-      const sessionId = ctx?.sessionId ?? msg.sessionId ?? session ?? "unknown";
-      const msgId = msg.id ?? msg.messageId ?? `${sessionId}-${msg.timestamp ?? Date.now()}`;
-      const ts = parseTs(msg.timestamp) ?? Date.now();
-
-      let lineage = session ? await store.getLineage(session) : null;
-      if (!lineage && session) {
-        const row = await resolver.resolve(session, { source: "lazy_resolve" });
-        if (row) { await store.upsertLineage(row); lineage = row; }
+      const authz = authorizeBearerRequest(req, { logger, secret: ingestToken });
+      if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
+      let size = 0;
+      const chunks = [];
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 256 * 1024) { res.statusCode = 413; res.end("body too large"); return true; }
+        chunks.push(chunk);
       }
-
-      await store.insertCost({
-        session_id: sessionId,
-        msg_id: msgId,
-        ts,
-        provider, model,
-        input_tokens: usage.input ?? null,
-        output_tokens: usage.output ?? null,
-        cache_read_tokens: usage.cacheRead ?? null,
-        cache_write_tokens: usage.cacheWrite ?? null,
-        total_tokens: usage.totalTokens ?? usage.total ?? null,
-        cost_input: cost.input ?? null,
-        cost_output: cost.output ?? null,
-        cost_cache_read: cost.cacheRead ?? null,
-        cost_cache_write: cost.cacheWrite ?? null,
-        cost_total: cost.total,
-        session_key: session,
-        agent_id: lineage?.agent_id ?? ctx?.agentId ?? null,
-        root_session_key: lineage?.root_session_key ?? session,
-        root_kind: lineage?.root_kind ?? lineage?.kind ?? null,
-        root_label: lineage?.root_label ?? null,
-        pipeline_id: lineage?.pipeline_id ?? null,
-        flow_id: lineage?.flow_id ?? null,
-        node_id: lineage?.node_id ?? null,
-        item_key: lineage?.item_key ?? null,
+      let event;
+      try { event = JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}"); }
+      catch { res.statusCode = 400; res.end(JSON.stringify({ ok: false, error: "invalid json body" })); return true; }
+      const result = await applyTelemetryEvent(event, {
+        getStore: () => SHARED_STORE,
+        getResolver: () => SHARED_RESOLVER,
+        getBroadcast, logger, emit,
       });
-      try { await emit("cost.record.added", { costTotal: cost.total, flowId: lineage?.flow_id ?? null }); } catch {}
-      checkBudget({ store, logger, justWroteUsd: cost.total, notify: (payload) => getBroadcast?.()?.("plugin.manifold.budget.alert", payload) });
-    } catch (err) {
-      logger.warn(`telemetry[before_message_write] ERROR: ${err?.message ?? err}`);
-    }
+      res.statusCode = result.ok ? 202 : 400;
+      res.setHeader("Content-Type", "application/json");
+      res.end(JSON.stringify(result));
+      return true;
+    },
   });
 
   // ── HTTP routes ────────────────────────────────────────────────────────────

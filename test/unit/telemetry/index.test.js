@@ -10,58 +10,75 @@ import { registerTelemetry } from "../../../telemetry/index.js";
 function makeMockApi() {
   const handlers = {};
   const services = [];
+  const routes = {};
   return {
     _handlers: handlers,
     _services: services,
+    _routes: routes,
     logger: { info: () => {}, warn: () => {}, error: () => {} },
     on: (event, handler) => { handlers[event] = handler; },
     registerService: (svc) => services.push(svc),
-    registerHttpRoute: () => {},
+    registerHttpRoute: (spec) => { routes[spec.path] = spec; },
     registerCli: () => {},
   };
 }
 
-// A valid before_message_write event for a known provider/model so resolveCost
+process.env.MANIFOLD_INGEST_TOKEN = "test-ingest";
+
+// Post one canonical telemetry event through the ingest route, the way a
+// harness adapter does.
+async function ingest(api, payload) {
+  const route = api._routes["/manifold/telemetry/event"];
+  const req = {
+    method: "POST",
+    headers: { authorization: "Bearer test-ingest" },
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(payload)); },
+  };
+  const res = { statusCode: 0, setHeader() {}, end() {} };
+  await route.handler(req, res);
+  return res.statusCode;
+}
+
+// A canonical cost.usage event for a known provider/model so resolveCost
 // returns a non-null result and the insertion path runs to completion.
 function makeEvent(overrides = {}) {
   return {
-    sessionKey: `test-sk-${randomUUID()}`,
-    message: {
-      provider: "openrouter",
-      model: "deepseek/deepseek-v4-flash",
-      timestamp: Date.now(),
-      id: randomUUID(),
-      usage: { input: 1000, output: 500, cost: { total: 0.001 } },
-      ...overrides,
-    },
+    kind: "cost.usage",
+    session: `test-sk-${randomUUID()}`,
+    messageId: randomUUID(),
+    provider: "openrouter",
+    model: "deepseek/deepseek-v4-flash",
+    timestamp: Date.now(),
+    usage: { input: 1000, output: 500, cost: { total: 0.001 } },
+    ...overrides,
   };
 }
 
 // ── before_message_write → cost.record.added ───────────────────────────────────
 
-describe("before_message_write — cost.record.added broadcast", () => {
-  let bmwHandler;
+describe("telemetry ingest — cost.record.added broadcast", () => {
+  let ingestApi;
   const broadcastFn = mock.fn();
 
   before(async () => {
     const tmpPath = join(tmpdir(), `telemetry-broadcast-test-${randomUUID()}.sqlite`);
     const api = makeMockApi();
     registerTelemetry(api, { getBroadcast: () => broadcastFn, _dbPath: tmpPath });
-    bmwHandler = api._handlers["before_message_write"];
+    ingestApi = api;
     const svc = api._services.find(s => s.id === "lineage-service");
     await svc.start();
   });
 
   it("emits 'cost.record.added' when a cost record is inserted", async () => {
     broadcastFn.mock.resetCalls();
-    await bmwHandler(makeEvent(), {});
+    await ingest(ingestApi, makeEvent());
     const call = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.cost.record.added");
     assert.ok(call, "cost.record.added broadcast must fire");
   });
 
   it("payload includes a numeric costTotal > 0", async () => {
     broadcastFn.mock.resetCalls();
-    await bmwHandler(makeEvent(), {});
+    await ingest(ingestApi, makeEvent());
     const call = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.cost.record.added");
     assert.ok(call, "broadcast must fire");
     const { costTotal } = call.arguments[1];
@@ -71,16 +88,8 @@ describe("before_message_write — cost.record.added broadcast", () => {
 
   it("does NOT emit when event has no cost data (hasCost guard)", async () => {
     broadcastFn.mock.resetCalls();
-    const eventNoCost = {
-      sessionKey: `test-sk-${randomUUID()}`,
-      message: {
-        provider: "openrouter",
-        model: "deepseek/deepseek-v4-flash",
-        id: randomUUID(),
-        usage: { input: 1000, output: 500 }, // missing usage.cost.total
-      },
-    };
-    await bmwHandler(eventNoCost, {});
+    const eventNoCost = makeEvent({ usage: undefined });
+    await ingest(ingestApi, eventNoCost);
     const call = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.cost.record.added");
     assert.ok(!call, "must not broadcast when usage.cost.total is missing");
   });
@@ -90,7 +99,7 @@ describe("before_message_write — cost.record.added broadcast", () => {
     // known-models table — so broadcast still fires with costTotal == srcTotal.
     broadcastFn.mock.resetCalls();
     const eventUnknown = makeEvent({ provider: "unknown-provider", model: "unknown-model" });
-    await bmwHandler(eventUnknown, {});
+    await ingest(ingestApi, eventUnknown);
     const call = broadcastFn.mock.calls.find(c => c.arguments[0] === "plugin.cost.record.added");
     assert.ok(call, "broadcast must fire using pre-computed srcTotal");
     assert.ok(call.arguments[1].costTotal > 0, "costTotal comes from usage.cost.total");
@@ -98,24 +107,28 @@ describe("before_message_write — cost.record.added broadcast", () => {
 
   it("does NOT throw when getBroadcast is undefined", async () => {
     const api = makeMockApi();
-    let handler;
     const tmpPath = join(tmpdir(), `telemetry-broadcast-test-${randomUUID()}.sqlite`);
     registerTelemetry(api, { getBroadcast: undefined, _dbPath: tmpPath });
-    handler = api._handlers["before_message_write"];
-    await assert.doesNotReject(() => handler(makeEvent(), {}));
+    const svc = api._services.find(s => s.id === "lineage-service");
+    await svc.start();
+    await assert.doesNotReject(() => ingest(api, makeEvent()));
   });
 
   it("does NOT throw when getBroadcast returns null", async () => {
     const api = makeMockApi();
     const tmpPath = join(tmpdir(), `telemetry-broadcast-test-${randomUUID()}.sqlite`);
     registerTelemetry(api, { getBroadcast: () => null, _dbPath: tmpPath });
-    await assert.doesNotReject(() => api._handlers["before_message_write"](makeEvent(), {}));
+    const svc = api._services.find(s => s.id === "lineage-service");
+    await svc.start();
+    await assert.doesNotReject(() => ingest(api, makeEvent()));
   });
 
   it("does NOT throw when getBroadcast throws internally", async () => {
     const api = makeMockApi();
     const tmpPath = join(tmpdir(), `telemetry-broadcast-test-${randomUUID()}.sqlite`);
     registerTelemetry(api, { getBroadcast: () => { throw new Error("exploded"); }, _dbPath: tmpPath });
-    await assert.doesNotReject(() => api._handlers["before_message_write"](makeEvent(), {}));
+    const svc = api._services.find(s => s.id === "lineage-service");
+    await svc.start();
+    await assert.doesNotReject(() => ingest(api, makeEvent()));
   });
 });
