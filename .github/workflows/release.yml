@@ -94,6 +94,15 @@ jobs:
         if: '!cancelled()'
         run: npm run test:unit
 
+      - name: Authenticate GitHub Packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --registry alone does not bind a token: npm reads the credential
+        # from an //npm.pkg.github.com/:_authToken line.
+        run: |
+          echo "@igorjpimenta:registry=https://npm.pkg.github.com" >> "$HOME/.npmrc"
+          echo "//npm.pkg.github.com/:_authToken=$NODE_AUTH_TOKEN" >> "$HOME/.npmrc"
+
       - name: Publish core to GitHub Packages
         if: '!cancelled()'
         env:
