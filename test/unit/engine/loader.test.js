@@ -22,7 +22,7 @@ import { mkdir, writeFile, rm } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
-import { loadPipelines } from "../../../engine/loader.js";
+import { loadPipelines, createPipelinesLoader } from "../../../engine/loader.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -1915,3 +1915,59 @@ describe("registerSubflowChildren — proposalMeta propagation to synthetic chil
   });
 });
 
+describe("createPipelinesLoader — memoized single load", () => {
+  test("concurrent callers share one in-flight load; load() is invoked exactly once", async () => {
+    let calls = 0;
+    let resolveLoad;
+    const loadPromise = new Promise((resolve) => { resolveLoad = resolve; });
+    const fakeMap = new Map([["p1", { id: "p1" }]]);
+    const load = async () => {
+      calls += 1;
+      return loadPromise;
+    };
+    const pipelinesRef = { value: new Map() };
+    const ensurePipelinesLoaded = createPipelinesLoader("/fake/dir", null, pipelinesRef, { load });
+
+    // Mirrors manifold-loader and manifold-flow-revival both calling
+    // ensurePipelinesLoaded() before the underlying load has resolved.
+    const p1 = ensurePipelinesLoaded();
+    const p2 = ensurePipelinesLoaded();
+    assert.equal(calls, 1, "load() must only be invoked once even with concurrent callers");
+
+    resolveLoad(fakeMap);
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    assert.equal(r1, fakeMap);
+    assert.equal(r2, fakeMap);
+    assert.equal(pipelinesRef.value, fakeMap, "pipelinesRef must reflect the shared load's result");
+  });
+
+  test("a caller arriving after the load already resolved gets the cached result, no reload", async () => {
+    let calls = 0;
+    const fakeMap = new Map([["p1", { id: "p1" }]]);
+    const load = async () => { calls += 1; return fakeMap; };
+    const pipelinesRef = { value: new Map() };
+    const ensurePipelinesLoaded = createPipelinesLoader("/fake/dir", null, pipelinesRef, { load });
+
+    await ensurePipelinesLoaded();
+    const second = await ensurePipelinesLoaded();
+
+    assert.equal(calls, 1);
+    assert.equal(second, fakeMap);
+  });
+
+  test("integrates with the real loadPipelines to populate pipelinesRef from disk", async () => {
+    const { dir, cleanup } = await makeTempPipelinesDir();
+    try {
+      await mkdir(path.join(dir, "team_pipe"), { recursive: true });
+      await writeFile(path.join(dir, "team_pipe", "index.js"), VALID_MINIMAL_PIPELINE, "utf8");
+      const pipelinesRef = { value: new Map() };
+      const ensurePipelinesLoaded = createPipelinesLoader(dir, null, pipelinesRef);
+      const loaded = await ensurePipelinesLoaded();
+      assert.ok(loaded.has("test_minimal"));
+      assert.equal(pipelinesRef.value, loaded);
+    } finally {
+      await cleanup();
+    }
+  });
+});

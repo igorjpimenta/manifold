@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { flowStateEmitter } from "./events.js";
+import { flowStateEmitter } from "../../events.js";
 import { EventEmitter } from "node:events";
 
 // ── identity ───────────────────────────────────────────────────────────────────
@@ -15,7 +15,7 @@ describe("flowStateEmitter identity", () => {
   });
 
   it("same instance across imports (ESM cache dedup)", async () => {
-    const { flowStateEmitter: again } = await import("./events.js");
+    const { flowStateEmitter: again } = await import("../../events.js");
     assert.strictEqual(flowStateEmitter, again);
   });
 });
@@ -86,7 +86,7 @@ describe("listener cap", () => {
 
 // ── failureEmitter ────────────────────────────────────────────────────────────
 
-import { failureEmitter } from "./events.js";
+import { failureEmitter } from "../../events.js";
 
 describe("failureEmitter identity", () => {
   it("is an EventEmitter", () => {
@@ -98,7 +98,7 @@ describe("failureEmitter identity", () => {
   });
 
   it("same instance across imports (ESM cache dedup)", async () => {
-    const { failureEmitter: again } = await import("./events.js");
+    const { failureEmitter: again } = await import("../../events.js");
     assert.strictEqual(failureEmitter, again);
   });
 });
