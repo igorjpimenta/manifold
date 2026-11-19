@@ -165,7 +165,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
           client = c;
           runtimeClient = c.runtime ?? c;
           runtimeDbPath = c.runtimePath ?? runtimeDbPath;
-          api.logger.info("[manifold/budget] store ready at " + DB_PATH);
+          api.logger.info("[manifold/budget] store ready at " + (c.dbPath ?? DB_PATH));
           return c;
         })
         .catch((err) => {

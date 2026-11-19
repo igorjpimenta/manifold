@@ -51,7 +51,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     id: "budget-cap-store",
     start: async () => {
       try {
-        await initCapStore();
+        await initCapStore({ dbPath });
         logger.info(`telemetry: budget-cap store ready`);
       } catch (err) {
         logger.error(`telemetry: budget-cap store init failed: ${err?.message ?? err}`);

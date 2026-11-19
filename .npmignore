@@ -1,8 +1,10 @@
 # Pack rules, not git rules: npm pack falls back to .gitignore only when no
 # .npmignore exists, and .gitignore's `dist/` rule would strip the
-# prepare-built dashboard/dist — the artifact git-dependency installs
-# (this package's only distribution channel) depend on receiving. Mirrors
-# .gitignore minus `dist/`; keep the two lists in sync except for that rule.
+# prepare-built dashboard/dist every install needs. Mirrors .gitignore minus
+# `dist/`; keep the two lists in sync except for that rule.
+#
+# The openclaw adapter is its own package (@igorjpimenta/manifold-openclaw)
+# and the tests and workflows never ship.
 node_modules
 .doppler/
 .citmp/
@@ -11,3 +13,6 @@ node_modules
 *.local
 .vite
 tsconfig.tsbuildinfo
+test/
+plugins/
+.github/

@@ -2,9 +2,9 @@ name: Release
 
 # Tag pushes are the install contract (RELEASING.md): a tag named
 # YYYY.M.D[-beta.N] ships the version in package.json, verbatim.
-# This workflow verifies that contract and publishes the GitHub
-# release. It never touches npm (UNLICENSED, git tags only) and never
-# moves branches — a tag push is not a branch push.
+# This workflow verifies that contract, publishes both packages to GitHub
+# Packages (@igorjpimenta/manifold and its openclaw adapter) and the GitHub
+# release. It never moves branches — a tag push is not a branch push.
 #
 # Beta numbering starts at 1: the installer's strict CalVer parser
 # requires the sequence above zero, so a -beta.0 tag fails closed here
@@ -31,6 +31,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write  # create the GitHub release
+      packages: write  # publish @igorjpimenta/manifold + -openclaw
 
     steps:
       - uses: actions/checkout@v4
@@ -92,6 +93,19 @@ jobs:
       - name: unit tests
         if: '!cancelled()'
         run: npm run test:unit
+
+      - name: Publish core to GitHub Packages
+        if: '!cancelled()'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # `prepare` builds dashboard/dist before the tarball is packed.
+        run: npm publish --registry https://npm.pkg.github.com
+
+      - name: Publish openclaw adapter to GitHub Packages
+        if: '!cancelled()'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: cd plugins/openclaw/manifold && npm publish --registry https://npm.pkg.github.com
 
       - name: Publish GitHub release
         if: '!cancelled()'

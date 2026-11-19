@@ -7,14 +7,15 @@
   "type": "module",
   "exports": {
     ".": "./index.js",
-    "./errors": "./engine/executor-errors.js",
     "./elevation": "./elevation.js",
+    "./errors": "./engine/executor-errors.js",
+    "./package.json": "./package.json",
     "./routes/bearer-auth": "./routes/bearer-auth.js",
-    "./tool-handoff": "./state/tool-handoff.js",
+    "./state/batch-writer": "./state/batch-writer.js",
     "./state/db": "./state/db.js",
     "./state/paths": "./state/paths.js",
-    "./state/batch-writer": "./state/batch-writer.js",
-    "./state/schema": "./state/schema.js"
+    "./state/schema": "./state/schema.js",
+    "./tool-handoff": "./state/tool-handoff.js"
   },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",
@@ -22,7 +23,8 @@
     "test:unit": "./scripts/with-guard.sh node --experimental-test-module-mocks --test-timeout=60000 --test 'test/unit/**/*.test.js'",
     "test:integration": "./scripts/with-guard.sh node --test-timeout=60000 --test 'test/integration/*.test.js'",
     "db:generate": "drizzle-kit generate --config=drizzle.config.js && drizzle-kit generate --config=drizzle.config.ops.js",
-    "db:migrate": "drizzle-kit migrate --config=drizzle.config.js && drizzle-kit migrate --config=drizzle.config.ops.js"
+    "db:migrate": "drizzle-kit migrate --config=drizzle.config.js && drizzle-kit migrate --config=drizzle.config.ops.js",
+    "postinstall": "node scripts/link-core-self.mjs"
   },
   "dependencies": {
     "@igorjpimenta/oc-contracts": "git+https://github.com/igorjpimenta/oc-contracts.git#v1.0.1",

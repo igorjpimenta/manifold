@@ -11,22 +11,24 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
-      "pipelinesDir": {
-        "type": "string"
+      "apiPort": {
+        "type": "integer",
+        "minimum": 1024,
+        "maximum": 65535
       },
-      "ownerSessionKey": {
+      "coreBinary": {
         "type": "string"
       },
       "dashboardEnabled": {
         "type": "boolean"
       },
+      "dashboardHost": {
+        "type": "string"
+      },
       "dashboardPort": {
         "type": "integer",
         "minimum": 1024,
         "maximum": 65535
-      },
-      "dashboardHost": {
-        "type": "string"
       },
       "discuss": {
         "type": "object",
@@ -43,6 +45,15 @@
         "type": "integer",
         "minimum": 1,
         "description": "Shared ceiling for every flow-run concurrency mechanism \u2014 agent dispatch, subflow fan-out, and whole-flow-run concurrency alike (engine/global-concurrency.js). Default: 8."
+      },
+      "ownerSessionKey": {
+        "type": "string"
+      },
+      "pipelinesDir": {
+        "type": "string"
+      },
+      "turnUrl": {
+        "type": "string"
       }
     }
   }

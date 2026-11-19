@@ -15,8 +15,8 @@
 // gateway is up, so free after boot. A call refused anyway surfaces as an
 // ordinary error; it is not retried.
 
-import { GatewayHandoffNeeded, isRequestScopedSubagentError, fetchSessionError } from "../../../engine/executor-errors.js";
-import { waitForToolResult } from "../../../state/tool-handoff.js";
+import { GatewayHandoffNeeded, isRequestScopedSubagentError, fetchSessionError } from "@igorjpimenta/manifold/errors";
+import { waitForToolResult } from "@igorjpimenta/manifold/tool-handoff";
 
 // A lapsed agent.wait window answers with the same bare "timeout" status a
 // timed-out run gets — waitForRun drops endedAt, so the two can't be told

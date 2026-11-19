@@ -1,8 +1,7 @@
 // Unit tests for the public export surface declared in package.json.
 //
-// Consumers (oc-config, later stories) install this repo as the
-// `@igorjpimenta/manifold` git dependency and import ONLY through the
-// subpaths below — deep file paths are not a contract. This suite pins the
+// Consumers install `@igorjpimenta/manifold` from GitHub Packages and import
+// ONLY through the subpaths below — deep file paths are not a contract. This suite pins the
 // map itself: the exact subpath set, each target file's existence, and that
 // every subpath still imports through the package's own bare specifier
 // (Node package self-reference) yielding the symbols consumers were written
@@ -77,6 +76,10 @@ const PUBLIC_API = {
     file: "./state/batch-writer.js",
     exports: ["enqueue", "enqueueRaw", "flush", "flushAll"],
   },
+  // The manifest itself is reachable by name so a consumer can locate assets
+  // beside it (the adapter resolves the CLI entry it spawns this way). It
+  // exports no symbols; the import pass below skips it.
+  "./package.json": { file: "./package.json" },
   "./state/schema": {
     file: "./state/schema.js",
     exports: [
@@ -120,6 +123,7 @@ describe("public subpaths — import by bare specifier, expected symbols present
   registerHooks(openclawSdkHooks);
 
   for (const [subpath, { exports: names }] of Object.entries(PUBLIC_API)) {
+    if (!names) continue;
     it(`import('${specifierFor(subpath)}')`, async () => {
       const mod = await import(specifierFor(subpath));
       for (const name of names) {

@@ -5,8 +5,11 @@ is no CHANGELOG.md. The tag is the install contract: the live gateway and
 every consumer pin resolve to it, so the version is decided in the release PR
 before the tag is cut, never after.
 
-This repo is private and `@igorjpimenta/manifold` is UNLICENSED. It is
-never npm-published; a git tag is the only distribution channel.
+This repo is private and `@igorjpimenta/manifold` is UNLICENSED. Releases
+publish to GitHub Packages (`https://npm.pkg.github.com`): the core package
+`@igorjpimenta/manifold` and the openclaw adapter
+`@igorjpimenta/manifold-openclaw`, both at the tagged version. The git tag
+remains the release record and the version source of truth.
 
 ## Version
 
@@ -37,8 +40,9 @@ uninstallable by contract.
    then push the tag.
 5. The tag push fires the release workflow (`.github/workflows/release.yml`),
    which verifies the tag matches `package.json` verbatim, rejects `beta.0`,
-   runs the unit suite, and publishes the GitHub release with generated
-   notes. Edit the notes afterward to the hand-written shape below. Manual
+   runs the unit suite, publishes both packages to GitHub Packages, and
+   publishes the GitHub release with generated notes. Edit the notes
+   afterward to the hand-written shape below. Manual
    fallback (workflow down or re-publish after a notes edit):
    `gh release create <version> --title <version> --notes <notes>`.
 
@@ -54,19 +58,20 @@ counts are omitted; a consumer cannot act on them.
 
 ## Consumers of a release
 
-Live gateway (proven spec form — shorthand, pinned tag, unsafe flag for the
-scanner's `child_process` block):
+Live gateway (the openclaw adapter; it spawns `manifold serve` as a child):
 
-    openclaw plugins install git:igorjpimenta/manifold@<version> --force --dangerously-force-unsafe-install
+    openclaw plugins install npm:@igorjpimenta/manifold-openclaw@<version> --force --accept-capabilities
 
-then reload the plugin. Managed installs land under `~/.openclaw/git/`
-(resolve the exact path from `~/.openclaw/plugins/installs.json`,
-`installPath` for id `manifold`), never under `extensions/`. Build the
-dashboard there explicitly — managed installs pass `--ignore-scripts`, so
-`prepare` never runs there (`prepare` only covers npm and git-dependency
-consumers):
+then reload the plugin. The registry must resolve the `@igorjpimenta` scope
+to GitHub Packages and carry a token with `read:packages`, e.g. in
+`~/.npmrc`:
 
-    npm --prefix <installPath>/dashboard run build
+    @igorjpimenta:registry=https://npm.pkg.github.com
+    //npm.pkg.github.com/:_authToken=<token>
+
+The adapter resolves the core from its own dependency; the core package
+carries the dashboard build (`prepare` runs when the core is packed), so
+there is no post-install build step.
 
 oc-config consumers: bump the `#<version>` pins in the npm git-deps
 (`workspace/*`, `extensions/*`) and regen their lockfiles — one chore PR
