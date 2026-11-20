@@ -43,5 +43,8 @@
   },
   "dependencies": {
     "@igorjpimenta/manifold": "^2026.11.19-beta.2"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }
