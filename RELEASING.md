@@ -6,12 +6,14 @@ every consumer pin resolve to it, so the version is decided in the release PR
 before the tag is cut, never after.
 
 This repo is public and `@igorjpimenta/manifold` is UNLICENSED. Releases
-publish to GitHub Packages (`https://npm.pkg.github.com`) at the tagged
-version: the core package `@igorjpimenta/manifold` and the openclaw adapter
-`@igorjpimenta/manifold-openclaw`. Published packages inherit the
-repository's visibility, so both are public and consumers need only the
-scope line — same shape as winch. The git tag remains the release record
-and the version source of truth.
+publish to npmjs at the tagged version: the core package
+`@igorjpimenta/manifold` and the openclaw adapter
+`@igorjpimenta/manifold-openclaw`, both public (same shape as brayer).
+Auth is npm trusted publishing (OIDC): the workflow carries
+`id-token: write` and each package's npm settings list this repo's
+`release.yml` as a trusted publisher, so no token secret is needed and
+every publish ships provenance. The git tag remains the release
+record and the version source of truth.
 
 ## Version
 
@@ -64,10 +66,8 @@ Live gateway (the openclaw adapter; it spawns `manifold serve` as a child):
 
     openclaw plugins install npm:@igorjpimenta/manifold-openclaw@<version> --force --accept-capabilities
 
-then reload the plugin. The registry must resolve the `@igorjpimenta` scope
-to GitHub Packages (public package, no token needed):
-
-    @igorjpimenta:registry=https://npm.pkg.github.com
+then reload the plugin. The packages are public on npmjs — no registry
+configuration, no token.
 
 The adapter resolves the core from its own dependency; the core package
 carries the dashboard build (`prepare` runs when the core is packed), so

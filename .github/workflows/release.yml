@@ -2,9 +2,11 @@ name: Release
 
 # Tag pushes are the install contract (RELEASING.md): a tag named
 # YYYY.M.D[-beta.N] ships the version in package.json, verbatim.
-# This workflow verifies that contract, publishes both packages to GitHub
-# Packages (@igorjpimenta/manifold and its openclaw adapter) and the GitHub
-# release. It never moves branches — a tag push is not a branch push.
+# This workflow verifies that contract, publishes both packages to npmjs
+# (@igorjpimenta/manifold and its openclaw adapter, public) and the GitHub
+# release. Auth is npm trusted publishing: the runner's OIDC identity is
+# exchanged for a short-lived publish token, so there is no NPM_TOKEN. It
+# never moves branches — a tag push is not a branch push.
 #
 # Beta numbering starts at 1: the installer's strict CalVer parser
 # requires the sequence above zero, so a -beta.0 tag fails closed here
@@ -31,7 +33,7 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write  # create the GitHub release
-      packages: write  # publish @igorjpimenta/manifold + -openclaw
+      id-token: write  # npm trusted publishing (OIDC -> short-lived token)
 
     steps:
       - uses: actions/checkout@v4
@@ -94,28 +96,27 @@ jobs:
         if: '!cancelled()'
         run: npm run test:unit
 
-      - name: Configure GitHub Packages auth
+      - name: Configure npm auth
         uses: actions/setup-node@v4
         with:
           node-version: '25'
           cache: npm
-          registry-url: https://npm.pkg.github.com
-          scope: "@igorjpimenta"
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm >= 11.5.1; fail here, not mid-publish.
+      - run: node -e 'const v=require("child_process").execSync("npm --version").toString().trim().split(".").map(Number); if (v[0]<11 || (v[0]===11 && v[1]<5)) { throw new Error("npm "+v.join(".")+" < 11.5.1") }' 
 
-      - name: Publish core to GitHub Packages
+      - name: Publish core to npm
         if: '!cancelled()'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
         # `prepare` builds dashboard/dist before the tarball is packed.
-        run: npm publish --registry https://npm.pkg.github.com --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
+        run: npm publish --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
 
-      - name: Publish openclaw adapter to GitHub Packages
+      - name: Publish openclaw adapter to npm
         if: '!cancelled()'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: cd plugins/openclaw/manifold && npm publish --registry https://npm.pkg.github.com --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
+        run: cd plugins/openclaw/manifold && npm publish --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
 
       - name: Publish GitHub release
         if: '!cancelled()'
