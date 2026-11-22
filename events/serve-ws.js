@@ -16,7 +16,7 @@
 import http from "node:http";
 import { attachWsEndpoint, encodeWsFrame } from "./ws-frame.js";
 
-export const DEFAULT_WS_PORT = 38294;
+export const DEFAULT_WS_PORT = 44303;
 export const HISTORY_LIMIT = 200;
 
 export function startWsServer({ stream, port = null, host = "127.0.0.1", historyLimit = null, logger } = {}) {

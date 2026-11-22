@@ -24,8 +24,8 @@ import { registerManifoldMetaHook } from "./meta.js";
 import { registerTelemetryHooks } from "./telemetry.js";
 import { registerGatewayReadiness } from "./gateway-readiness.js";
 
-const DEFAULT_CORE_API_PORT = 7431;
-const DEFAULT_DASHBOARD_PORT = 7430;
+const DEFAULT_CORE_API_PORT = 44301;
+const DEFAULT_DASHBOARD_PORT = 44300;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 const DEFAULT_GATEWAY_PORT = 18789;
 const TURN_PATH = "/api/manifold/turn";

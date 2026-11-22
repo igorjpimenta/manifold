@@ -68,12 +68,12 @@ describe("adapter registration", () => {
 
 describe("buildCoreEnv", () => {
   const base = { baseEnv: { PATH: "/bin", HOME: "/home/u" } };
-  const common = { coreApiPort: 7431, turnUrl: "http://127.0.0.1:18789/api/manifold/turn", turnToken: "tok", dashboardPort: 7430, dashboardHost: "127.0.0.1" };
+  const common = { coreApiPort: 44301, turnUrl: "http://127.0.0.1:18789/api/manifold/turn", turnToken: "tok", dashboardPort: 44300, dashboardHost: "127.0.0.1" };
 
   it("carries the harness identity and the bridge credentials", () => {
     const env = buildCoreEnv({ userCfg: {}, ...common, ...base });
     assert.equal(env.MANIFOLD_HARNESS, "openclaw");
-    assert.equal(env.MANIFOLD_API_PORT, "7431");
+    assert.equal(env.MANIFOLD_API_PORT, "44301");
     assert.equal(env.MANIFOLD_TURN_URL, common.turnUrl);
     assert.equal(env.MANIFOLD_TURN_TOKEN, "tok");
     assert.equal(env.PATH, "/bin");

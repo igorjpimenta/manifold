@@ -13,7 +13,7 @@ import { createManifoldApp, DEFAULT_DASHBOARD_HOST, DEFAULT_DASHBOARD_PORT } fro
 import { createPipelineDirsStore } from "../state/pipeline-dirs.js";
 import { resolveStorePaths } from "../state/paths.js";
 
-export const DEFAULT_API_PORT = 7431;
+export const DEFAULT_API_PORT = 44301;
 export const DEFAULT_API_HOST = "127.0.0.1";
 
 function createLogger(prefix) {

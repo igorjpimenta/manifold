@@ -32,7 +32,7 @@ core runtime version alongside it.
 | `pipelinesDir` | `~/.openclaw/workspace/.pipelines` | directory to scan for pipeline definitions |
 | `ownerSessionKey` | `agent:main:explicit:manifold-owner` | session key scoping flow-run ownership |
 | `dashboardEnabled` | `true` | boot the read-only HTTP dashboard service |
-| `dashboardPort` / `dashboardHost` | `7430` / `127.0.0.1` | dashboard bind |
+| `dashboardPort` / `dashboardHost` | `44300` / `127.0.0.1` | dashboard bind |
 | `discuss.defaultAgent` | — | default agent for gate discuss sessions |
 | `globalConcurrency` | `8` | shared ceiling for agent dispatch, subflow fan-out, and flow-run concurrency |
 

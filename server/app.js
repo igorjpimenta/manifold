@@ -40,7 +40,7 @@ import { costForAllPipelines } from "../dashboard/cost.js";
 import { createPipelinesWatcher } from "../engine/pipelines-watcher.js";
 import { flushAll as flushBatchWriter } from "../state/batch-writer.js";
 import { invokeElevated as invokeElevatedLoopback } from "../elevation.js";
-import { createDialogServer } from "../events/ws-dialog.js";
+import { createDialogServer, DEFAULT_DIALOG_PORT } from "../events/ws-dialog.js";
 import { flowStateEmitter, gateEmitter } from "../events.js";
 import { createEmitter } from "../events/emit.js";
 import { createWsRunEventsListener } from "../events/ws-run-events.js";
@@ -66,9 +66,22 @@ import { setStateFile } from "../gates/paused-flows.js";
 const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 
 export const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
-export const DEFAULT_DASHBOARD_PORT = 7430;
+export const DEFAULT_DASHBOARD_PORT = 44300;
 export const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
-export const DEFAULT_DIALOG_PORT = 38295;
+
+// An auxiliary listener that cannot bind — a port another process holds —
+// must not take the engine down: the API, pipelines and telemetry stay live,
+// and the caller learns the service is off from the warning.
+export async function startOrWarn(logger, { label, address, start, stop }) {
+  try {
+    await start();
+    return true;
+  } catch (err) {
+    logger.warn(`${label}: failed to start on ${address}: ${err?.message ?? err}`);
+    try { await stop?.(); } catch {}
+    return false;
+  }
+}
 
 export function createManifoldApp({ host, config = {} } = {}) {
   if (!host?.logger) throw new Error("createManifoldApp: host.logger is required");
@@ -338,10 +351,12 @@ export function createManifoldApp({ host, config = {} } = {}) {
   registerTelemetry(routeHost, { getBroadcast, _dbPath: storePaths.opsDb });
 
   let _dialogServer = null;
+  const dialogHost = process.env.MANIFOLD_DIALOG_HOST ?? "127.0.0.1";
+  const dialogPort = Number(process.env.MANIFOLD_DIALOG_PORT) || DEFAULT_DIALOG_PORT;
   service("manifold-dialog", async () => {
-    _dialogServer = createDialogServer({
-      port: Number(process.env.MANIFOLD_DIALOG_PORT) || DEFAULT_DIALOG_PORT,
-      host: process.env.MANIFOLD_DIALOG_HOST ?? "127.0.0.1",
+    const server = createDialogServer({
+      port: dialogPort,
+      host: dialogHost,
       readFlow: (flowId) => readStore.get(flowId),
       resolveTarget: discussHandlers.resolveDiscussTarget,
       runTurn: async ({ flowId, session, agentId, gateNodeId, modelOverride, itemId, text, systemPrompt }) => {
@@ -367,7 +382,13 @@ export function createManifoldApp({ host, config = {} } = {}) {
       emit: emitCanonical,
       logger,
     });
-    await _dialogServer.start();
+    const up = await startOrWarn(logger, {
+      label: "manifold dialog ws",
+      address: `${dialogHost}:${dialogPort}`,
+      start: () => server.start(),
+      stop: () => server.stop(),
+    });
+    _dialogServer = up ? server : null;
   }, async () => {
     try { await _dialogServer?.stop(); } catch {}
     _dialogServer = null;
@@ -396,11 +417,12 @@ export function createManifoldApp({ host, config = {} } = {}) {
     });
     service("manifold-dashboard", async () => {
       dashboardBus.start();
-      try { await dashboardServer.start(); }
-      catch (err) {
-        logger.warn(`manifold dashboard: failed to start on ${dashboardHost}:${dashboardPort}: ${err?.message ?? err}`);
-        dashboardBus.stop();
-      }
+      await startOrWarn(logger, {
+        label: "manifold dashboard",
+        address: `${dashboardHost}:${dashboardPort}`,
+        start: () => dashboardServer.start(),
+        stop: () => { dashboardBus.stop(); },
+      });
     }, async () => {
       dashboardBus.stop();
       await dashboardServer.stop();

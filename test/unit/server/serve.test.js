@@ -9,10 +9,10 @@ import {
 } from "../../../server/serve.js";
 
 describe("resolveServeConfig", () => {
-  it("defaults the API to 7431 and the dashboard to 7430", () => {
+  it("defaults the API to 44301 and the dashboard to 44300", () => {
     const cfg = resolveServeConfig({ env: { MANIFOLD_DATA_DIR: "/tmp/manifold-cfg-test" } });
     assert.equal(cfg.apiPort, DEFAULT_API_PORT);
-    assert.equal(cfg.config.dashboardPort, 7430);
+    assert.equal(cfg.config.dashboardPort, 44300);
     assert.equal(cfg.apiHost, "127.0.0.1");
     assert.equal(cfg.config.dashboardEnabled, true);
   });
@@ -90,7 +90,7 @@ describe("createHttpRunTurn", () => {
 
 describe("createLocalElevation", () => {
   it("fails closed when the shared bearer is unset", async () => {
-    const elevate = createLocalElevation({ port: 7431, host: "127.0.0.1", token: null });
+    const elevate = createLocalElevation({ port: 44301, host: "127.0.0.1", token: null });
     const result = await elevate("/manifold/_elev/start", {});
     assert.equal(result.ok, false);
     assert.equal(result.status, 503);
@@ -100,7 +100,7 @@ describe("createLocalElevation", () => {
   it("loops back to this process with the bearer", async () => {
     let seen;
     const elevate = createLocalElevation({
-      port: 7431, host: "127.0.0.1", token: "shared",
+      port: 44301, host: "127.0.0.1", token: "shared",
       fetchImpl: async (url, init) => {
         seen = { url, init };
         return { ok: true, status: 200, text: async () => '{"ok":true}' };
@@ -108,7 +108,7 @@ describe("createLocalElevation", () => {
     });
     const result = await elevate("/manifold/_elev/start", { flowId: "f1" });
     assert.equal(result.ok, true);
-    assert.equal(seen.url, "http://127.0.0.1:7431/manifold/_elev/start");
+    assert.equal(seen.url, "http://127.0.0.1:44301/manifold/_elev/start");
     assert.equal(seen.init.headers.authorization, "Bearer shared");
   });
 });
