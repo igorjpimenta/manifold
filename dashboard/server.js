@@ -311,7 +311,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     // The bundle is built with vite base `/graph/`, so all HTML references
     // (assets, API client URLs) embed that prefix. We strip it here so the
     // route table below stays prefix-agnostic. This works two ways:
-    //   - Direct loopback: `127.0.0.1:7430/graph/...` arrives with the prefix.
+    //   - Direct loopback: `127.0.0.1:44300/graph/...` arrives with the prefix.
     //   - Behind `tailscale serve --set-path=/graph`: tailscale already strips
     //     the mount prefix before forwarding, so backend sees the unprefixed
     //     path and the `if` is a no-op.

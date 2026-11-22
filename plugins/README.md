@@ -106,7 +106,7 @@ claude mcp add manifold --env MANIFOLD_HARNESS=generic -- manifold serve --mcp s
 
 ## WS event stream
 
-`manifold serve --ws [--port N]` (default 38294) broadcasts the in-process
+`manifold serve --ws [--port N]` (default 44303) broadcasts the in-process
 event stream verbatim over WebSocket: `{"type":"welcome"}`, then
 `{"type":"history","events":[...]}` (replay, oldest-first, capped), then
 one `{"type":"event","event":{...}}` per entry. Track your own seen state —

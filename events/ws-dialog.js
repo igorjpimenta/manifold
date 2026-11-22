@@ -30,10 +30,10 @@ import { attachWsEndpoint, encodeWsFrame } from "./ws-frame.js";
 import { buildDiscussPrompt } from "../routes/discuss.js";
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
-// 7432 sits beside the API (7431) and dashboard (7430). 38295 is brayer's MCP
-// default, and a collision here costs the dialog socket on any host running
-// both engines.
-export const DEFAULT_DIALOG_PORT = 7432;
+// Every manifold listener sits in 743xx, a two-digit prefix no other engine
+// uses (openclaw 18xxx, winch 38xxx, brayer 39xxx), so a port collision can
+// only come from an explicit override. 38295 was brayer's MCP port.
+export const DEFAULT_DIALOG_PORT = 44302;
 
 function tokensEqual(a, b) {
   const ab = Buffer.from(a, "utf8");

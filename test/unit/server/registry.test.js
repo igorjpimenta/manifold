@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createRouteRegistry } from "../../../server/registry.js";
 
 function fakeReq(url, method = "GET") {
-  return { url, method, headers: { host: "127.0.0.1:7431" } };
+  return { url, method, headers: { host: "127.0.0.1:44301" } };
 }
 
 function fakeRes() {

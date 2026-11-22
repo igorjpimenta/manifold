@@ -66,7 +66,7 @@ import { setStateFile } from "../gates/paused-flows.js";
 const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 
 export const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
-export const DEFAULT_DASHBOARD_PORT = 7430;
+export const DEFAULT_DASHBOARD_PORT = 44300;
 export const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 
 // An auxiliary listener that cannot bind — a port another process holds —

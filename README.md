@@ -1070,7 +1070,7 @@ otherwise correctly registered.
 
 Mostly read-only web UI with one actuation endpoint
 (`POST /api/runs/:flowId/approve`) that resolves a blocked human-gate.
-Listens on `dashboardHost:dashboardPort` (default `127.0.0.1:7430`).
+Listens on `dashboardHost:dashboardPort` (default `127.0.0.1:44300`).
 Behind tailscale serve at `https://<tailnet>/graph/` when configured
 (`tailscale serve --set-path=/graph`).
 
@@ -1365,7 +1365,7 @@ openclaw manifold respond <flowId> "the answer"                # needs-info (fre
 # HTTP (what the dashboard sends)
 curl -X POST -H 'Content-Type: application/json' \
   -d '{"itemId":"<itemId>","decision":"approve"}' \
-  http://127.0.0.1:7430/api/runs/<flowId>/approve
+  http://127.0.0.1:44300/api/runs/<flowId>/approve
 ```
 
 `itemId` must match the `id` of an entry returned by the node's
@@ -1484,7 +1484,7 @@ with operator-supplied state* above.
     "pipelinesDir":      "~/.openclaw/workspace/.pipelines",   // discovery root
     "ownerSessionKey":   "agent:main:explicit:manifold-owner",
     "dashboardEnabled":  true,
-    "dashboardPort":     7430,
+    "dashboardPort":     44300,
     "dashboardHost":     "127.0.0.1"
   }
 }

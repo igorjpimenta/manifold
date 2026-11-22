@@ -69,7 +69,7 @@ describe("registerTelemetryHooks", () => {
     const seen = [];
     const api = makeApi();
     registerTelemetryHooks(api, {
-      ingestUrl: "http://127.0.0.1:7431/manifold/telemetry/event",
+      ingestUrl: "http://127.0.0.1:44301/manifold/telemetry/event",
       token: "secret",
       fetchImpl: async (url, init) => {
         seen.push({ url, init });
@@ -79,7 +79,7 @@ describe("registerTelemetryHooks", () => {
     api.handlers.subagent_spawned({ childSessionKey: "child" }, { requesterSessionKey: "p" });
     await new Promise((r) => setTimeout(r, 10));
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].url, "http://127.0.0.1:7431/manifold/telemetry/event");
+    assert.equal(seen[0].url, "http://127.0.0.1:44301/manifold/telemetry/event");
     assert.equal(seen[0].init.headers.authorization, "Bearer secret");
     assert.equal(JSON.parse(seen[0].init.body).kind, "lineage.spawn");
   });

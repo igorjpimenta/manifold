@@ -708,7 +708,7 @@ export function registerCliCommands({ program, executor, store, pipelinesRef, lo
     .option("--no-open", "Just print the URL; don't launch a browser.")
     .option("--url <url>", "Override the URL to open (defaults to the configured dashboard host/port).")
     .action(withExit((options) => {
-      const url = options.url || dashboardUrl || "http://127.0.0.1:7430";
+      const url = options.url || dashboardUrl || "http://127.0.0.1:44300";
       console.log(`manifold dashboard: ${url}`);
       if (options.open === false) return;
       const { cmd, args } = browserOpenCommand(url);
