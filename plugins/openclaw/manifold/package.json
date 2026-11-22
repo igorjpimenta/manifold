@@ -9,8 +9,7 @@
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/igorjpimenta/manifold.git",
-    "directory": "plugins/openclaw/manifold"
+    "url": "git+https://github.com/igorjpimenta/manifold.git"
   },
   "files": [
     "README.md",
@@ -45,6 +44,7 @@
     "@igorjpimenta/manifold": "^2026.11.22-beta.1"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
   }
 }

@@ -41,6 +41,11 @@
     "manifold": "bin/manifold.js"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/igorjpimenta/manifold.git"
   }
 }
