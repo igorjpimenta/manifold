@@ -102,21 +102,28 @@ jobs:
           node-version: '25'
           cache: npm
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm >= 11.5.1; fail here, not mid-publish.
-      - run: node -e 'const v=require("child_process").execSync("npm --version").toString().trim().split(".").map(Number); if (v[0]<11 || (v[0]===11 && v[1]<5)) { throw new Error("npm "+v.join(".")+" < 11.5.1") }' 
+      # Trusted publishing needs npm >= 11.5.1, and setting a dist-tag over
+      # OIDC needs >= 11.21.0; the npm bundled with Node lags both, so upgrade.
+      - name: Upgrade npm for OIDC publish
+        run: npm install -g npm@latest && npm --version
+
+      - name: OIDC preflight
+        run: |
+          echo "OIDC request env set: $([ -n "$ACTIONS_ID_TOKEN_REQUEST_URL" ] && echo yes || echo no)"
+          echo "npm config registry: $(npm config get registry)"
 
       - name: Publish core to npm
         if: '!cancelled()'
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         # `prepare` builds dashboard/dist before the tarball is packed.
-        run: npm publish --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
+        run: npm publish --loglevel http --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
 
       - name: Publish openclaw adapter to npm
         if: '!cancelled()'
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: cd plugins/openclaw/manifold && npm publish --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
+        run: cd plugins/openclaw/manifold && npm publish --loglevel http --tag "$( [[ "$TAG" == *-* ]] && echo beta || echo latest )"
 
       - name: Publish GitHub release
         if: '!cancelled()'
