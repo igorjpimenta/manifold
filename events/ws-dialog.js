@@ -30,7 +30,10 @@ import { attachWsEndpoint, encodeWsFrame } from "./ws-frame.js";
 import { buildDiscussPrompt } from "../routes/discuss.js";
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
-export const DEFAULT_DIALOG_PORT = 38295;
+// 7432 sits beside the API (7431) and dashboard (7430). 38295 is brayer's MCP
+// default, and a collision here costs the dialog socket on any host running
+// both engines.
+export const DEFAULT_DIALOG_PORT = 7432;
 
 function tokensEqual(a, b) {
   const ab = Buffer.from(a, "utf8");
