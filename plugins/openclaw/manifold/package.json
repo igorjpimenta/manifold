@@ -44,7 +44,7 @@
     "@igorjpimenta/manifold": "^2026.11.22-beta.2"
   },
   "publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://registry.npmjs.org",
     "access": "public"
   }
 }
