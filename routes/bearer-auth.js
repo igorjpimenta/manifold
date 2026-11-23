@@ -1,4 +1,4 @@
-// routes/bearer-auth.js — winch-style bearer guard for manifold HTTP routes.
+// routes/bearer-auth.js — bearer guard for manifold HTTP routes.
 //
 // One shared secret, no pairing, no device tokens: `Authorization: Bearer
 // <MANIFOLD_BEARER>` — the same env the MCP HTTP server requires before it

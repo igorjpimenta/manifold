@@ -60,13 +60,13 @@ describe("audioDirForFlow", () => {
 
   it("namespaces by the connection-declared harness, never a default", () => {
     assert.equal(
-      audioDirForFlow("flow-abc", "item-1", "winch"),
-      path.join(dataDir, "media", "audio", "winch", "flow-abc", "item-1"),
+      audioDirForFlow("flow-abc", "item-1", "test-harness"),
+      path.join(dataDir, "media", "audio", "test-harness", "flow-abc", "item-1"),
     );
   });
 
   it("resolveAudioHarness reads X-Manifold-Harness and refuses the rest", () => {
-    assert.equal(resolveAudioHarness({ headers: { "x-manifold-harness": "winch" } }), "winch");
+    assert.equal(resolveAudioHarness({ headers: { "x-manifold-harness": "test-harness" } }), "test-harness");
     assert.throws(() => resolveAudioHarness({ headers: {} }), "missing header must refuse");
     assert.throws(() => resolveAudioHarness({ headers: { "x-manifold-harness": "unknown" } }), "reserved value must refuse");
     assert.throws(() => resolveAudioHarness({ headers: { "x-manifold-harness": "  " } }), "blank value must refuse");

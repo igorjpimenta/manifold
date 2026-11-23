@@ -1,7 +1,7 @@
 /**
  * Unit tests for routes/operator-resume.js
  *
- * Verifies (extracted from POST /pipeclaw/resume-from-gate, same outcomes):
+ * Verifies resumeFlowFromGate's outcomes:
  *   - Applied path resumes via setImmediate and reports queued:false.
  *   - Full pool leaves status:queued to the admission cycle, no resume.
  *   - Unknown flow reports flow_not_found without touching admission.

@@ -49,7 +49,7 @@ new plugin config keys (env + table only).
    @igorjpimenta/manifold-openclaw`. No push setup exists: the harness
    feeds manifold through the registered tools and routes, never the
    reverse. Operator routes (`/manifold/*`) require
-   `Authorization: Bearer <MANIFOLD_BEARER>` (gateway env, winch-style).
+   `Authorization: Bearer <MANIFOLD_BEARER>` (gateway env).
    Multi-gateway setups: the pipelines-dir table resolves per harness
    (`manifold pipelines register --harness`).
 
