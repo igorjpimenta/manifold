@@ -88,6 +88,7 @@ describe("admission-queue-store — admit()", () => {
     const b = await store.admit({ kind: "flow-start", flowId: "f2" });
     assert.equal(b.status, "queued", "limit=1, second entry queues");
     limit = 5;
+    assert.equal(await store.limit(), 5, "limit() reports the raised pool size without a restart");
     const c = await store.admit({ kind: "flow-start", flowId: "f3" });
     assert.equal(c.status, "admitted", "raised limit takes effect on the very next admit(), no restart needed");
   });

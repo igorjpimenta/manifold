@@ -508,3 +508,35 @@ export interface Transcript {
   updatedAt: number | null;
   turns: TranscriptTurn[];
 }
+
+// ─── Admission lanes (from /api/lanes) ──────────────────────────────────────
+// One lane per running flow. `holder` names why the lane looks the way it
+// does: "ok" (running and recently active), "suspect" (running but idle past
+// the stale window — the signature of a dispatch that will only free the lane
+// on its own timeout), "orphan" (flow is terminal/blocked or gone, so nothing
+// will ever release it).
+
+export interface LaneHolder {
+  flowId: string;
+  nodeId: string | null;
+  kind: string;
+  pipelineId: string | null;
+  lastStep: string | null;
+  flowStatus: string | null;
+  admittedAt: number | null;
+  ageMs: number | null;
+  idleMs: number | null;
+  holder: "ok" | "suspect" | "orphan";
+}
+
+export interface LanesSnapshot {
+  limit: number;
+  held: number;
+  queued: number;
+  free: number;
+  ok: number;
+  suspect: number;
+  orphan: number;
+  staleMs: number;
+  lanes: LaneHolder[];
+}

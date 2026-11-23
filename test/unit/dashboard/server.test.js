@@ -151,6 +151,14 @@ describe("dashboard/server.js — direct store reads (no gateway)", () => {
     assert.equal(body[0].lastStep, "N1");
   });
 
+  test("GET /api/lanes with no admission store answers an empty pool instead of failing", async () => {
+    const { status, body } = await get("/api/lanes");
+    assert.equal(status, 200);
+    assert.equal(body.limit, 0);
+    assert.equal(body.held, 0);
+    assert.deepEqual(body.lanes, []);
+  });
+
   test("GET /api/runs/:id returns full run with errorEntries", async () => {
     const { status, body } = await get(`/api/runs/${FLOW_ID}`);
     assert.equal(status, 200);

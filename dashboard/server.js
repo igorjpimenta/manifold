@@ -14,6 +14,7 @@ import { readFile, readdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { serializePipeline } from "./pipeline-graph.js";
+import { buildLanesSnapshot } from "./lanes.js";
 import { computeGlobalStats, computePipelineStats, compareRunToMedian, computeNodeStats, resolveDisplayStep } from "./stats.js";
 import { searchRuns } from "./search.js";
 import { costForRun, costForPipeline, costForAllPipelines } from "./cost.js";
@@ -44,7 +45,7 @@ const MIME = {
   ".ico":  "image/x-icon",
 };
 
-export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision }) {
+export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision, admissionQueueStore = null }) {
   let server = null;
   // Live WS door (events/ws-frame.js) — opened in start(), drained on stop().
   let door = null;
@@ -361,6 +362,35 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         const p = pipelinesRef.value.get(decodeURIComponent(pipelineMatch[1]));
         if (!p) return sendJson(res, 404, { error: "pipeline not found" });
         return sendJson(res, 200, serializePipeline(p));
+      }
+
+      // /api/lanes — the admission pool as a live picture: how many lanes are
+      // held, by which flows, and whether a holder is leaked or merely slow.
+      // Without this the only symptom of a dead dispatch is a shrinking free
+      // count with no way to tell which flow is eating it.
+      if (req.method === "GET" && pathname === "/api/lanes") {
+        if (!admissionQueueStore) {
+          return sendJson(res, 200, {
+            limit: 0, held: 0, queued: 0, free: 0, ok: 0, suspect: 0, orphan: 0,
+            staleMs: 0, lanes: [],
+          });
+        }
+        const [stats, admitted] = await Promise.all([
+          admissionQueueStore._stats(),
+          admissionQueueStore.listByStatus("admitted"),
+        ]);
+        const runsByFlow = new Map();
+        for (const lane of admitted) {
+          const run = await readStore.get(lane.flowId).catch(() => null);
+          if (run) runsByFlow.set(lane.flowId, run);
+        }
+        return sendJson(res, 200, buildLanesSnapshot({
+          limit: await admissionQueueStore.limit(),
+          queued: stats.queued ?? 0,
+          admitted,
+          runsByFlow,
+          now: Date.now(),
+        }));
       }
 
       if (req.method === "GET" && pathname === "/api/stats") {

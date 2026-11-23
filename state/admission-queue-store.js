@@ -277,6 +277,13 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
       });
     },
 
+    // Pool size in force right now — getLimit is re-read on every call so a
+    // reconfigured limit reports the new number without a restart, matching
+    // admit()'s own read.
+    async limit() {
+      return getLimit();
+    },
+
     // Observability / test hook — counts across the whole combined pool,
     // not scoped to one kind (matching admit()/release()'s own scope).
     async _stats() {
