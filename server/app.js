@@ -414,6 +414,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
       host: dashboardHost,
       logger,
       recordItemDecision: gateResolver.recordItemDecision,
+      admissionQueueStore,
     });
     service("manifold-dashboard", async () => {
       dashboardBus.start();

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { StatusBadge } from "@/components/StatusBadge";
 import { StatStrip } from "@/components/StatStrip";
+import { Lanes } from "@/components/Lanes";
 import { Sparkline } from "@/components/Sparkline";
 import { Histogram } from "@/components/Histogram";
 import { PipelineCostBreakdown } from "@/components/PipelineCostBreakdown";
@@ -177,6 +178,8 @@ export function Home() {
           />
         );
       })()}
+
+      <Lanes />
 
       <h2 className="text-[15px] font-semibold uppercase tracking-[0.5px] text-fg-dim mt-6 mb-2.5">overview</h2>
       {stats

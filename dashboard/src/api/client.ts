@@ -8,6 +8,7 @@ import type {
   FlowRunSummary,
   FlowTreeItem,
   GlobalStats,
+  LanesSnapshot,
   NodeStats,
   Pipeline,
   PipelineCost,
@@ -68,6 +69,7 @@ export const api = {
   runSubflows:   (flowId: string) => json<Record<string, Record<string, SubflowData>>>(`${API}/runs/${flowId}/subflows`),
   runTree:       (flowId: string) => json<{ items: FlowTreeItem[] }>(`${API}/runs/${flowId}/tree`),
   stats:         () => json<GlobalStats>(`${API}/stats`),
+  lanes:         () => json<LanesSnapshot>(`${API}/lanes`),
   pipelineStats: (id: string) => json<PipelineStats>(`${API}/stats/pipelines/${encodeURIComponent(id)}`),
   pipelineNodeStats: (pipelineId: string, nodeId: string) =>
     json<NodeStats>(`${API}/pipelines/${encodeURIComponent(pipelineId)}/nodes/${encodeURIComponent(nodeId)}/stats`),
