@@ -35,7 +35,7 @@ import { dispatchSubflowChildren } from "./executor-subflow-children.js";
 import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
-export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit }) {
+export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit, sessions }) {
   // Explicit params win; api is the fallback the adapter still
   // supplies (tests construct with api only).
   const _config = config ?? api?.config ?? null;
@@ -124,6 +124,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
+    // Harness adapter's id minting (sessions.newNodeSessionId), same seam as
+    // the discuss routes: core asks, never shapes.
+    sessions,
   });
 
   /**

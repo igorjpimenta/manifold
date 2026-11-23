@@ -8,7 +8,7 @@ import * as sdkHooks from "../../../../helpers/openclaw-plugin-sdk-hooks.js";
 import { createMockRes } from "../../../../helpers/mock-api.js";
 
 registerHooks(sdkHooks);
-const { default: entry, buildCoreEnv } = await import("../../../../../plugins/openclaw/manifold/index.js");
+const { default: entry, buildCoreEnv, sessionIdFor } = await import("../../../../../plugins/openclaw/manifold/index.js");
 
 function makeApi({ pluginConfig = {} } = {}) {
   const routes = [];
@@ -41,10 +41,10 @@ function fakeReq({ method = "POST", authorization, body = {} } = {}) {
 }
 
 describe("adapter registration", () => {
-  it("serves the turn bridge and supervises exactly one core process", () => {
+  it("serves the turn and session bridges and supervises exactly one core process", () => {
     const { api, routes, services } = makeApi();
     entry.register(api);
-    assert.deepEqual(routes.map((r) => r.path), ["/api/manifold/turn"]);
+    assert.deepEqual(routes.map((r) => r.path), ["/api/manifold/turn", "/api/manifold/session"]);
     assert.deepEqual(services.map((s) => s.id), ["manifold-core", "manifold-runtime-capture"]);
   });
 
@@ -66,15 +66,44 @@ describe("adapter registration", () => {
   });
 });
 
+describe("session-id bridge", () => {
+  function sessionRoute() {
+    const { api, routes } = makeApi();
+    entry.register(api);
+    return routes.find((r) => r.path === "/api/manifold/session");
+  }
+
+  it("mints this harness's id shape for a dispatch", () => {
+    const minted = sessionIdFor({ agentId: "scorer", flowId: "abcdef01-0000-0000-0000-000000000000", nodeId: "SCORE_LLM" });
+    assert.equal(minted.session, "agent:scorer:manifold:abcdef01-SCORE_LLM");
+  });
+
+  it("refuses missing coordinates instead of defaulting them", () => {
+    assert.match(sessionIdFor({ agentId: "scorer" }).error, /flowId/);
+    assert.match(sessionIdFor().error, /agentId/);
+  });
+
+  it("is POST-only and needs the per-boot token, like the turn bridge", async () => {
+    const route = sessionRoute();
+    const notPost = createMockRes();
+    await route.handler(fakeReq({ method: "GET" }), notPost);
+    assert.equal(notPost.statusCode, 405);
+    const untokenized = createMockRes();
+    await route.handler(fakeReq({ authorization: "Bearer not-the-token", body: { agentId: "a", flowId: "f", nodeId: "N" } }), untokenized);
+    assert.equal(untokenized.statusCode, 401);
+  });
+});
+
 describe("buildCoreEnv", () => {
   const base = { baseEnv: { PATH: "/bin", HOME: "/home/u" } };
-  const common = { coreApiPort: 44301, turnUrl: "http://127.0.0.1:18789/api/manifold/turn", turnToken: "tok", dashboardPort: 44300, dashboardHost: "127.0.0.1" };
+  const common = { coreApiPort: 44301, turnUrl: "http://127.0.0.1:18789/api/manifold/turn", turnToken: "tok", sessionUrl: "http://127.0.0.1:18789/api/manifold/session", dashboardPort: 44300, dashboardHost: "127.0.0.1" };
 
   it("carries the harness identity and the bridge credentials", () => {
     const env = buildCoreEnv({ userCfg: {}, ...common, ...base });
     assert.equal(env.MANIFOLD_HARNESS, "openclaw");
     assert.equal(env.MANIFOLD_API_PORT, "44301");
     assert.equal(env.MANIFOLD_TURN_URL, common.turnUrl);
+    assert.equal(env.MANIFOLD_SESSION_URL, common.sessionUrl);
     assert.equal(env.MANIFOLD_TURN_TOKEN, "tok");
     assert.equal(env.PATH, "/bin");
   });

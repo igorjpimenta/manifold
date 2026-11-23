@@ -7,6 +7,9 @@
 //   - it serves POST /api/manifold/turn, the endpoint the core calls when a
 //     flow needs an agent turn — the gateway's agent runtime never leaves
 //     this process;
+//   - it serves POST /api/manifold/session, which mints the session id for an
+//     agent-node dispatch: ids are harness-owned, and the core process has no
+//     way to know this harness's format;
 //   - it stamps manifold session metadata on openclaw sessions.
 //
 // Nothing in core imports this file, and this file imports core only through
@@ -19,6 +22,7 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { wrapSubagentKeys } from "./session-keys.js";
+import { newNodeSessionId } from "./sessions.js";
 import { createRunTurn } from "./run-turn.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { registerTelemetryHooks } from "./telemetry.js";
@@ -29,10 +33,19 @@ const DEFAULT_DASHBOARD_PORT = 44300;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 const DEFAULT_GATEWAY_PORT = 18789;
 const TURN_PATH = "/api/manifold/turn";
+const SESSION_PATH = "/api/manifold/session";
 const MAX_TURN_BODY_BYTES = 1024 * 1024;
 const RESTART_BACKOFF_MS = [2000, 5000, 15000];
 
 const require = createRequire(import.meta.url);
+
+// Dispatch coordinates in, this harness's session id out. Missing coordinates
+// are refused rather than defaulted: the id labels a real transcript.
+export function sessionIdFor(body) {
+  const { agentId, flowId, nodeId } = body ?? {};
+  if (!agentId || !flowId || !nodeId) return { error: "agentId, flowId and nodeId are required" };
+  return { session: newNodeSessionId({ agentId, flowId, nodeId }) };
+}
 
 function resolveCoreEntry() {
   try {
@@ -49,13 +62,14 @@ function resolveCoreEntry() {
 // rest of the environment passes through untouched (PATH, HOME, the store
 // home env vars an operator set).
 export function buildCoreEnv({
-  userCfg = {}, coreApiPort, turnUrl, turnToken, dashboardPort, dashboardHost, baseEnv = process.env,
+  userCfg = {}, coreApiPort, turnUrl, turnToken, sessionUrl, dashboardPort, dashboardHost, baseEnv = process.env,
 }) {
   const env = {
     ...baseEnv,
     MANIFOLD_HARNESS: "openclaw",
     MANIFOLD_API_PORT: String(coreApiPort),
     MANIFOLD_TURN_URL: turnUrl,
+    MANIFOLD_SESSION_URL: sessionUrl,
     MANIFOLD_TURN_TOKEN: turnToken,
     MANIFOLD_INGEST_TOKEN: turnToken,
     MANIFOLD_DASHBOARD_ENABLED: userCfg.dashboardEnabled === false ? "false" : "true",
@@ -177,6 +191,7 @@ export default definePluginEntry({
     const turnToken = crypto.randomBytes(32).toString("hex");
     const gatewayPort = Number(process.env.OPENCLAW_GATEWAY_PORT) || DEFAULT_GATEWAY_PORT;
     const turnUrl = userCfg.turnUrl || `http://127.0.0.1:${gatewayPort}${TURN_PATH}`;
+    const sessionUrl = `http://127.0.0.1:${gatewayPort}${SESSION_PATH}`;
 
     registerManifoldMetaHook(api);
     registerTelemetryHooks(api, {
@@ -223,6 +238,34 @@ export default definePluginEntry({
       },
     });
 
+    // ── Session-id bridge ────────────────────────────────────────────────────
+    // Dispatch ids belong to this harness (see sessions.js), so the core asks
+    // here instead of inventing a shape the gateway may not accept. Missing
+    // coordinates are refused rather than defaulted: the id labels a real
+    // transcript.
+    api.registerHttpRoute({
+      path: SESSION_PATH,
+      auth: "plugin",
+      match: "exact",
+      handler: async (req, res) => {
+        if (req.method !== "POST") {
+          res.setHeader("allow", "POST");
+          sendJson(res, 405, { ok: false, error: "method not allowed" });
+          return true;
+        }
+        if (!bearerMatches(req.headers?.authorization, turnToken)) {
+          sendJson(res, 401, { ok: false, error: "unauthorized" });
+          return true;
+        }
+        const body = await readJsonBody(req);
+        if (body.error) { sendJson(res, body.status, { ok: false, error: body.error }); return true; }
+        const minted = sessionIdFor(body.value);
+        if (minted.error) { sendJson(res, 400, { ok: false, error: minted.error }); return true; }
+        sendJson(res, 200, { ok: true, session: minted.session });
+        return true;
+      },
+    });
+
     // ── Core process ─────────────────────────────────────────────────────────
     let child = null;
     let restartTimer = null;
@@ -231,7 +274,7 @@ export default definePluginEntry({
 
     function spawnCore() {
       const env = buildCoreEnv({
-        userCfg, coreApiPort, turnUrl, turnToken, dashboardPort, dashboardHost,
+        userCfg, coreApiPort, turnUrl, turnToken, sessionUrl, dashboardPort, dashboardHost,
       });
 
       const proc = spawn(process.execPath, [coreEntry, "serve"], {

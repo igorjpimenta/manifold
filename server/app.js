@@ -175,6 +175,9 @@ export function createManifoldApp({ host, config = {} } = {}) {
     // The harness owns the agent runtime: core receives a turn function,
     // never the runtime object.
     runTurn: host.runTurn,
+    // Same seam for ids: the harness adapter mints dispatch sessions
+    // (sessions.newNodeSessionId) because it owns the session namespace.
+    sessions: host.sessions,
     emit: emitCanonical,
   });
   resumeParentRef.resume = executor.resume;

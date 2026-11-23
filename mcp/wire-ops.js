@@ -104,6 +104,9 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     runTurn: async () => {
       throw new Error("manifold standalone serve: agent dispatch needs a gateway agent runtime");
     },
+    // No harness alongside the MCP stdio transport either, so a node that
+    // declares no session is refused by name rather than silently dispatched.
+    sessions: null,
     failureStore,
     nodeHealthStore,
     notifyFlowEnteredWaiting: async () => {},

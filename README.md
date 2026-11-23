@@ -911,19 +911,24 @@ serialization is doing real work there.
 
 ## Session keys (agent nodes dispatched by manifold)
 
-Manifold does not mint session ids: the harness owns the id format, so an
-agent node declares its own key and manifold passes it through verbatim.
+Manifold does not mint session ids: the harness owns the id format. An
+agent node may pin its own; otherwise the harness adapter mints one for the
+dispatch, so pipelines carry no harness key syntax.
 
 ```
-node.sessionKey                          // static
-node.sessionKeyBuilder(state, flowId)    // derived
+node.session                               // pinned, passed through verbatim
+node.sessionBuilder(state, flowId)         // pinned, derived by the node
+sessions.newNodeSessionId({agentId, flowId, nodeId})   // harness adapter
 ```
 
-`dispatchAgentEntry` refuses an agent node that declares neither —
-tool-handoff and the lineage ledger both key off this value, so inventing
-one here would silently diverge from the harness's id. A discuss thread
-carries its own session id, locked on the first turn and re-used for every
-later turn of that thread.
+Resolution order is node-declared first, then the adapter's mint function.
+`dispatchAgentEntry` refuses a dispatch that ends with neither — tool-handoff
+and the lineage ledger both key off this value, so neither manifold nor a
+default may invent one. `sessions` is the same harness-adapter object the
+discuss routes get (`newDiscussSessionId`); `manifold serve` ships a
+harness-neutral one, and each in-process adapter provides its own. A discuss
+thread carries its own session id, locked on the first turn and re-used for
+every later turn of that thread.
 
 Transcript attribution comes from the session ledger, never from the key's
 shape.

@@ -18,6 +18,12 @@ const REGEX = {
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
+  // Agent-node dispatch key minted by the openclaw adapter
+  // (plugins/openclaw/manifold/sessions.js newNodeSessionId). Format:
+  //   agent:<agentId>:manifold:<flow8>-<node>
+  // The flow segment joins back to flow_runs, so a run's dispatches are
+  // attributable even when the session index row is missing.
+  MANIFOLD_NODE: /^agent:([^:]+):manifold:([0-9a-f]{8})-([A-Za-z0-9._-]+)$/,
   // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
   // when a pipeline is started via CLI or another harness. Format:
   //   agent:operator:(cli|operator):<flowId-uuid>
@@ -80,6 +86,13 @@ export function classify(session) {
     return {
       kind: "operator-trigger", agentId: "operator", operatorSource: source, triggerFlowId,
       parentHint: null,                              // ROOT
+    };
+  }
+  if ((m = REGEX.MANIFOLD_NODE.exec(session))) {
+    const [, agentId, flowShort, nodeId] = m;
+    return {
+      kind: "manifold-node", agentId, nodeId, flowShort,
+      parentHint: { kind: "flow", flowShort },
     };
   }
   if ((m = REGEX.EXPLICIT.exec(session))) {

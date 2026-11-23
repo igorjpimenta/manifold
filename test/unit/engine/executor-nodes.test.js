@@ -32,6 +32,7 @@ function makeRunner(opts = {}) {
     api,
     logger,
     nodeHealthStore: opts.nodeHealthStore,
+    sessions: opts.sessions,
     runStore: opts.runStore,
     nodeExecutionsStore: opts.nodeExecutionsStore ?? makeNodeExecutionsStore(),
   });
@@ -111,6 +112,37 @@ describe("executeNode — agent kind", () => {
     };
     const result = await executeNode({ node, nodeId: "DRAFT", state: { pipelineId: "p" }, flowId: "flow-00000005" });
     assert.deepEqual(result.stateUpdate, { draft: "output" });
+  });
+
+  it("asks the harness adapter for a session when the node declares none", async () => {
+    let seen = null;
+    const { executeNode } = makeRunner({
+      sessions: { newNodeSessionId: (args) => { seen = args; return `agent:a:manifold:${args.flowId.slice(0, 8)}-${args.nodeId}`; } },
+      dispatchAgentWithRetry: async ({ node, applyCtx, session }) => { assert.ok(session); return node.apply(applyCtx, { text: "output" }); },
+    });
+    const node = { kind: "agent", agent: "a", promptBuilder: () => "x", apply: (_s, o) => ({ draft: o.text }) };
+    await executeNode({ node, nodeId: "DRAFT", state: { pipelineId: "p" }, flowId: "flow-00000005" });
+    assert.deepEqual(seen, { agentId: "a", flowId: "flow-00000005", nodeId: "DRAFT" });
+  });
+
+  it("a pinned node session wins over the adapter's mint", async () => {
+    let minted = false;
+    const { executeNode } = makeRunner({
+      sessions: { newNodeSessionId: () => { minted = true; return "agent:a:manifold:x-DRAFT"; } },
+      dispatchAgentWithRetry: async () => ({}),
+    });
+    const node = { kind: "agent", agent: "a", session: "agent:a:pinned", promptBuilder: () => "x", apply: () => ({}) };
+    await executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f" });
+    assert.equal(minted, false, "a declared session is never overridden");
+  });
+
+  it("refuses a dispatch when neither the node nor a harness adapter supplies a session", async () => {
+    const { executeNode } = makeRunner();
+    const node = { kind: "agent", agent: "a", promptBuilder: () => "x", apply: () => ({}) };
+    await assert.rejects(
+      () => executeNode({ node, nodeId: "DRAFT", state: {}, flowId: "f" }),
+      /refusing dispatch of node "DRAFT" with no session/,
+    );
   });
 
   it("skips when budget gate returns skip", async () => {

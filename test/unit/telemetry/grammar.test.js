@@ -79,6 +79,19 @@ describe("classify", () => {
     assert.equal(r.parentHint, null);
   });
 
+  it("classifies a manifold agent-node dispatch back to its flow", () => {
+    const r = classify("agent:scorer:manifold:abcdef01-SCORE_LLM");
+    assert.equal(r.kind, "manifold-node");
+    assert.equal(r.agentId, "scorer");
+    assert.equal(r.nodeId, "SCORE_LLM");
+    assert.deepEqual(r.parentHint, { kind: "flow", flowShort: "abcdef01" });
+  });
+
+  it("keeps an unprefixed-tail manifold-like key out of the manifold-node rule", () => {
+    const r = classify("agent:scorer:manifold:not-a-flow-prefix-SCORE_LLM");
+    assert.notEqual(r.kind, "manifold-node", "no 8-hex flow segment, so it cannot join a flow");
+  });
+
   it("classifies memory-synth-chunk with parent hint", () => {
     const r = classify("agent:main:memory-synth:1716000000:c-3");
     assert.equal(r.kind, "memory-synth-chunk");
