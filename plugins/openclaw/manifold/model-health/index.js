@@ -177,8 +177,10 @@ export function registerModelHealth(api, userCfg = {}) {
     });
 
     // Durable state is the whole point: without it a restart returns every
-    // quarantined model to "healthy" and the provider re-throttles it.
-    hydratePromise ??= (async () => {
+    // quarantined model to "healthy" and the provider re-throttles it. Runs on
+    // service start, so merely registering (unit tests, a config reload that
+    // never boots the gateway) touches no database and arms no timer.
+    const hydrate = () => (hydratePromise ??= (async () => {
       try {
         const st = await createModelHealthStore({ logger: api.logger });
         const now = Date.now();
@@ -201,7 +203,7 @@ export function registerModelHealth(api, userCfg = {}) {
           `quarantines will not survive a restart this generation`,
         );
       }
-    })();
+    })());
 
     if (typeof api.on !== "function") {
       api.logger.warn("model-health: api.on unavailable; not registering hooks");
@@ -303,21 +305,26 @@ export function registerModelHealth(api, userCfg = {}) {
       if (!probeStopped) schedule(probeTick, probeIntervalMs);
     };
 
-    if (!probeChainStarted) {
+    const startProber = () => {
+      if (probeChainStarted) return;
       probeChainStarted = true;
       probeStopped = false;
       schedule(probeTick, probeIntervalMs);
-    }
+    };
+    const stopProber = () => {
+      probeStopped = true;
+      probeChainStarted = false;
+    };
 
     if (typeof api.registerService === "function") {
       api.registerService({
         id: "manifold-model-health-prober",
-        start: () => {},
-        stop: () => {
-          probeStopped = true;
-          probeChainStarted = false;
-        },
+        start: () => { hydrate(); startProber(); },
+        stop: stopProber,
       });
+    } else {
+      hydrate();
+      startProber();
     }
 
     // Runtime surface — inspection + manual override from sibling plugins or a

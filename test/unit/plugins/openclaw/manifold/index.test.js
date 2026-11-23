@@ -45,7 +45,7 @@ describe("adapter registration", () => {
     const { api, routes, services } = makeApi();
     entry.register(api);
     assert.deepEqual(routes.map((r) => r.path), ["/api/manifold/turn"]);
-    assert.deepEqual(services.map((s) => s.id), ["manifold-core", "manifold-runtime-capture"]);
+    assert.deepEqual(services.map((s) => s.id), ["manifold-model-health-prober", "manifold-core", "manifold-runtime-capture"]);
   });
 
   it("rejects non-POST on the bridge", async () => {
