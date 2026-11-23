@@ -1,4 +1,4 @@
-# Releasing
+# Releases
 
 CalVer, one tag per release, and the GitHub release is the changelog — there
 is no CHANGELOG.md. The tag is the install contract: the live gateway and

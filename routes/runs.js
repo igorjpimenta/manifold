@@ -812,7 +812,7 @@ export function registerRunRoutes({
     };
   }
 
-  // A cascade-kind pipeline (README.md's "retry-on-failure as a flow
+  // A cascade-kind pipeline (docs/pipelines.md's "retry-on-failure as a flow
   // characteristic") tries its own root nodes in sequence, one throw at a
   // time, until one succeeds or all are exhausted — every attempt still
   // gets its own ordinary flow_node_invocations row (see
