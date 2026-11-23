@@ -54,6 +54,41 @@
       },
       "turnUrl": {
         "type": "string"
+      },
+      "modelHealth": {
+        "type": "object",
+        "additionalProperties": false,
+        "description": "Model circuit breaker: terminal failures block a model until a probe confirms recovery; rate limits quarantine it with a doubling cooldown. Default: enabled.",
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "probeIntervalMs": {
+            "type": "integer",
+            "minimum": 1000,
+            "description": "How often a blocked model is probed for recovery. Default: 300000."
+          },
+          "failureWindowMs": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "failureThreshold": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rateLimitThreshold": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "rateLimitCooldownMs": {
+            "type": "integer",
+            "minimum": 1000
+          },
+          "rateLimitMaxCooldownMs": {
+            "type": "integer",
+            "minimum": 1000
+          }
+        }
       }
     }
   }

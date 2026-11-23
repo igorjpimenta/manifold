@@ -21,6 +21,7 @@ import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { wrapSubagentKeys } from "./session-keys.js";
 import { createRunTurn } from "./run-turn.js";
 import { registerManifoldMetaHook } from "./meta.js";
+import { registerModelHealth } from "./model-health/index.js";
 import { registerTelemetryHooks } from "./telemetry.js";
 import { registerGatewayReadiness } from "./gateway-readiness.js";
 
@@ -163,6 +164,24 @@ export default definePluginEntry({
         minimum: 1,
         description: "Shared ceiling for every flow-run concurrency mechanism. Default: 8.",
       },
+      modelHealth: {
+        type: "object",
+        additionalProperties: false,
+        description: "Model circuit breaker: terminal failures block a model until a probe confirms recovery; rate limits quarantine it with a doubling cooldown. Default: enabled.",
+        properties: {
+          enabled: { type: "boolean" },
+          probeIntervalMs: {
+            type: "integer",
+            minimum: 1000,
+            description: "How often a blocked model is probed for recovery. Default: 300000.",
+          },
+          failureWindowMs: { type: "integer", minimum: 1000 },
+          failureThreshold: { type: "integer", minimum: 1 },
+          rateLimitThreshold: { type: "integer", minimum: 1 },
+          rateLimitCooldownMs: { type: "integer", minimum: 1000 },
+          rateLimitMaxCooldownMs: { type: "integer", minimum: 1000 },
+        },
+      },
     },
   }),
   register: (api) => {
@@ -179,6 +198,7 @@ export default definePluginEntry({
     const turnUrl = userCfg.turnUrl || `http://127.0.0.1:${gatewayPort}${TURN_PATH}`;
 
     registerManifoldMetaHook(api);
+    registerModelHealth(api, userCfg.modelHealth);
     registerTelemetryHooks(api, {
       ingestUrl: `http://127.0.0.1:${coreApiPort}/manifold/telemetry/event`,
       token: turnToken,

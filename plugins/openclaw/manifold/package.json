@@ -30,7 +30,10 @@
     "run-turn.js",
     "session-keys.js",
     "sessions.js",
-    "telemetry.js"
+    "telemetry.js",
+    "model-health/index.js",
+    "model-health/lib.js",
+    "model-health/store.js"
   ],
   "openclaw": {
     "extensions": [
