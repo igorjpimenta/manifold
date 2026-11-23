@@ -268,7 +268,13 @@ export function registerModelHealth(api, userCfg = {}) {
     // a recovery 402.
     const schedule = api.runtime?.setTimer
       ? (fn, ms) => api.runtime.setTimer(fn, ms)
-      : (fn, ms) => setTimeout(fn, ms);
+      // unref: the probe loop must never be the reason a process stays alive
+      // (a loaded-but-never-stopped plugin would otherwise pin the event loop).
+      : (fn, ms) => {
+          const t = setTimeout(fn, ms);
+          t.unref?.();
+          return t;
+        };
 
     const probeTick = async () => {
       if (probeStopped) return;
