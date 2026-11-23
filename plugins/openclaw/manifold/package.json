@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/manifold-openclaw",
-  "version": "2026.11.23-beta.1",
+  "version": "2026.11.23-beta.2",
   "description": "OpenClaw companion for manifold: registers pipeline agent tools, discuss routes, the WS dialog door, and boot services on the gateway.",
   "exports": {
     ".": "./index.js"
@@ -41,7 +41,7 @@
     }
   },
   "dependencies": {
-    "@igorjpimenta/manifold": "^2026.11.23-beta.1"
+    "@igorjpimenta/manifold": "^2026.11.23-beta.2"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",
