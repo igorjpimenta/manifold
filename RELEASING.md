@@ -8,7 +8,7 @@ before the tag is cut, never after.
 This repo is public and `@igorjpimenta/manifold` is UNLICENSED. Releases
 publish to npmjs at the tagged version: the core package
 `@igorjpimenta/manifold` and the openclaw adapter
-`@igorjpimenta/manifold-openclaw`, both public (same shape as brayer).
+`@igorjpimenta/manifold-openclaw`, both public.
 Auth is npm trusted publishing (OIDC): the workflow carries
 `id-token: write` and each package's npm settings list this repo's
 `release.yml` as a trusted publisher, so no token secret is needed and

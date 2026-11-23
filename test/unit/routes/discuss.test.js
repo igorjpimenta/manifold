@@ -408,7 +408,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     const { mkdir, writeFile } = await import("node:fs/promises");
     await mkdir(audioDir, { recursive: true });
     const turnId = "22222222-2222-2222-2222-222222222222";
-    const audioUrl = `/pipeclaw/runs/${testFlowId}/discuss/audio/${turnId}.m4a`;
+    const audioUrl = `/manifold/runs/${testFlowId}/discuss/audio/${turnId}.m4a`;
     await writeFile(path.join(audioDir, `${turnId}.m4a`), Buffer.from("fake audio bytes"));
     await writeFile(path.join(audioDir, `${turnId}.meta.json`), JSON.stringify({
       turnId, itemId, audioUrl, transcript: null, status: "failed",
@@ -433,7 +433,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 
-    const req = createMockReqWithBody("POST", `/pipeclaw/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId }, { "x-manifold-harness": "test-harness" });
+    const req = createMockReqWithBody("POST", `/manifold/runs/${testFlowId}/discuss/audio/retry`, { turnId, itemId }, { "x-manifold-harness": "test-harness" });
     const res = createMockRes();
     await handleDiscussAudioRetry(req, res, sourceFlow);
     assert.equal(res.statusCode, 202);

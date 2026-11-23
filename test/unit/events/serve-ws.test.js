@@ -1,7 +1,7 @@
 // serve-ws.test.js — the event pipe: welcome, history replay, live
 // broadcast to every connected client. Real server + real sockets on an
 // ephemeral port; entries stream verbatim. Uses the global WebSocket client
-// (Node 24), the same transport winch's ws.test.js uses.
+// (Node 24).
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";

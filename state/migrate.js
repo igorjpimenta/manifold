@@ -1,5 +1,5 @@
-// state/migrate.js — better-sqlite3 migrate-on-open, exactly winch's src/db.js
-// shape: schema DDL lives in state/schema.js (runtime.sqlite) and
+// state/migrate.js — better-sqlite3 migrate-on-open: schema DDL lives in
+// state/schema.js (runtime.sqlite) and
 // state/schema.ops.js (ops.sqlite); `npm run db:generate` snapshots them
 // into .migrations/*/<n>.sql; drizzle's migrate() applies pending snapshots.
 //
@@ -8,8 +8,7 @@
 // writing under live handles is the one ordering that was observed to
 // poison them, so the first opener applies pending snapshots while no
 // handle exists yet and later opens find the journal current. Cross-process
-// safety comes from the drizzle journal transaction + busy_timeout, same
-// posture as winch.
+// safety comes from the drizzle journal transaction + busy_timeout.
 //
 // Snapshots are the sole schema path. A snapshot that fails throws here,
 // failing the open fast with the file named, instead of surfacing as
@@ -66,8 +65,9 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
     // set here, around the whole run. Enforcement resumes before the handle
     // closes; opening a migrated file never re-validates existing rows.
     sqlite.exec("PRAGMA foreign_keys = OFF;");
-    // 30000 to match the house busy posture (state/db.js), not winch's
-    // 5000 — the contended moment is a second process mid-migration.
+    // 30000 to match state/db.js's busy posture — the contended moment is a
+    // second process mid-migration, and the read path elsewhere tolerates the
+    // longer wait.
     sqlite.exec("PRAGMA busy_timeout = 30000;");
     migrate(drizzle(sqlite, { schema: SCHEMAS.get(migrationsFolder) ?? {} }), { migrationsFolder });
     sqlite.exec("PRAGMA foreign_keys = ON;");
