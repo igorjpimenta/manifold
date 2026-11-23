@@ -20,7 +20,7 @@ The static half of manifold: what a pipeline file exports, how to author it, and
 ## Pipeline schema (canonical)
 
 ```js
-// ~/.openclaw/workspace/.pipelines/<pipelineId>/index.js
+// ~/.manifold/workspace/.pipelines/<pipelineId>/index.js
 export default {
   id: "my-pipeline",                          // string, file-system safe
   goal: "one-line description",               // shown in the dashboard
@@ -237,7 +237,7 @@ If you've written pipelines for other graph runtimes (LangGraph, n8n, Airflow, e
 
 ### What the validator catches (loader.js)
 
-These are hard-stops at pipeline load time — the gateway log shows `manifold loader: <id>/ failed to load: <reason>`:
+These are hard-stops at pipeline load time — the loader logs `manifold loader: <id>/ failed to load: <reason>`:
 
 | Loader error | Fix |
 |---|---|
@@ -292,9 +292,9 @@ Factories that compute targets should return only nodes; let each pipeline defin
 
 #### Pipeline reload only refreshes `index.js`, not its `file:///` imports
 
-The pipelines-watcher reloads each pipeline's `index.js` via a `data:` URL (forces a fresh import per the comment in `loader.js`). But the pipeline's `import { ... } from "file:///.../lib/foo.js"` statements go through Node's normal ESM loader — and **Node caches modules by URL forever within a process**. Edits to shared `lib/` files used by pipelines won't take effect until you restart the gateway.
+The pipelines-watcher reloads each pipeline's `index.js` via a `data:` URL (forces a fresh import per the comment in `loader.js`). But the pipeline's `import { ... } from "file:///.../lib/foo.js"` statements go through Node's normal ESM loader — and **Node caches modules by URL forever within a process**. Edits to shared `lib/` files used by pipelines won't take effect until you restart the process running the engine.
 
-**Fix:** restart the gateway after editing any `lib/` file:
+**Fix:** restart the engine process after editing any `lib/` file (under OpenClaw, restarting the host respawns `manifold serve` through the adapter — e.g.):
 
 ```sh
 launchctl unload ~/Library/LaunchAgents/ai.openclaw.gateway.plist
@@ -309,7 +309,7 @@ If you only edit a pipeline's own `index.js`, the watcher handles the reload —
 import path from "node:path";
 import os from "node:os";
 
-const ROOT = path.join(os.homedir(), ".openclaw");
+const ROOT = path.join(os.homedir(), ".manifold");
 
 export default {
   id: "myteam_my-flow",
@@ -321,7 +321,7 @@ export default {
   //                omitted, so this field is optional but recommended.
   //   displayName — human label used everywhere a pipeline is named.
   identity: { emoji: "🧩", sfSymbol: "puzzlepiece.fill", displayName: "My flow" },
-  schedule: ["0 9 * * *"],            // optional cron(s), GMT-3 if your gateway is in BR
+  schedule: ["0 9 * * *"],            // optional cron(s)
 
   // Static state shape. Merged with run args at flow start. Don't add an
   // `errors` array here — errors are never a stateJson field; every node
@@ -418,7 +418,8 @@ fallback). Slugs may (and usually do) contain hyphens.
 
 ### 3. Plugin config nests under `.config`
 
-**Rule:** In `~/.openclaw/openclaw.json`:
+**Rule (host plugin config):** config must nest under `.config` in the
+host's plugin entry — on OpenClaw, in `~/.openclaw/openclaw.json`:
 
 ```jsonc
 "plugins": {

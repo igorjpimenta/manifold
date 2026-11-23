@@ -7,9 +7,9 @@ The read-only web UI, its API surface, and the pipeline-declared views pattern.
 > investigation; tracked as a follow-up to the session-file retirement
 > work. The backend (`/api/*`) responds normally.
 
-Mostly read-only web UI with one actuation endpoint
-(`POST /api/runs/:flowId/approve`) that resolves a blocked human-gate.
-Listens on `dashboardHost:dashboardPort` (default `127.0.0.1:44300`).
+Read-only web UI with a small set of actuation endpoints (approve, cancel,
+rerun, pause, resume). Listens on `dashboardHost:dashboardPort` (default
+`127.0.0.1:44300`).
 Behind tailscale serve at `https://<tailnet>/graph/` when configured
 (`tailscale serve --set-path=/graph`).
 
@@ -35,6 +35,11 @@ POST /api/runs/:flowId/approve     body: { itemId, decision: "approve"|"reject"|
                                    → 200 { decision, itemId, stillPending, status: "blocked"|"resumed" }
                                    → 400 invalid body | 404 flow not found
                                    → 409 not awaiting / itemId not pending / store write race
+POST /api/runs/:flowId/cancel      cancel a non-terminal flow
+POST /api/runs/:flowId/rerun       fresh run from __start__ (new flow id)
+POST /api/runs/:flowId/pause       pause the flow
+POST /api/runs/:flowId/resume      resume a paused flow
+POST /api/runs/bulk-cancel         cancel many flows in one call
 ```
 
 Source: `dashboard/server.js`. Frontend uses hash routing (`#/`,

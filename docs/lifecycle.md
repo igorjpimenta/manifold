@@ -14,8 +14,9 @@ is terminal; `human-gate` builds `waitJson` and blocks), and persists the
 outcome — a `stateUpdate` advances and loops again, a thrown error or
 `_error` sentinel fails/blocks the flow, `__end__` runs `runAudit` and
 writes the terminal status (`succeeded`/`failed`/`skipped`). Blocked flows
-resume via `POST /manifold/resume-from-gate`; any non-terminal flow can be
-cancelled by an operator.
+resume through the dashboard or `POST /manifold/gate/resolve`; any
+non-terminal flow can be cancelled (`POST /manifold/cancel`, MCP
+`manifold_cancel`, or the dashboard).
 
 
 ## Status transitions
@@ -54,7 +55,7 @@ stateDiagram-v2
 | `succeeded`   | Reached `__end__` cleanly. Terminal.                                                             |
 | `failed`      | A node threw, or an applyResult rejected. Terminal. Also where a bare `ctx.blocked()` call ends up today — see [Nodes → Code-node `ctx` argument](nodes.md#code-node-ctx-argument). |
 | `skipped`     | Pipeline ran but produced no output (nothing to score, all filtered, cap reached). Terminal.     |
-| `cancelled`   | Operator-initiated termination via tool / SQL (no CLI command yet — see [Operational quirks](operations.md#operational-quirks)).   |
+| `cancelled`   | Operator-initiated termination via `POST /manifold/cancel`, MCP `manifold_cancel`, or the dashboard.   |
 
 
 ## State conventions

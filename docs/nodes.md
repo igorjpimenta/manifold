@@ -9,8 +9,8 @@ The unit-level half of manifold: the four node kinds, subflow fan-out, and the a
 | `code`              | `run(state, ctx) => stateUpdate \| Promise<stateUpdate>` — `ctx` exposes `invokePipeline` (see below) | `stateUpdate`          | normal edge                               |
 | `agent`             | `agent`, `promptBuilder(state)`, `applyResult(state, output)`. Optional `circuitBreaker: true` — see *Circuit breaker* below. | `stateUpdate`          | normal edge                               |
 | `subflow`           | `selector(state) => Item[]`, `flow: { nodes, edges }` (required — no other shape). Never set `.groupId` — it's always the node's own id; the loader throws if you set it. See *Subflow nodes (childFlows)* below for the full authoring guide. | one real child `flow_runs` per item; parent blocks (`waitJson.kind:"children-pending"`) until every sibling child is terminal, then auto-resumes **if `mode` is satisfied** — otherwise the parent is failed directly, with a real retryable `failure_events` row | normal edge, once all children terminal and `mode` satisfied |
-| `human-gate`        | `pendingSelector(state) => Item[]`. Each item is `string` *or* `{ id: string, reason?, hint?, text?, editable? }` — see *Human-gate pending item shape* below | sets `waitJson`; flow → `blocked` | resumes via CLI `approve` / `respond` *or* dashboard GateForm |
-| `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the gateway broadcasts `manifold.gate.opened` / `manifold.gate.closed` over WS with the full payload, and each consumer decides how to surface it (inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into a discuss surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
+| `human-gate`        | `pendingSelector(state) => Item[]`. Each item is `string` *or* `{ id: string, reason?, hint?, text?, editable? }` — see *Human-gate pending item shape* below | sets `waitJson`; flow → `blocked` | resumes via the dashboard GateForm or the `manifold_approve` MCP tool |
+| `gate`              | `pendingSelector` + `approvalRequestBuilder`. Channel-agnostic per-item gate. Delivery is consumer-side: the engine broadcasts `manifold.gate.opened` / `manifold.gate.closed` over its event stream with the full payload, and each host decides how to surface it (OpenClaw: Inbox, Live Activity, …). Optional `discuss: { agent, promptBuilder }` opts the gate into a discuss surface — see *Per-gate discuss opt-in*. | sets `waitJson` (`pending: string[]`, `items: [{itemId, requestPayload}]`) | resumes via any channel's resolver call into `gate-resolver.recordItemDecision` |
 
 A `code`-then-`agent` fallback (deterministic primary path, LLM-driven
 recovery leg) is not a distinct node kind — author it as a
@@ -78,9 +78,8 @@ once the underlying issue is confirmed fixed
 
 On a genuine dispatch failure it calls `nodeHealthStore.markUnhealthy(...)`
 before re-throwing, which blocks every future dispatch of that
-`(pipelineId, nodeId)` pair until an operator resets it — see
-[Operations → CLI](operations.md#cli)
-(`openclaw manifold node-health status|reset`). Deliberately does
+`(pipelineId, nodeId)` pair until the node-health store is reset.
+Deliberately does
 **not** mark unhealthy for `NodeBlocked` (an ordinary budget-gate pause,
 not a dispatch failure) or `GatewayHandoffNeeded` (the agent runtime
 being unreachable in the current context, not evidence the agent itself
@@ -215,13 +214,16 @@ edited result must read from there.
 ### Per-gate discuss opt-in
 
 A `human-gate` node can optionally let the operator chat with an agent
-about a pending item before deciding. The chat lives in a dedicated
-Inbox screen and is transported over the WS dialog door
-(`ws://<gateway-host>:<dialog-port>/api/dialog?bearer=<MANIFOLD_BEARER>`):
+about a pending item before deciding. The chat lives in a dedicated host
+surface (OpenClaw: the Inbox screen) and is transported over the engine's
+WS dialog door
+(`ws://<engine-host>:44302/api/dialog?bearer=<MANIFOLD_BEARER>`, port via
+`MANIFOLD_DIALOG_PORT`):
 the client sends `{type:"message", flowId, itemId, text}` frames and gets
 back `{type:"ack"}`, then `{type:"reply"}` (or `{type:"error"}`).
 
-**Global default** — set `discuss.defaultAgent` in `openclaw.json`
+**Global default** — set `discuss.defaultAgent` in the adapter config
+(OpenClaw: `openclaw.json`)
 so every gate in every pipeline gets a discuss agent without declaring
 its own `discuss` block:
 
@@ -258,9 +260,8 @@ GATE: {
         `You are reviewing item ${itemId} for pipeline ${pipelineId}.`,
         `flowId: ${flowId}   itemId: ${itemId}`,
         draft ? `Current draft:\n${draft}` : "",
-        `When the operator asks for a revision, spawn Cyrano (content-writer)`,
-        `with the task and instruct them to propose through the pipeline's`,
-        `discuss tooling (oc-config). End your turn immediately — do NOT call sessions_yield.`,
+        `When the operator asks for a revision, hand it to your content`,
+        `agent, then end your turn immediately.`,
       ].filter(Boolean).join("\n");
     },
   },
@@ -282,21 +283,21 @@ exactly as before — Approve / Deny / Edit & approve / Cancel only.
 | Draft proposal | A `discuss.component` event carrying a draft payload — a connected client surfaces an Apply affordance. |
 | Meta proposal | A `discuss.component` event carrying a fields payload — updates the chip row on connected clients. |
 | subflow (sub-node gate) | Gates inside `flow.nodes` opt in identically. `resolveDiscussTarget` walks `subflow` parents and picks the first `kind: "human-gate"` sub-node with a `discuss` block. |
-| Resolution order | Stamped session → node `discuss.agent` → `discuss.defaultAgent` in openclaw.json. |
+| Resolution order | Stamped session → node `discuss.agent` → adapter `discuss.defaultAgent`. |
 | History | `GET /manifold/runs/<flowId>/discuss?itemId=...` returns message history and pending components for cold-reconnect. |
 
 **Pipeline authors:** `promptBuilder` is your contract surface. Inline the
 listing context, current draft, and orchestration rules the agent needs.
-Point the agent at oc-config's discuss tooling — not at `<draft>` tags or
-`subagent_run`. Keep the prompt under ~2 KB.
+Point the agent at the host's discuss tooling — not at `<draft>` tags or
+a raw subagent call. Keep the prompt under ~2 KB.
 
 ### needs-info: free-text vs button choices
 
 A `code` node that returns `{ _blocked: { reason, needed, hint } }` puts
-the flow into `status=waiting`, `waitJson.kind="needs-info"`. The
-dashboard renders a `RespondForm` with a textarea by default; the
-operator's reply gets appended to `state.userAnswers[nodeId]` and the
-node re-runs.
+the flow into a `needs-info` wait (`waitJson.kind="needs-info"`). The
+dashboard renders a `RespondForm` with a textarea by default; once the
+wait is answered the flow resumes and the node re-runs (the executor
+logs `→ waiting (will re-run <node> on resume)`).
 
 Pipeline authors can opt into a **button-only** form by passing
 `choices: string[]` in the `_blocked` payload:
@@ -311,15 +312,11 @@ return {
 ```
 
 The dashboard's RespondForm renders one button per choice (each
-submits the choice label as the response text) and skips the textarea.
-The node is responsible for interpreting the choice in its next run
-via `state.userAnswers[nodeId].at(-1).text`. If `choices` is omitted,
+submits the choice label as the response) and skips the textarea. The
+node interprets the choice in its next run. If `choices` is omitted,
 the textarea remains.
 
-`choices` is invisible to the CLI (`manifold respond` still takes
-free text) and to companion Live Activity surfaces (which carry their own
-approve/deny opinion regardless of `choices`). It's a dashboard-form
-hint, not a contract.
+`choices` is a dashboard-form hint, not a contract.
 
 
 ## Groups (compound parents in the dashboard)

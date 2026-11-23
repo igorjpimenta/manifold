@@ -1,13 +1,14 @@
 # manifold
 
-**LangGraph-style pipeline runtime for openclaw.**
+**LangGraph-style pipeline runtime.**
 
 Manifold is a pipeline engine that runs as its own process (`manifold serve`:
-HTTP API, executor, dashboard, plus an MCP server for tools); the openclaw
-adapter (`plugins/openclaw/manifold`) starts it, supervises it, and bridges
-agent turns back into the gateway. A `Pipeline` is `{ nodes, edges, state }`
-loaded from a JS module; a `Flow` is one persistent run of a pipeline. The
-executor walks nodes by id, applies their `stateUpdate`, picks the next id from
+HTTP API, executor, dashboard, plus an MCP server for tools). Harness adapters
+attach to it — the shipped adapter (`plugins/openclaw/manifold`, published as
+`@igorjpimenta/manifold-openclaw`) starts and supervises the engine and
+bridges agent turns into it. A `Pipeline` is `{ nodes, edges, state }` loaded
+from a JS module; a `Flow` is one persistent run of a pipeline. The executor
+walks nodes by id, applies their `stateUpdate`, picks the next id from
 `edges[currentId](state)`, persists every revision to sqlite, and exits the
 loop on a terminal or blocked status.
 
@@ -24,40 +25,54 @@ this repo or building pipelines against it. Source lives at
 
 ## Install
 
-Requires OpenClaw ≥ 2026.5.6. Install or update a release:
+Engine (standalone):
+
+    npm install -g @igorjpimenta/manifold
+    manifold serve
+
+Harness adapter — OpenClaw (the shipped one; requires OpenClaw ≥ 2026.5.6):
 
     openclaw plugins install npm:@igorjpimenta/manifold-openclaw@<version> --force --accept-capabilities
 
-The tag is the install contract — versioning, tagging and the dashboard build
-step are in [Releases](docs/releases.md).
+The adapter spawns `manifold serve` for you and connects the host to its MCP
+tools — see [the adapter README](plugins/openclaw/manifold/README.md).
+Versioning, tagging and publishing: [Releases](docs/releases.md).
 
 ## Quick start
 
-1. Create `~/.openclaw/workspace/.pipelines/<id>/index.js` default-exporting
-   `{ id, goal, state, nodes, edges }` — full schema and a copy-me skeleton in
-   [Pipelines](docs/pipelines.md).
-2. No restart needed: `pipelines-watcher.js` reloads on change. Verify with
-   `openclaw manifold list` or `GET /api/pipelines/<id>`.
-3. Run it:
+1. Create a pipeline module under the pipelines dir — by default
+   `~/.manifold/workspace/.pipelines/<id>/index.js` — default-exporting
+   `{ id, goal, state, nodes, edges }` (full schema and a copy-me skeleton:
+   [Pipelines](docs/pipelines.md)).
+2. Start the engine (the loader/watcher picks the file up; edits hot-reload):
 
-       openclaw manifold start <id> --args '{"someInput":"x"}'
+       MANIFOLD_BEARER=$(openssl rand -hex 32) manifold serve
 
-4. Watch it: `openclaw manifold runs`, `openclaw manifold status <flowId>`,
-   or the dashboard at `http://127.0.0.1:44300`
-   ([Dashboard](docs/dashboard.md)).
+3. Start a flow over the engine API (`127.0.0.1:44301`, bearer required):
+
+       curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" \
+         -H 'Content-Type: application/json' \
+         -d '{"pipelineId":"<id>"}' http://127.0.0.1:44301/manifold/start
+
+4. Watch it: the dashboard at `http://127.0.0.1:44300`
+   ([Dashboard](docs/dashboard.md)) or `GET /manifold/runs` on the API.
+   Agents get the same operations as MCP tools (`manifold serve --mcp http`):
+   `manifold_start`, `manifold_status`, `manifold_runs`, `manifold_approve`,
+   `manifold_cancel`, `manifold_deliver_result`
+   ([Operations](docs/operations.md#tool-surface-agent-facing)).
 
 ## How it fits together
 
-- The **engine** is one process (`manifold serve`): it hosts the HTTP API, the executor loop, the dashboard, and an MCP server for tools.
+- The **engine** is one process (`manifold serve`): HTTP API, executor loop, pipeline loader + watcher, flow revival, dashboard, MCP and WS servers.
 - The **loader** (`loader.js`) discovers and validates pipeline modules under `pipelinesDir`.
 - The **executor** (`executor.js`) drives the node loop, dispatches each node kind, and persists through the **state store** (`state-store.js`, one `runtime.sqlite`).
-- The **dashboard** (`dashboard/server.js`, `dashboard/src/`) serves the read-only UI and the single actuation endpoint (gate approve).
-- The **openclaw adapter** (`plugins/openclaw/manifold`) starts and supervises the engine, bridges agent turns back into the gateway, and stamps identity.
+- The **dashboard** (`dashboard/server.js`, `dashboard/src/`) serves the read-only UI and the actuation endpoints (approve, cancel, rerun, pause, resume).
+- The **harness adapter** (`plugins/openclaw/manifold`) spawns and supervises `manifold serve`, bridges agent turns into the engine, and stamps identity. Other harnesses attach the same way — the engine never calls out.
 
     pipeline module ──▶ loader ──▶ executor ──▶ runtime.sqlite
                                                   ▲
-    openclaw agent ── MCP tools (start/status) ───┤
-    operator ──────── dashboard / CLI ────────────┘
+    harness agent ── MCP tools ───────────────────┤
+    operator ──────── dashboard / API ────────────┘
 
 ## Identity
 
@@ -108,40 +123,29 @@ Status semantics, the state keys the executor writes, and session-key rules:
 | Node kinds, subflow fan-out, gate/discuss/needs authoring, groups | [Nodes](docs/nodes.md) |
 | Run lifetime, status transitions, state conventions, session keys | [Lifecycle](docs/lifecycle.md) |
 | Dashboard API and pipeline-declared views | [Dashboard](docs/dashboard.md) |
-| CLI, agent tools, recovery recipes, troubleshooting, quirks | [Operations](docs/operations.md) |
-| Config keys and defaults | [Configuration](docs/configuration.md) |
+| Engine CLI, MCP tools, HTTP recipes, troubleshooting, quirks | [Operations](docs/operations.md) |
+| Engine env and adapter config keys | [Configuration](docs/configuration.md) |
 | Public API, code map, migrations, sqlite shape | [Internals](docs/internals.md) |
 | Publish a release | [Releases](docs/releases.md) |
 
 ## CLI
 
-All commands run as `openclaw manifold …`; implementation: `cli.js`.
+The engine binary serves; it has no run-manipulation subcommands:
 
 | command | what it does |
 | --- | --- |
-| `list` | list discovered pipelines |
-| `runs` | list flow runs |
-| `start <pipelineId> [--args <json>] [--detach]` | start a flow |
-| `status <flowId>` | status, currentStep, waitJson |
-| `respond <flowId> <text>` | answer a needs-info wait |
-| `approve <flowId> <itemId> <decision>` | resolve a gate (`approve` / `reject` / `edit --text …`) |
-| `retry <flowId>` | retry a flow |
-| `pause <flowId>` / `resume <flowId>` / `paused` | pause controls |
-| `dashboard` | start/open the dashboard |
-| `node-health status [pipelineId] [--all]` | circuit-breaker health |
-| `node-health reset <pipelineId> <nodeId>` | unblock an unhealthy agent node |
+| `manifold serve` | boot the full app — API (44301), executor, loader/watcher, revival, dashboard (44300) |
+| `manifold serve --mcp stdio` | pipeline tools over MCP stdio (harness declared via `MANIFOLD_HARNESS`) |
+| `manifold serve --mcp http [--port N] [--host H]` | the same tools over Streamable HTTP (`MANIFOLD_BEARER` + `X-Manifold-Harness`) |
+| `manifold serve --ws [--port N] [--host H]` | push event stream (default 44303) |
 
-The agent-facing surface is one tool (`manifold_start`) plus MCP transport —
-see [Operations → Tool surface](docs/operations.md#tool-surface-agent-facing).
+Flow operations — start, cancel, gates, retry, rerun — are HTTP routes on the
+engine API and MCP tools: [Operations](docs/operations.md).
 
 ## Development
 
     npm install
     npm test
-
-Development clone: `~/.dev/job/igorpimenta/manifold`. Story worktrees are
-created at `<clone>/.doppler/.worktrees/<story>`, and each story ships as its
-own PR (base `feat/plugin`).
 
 ## License
 

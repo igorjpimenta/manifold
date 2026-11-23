@@ -1,105 +1,83 @@
 # Operations
 
-Running, inspecting and recovering flows from the CLI, the agent tool surface, and the symptom/quirk tables.
+Running, inspecting and recovering flows: the engine CLI, the MCP tool
+surface, HTTP recipes against the engine API, and the symptom/quirk tables.
 
-## CLI
+Every engine route below is served by `manifold serve` on
+`http://127.0.0.1:44301` (`MANIFOLD_API_HOST` / `MANIFOLD_API_PORT`) and
+requires `Authorization: Bearer $MANIFOLD_BEARER`. Dashboard routes are on
+`http://127.0.0.1:44300`.
 
-```
-openclaw manifold list
-openclaw manifold runs
-openclaw manifold start <pipelineId> [--args <json>] [--detach]
-openclaw manifold status <flowId>
-openclaw manifold respond <flowId> <text>
-openclaw manifold approve <flowId> <itemId> <decision>
-openclaw manifold retry <flowId>
-openclaw manifold pause <flowId>
-openclaw manifold resume <flowId>
-openclaw manifold paused
-openclaw manifold dashboard
-openclaw manifold node-health status [pipelineId] [--all]
-openclaw manifold node-health reset <pipelineId> <nodeId>
-```
+## Engine CLI
 
-Implementation: `cli.js`.
-
+The binary serves; run-manipulation lives on the HTTP API and MCP tools
+(see [README → CLI](../README.md#cli) for the `serve` modes).
 
 ## Tool surface (agent-facing)
 
-Declared in `openclaw.plugin.json`, one tool per file under `agent/tools/`
-(barrel re-export in `agent/tools/index.js`):
+Six tools, declared in `mcp/tools.js` (`TOOL_DEFS`) and registered by both
+transports — `mcp/stdio.js` and `mcp/http.js` register every `TOOL_DEFS`
+entry, so there is no per-tool wiring:
 
-| Tool                      | File                                    | Signature input fields        | Purpose                                             |
-| ------------------------- | ---------------------------------------- | ------------------------------ | ---------------------------------------------------- |
-| `manifold_start`          | `agent/tools/manifold-start.js`          | `pipelineId`, optional `args` | Start a flow. Returns `flowId`.                     |
+| Tool | Input | Purpose |
+| --- | --- | --- |
+| `manifold_start` | `pipelineId`, optional `args` | Start a flow. Returns `flowId`. |
+| `manifold_status` | `flowId` | Read one flow (status, currentStep, waitJson). |
+| `manifold_runs` | optional filters | List flows. |
+| `manifold_approve` | `flowId`, `itemId`, `decision` | Resolve a gate item. |
+| `manifold_cancel` | `flowId`, optional `reason` | Cancel a non-terminal flow. |
+| `manifold_deliver_result` | JSON `payload`, optional `kind`/`runId` | Structured result rendezvous (`state/tool-handoff.js`): stored under the caller's stamped session key, where the waiting dispatch picks it up. |
 
-Pipeline-specific tools (`propose_*`, `submit_*`, `report_*`) live in
-oc-config, not here — core keeps only the harness-agnostic surface.
-
-Shared helpers (`toolErr`) live in `agent/tools/shared.js`.
+Agents reach them through a harness that connects MCP (`manifold serve
+--mcp stdio|http`); identity is stamped per call — see
+[plugins/README.md](../plugins/README.md). Pipeline-specific tools
+(`propose_*`, `submit_*`, `report_*`) belong to companion packages, not
+core — core keeps only the harness-agnostic surface.
 
 ### Adding a new tool
 
-1. New file under `agent/tools/`, one `registerXTool({ api, ...deps })`
-   export per file.
-2. Add the tool name to `contracts.tools` in `openclaw.plugin.json` — the
-   loader rejects registration for undeclared names.
-3. Register with `api.registerTool({ name: "...", ... })` — **prefer the
-   object form**. Only reach for the factory form
-   (`api.registerTool((ctx) => ({ name: "...", ... }))`, as `manifold_start`
-   does) when you actually need `ctx` (e.g. `ctx.sessionKey`) in closure.
-4. **If you use the factory form, you MUST pass `{ name: "..." }` as the
-   second argument**: `api.registerTool((ctx) => ({...}), { name: "..." })`.
-   Object-form registrations get their `names` populated automatically from
-   the object's own `.name` field; factory-form registrations do not — the
-   core loader never inspects what the factory *returns*, only
-   `opts.name`/`opts.names`. Omitting this on a factory-form tool leaves its
-   registry entry with an empty `names` array, which falls back to matching
-   the *whole plugin's* declared tool list. Combined with `Array.find()`
-   picking the *first* matching registry entry, a single factory-form tool
-   registered without `opts.name` can silently hijack lookups for every
-   *other* tool in the plugin — surfacing as `plugin tool runtime missing
-   (manifold): <unrelated-tool-name>` at call time for tools that are
-otherwise correctly registered.
-5. Wire the register call into `index.js`.
-6. Add a test file under `test/unit/agent/tools/<tool-name>.test.js`
-   mirroring the source file 1:1.
-
+1. Add a definition to `TOOL_DEFS` in `mcp/tools.js` — name, input schema,
+   handler.
+2. Both transports register every `TOOL_DEFS` entry; no manifest entry and
+   no per-transport registration step (the adapter manifest carries no tool
+   contracts by design).
+3. Add a test under `test/unit/mcp/` mirroring the definition.
 
 ## Common tasks
 
 ### Add a new pipeline
 
-1. Create `~/.openclaw/workspace/.pipelines/<id>/index.js`.
+1. Create `<pipelinesDir>/<id>/index.js` (default
+   `~/.manifold/workspace/.pipelines/<id>/index.js`).
 2. Default-export an object matching [Pipeline schema (canonical)](pipelines.md#pipeline-schema-canonical).
-3. No restart needed — `pipelines-watcher.js` reloads on change.
-4. Verify with `openclaw manifold list` or
-   `GET /api/pipelines/<id>`.
+3. No restart needed — the engine's `pipelines-watcher.js` reloads on change.
+4. Verify with `GET http://127.0.0.1:44300/api/pipelines/<id>` (dashboard
+   API) or `GET /manifold/pipelines` on the engine API.
 
 ### Run a pipeline once
 
-```
-openclaw manifold start my-pipeline --args '{"someInput":"x"}'
+```bash
+curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" \
+  -H 'Content-Type: application/json' \
+  -d '{"pipelineId":"my-pipeline","args":{"someInput":"x"}}' \
+  http://127.0.0.1:44301/manifold/start
 ```
 
-Without `--detach`, the CLI blocks driving the executor loop until
-the flow terminates or hits a gate. **With `--detach`, the flow record
-is created but never driven** (see *Operational quirks*).
+The engine drives the flow to a terminal status or a gate. Agents start
+flows through the `manifold_start` MCP tool instead — same route behind it.
 
 ### Seed a pipeline with operator-supplied state
 
 When the operator wants to drive a pipeline for a specific input the
 pipeline's normal SCAN/ENUMERATE stage wouldn't produce — e.g. "run
-the proposal flow for *this* listing URL" — neither `--args` nor the
+the proposal flow for *this* listing URL" — neither `args` nor the
 `manifold_start` tool fits: the pipeline's discovery stage still
 runs. Instead, insert a `flow_runs` row at `status='running'` +
-`current_step='__start__'` with pre-populated `state_json`. The
-gateway's *revival service* catches it at the next boot (~15s delay)
-and drives forward; the pipeline's start-edge typically short-circuits
-past discovery when its readiness condition is already satisfied (e.g.
+`current_step='__start__'` with pre-populated `state_json`. The engine's
+*revival service* (a `manifold serve` boot service) catches it and drives
+forward; the pipeline's start-edge typically short-circuits past discovery
+when its readiness condition is already satisfied (e.g.
 `PRIME: (s) => s.listings.length > 0 ? "FILTER" : "ENSURE_LOGIN"`).
-
-Procedure lives in Vulcan's `seed-pipeline-flow` skill —
-`workspace/agents/agent-forger/skills/seed-pipeline-flow/SKILL.md`.
 
 **⚠ Infra-skip gotcha.** Skipping `ENSURE_LOGIN_CODE` /
 `LAUNCH_BROWSER` / etc. via a pre-populated state leaves downstream
@@ -109,11 +87,14 @@ run the infra step manually before seeding, or set the row's
 
 ### Inspect why a flow failed
 
-```
-openclaw manifold status <flowId>          # shows status, currentStep, waitJson
+```bash
+curl -H "Authorization: Bearer $MANIFOLD_BEARER" \
+  http://127.0.0.1:44301/manifold/runs/<flowId>
 ```
 
-Or open the dashboard at `#/runs/<flowId>`:
+Shows status, currentStep and waitJson. Or open the dashboard at
+`#/runs/<flowId>`:
+
 - `errors` card lists `errorEntries[*]` (top-level, sourced from `flow_node_executions` — not a `stateJson` field)
 - `transcripts` card shows the full subagent conversation per session
 - `state` tree shows the full `stateJson`
@@ -129,12 +110,12 @@ failure_node)`; UPSERT semantics on re-records (see
 
 ```bash
 # Open rows (default: not resolved, not ignored)
-curl -H "Authorization: Bearer $TOKEN" \
-  http://127.0.0.1:18789/manifold/failures
+curl -H "Authorization: Bearer $MANIFOLD_BEARER" \
+  http://127.0.0.1:44301/manifold/failures
 
 # Include resolved + ignored — what Inbox clients fetch in one shot
-curl -H "Authorization: Bearer $TOKEN" \
-  'http://127.0.0.1:18789/manifold/failures?resolved=all&ignored=all&limit=200'
+curl -H "Authorization: Bearer $MANIFOLD_BEARER" \
+  'http://127.0.0.1:44301/manifold/failures?resolved=all&ignored=all&limit=200'
 ```
 
 Each row carries an `available_actions[]` array — descriptor list of
@@ -142,15 +123,15 @@ operator actions Inbox clients render (kind / label / icon / tint /
 destructive). Framework defaults always present; pipeline-declared
 actions opt in via the `recoveryActions` map (see [Pipeline schema](pipelines.md#pipeline-schema-canonical)).
 
-**Action dispatch endpoints** (gateway, port 18789):
+**Action dispatch endpoints** (engine API, port 44301):
 
 ```bash
 # Generic dispatch — for any kind the row's available_actions exposes.
-# Includes pipeline-declared kinds (e.g. `skip` on workana-proposal)
-# and would include future custom kinds without code changes here.
-curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+# Includes pipeline-declared kinds (e.g. `skip`) and any future custom
+# kinds without code changes here.
+curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" -H "Content-Type: application/json" \
   -d '{"via":"app"}' \
-  http://127.0.0.1:18789/manifold/failures/<id>/action/<kind>
+  http://127.0.0.1:44301/manifold/failures/<id>/action/<kind>
 
 # Framework-default routes — same semantics, dedicated URLs:
 curl -X POST .../manifold/failures/<id>/retry      # surgical branch retry
@@ -178,25 +159,30 @@ Implementation: `routes/operator-retry.js: retryFailureBranch`.
 Three surfaces, same underlying operation:
 
 ```
-# CLI
-openclaw manifold approve <flowId> <itemId> approve            # human-gate / gate
-openclaw manifold approve <flowId> <itemId> edit --text "..."  # replace agent output
-openclaw manifold respond <flowId> "the answer"                # needs-info (free-form)
+# Dashboard: open #/runs/<flowId> → "waiting on …" card. Approve/reject
+# buttons are always rendered; the edit button shows only when the pending
+# item has `text` (textarea pre-fills) or `editable: true` (empty textarea).
+# The SSE stream refreshes the page once the executor reacts.
 
-# Dashboard: open #/runs/<flowId> → "waiting on …" card. Approve/reject buttons are
-# always rendered; the edit button shows only when the pending item has
-# `text` (textarea pre-fills) or `editable: true` (empty textarea). The SSE
-# stream refreshes the page once the executor reacts.
-
-# HTTP (what the dashboard sends)
+# HTTP — what the dashboard sends (human-gate):
 curl -X POST -H 'Content-Type: application/json' \
   -d '{"itemId":"<itemId>","decision":"approve"}' \
   http://127.0.0.1:44300/api/runs/<flowId>/approve
+
+# HTTP — gate nodes on the engine API (decision: approve | reject | edit):
+curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" \
+  -H 'Content-Type: application/json' \
+  -d '{"flowId":"<flowId>","itemId":"<itemId>","decision":"approve",
+       "session":"<caller session>","agentId":"<caller agent>"}' \
+  http://127.0.0.1:44301/manifold/gate/resolve
+
+# Agents resolve gates through the manifold_approve MCP tool.
 ```
 
 `itemId` must match the `id` of an entry returned by the node's
-`pendingSelector`. Both the CLI and the dashboard endpoint share
-`gates.js: applyApproval` so the resulting state mutation is identical.
+`pendingSelector`. The dashboard endpoint lands in `gates.js: applyApproval`
+and `gate/resolve` in `gate-resolver.js: recordItemDecision` — one state
+mutation per decision either way.
 
 ### Rerun a flow or a single subflow item
 
@@ -204,8 +190,9 @@ Three escalating strategies. Use the lowest one that fits.
 
 **A. Whole flow, fresh from `__start__` (creates a new flow id):**
 
-```
-curl -X POST http://127.0.0.1:18789/manifold/runs/<flowId>/rerun
+```bash
+curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" \
+  http://127.0.0.1:44301/manifold/runs/<flowId>/rerun
 ```
 
 Routes through `executor.rerunFromSource` — copies the source flow's
@@ -223,10 +210,10 @@ Because every subflow item is a real, independent flow (its own `flowId`,
 just retrying that flow — the exact same mechanism as option A/the
 failures flow, pointed at the CHILD's own flowId instead of the parent's:
 
-```
-curl -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+```bash
+curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" -H "Content-Type: application/json" \
   -d '{"via":"app"}' \
-  http://127.0.0.1:18789/manifold/failures/<id>/retry
+  http://127.0.0.1:44301/manifold/failures/<id>/retry
 ```
 
 where `<id>` is the failure event recorded against the child's own
@@ -258,7 +245,7 @@ This walks
 the child's own topology back to the failing node exactly like a
 flow-level retry (see *Failures feed + operator recovery actions*
 above) — no manual `runtime.sqlite` surgery, no
-`branch.step`/`flow.currentStep` rewind math, no gateway restart. The
+`branch.step`/`flow.currentStep` rewind math, no engine restart. The
 parent flow is untouched and stays blocked on `children-pending` until
 this one child (re-)reaches a terminal status.
 
@@ -273,29 +260,18 @@ with operator-supplied state* above.
 
 ## If you see…
 
-| Symptom                                                                                             | Likely cause + where to look                                                                  |
-| --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `pipeline "<id>" already has 1 active flow(s)`                                                       | Singleton guard. Cancel/finish the prior run. `executor.js: start` line 105.                  |
-| `Unrecognized key: "<name>"` from `openclaw doctor` or gateway start                                 | Plugin config not nested under `.config`. See [Pipelines → Conventions](pipelines.md#conventions-and-what-breaks-if-you-violate-them) §3.                                |
-| Flow stuck at `__start__` in `running` for forever                                                   | `--detach` was used. CLI never invoked `runFlow`. Restart the gateway (revival picks orphans) or re-run without `--detach`. |
-| `manifold: flow not found: <shortId>`                                                              | CLI commands take full UUID, not the dashboard's 8-char display id.                            |
-| Dashboard transcript pane shows long messy nodeId, no item                                           | Pipeline uses a node id with a hyphen. Fix the node id. See [Pipelines → Conventions](pipelines.md#conventions-and-what-breaks-if-you-violate-them) §1.                  |
-| Dashboard pipeline detail renders blank black                                                        | `pipeline.nodes` is an array instead of an object keyed by id. Fix the export shape.            |
-| `itemId "<x>" not in pending list. Pending: [object Object]`                                         | `pendingSelector` returned objects without `.id`. Items must be `{ id: string, … }`.            |
+| Symptom | Likely cause + where to look |
+| --- | --- |
+| `pipeline "<id>" already has 1 active flow(s)` | Singleton guard on `POST /manifold/start` / `manifold_start`. Cancel or finish the prior run. `executor.js: start`. |
+| `Unrecognized key: "<name>"` when the host validates config | Adapter config not nested under `.config`. See [Pipelines → Conventions](pipelines.md#conventions-and-what-breaks-if-you-violate-them) §3. |
+| `manifold: flow not found: <shortId>` | Id lookups take the full UUID, not the dashboard's 8-char display id. |
+| Dashboard transcript pane shows long messy nodeId, no item | Pipeline uses a node id with a hyphen. Fix the node id. See [Pipelines → Conventions](pipelines.md#conventions-and-what-breaks-if-you-violate-them) §1. |
+| Dashboard pipeline detail renders blank black | `pipeline.nodes` is an array instead of an object keyed by id. Fix the export shape. |
+| `itemId "<x>" not in pending list. Pending: [object Object]` | `pendingSelector` returned objects without `.id`. Items must be `{ id: string, … }`. |
 
 
 ## Operational quirks
 
-- **`--detach` is a footgun.** It creates the flow record without
-  driving the executor loop. The flow stays at `__start__` in
-  `running` until something fires `executor.runFlow(flowId)`. The
-  gateway's *revival service* (registered in `index.js: manifold-flow-revival`)
-  picks up orphans at gateway boot. Practical fix: run without
-  `--detach` inside a background shell instead.
-- **No `cancel` CLI command.** Terminal status is only `succeeded` /
-  `failed`. To force-stop a flow today, the only path is direct sqlite
-  surgery against `runtime.sqlite` (`UPDATE flow_runs SET status='cancelled', ended_at=<ms> …`).
-  This is on the *actuation* roadmap (`POST /api/runs/:id/cancel`).
 - **Per-run artifacts** live in `<pipelinesDir>/<id>/runs/<runId>/`,
   not under the dashboard. The dashboard's `/api/runs/:flowId/artifacts`
   endpoint reads from there.

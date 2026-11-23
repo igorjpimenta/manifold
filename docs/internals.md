@@ -4,13 +4,13 @@ The contract surface for consumers of this repo as a dependency, the code map, a
 
 ## Public API
 
-Consumers (oc-config, and later stories) install this repo as the
-`@igorjpimenta/manifold` git dependency and import **only** through these
+Downstream packages install this repo as the
+`@igorjpimenta/manifold` dependency and import **only** through these
 subpaths. Deep file paths are not a contract — only this table is.
 
 | Subpath | Exports | Consumed by |
 | --- | --- | --- |
-| `@igorjpimenta/manifold` | plugin entry (default) | openclaw runtime |
+| `@igorjpimenta/manifold` | plugin entry (default) | openclaw adapter |
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
 | `…/elevation` | `invokeElevated` | oc-config |
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
@@ -34,16 +34,17 @@ removing an entry is a breaking change for the consumers above.
 
 | You need…                               | Look at                                        |
 | --------------------------------------- | ---------------------------------------------- |
-| Plugin entry (wires everything)         | `index.js`                                     |
+| Neutral core entry (factories)          | `index.js`                                     |
+| Harness adapter entry (wires a host)    | `plugins/openclaw/manifold/index.js`           |
 | Run loop / node dispatch                | `executor.js: runFlow`, `runStep`              |
 | Pipeline file discovery + validation    | `loader.js`                                    |
 | sqlite persistence (`flow_runs` table)  | `state-store.js`                               |
-| CLI command implementations             | `cli.js`                                       |
-| Agent-facing tools                      | `tool.js`                                      |
-| Approval helpers (CLI + dashboard)      | `gates.js`                                     |
+| Engine CLI (`serve` modes)              | `bin/cli.js`                                   |
+| Agent-facing tools (`TOOL_DEFS`)        | `mcp/tools.js`                                 |
+| Approval helpers (dashboard + HTTP)     | `gates.js`                                     |
 | Dashboard server                        | `dashboard/server.js`                          |
 | Dashboard frontend                      | `dashboard/src/`                               |
-| Plugin manifest (tools + config schema) | `openclaw.plugin.json`                         |
+| Adapter manifest (config schema)        | `plugins/openclaw/manifold/openclaw.plugin.json` |
 
 
 ## Database migrations
