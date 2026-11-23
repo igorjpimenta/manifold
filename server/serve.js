@@ -2,6 +2,8 @@
 //
 // Everything harness-specific arrives through the host this file builds:
 //   - agent turns go to MANIFOLD_TURN_URL (the harness adapter's endpoint)
+//   - dispatch session ids go to MANIFOLD_SESSION_URL (the same adapter mints
+//     them; the core process cannot know a harness's id format)
 //   - discuss session ids are minted locally (no harness to ask)
 //   - elevation loops back to this process's own API port
 //
@@ -43,6 +45,12 @@ export function localSessions() {
   };
 }
 
+export function createHostSessions({ sessionUrl = null, token = null, fetchImpl } = {}) {
+  const sessions = localSessions();
+  if (sessionUrl) sessions.newNodeSessionId = createHttpSessionId({ url: sessionUrl, token, fetchImpl });
+  return sessions;
+}
+
 export function createHttpRunTurn({ url, token, timeoutMs = 600_000, logger, fetchImpl = globalThis.fetch }) {
   return async (args) => {
     if (!url) {
@@ -64,6 +72,30 @@ export function createHttpRunTurn({ url, token, timeoutMs = 600_000, logger, fet
       throw new Error(`manifold: agent turn failed: ${detail}`);
     }
     return { text: payload.text ?? "", runId: payload.runId ?? null, usage: payload.usage ?? null };
+  };
+}
+
+// Dispatch session ids come from the harness, never from here: POST to the
+// adapter's bridge (same per-boot token as the turn bridge) and pass its answer
+// through verbatim. A bridge that answers nothing is an error, not a cue to
+// fall back on an id this process would have to invent.
+export function createHttpSessionId({ url, token, timeoutMs = 5_000, fetchImpl = globalThis.fetch } = {}) {
+  return async function newNodeSessionId({ agentId, flowId, nodeId }) {
+    const res = await fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ agentId, flowId, nodeId }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || typeof payload?.session !== "string" || !payload.session) {
+      const detail = payload?.error ?? `HTTP ${res.status}`;
+      throw new Error(`manifold: harness session bridge gave no session for node "${nodeId}": ${detail}`);
+    }
+    return payload.session;
   };
 }
 
@@ -116,6 +148,7 @@ export function resolveServeConfig({ env = process.env } = {}) {
     apiPort: Number(env.MANIFOLD_API_PORT) || DEFAULT_API_PORT,
     apiHost: env.MANIFOLD_API_HOST || DEFAULT_API_HOST,
     turnUrl: env.MANIFOLD_TURN_URL || null,
+    sessionUrl: env.MANIFOLD_SESSION_URL || null,
     turnToken: env.MANIFOLD_TURN_TOKEN || env.MANIFOLD_BEARER || null,
     bearer: env.MANIFOLD_BEARER || null,
   };
@@ -139,7 +172,9 @@ export async function serve({ env = process.env, logger: injectedLogger = null }
     registerHttpRoute: registry.registerHttpRoute,
     runTurn: createHttpRunTurn({ url: cfg.turnUrl, token: cfg.turnToken, logger }),
     invokeElevated: createLocalElevation({ port: cfg.apiPort, host: cfg.apiHost, token: cfg.bearer }),
-    sessions: localSessions(),
+    // A harness that advertises a session bridge mints dispatch ids; without
+    // one, agent nodes must declare their own session or the dispatch refuses.
+    sessions: createHostSessions({ sessionUrl: cfg.sessionUrl, token: cfg.turnToken }),
     getBroadcast: () => null,
   };
 

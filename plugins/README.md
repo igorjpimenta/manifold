@@ -12,15 +12,17 @@ callbacks, no receiver sessions.
 | --------- | ------ | --------- |
 | harness   | per-call declaration (`MANIFOLD_HARNESS` / `X-Manifold-Harness`; `openclaw` default for pipelines-dir resolution) | core: logs, pipelines-dir resolution |
 | agent     | pipeline node `entry.agent` (**required** — anonymous dispatch is refused loudly) | core: session attribution |
-| session   | harness-owned throughout: dispatch sessions declared by the node (`entry.session` / `entry.sessionBuilder`), discuss ids minted by the harness adapter (`sessions.newDiscussSessionId`) — both pass through verbatim | core: turn identity |
+| session   | harness-owned throughout: a node may pin one (`entry.session` / `entry.sessionBuilder`), otherwise the harness adapter mints it (`sessions.newNodeSessionId`, alongside `sessions.newDiscussSessionId` for discuss threads) — every form passes through verbatim | core: turn identity |
 
 ## Session conventions
 
-Core does not mint sessions: the harness owns the format, so an agent
-node declares `entry.session` (static) or
-`entry.sessionBuilder(state, flowId)` (derived) and `dispatchAgentEntry`
-passes it through verbatim. A node that declares neither is refused
-loudly — tool-handoff and the lineage ledger both key off this value.
+Core does not mint sessions: the harness owns the format. An agent node
+may pin `entry.session` (static) or `entry.sessionBuilder(state, flowId)`
+(derived); when it declares neither, the adapter's
+`sessions.newNodeSessionId({agentId, flowId, nodeId})` supplies one, and
+`dispatchAgentEntry` passes whichever it got through verbatim. A dispatch
+with no session from either source is refused loudly — tool-handoff and the
+lineage ledger both key off this value.
 `entry.agent` is required too; no env fallback, ever.
 
 The adapter maps core's `session` to the harness `sessionKey` field on the

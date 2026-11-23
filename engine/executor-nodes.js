@@ -29,6 +29,7 @@ export function createNodeRunner({
   nodeExecutionsStore,
   nodeHealthStore,
   pipelinesRef,
+  sessions,
 }) {
   // Explicit params win; api is the fallback the adapter still
   // supplies (tests construct with api only).
@@ -135,16 +136,22 @@ export function createNodeRunner({
     // NodeBlocked into blockedInfo.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
-    // Session ids belong to the harness, not manifold: pass a declared
-    // entry.session / entry.sessionBuilder through verbatim, and
-    // refuse an agent node that declares neither — tool-handoff and the
-    // lineage ledger both key off this value, so inventing one here would
-    // silently diverge from the harness's own id.
-    const session = entry.session
-      ?? entry.sessionBuilder?.(state, flowId)
-      ?? null;
-    if (!session) {
-      throw new Error(`manifold: refusing dispatch of node "${nodeId}" with no session (set entry.session or entry.sessionBuilder)`);
+    // Session ids belong to the harness, not manifold. A node's own
+    // entry.session / entry.sessionBuilder is passed through verbatim; when
+    // it declares neither, the harness adapter mints one (the injected
+    // `sessions.newNodeSessionId`, the dispatch counterpart of the discuss
+    // ids) so pipelines carry no harness key syntax. A refused dispatch means
+    // no harness mint function was injected at all — tool-handoff, the session
+    // index and the lineage ledger all key off this value, so neither core nor
+    // a silent default may invent one.
+    let session = entry.session ?? entry.sessionBuilder?.(state, flowId) ?? null;
+    // The mint may be local or a bridge call to the harness process, so it is
+    // awaited and its answer type-checked before anything keys off it.
+    if (!session && typeof sessions?.newNodeSessionId === "function") {
+      session = await sessions.newNodeSessionId({ agentId: entry.agent, flowId, nodeId });
+    }
+    if (typeof session !== "string" || !session) {
+      throw new Error(`manifold: refusing dispatch of node "${nodeId}" with no session (declare entry.session / entry.sessionBuilder, or pass a harness sessions.newNodeSessionId)`);
     }
     _lineage?.recordSpawn?.({
       childSession: session, flowId, nodeId,

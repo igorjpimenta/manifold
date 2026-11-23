@@ -4,6 +4,8 @@ import {
   serve,
   resolveServeConfig,
   createHttpRunTurn,
+  createHttpSessionId,
+  createHostSessions,
   createLocalElevation,
   localSessions,
   DEFAULT_API_PORT,
@@ -127,6 +129,56 @@ describe("localSessions", () => {
     const sessions = localSessions();
     assert.equal(await sessions.resolveAgentEffectiveModelPrimary(null, "a"), null);
     assert.equal(sessions.isProviderCooldown("a", "anthropic"), false);
+  });
+});
+
+describe("createHttpSessionId", () => {
+  it("posts the coordinates to the harness bridge and passes its answer through", async () => {
+    let seen = null;
+    const mint = createHttpSessionId({
+      url: "http://127.0.0.1:18789/api/manifold/session",
+      token: "tok",
+      fetchImpl: async (url, init) => {
+        seen = { url, init };
+        return { ok: true, status: 200, json: async () => ({ ok: true, session: "agent:scorer:manifold:abcdef01-SCORE_LLM" }) };
+      },
+    });
+    const session = await mint({ agentId: "scorer", flowId: "abcdef01-0000", nodeId: "SCORE_LLM" });
+    assert.equal(session, "agent:scorer:manifold:abcdef01-SCORE_LLM");
+    assert.equal(seen.url, "http://127.0.0.1:18789/api/manifold/session");
+    assert.equal(seen.init.headers.authorization, "Bearer tok");
+    assert.deepEqual(JSON.parse(seen.init.body), { agentId: "scorer", flowId: "abcdef01-0000", nodeId: "SCORE_LLM" });
+  });
+
+  it("fails the dispatch instead of falling back on an invented id", async () => {
+    const mint = createHttpSessionId({
+      url: "http://127.0.0.1:18789/api/manifold/session",
+      fetchImpl: async () => ({ ok: false, status: 502, json: async () => ({ ok: false, error: "boom" }) }),
+    });
+    await assert.rejects(() => mint({ agentId: "a", flowId: "f", nodeId: "N" }), /gave no session for node "N": boom/);
+  });
+
+  it("treats a 200 with no session as a failure", async () => {
+    const mint = createHttpSessionId({
+      url: "http://127.0.0.1:18789/api/manifold/session",
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ ok: true }) }),
+    });
+    await assert.rejects(() => mint({ agentId: "a", flowId: "f", nodeId: "N" }), /gave no session/);
+  });
+});
+
+describe("createHostSessions", () => {
+  it("mints dispatch ids through the bridge when the harness advertises one", async () => {
+    const sessions = createHostSessions({
+      sessionUrl: "http://127.0.0.1:18789/api/manifold/session",
+      fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ session: "agent:a:manifold:abcdef01-N" }) }),
+    });
+    assert.equal(typeof sessions.newNodeSessionId, "function");
+    assert.equal(await sessions.newNodeSessionId({ agentId: "a", flowId: "abcdef01-x", nodeId: "N" }), "agent:a:manifold:abcdef01-N");
+  });
+
+  it("has no dispatch mint when no bridge is advertised — the node must declare its own", () => {
+    assert.equal(createHostSessions({}).newNodeSessionId, undefined);
   });
 });
 
