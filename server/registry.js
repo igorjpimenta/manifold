@@ -7,8 +7,13 @@
 //
 // `auth` is ignored here: every handler guards itself with the shared
 // MANIFOLD_BEARER (routes/bearer-auth.js), and the server binds loopback.
+// Host/Origin is checked here, once, before the route table — per-route
+// bearer checks cannot see a rebinding attempt that never reaches them
+// (see local-request.js).
 
-export function createRouteRegistry({ logger = console } = {}) {
+import { isLocalRequest } from "./local-request.js";
+
+export function createRouteRegistry({ logger = console, boundHost = null } = {}) {
   const routes = [];
 
   function registerHttpRoute(spec) {
@@ -28,6 +33,12 @@ export function createRouteRegistry({ logger = console } = {}) {
   }
 
   async function handle(req, res) {
+    if (!isLocalRequest(req, { boundHost })) {
+      res.statusCode = 403;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ error: "forbidden", reason: "non-local host or origin" }));
+      return;
+    }
     const url = new URL(req.url, `http://${req.headers.host ?? "127.0.0.1"}`);
     const route = find(url.pathname);
     if (!route) {

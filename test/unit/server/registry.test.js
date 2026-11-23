@@ -2,8 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createRouteRegistry } from "../../../server/registry.js";
 
-function fakeReq(url, method = "GET") {
-  return { url, method, headers: { host: "127.0.0.1:44301" } };
+function fakeReq(url, method = "GET", headers = {}) {
+  return { url, method, headers: { host: "127.0.0.1:44301", ...headers } };
 }
 
 function fakeRes() {
@@ -68,5 +68,52 @@ describe("createRouteRegistry", () => {
     const res = fakeRes();
     await registry.handle(fakeReq("/empty"), res);
     assert.equal(res.writableEnded, true);
+  });
+
+  it("refuses a non-local Host before the route table (DNS rebinding)", async () => {
+    const registry = createRouteRegistry({ logger: { warn() {} } });
+    registry.registerHttpRoute({ path: "/manifold/start", handler: async (req, res) => { res.end("started"); return true; } });
+    const res = fakeRes();
+    await registry.handle(fakeReq("/manifold/start", "POST", { host: "attacker.example:44301" }), res);
+    assert.equal(res.statusCode, 403);
+    assert.match(res.body, /non-local/);
+    assert.equal(res.body.includes("started"), false);
+  });
+
+  it("refuses a missing Host", async () => {
+    const registry = createRouteRegistry({ logger: { warn() {} } });
+    const res = fakeRes();
+    await registry.handle({ url: "/manifold/health", method: "GET", headers: {} }, res);
+    assert.equal(res.statusCode, 403);
+  });
+
+  it("refuses a local Host with a foreign Origin", async () => {
+    const registry = createRouteRegistry({ logger: { warn() {} } });
+    registry.registerHttpRoute({ path: "/manifold/start", handler: async (req, res) => { res.end("started"); return true; } });
+    const res = fakeRes();
+    await registry.handle(
+      fakeReq("/manifold/start", "POST", { host: "127.0.0.1:44301", origin: "http://attacker.example" }),
+      res,
+    );
+    assert.equal(res.statusCode, 403);
+  });
+
+  it("accepts a local Origin alongside a local Host", async () => {
+    const registry = createRouteRegistry({ logger: { warn() {} } });
+    registry.registerHttpRoute({ path: "/manifold/health", handler: async (req, res) => { res.end("ok"); return true; } });
+    const res = fakeRes();
+    await registry.handle(
+      fakeReq("/manifold/health", "GET", { host: "127.0.0.1:44301", origin: "http://localhost:44300" }),
+      res,
+    );
+    assert.equal(res.body, "ok");
+  });
+
+  it("accepts the bound host when it is an explicit LAN address", async () => {
+    const registry = createRouteRegistry({ logger: { warn() {} }, boundHost: "192.168.1.10" });
+    registry.registerHttpRoute({ path: "/manifold/health", handler: async (req, res) => { res.end("ok"); return true; } });
+    const res = fakeRes();
+    await registry.handle(fakeReq("/manifold/health", "GET", { host: "192.168.1.10:44301" }), res);
+    assert.equal(res.body, "ok");
   });
 });

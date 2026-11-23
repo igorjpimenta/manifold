@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  serve,
   resolveServeConfig,
   createHttpRunTurn,
   createLocalElevation,
@@ -126,5 +127,17 @@ describe("localSessions", () => {
     const sessions = localSessions();
     assert.equal(await sessions.resolveAgentEffectiveModelPrimary(null, "a"), null);
     assert.equal(sessions.isProviderCooldown("a", "anthropic"), false);
+  });
+});
+
+describe("serve — boot guard", () => {
+  it("refuses to start without MANIFOLD_BEARER", async () => {
+    await assert.rejects(
+      () => serve({
+        env: { MANIFOLD_DATA_DIR: "/tmp/manifold-serve-guard-test" },
+        logger: { info() {}, warn() {}, error() {} },
+      }),
+      /MANIFOLD_BEARER is required/,
+    );
   });
 });

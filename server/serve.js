@@ -125,7 +125,15 @@ export async function serve({ env = process.env, logger: injectedLogger = null }
   const cfg = resolveServeConfig({ env });
   const logger = injectedLogger ?? createLogger("manifold");
 
-  const registry = createRouteRegistry({ logger });
+  // Refuse at boot: every operator route fails closed on an unset bearer, so
+  // serving without one produces a listener that answers nothing but 401s —
+  // indistinguishable from a bad client token, and silent about the real
+  // cause.
+  if (!cfg.bearer) {
+    throw new Error("manifold serve: MANIFOLD_BEARER is required — operator routes fail closed without it");
+  }
+
+  const registry = createRouteRegistry({ logger, boundHost: cfg.apiHost });
   const host = {
     logger,
     registerHttpRoute: registry.registerHttpRoute,
