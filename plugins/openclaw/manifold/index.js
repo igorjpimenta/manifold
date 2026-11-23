@@ -23,6 +23,7 @@ import { fileURLToPath } from "node:url";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { wrapSubagentKeys } from "./session-keys.js";
 import { newNodeSessionId } from "./sessions.js";
+import { invokeElevated } from "@igorjpimenta/manifold/elevation";
 import { createRunTurn } from "./run-turn.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { registerTelemetryHooks } from "./telemetry.js";
@@ -33,6 +34,10 @@ const DEFAULT_DASHBOARD_PORT = 44300;
 const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 const DEFAULT_GATEWAY_PORT = 18789;
 const TURN_PATH = "/api/manifold/turn";
+const ELEV_TURN_PATH = "/api/manifold/_elev/turn";
+// A turn ends when its own run ends, not on socket silence: the elevation
+// loopback's timeout is an idle timer, so it must outlast any single turn.
+const ELEV_TURN_TIMEOUT_MS = 3_600_000;
 const SESSION_PATH = "/api/manifold/session";
 const MAX_TURN_BODY_BYTES = 1024 * 1024;
 const RESTART_BACKOFF_MS = [2000, 5000, 15000];
@@ -41,6 +46,17 @@ const require = createRequire(import.meta.url);
 
 // Dispatch coordinates in, this harness's session id out. Missing coordinates
 // are refused rather than defaulted: the id labels a real transcript.
+// The elevated sibling answers with its own JSON error envelope; reuse its
+// message rather than wrapping it again.
+function parseErrorOf(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed?.error === "string" ? parsed.error : null;
+  } catch {
+    return null;
+  }
+}
+
 export function sessionIdFor(body) {
   const { agentId, flowId, nodeId } = body ?? {};
   if (!agentId || !flowId || !nodeId) return { error: "agentId, flowId and nodeId are required" };
@@ -209,8 +225,36 @@ export default definePluginEntry({
     });
 
     // ── Turn bridge ──────────────────────────────────────────────────────────
-    // The core calls this when a flow reaches an agent node; the turn runs
-    // here, inside the gateway, with the harness's own runtime.
+    // Two routes for one turn. The gateway refuses `runtime.subagent.run`
+    // outside an operator-scoped request ("missing scope: operator.write"),
+    // and an `auth: "plugin"` handler carries no scope at all — so the public
+    // route, which the core calls with the per-boot token, loops back through
+    // the env-var Bearer to the `auth: "gateway"` sibling, whose handler runs
+    // with CLI_DEFAULT_OPERATOR_SCOPES ambient (the same crossing
+    // manifold's own elevation.js documents for gate resolution).
+    api.registerHttpRoute({
+      path: ELEV_TURN_PATH,
+      auth: "gateway",
+      match: "exact",
+      handler: async (req, res) => {
+        if (req.method !== "POST") {
+          res.setHeader("allow", "POST");
+          sendJson(res, 405, { ok: false, error: "method not allowed" });
+          return true;
+        }
+        const body = await readJsonBody(req);
+        if (body.error) { sendJson(res, body.status, { ok: false, error: body.error }); return true; }
+        try {
+          const result = await runTurn(body.value ?? {});
+          sendJson(res, 200, { ok: true, text: result.text ?? "", runId: result.runId ?? null, usage: result.usage ?? null });
+        } catch (err) {
+          api.logger.warn(`manifold: turn failed: ${err?.message ?? err}`);
+          sendJson(res, 502, { ok: false, error: err?.message ?? String(err) });
+        }
+        return true;
+      },
+    });
+
     api.registerHttpRoute({
       path: TURN_PATH,
       auth: "plugin",
@@ -227,13 +271,14 @@ export default definePluginEntry({
         }
         const body = await readJsonBody(req);
         if (body.error) { sendJson(res, body.status, { ok: false, error: body.error }); return true; }
-        try {
-          const result = await runTurn(body.value ?? {});
-          sendJson(res, 200, { ok: true, text: result.text ?? "", runId: result.runId ?? null, usage: result.usage ?? null });
-        } catch (err) {
-          api.logger.warn(`manifold: turn failed: ${err?.message ?? err}`);
-          sendJson(res, 502, { ok: false, error: err?.message ?? String(err) });
+        const elevated = await invokeElevated(ELEV_TURN_PATH, body.value ?? {}, { timeoutMs: ELEV_TURN_TIMEOUT_MS });
+        if (!elevated.ok) {
+          sendJson(res, elevated.status || 502, { ok: false, error: parseErrorOf(elevated.body) ?? "turn failed" });
+          return true;
         }
+        res.statusCode = 200;
+        res.setHeader("content-type", "application/json");
+        res.end(elevated.body);
         return true;
       },
     });

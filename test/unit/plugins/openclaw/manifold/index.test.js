@@ -41,28 +41,48 @@ function fakeReq({ method = "POST", authorization, body = {} } = {}) {
 }
 
 describe("adapter registration", () => {
-  it("serves the turn and session bridges and supervises exactly one core process", () => {
+  it("serves the turn, elevated-turn and session bridges and supervises exactly one core process", () => {
     const { api, routes, services } = makeApi();
     entry.register(api);
-    assert.deepEqual(routes.map((r) => r.path), ["/api/manifold/turn", "/api/manifold/session"]);
+    assert.deepEqual(routes.map((r) => r.path), ["/api/manifold/_elev/turn", "/api/manifold/turn", "/api/manifold/session"]);
     assert.deepEqual(services.map((s) => s.id), ["manifold-core", "manifold-runtime-capture"]);
   });
 
-  it("rejects non-POST on the bridge", async () => {
+  function routeAt(routes, path) {
+    const found = routes.find((r) => r.path === path);
+    assert.ok(found, `route ${path} registered`);
+    return found;
+  }
+
+  it("rejects non-POST on either turn route", async () => {
     const { api, routes } = makeApi();
     entry.register(api);
-    const res = createMockRes();
-    await routes[0].handler(fakeReq({ method: "GET" }), res);
-    assert.equal(res.statusCode, 405);
-    assert.equal(res.headers.allow, "POST");
+    for (const path of ["/api/manifold/turn", "/api/manifold/_elev/turn"]) {
+      const res = createMockRes();
+      await routeAt(routes, path).handler(fakeReq({ method: "GET" }), res);
+      assert.equal(res.statusCode, 405, path);
+      assert.equal(res.headers.allow, "POST", path);
+    }
   });
 
-  it("rejects a request without the per-boot turn token", async () => {
+  it("rejects a request without the per-boot turn token on the public bridge", async () => {
     const { api, routes } = makeApi();
     entry.register(api);
     const res = createMockRes();
-    await routes[0].handler(fakeReq({ authorization: "Bearer not-the-token" }), res);
+    await routeAt(routes, "/api/manifold/turn").handler(fakeReq({ authorization: "Bearer not-the-token" }), res);
     assert.equal(res.statusCode, 401);
+  });
+
+  it("runs the turn on the gateway-scoped route, which carries the operator scope its runtime call needs", async () => {
+    const { api, routes } = makeApi();
+    entry.register(api);
+    const route = routeAt(routes, "/api/manifold/_elev/turn");
+    assert.equal(route.auth, "gateway", "the turn runs under ambient operator scope, not the plugin route's none");
+    const res = createMockRes();
+    await route.handler(fakeReq({ body: { session: "agent:a:manifold:abcdef01-N", message: "hi", agentId: "a" } }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).ok, true);
+    assert.match(JSON.parse(res.body).runId, /^mf-run-/, "the adapter maps the gateway runId to a core handle");
   });
 });
 
