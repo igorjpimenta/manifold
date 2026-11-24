@@ -5,7 +5,7 @@ is no CHANGELOG.md. The tag is the install contract: the live host and
 every consumer pin resolve to it, so the version is decided in the release PR
 before the tag is cut, never after.
 
-This repo is public and `@igorjpimenta/manifold` is UNLICENSED. Releases
+This repo is public and `@igorjpimenta/manifold` is MIT-licensed. Releases
 publish to npmjs at the tagged version: the core package
 `@igorjpimenta/manifold` and the openclaw adapter
 `@igorjpimenta/manifold-openclaw`, both public.

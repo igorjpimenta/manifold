@@ -1,11 +1,11 @@
 {
   "name": "@igorjpimenta/manifold-openclaw",
   "version": "2026.11.23-beta.2",
-  "description": "OpenClaw companion for manifold: registers pipeline agent tools, discuss routes, the WS dialog door, and boot services on the gateway.",
+  "description": "OpenClaw companion for manifold: spawns and supervises `manifold serve`, bridges agent and discuss turns into the engine, and exposes manifold's pipeline tools over MCP.",
   "exports": {
     ".": "./index.js"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "repository": {
     "type": "git",

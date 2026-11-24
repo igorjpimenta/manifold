@@ -149,7 +149,7 @@ engine API and MCP tools: [Operations](docs/operations.md).
 
 ## License
 
-UNLICENSED. Releases publish to npmjs (`@igorjpimenta/manifold` and
+[MIT](LICENSE). Releases publish to npmjs (`@igorjpimenta/manifold` and
 `@igorjpimenta/manifold-openclaw`) at the tagged version via trusted
 publishing; the git tag remains the release record
 ([Releases](docs/releases.md)).
