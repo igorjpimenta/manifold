@@ -48,7 +48,7 @@ core — core keeps only the harness-agnostic surface.
 ### Add a new pipeline
 
 1. Create `<pipelinesDir>/<id>/index.js` (default
-   `~/.manifold/workspace/.pipelines/<id>/index.js`).
+   `~/.manifold/pipelines/<id>/index.js`).
 2. Default-export an object matching [Pipeline schema (canonical)](pipelines.md#pipeline-schema-canonical).
 3. No restart needed — the engine's `pipelines-watcher.js` reloads on change.
 4. Verify with `GET http://127.0.0.1:44300/api/pipelines/<id>` (dashboard

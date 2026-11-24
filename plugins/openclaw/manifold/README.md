@@ -32,7 +32,7 @@ core runtime version alongside it.
 
 | key | default | meaning |
 |---|---|---|
-| `pipelinesDir` | `~/.manifold/workspace/.pipelines` | directory to scan for pipeline definitions |
+| `pipelinesDir` | `~/.manifold/pipelines` | directory to scan for pipeline definitions |
 | `ownerSessionKey` | `agent:main:explicit:manifold-owner` | session key scoping flow-run ownership |
 | `dashboardEnabled` | `true` | boot the dashboard with the engine |
 | `dashboardPort` / `dashboardHost` | `44300` / `127.0.0.1` | dashboard bind |

@@ -38,7 +38,7 @@ export const TOOL_DEFS = [
       additionalProperties: false,
       required: ["pipelineId"],
       properties: {
-        pipelineId: { type: "string", description: "Pipeline id (workspace/.pipelines/ definition)." },
+        pipelineId: { type: "string", description: "Pipeline id (~/.manifold/pipelines/ definition)." },
         args: { type: "object", description: "JSON args merged into the initial state." },
       },
     },

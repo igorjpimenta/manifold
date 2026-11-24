@@ -41,7 +41,7 @@ Versioning, tagging and publishing: [Releases](docs/releases.md).
 ## Quick start
 
 1. Create a pipeline module under the pipelines dir — by default
-   `~/.manifold/workspace/.pipelines/<id>/index.js` — default-exporting
+   `~/.manifold/pipelines/<id>/index.js` — default-exporting
    `{ id, goal, state, nodes, edges }` (full schema and a copy-me skeleton:
    [Pipelines](docs/pipelines.md)).
 2. Start the engine (the loader/watcher picks the file up; edits hot-reload):

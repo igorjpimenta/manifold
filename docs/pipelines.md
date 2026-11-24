@@ -20,7 +20,7 @@ The static half of manifold: what a pipeline file exports, how to author it, and
 ## Pipeline schema (canonical)
 
 ```js
-// ~/.manifold/workspace/.pipelines/<pipelineId>/index.js
+// ~/.manifold/pipelines/<pipelineId>/index.js
 export default {
   id: "my-pipeline",                          // string, file-system safe
   goal: "one-line description",               // shown in the dashboard
@@ -382,7 +382,7 @@ export default {
 
   // Optional. Run-summary writer.
   runAudit: {
-    runsDir: path.join(ROOT, "workspace", ".pipelines", "myteam_my-flow", "runs"),
+    runsDir: path.join(ROOT, "pipelines", "myteam_my-flow", "runs"),
     summarize: (state) => ({
       runId: state.runId,
       items: state.items?.length ?? 0,

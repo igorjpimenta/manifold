@@ -34,7 +34,7 @@ export const UNATTRIBUTED_LABEL = "(unattributed)";
 // stores that string — only the projection synthesizes it.
 export const UNATTRIBUTED_FILTER = { pipeline_id: "__null__" };
 
-// Pipeline ids are always shaped `<team>_<name>` (workspace/.pipelines/<team>_<name>.js —
+// Pipeline ids are always shaped `<team>_<name>` (<pipelinesDir>/<team>_<name>.js —
 // the same convention every team's pipelines follow). Stripping the leading
 // segment up to the first underscore is therefore a shape-based rule, not a
 // specific-team rule: it applies identically regardless of which team owns

@@ -14,7 +14,7 @@ environment (harness-neutral) and the harness adapter's plugin config
 | Event WS | `manifold serve --ws --port N` | 44303 |
 | Dialog door (discuss) | `MANIFOLD_DIALOG_PORT` | 44302 |
 | Data dir (store home) | `MANIFOLD_DATA_DIR` | `~/.manifold` |
-| Pipelines dir | `MANIFOLD_PIPELINES_DIR` | `<dataDir>/workspace/.pipelines` |
+| Pipelines dir | `MANIFOLD_PIPELINES_DIR` | `<dataDir>/pipelines` |
 | Discuss default agent | `MANIFOLD_DISCUSS_DEFAULT_AGENT` | unset |
 | Concurrency ceiling | `MANIFOLD_GLOBAL_CONCURRENCY` | engine default (adapter config overrides it, below) |
 
@@ -27,7 +27,7 @@ Schema: `plugins/openclaw/manifold/openclaw.plugin.json`.
 
 | key | default | meaning |
 | --- | --- | --- |
-| `pipelinesDir` | `<dataDir>/workspace/.pipelines` | pipeline discovery root (env and the pipelines-dir table rank above it — see [plugins/README.md](../plugins/README.md)) |
+| `pipelinesDir` | `<dataDir>/pipelines` | pipeline discovery root (env and the pipelines-dir table rank above it — see [plugins/README.md](../plugins/README.md)) |
 | `ownerSessionKey` | `agent:main:explicit:manifold-owner` | session key scoping flow-run ownership |
 | `dashboardEnabled` | `true` | boot the dashboard with the engine |
 | `dashboardPort` / `dashboardHost` | `44300` / `127.0.0.1` | dashboard bind |
