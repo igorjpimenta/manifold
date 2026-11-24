@@ -13,7 +13,6 @@ import { createNodeHealthStore } from "./state/node-health-store.js";
 import { createAdmissionQueueStore } from "./state/admission-queue-store.js";
 import { getNodeExecutionsStore } from "./state/node-executions.js";
 import { createGateResolver } from "./gates/gate-resolver.js";
-import { registerCliCommands } from "./bin/cli.js";
 import { invokeElevated } from "./elevation.js";
 
 export {
@@ -28,7 +27,6 @@ export {
   createAdmissionQueueStore,
   getNodeExecutionsStore,
   createGateResolver,
-  registerCliCommands,
   invokeElevated,
 };
 
@@ -44,6 +42,5 @@ export default {
   createAdmissionQueueStore,
   getNodeExecutionsStore,
   createGateResolver,
-  registerCliCommands,
   invokeElevated,
 };

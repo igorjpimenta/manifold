@@ -68,12 +68,11 @@ regardless of whether it's a top-level node or a cascade sub-node running
 inside its own child flow. Before doing any work — before the budget gate, before building the
 prompt, before spawning a session — it checks
 `nodeHealthStore.isBlocked(pipelineId, nodeId)` and throws immediately if
-blocked, with a message that includes the exact reset command:
+blocked, with a message that names the block:
 
 ```
 unhealthy agent dispatch: "<nodeId>" is blocked after a prior failure —
-reset via "openclaw manifold node-health reset <pipelineId> <nodeId>"
-once the underlying issue is confirmed fixed
+clear its node-health block once the underlying issue is confirmed fixed
 ```
 
 On a genuine dispatch failure it calls `nodeHealthStore.markUnhealthy(...)`
@@ -200,7 +199,7 @@ The dashboard's `GateForm` reads these to decide which buttons to show:
 
 | Field         | Type     | Effect on the dashboard form                                          |
 | ------------- | -------- | --------------------------------------------------------------------- |
-| `id`          | string   | **Required.** Used by `approve <flowId> <itemId> <decision>`.         |
+| `id`          | string   | **Required.** Sent as `itemId` to the approve endpoints (dashboard GateForm → `POST /api/runs/:flowId/approve`, harness bridge → `POST /manifold/gate/resolve`). |
 | `reason`/`hint` | string | Rendered as a small subtitle under the item row.                       |
 | `text`        | string   | Enables the **edit** button. Textarea is pre-filled with this text.   |
 | `editable`    | boolean  | If `true`, enables the **edit** button with an empty textarea.        |

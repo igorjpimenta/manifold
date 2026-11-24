@@ -1,5 +1,5 @@
 // One-tap clipboard button for IDs the operator routinely hands off to
-// CLI commands (`openclaw manifold cancel <flowId>`, etc.). Falls back
+// API calls (`POST /manifold/cancel {flowId}`, etc.). Falls back
 // to a non-secure copy when navigator.clipboard isn't available (rare on
 // the tailnet but possible if served from a non-https origin).
 

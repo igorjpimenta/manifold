@@ -105,9 +105,8 @@ export async function resumePromotedAdmission({ promoted, runStore, resume, logg
 // check `result.resumed` itself.
 //
 // Returns resumePromotedAdmission's own result shape ({resumed, reason,
-// ...}) so a caller that wants to act on the outcome (e.g. bin/cli.js's
-// release-leaked-admission, which prints it for the operator) still can;
-// callers that are purely fire-and-forget can ignore the return value.
+// ...}) so a caller that wants to act on the outcome still can; callers
+// that are purely fire-and-forget can ignore the return value.
 export async function wakePromotedRelease(releaseResult, { runStore, resume, logger, api, context }) {
   const results = Array.isArray(releaseResult) ? releaseResult : [releaseResult];
   const promoted = results.reduce((found, r) => found ?? r?.promoted ?? null, null);

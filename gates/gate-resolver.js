@@ -7,9 +7,10 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 // gate-resolver.js — channel-agnostic resolution for gate items.
 //
 // One write site for every consumer that records a decision on a gate
-// item: the dashboard's POST /approve (source="dashboard"), the CLI's
-// `manifold approve` (source="cli"), and a harness/app bridge over the
-// gateway REST surface (source="app"). All of them call
+// item: the dashboard's POST /approve (source="dashboard") and a
+// harness/app bridge over the engine REST surface (source="app"; the
+// "cli" and "pipeline" labels stay valid for other writers). All of them
+// call
 // `recordItemDecision`, which:
 //
 //   1. validates the flow (status, kind, item membership)
@@ -231,9 +232,9 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
   // default behavior schedules the actual executor.resume via setImmediate
   // (and, on sustained revision contention, a further round via setTimeout)
   // and returns before either fires — correct for the long-lived HTTP
-  // callers that use this (dashboard, companion apps), but fatal for the CLI's
-  // one-shot `manifold approve` process, which needs the resume (and any
-  // scheduled retry round) to have genuinely finished before it exits.
+  // callers that use this (dashboard, companion apps), but fatal for a
+  // caller that must observe the resume (and any scheduled retry round)
+  // genuinely finished before it returns.
   async function applyResolutionsAndResume(flowId, resolutions, retryRound = 0, awaitCompletion = false) {
     // Revision-aware: re-read on conflict. Appends new decisions to
     // approvalResults[nodeId] so the executor sees the full decision history

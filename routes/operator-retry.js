@@ -284,10 +284,10 @@ export function createRetryFailure({
       });
       // HTTP/Telegram callers pass neither, and need this call to return
       // fast — the flow keeps running in the background via setImmediate.
-      // The CLI passes awaitCompletion:true instead: its one-shot process
-      // exits right after this function returns, so a merely-SCHEDULED
-      // setImmediate callback would just get dropped mid-flight — it needs
-      // the retry to have genuinely finished before returning.
+      // awaitCompletion:true callers need the retry to have genuinely
+      // finished before this function returns: a merely-SCHEDULED
+      // setImmediate callback would be dropped if their process exits
+      // right after.
       if (awaitCompletion) await runRetryFlow();
       else setImmediate(runRetryFlow);
       logger.info(

@@ -710,8 +710,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     }
 
     // Delegates to the shared recordItemDecision helper. Same write site as
-    // the CLI's `manifold approve` and the /manifold/gate/resolve route that
-    // companion harnesses POST to.
+    // the /manifold/gate/resolve route that companion harnesses POST to.
     // Resolution -> state.approvalPending[itemId] = {decision, source: "dashboard"};
     // the existing consolidator advances the flow when all items decide.
     const result = await recordItemDecision({
