@@ -191,7 +191,7 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
     const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app", ...STAMP,
+      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -216,7 +216,7 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     registerOperatorRoutes(makeDeps(api, { invokeElevated }));
     const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
     const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app", ...STAMP,
+      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -234,7 +234,7 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
     const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
     const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app", editedText: "revised", ...STAMP,
+      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", editedText: "revised", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -254,7 +254,7 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
       gateResolver: { recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }) },
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
-    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "app", ...STAMP });
+    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "ws", ...STAMP });
     const res = createMockRes();
     await handler(req, res);
     assert.equal(res.statusCode, 404);

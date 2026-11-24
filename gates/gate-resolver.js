@@ -7,10 +7,10 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 // gate-resolver.js — channel-agnostic resolution for gate items.
 //
 // One write site for every consumer that records a decision on a gate
-// item: the dashboard's POST /approve (source="dashboard") and a
-// harness/app bridge over the engine REST surface (source="app"; the
-// "cli" and "pipeline" labels stay valid for other writers). All of them
-// call
+// item: the dashboard's POST /approve (source="dashboard"), the MCP
+// manifold_approve tool (source="mcp"), and the companion bridge over
+// the engine REST surface (source="ws"). The "cli" and "pipeline"
+// labels stay valid for other writers. All of them call
 // `recordItemDecision`, which:
 //
 //   1. validates the flow (status, kind, item membership)
@@ -48,7 +48,7 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 // underlying state changed out from under the operator (e.g. poll-
 // inbox's EVICT_GATES cancelling reply/touch gates after the listing
 // got a reply or was won).
-const VALID_SOURCES = ["app", "dashboard", "cli", "pipeline"];
+const VALID_SOURCES = ["ws", "dashboard", "mcp", "cli", "pipeline"];
 
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;
