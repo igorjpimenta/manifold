@@ -36,12 +36,12 @@ used, so any harness can read them without knowing a gateway namespace.
 ## Pipeline directories
 
 Resolution order: `pipeline_dirs` table[harness] → `MANIFOLD_PIPELINES_DIR`
-env → config `pipelinesDir` → `<dataDir>/workspace/.pipelines` default. No
+env → config `pipelinesDir` → `<dataDir>/pipelines` default. No
 new plugin config keys (env + table only).
 
-- `openclaw manifold pipelines register --harness <h> --path <dir>`
-  upserts the override (dir must exist); effective on next gateway boot.
-- `openclaw manifold pipelines list [--harness <h>]` shows registered
+- `manifold pipelines register --harness <h> --path <dir>`
+  upserts the override (dir must exist); effective on next engine boot.
+- `manifold pipelines list [--harness <h>]` shows registered
   rows plus the currently effective dir and which tier won.
 
 ## openclaw

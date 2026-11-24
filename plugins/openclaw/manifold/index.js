@@ -144,7 +144,7 @@ export default definePluginEntry({
     properties: {
       pipelinesDir: {
         type: "string",
-        description: "Directory to scan for pipeline definition files. Default: <dataDir>/workspace/.pipelines (MANIFOLD_DATA_DIR or ~/.manifold).",
+        description: "Directory to scan for pipeline definition files. Default: <dataDir>/pipelines (MANIFOLD_DATA_DIR or ~/.manifold).",
       },
       ownerSessionKey: {
         type: "string",

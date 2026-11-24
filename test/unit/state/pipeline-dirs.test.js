@@ -50,7 +50,7 @@ describe("resolve", () => {
     assert.equal(store.resolve({ harness: "other", env: { MANIFOLD_PIPELINES_DIR: "/e" }, configDir: "/c", dataDir: "/d", lookup }).dir, "/e");
     assert.equal(store.resolve({ harness: "other", env: {}, configDir: "/c", dataDir: "/d", lookup }).dir, "/c");
     const def = store.resolve({ harness: "other", env: {}, configDir: null, dataDir: "/d", lookup });
-    assert.equal(def.dir, path.join("/d", "workspace", ".pipelines"));
+    assert.equal(def.dir, path.join("/d", "pipelines"));
     assert.equal(def.source, "default");
   });
 });

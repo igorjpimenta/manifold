@@ -2,7 +2,7 @@
 //
 // Resolution order (resolvePipelinesDir): table[harness] →
 // MANIFOLD_PIPELINES_DIR env → adapter config `pipelinesDir` →
-// <dataDir>/workspace/.pipelines default. Table wins so an operator can
+// <dataDir>/pipelines default. Table wins so an operator can
 // relocate one harness without touching env or config; env wins over config
 // so a one-shot override doesn't need a config edit.
 //

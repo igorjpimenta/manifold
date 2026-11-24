@@ -1,11 +1,11 @@
-# Releasing
+# Releases
 
 CalVer, one tag per release, and the GitHub release is the changelog — there
-is no CHANGELOG.md. The tag is the install contract: the live gateway and
+is no CHANGELOG.md. The tag is the install contract: the live host and
 every consumer pin resolve to it, so the version is decided in the release PR
 before the tag is cut, never after.
 
-This repo is public and `@igorjpimenta/manifold` is UNLICENSED. Releases
+This repo is public and `@igorjpimenta/manifold` is MIT-licensed. Releases
 publish to npmjs at the tagged version: the core package
 `@igorjpimenta/manifold` and the openclaw adapter
 `@igorjpimenta/manifold-openclaw`, both public.
@@ -62,7 +62,7 @@ counts are omitted; a consumer cannot act on them.
 
 ## Consumers of a release
 
-Live gateway (the openclaw adapter; it spawns `manifold serve` as a child):
+OpenClaw host (the adapter; it spawns `manifold serve` as a child):
 
     openclaw plugins install npm:@igorjpimenta/manifold-openclaw@<version> --force --accept-capabilities
 
@@ -83,7 +83,8 @@ Nothing follows `main` automatically — consumers bump the pin and re-install.
 
 ## compat
 
-`openclaw.compat.openclawMin` in `package.json` is the host floor. Bump it
+`openclaw.compat.openclawMin` in the adapter's package.json
+(`plugins/openclaw/manifold/package.json`) is the host floor. Bump it
 deliberately, only when the plugin starts requiring newer host APIs, and
 call the raise out in the release notes — consumers pinning older tags stay
 put.

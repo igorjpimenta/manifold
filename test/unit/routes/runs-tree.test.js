@@ -129,8 +129,8 @@ const FIXTURE_PIPELINE = {
   },
 };
 
-// A flow-level kind:"cascade" pipeline (README.md's "retry-on-failure as a
-// flow characteristic") — its own root nodes are tried in sequence until
+// A flow-level kind:"cascade" pipeline (docs/pipelines.md's "retry-on-failure
+// as a flow characteristic") — its own root nodes are tried in sequence until
 // one succeeds or all are exhausted, no dedicated node kind involved.
 const CASCADE_PIPELINE = {
   id: "team_cascade",

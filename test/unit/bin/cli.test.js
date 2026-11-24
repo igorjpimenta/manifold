@@ -45,7 +45,7 @@ describe("resolveCliPipelinesDir — seam-or-explicit, never the harness layout"
       resolvePipelinesDir: () => { throw new Error("store offline"); },
       env: { MANIFOLD_DATA_DIR: "/data" },
     });
-    assert.equal(r.dir, path.join("/data", "workspace", ".pipelines"));
+    assert.equal(r.dir, path.join("/data", "pipelines"));
     assert.equal(r.source, "store");
   });
 
@@ -56,7 +56,7 @@ describe("resolveCliPipelinesDir — seam-or-explicit, never the harness layout"
 
   test("store default derives from MANIFOLD_DATA_DIR", () => {
     const r = resolveCliPipelinesDir({ env: { MANIFOLD_DATA_DIR: "/data" } });
-    assert.deepEqual(r, { dir: path.join("/data", "workspace", ".pipelines"), source: "store" });
+    assert.deepEqual(r, { dir: path.join("/data", "pipelines"), source: "store" });
   });
 
   test("loud refusal when nothing resolves names the flag and the env var", () => {

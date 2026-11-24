@@ -1,6 +1,6 @@
 name: Release
 
-# Tag pushes are the install contract (RELEASING.md): a tag named
+# Tag pushes are the install contract (docs/releases.md): a tag named
 # YYYY.M.D[-beta.N] ships the version in package.json, verbatim.
 # This workflow verifies that contract, publishes both packages to npmjs
 # (@igorjpimenta/manifold and its openclaw adapter, public) and the GitHub
@@ -52,7 +52,7 @@ jobs:
         run: |
           PKG_VERSION="$(node -p "require('./package.json').version")"
           if [[ "$PKG_VERSION" != "$TAG" ]]; then
-            echo "::error::tag $TAG != package.json $PKG_VERSION — the tag is the version, verbatim (RELEASING.md)"
+            echo "::error::tag $TAG != package.json $PKG_VERSION — the tag is the version, verbatim (docs/releases.md)"
             exit 1
           fi
           if [[ "$TAG" =~ -beta\.0$ ]]; then

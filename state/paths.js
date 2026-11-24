@@ -44,7 +44,7 @@ export function opsDbPath(dataDir) {
 }
 
 export function pipelinesDir(dataDir) {
-  return path.join(dataDir, "workspace", ".pipelines");
+  return path.join(dataDir, "pipelines");
 }
 
 export function mediaAudioDir(dataDir) {
