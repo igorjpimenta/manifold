@@ -150,6 +150,24 @@ describe("dispatchAgentWithRetry — the delivered tool result", () => {
     assert.equal(await readPendingResult(session), null, "consumed rows do not linger for the next turn");
   });
 
+  it("picks up a tool result written during the turn even when the output carries none", async () => {
+    const session = `sk-late-${randomUUID()}`;
+    const turn = async (args) => {
+      await new Promise((r) => setTimeout(r, 5));
+      await writePendingResult({ session: args.session, kind: "score", payload: { score: 77 } });
+      return { text: "", runId: "run-late" };
+    };
+    const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
+    let saw = null;
+    await dispatchAgentWithRetry({
+      node: makeNode({ apply: (state, output) => { saw = output.toolResult; return {}; } }),
+      nodeId: "SCORE_LLM", session, initialMessage: "go",
+      applyCtx: {}, applyExtraArg: undefined, flowId: "flow-late",
+    });
+    assert.deepEqual(saw?.payload, { score: 77 });
+    assert.equal(await readPendingResult(session), null, "the late row is consumed");
+  });
+
   it("leaves the row alone when no tool result was delivered", async () => {
     const session = `sk-dispatch-${randomUUID()}`;
     await writePendingResult({ session, payload: { stale: true } });
