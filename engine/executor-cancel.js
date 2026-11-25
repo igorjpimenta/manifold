@@ -1,20 +1,17 @@
 // Shared cancel-completion logic for both executor.cancel() and flow-revival.js.
 //
-// Precondition: cancelRequestedAt is already written on the flow (step 1 done).
+// Precondition: cancelRequestedAt is already written on the flow — this
+// function completes a cancellation, it does not request one.
 //
-// Sequence:
-//   step 2d — cascade-cancel non-terminal childFlows children,
-//             recursive: a child's own childFlows subflow cascades too.
-//   step 3  — store.cancel() → writes status='cancelled' to DB
+// Cancels every non-terminal childFlows child first (recursive: a child's
+// own childFlows subflow cascades too), then flips flow_runs.status to
+// 'cancelled'.
 //
-// KNOWN GAP (not fixed here — CANCEL_SESSION_ABORT.design.md): neither step
-// actually interrupts a `kind:"agent"` node that's currently mid-dispatch,
-// root or subflow. Cancel only flips `flow_runs.status`; the in-flight LLM
-// call keeps running to natural completion and its result is silently
-// discarded once it tries to persist against an already-terminal flow (a
-// harmless CAS rejection, no corruption — but no abort, no record of what
-// the agent did in the meantime either). See the design doc above for what
-// a real fix would need.
+// Cancel does not interrupt a `kind:"agent"` node that is mid-dispatch,
+// root or subflow: only the status flips. The in-flight LLM call runs to
+// natural completion and its result is discarded by a harmless CAS
+// rejection when it tries to persist against the already-terminal flow —
+// no abort, and no record of what the agent did in the meantime.
 
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 
@@ -67,17 +64,17 @@ export async function completeCancellation({ store, flowId, stateJson, lastStep,
   // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
 
-  // Step 2d: cascade-cancel non-terminal childFlows children, if any — see
+  // Cascade-cancel non-terminal childFlows children, if any — see
   // cascadeCancelChildren's own comment. Best-effort: a failure here (or a
-  // caller that doesn't pass runStore, e.g. older call sites) shouldn't
-  // block this flow's own terminal status flip (step 3) below.
+  // caller that doesn't pass runStore) must not block this flow's own
+  // terminal status flip below.
   try {
     await cascadeCancelChildren({ store, flowId, cfg, logger, nodeExecutions, runStore });
   } catch (err) {
     logger?.warn?.(`completeCancellation: cascadeCancelChildren(${flowId.slice(0, 8)}) failed: ${err?.message ?? err}`);
   }
 
-  // Step 3: flip flow status to 'cancelled'.
+  // Flip the flow's status to 'cancelled'.
   const result = await store.cancel({ flowId, cfg, reason });
   return result;
 }

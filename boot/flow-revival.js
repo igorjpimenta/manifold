@@ -166,9 +166,10 @@ export async function reviveOrphanFlows({
   // in two separate SQL statements. A crash between them leaves a flow with
   // cancelRequestedAt set but status still 'running'/'blocked'/'waiting'.
   // Re-cancel those before reviving anything else so they don't land in toRevive.
-  // Uses the same completeCancellation path as executor.cancel() — step 1 is
-  // already done, so f.revision is already the post-requestCancel value and is
-  // passed directly to completeCancellation as the expectedRevision for setRunning.
+  // Uses the same completeCancellation path as executor.cancel().
+  // cancelRequestedAt is already written here, so f.revision is the
+  // post-requestCancel value — pass it directly to completeCancellation as
+  // the expectedRevision for setRunning.
   const cancelledByRevival = new Set();
   const terminalStatuses = new Set(["cancelled", "failed", "succeeded"]);
   const cancelStores = new Map();
