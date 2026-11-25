@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/manifold",
-  "version": "2026.11.23-beta.2",
+  "version": "2026.11.25-beta.1",
   "license": "MIT",
   "description": "LangGraph-style pipeline executor. Loads pipelines/<team>_<name>.js definitions and runs them against managed flow_runs, dispatching nodes to agents via runtime.subagent.run with explicit state-graph routing.",
   "type": "module",
