@@ -125,16 +125,11 @@ export const flowNodeExecutions = sqliteTable('flow_node_executions', {
   invocationId: text('invocation_id').notNull().references(() => flowNodeInvocations.id, { onDelete: 'cascade' }),
   enteredAt:    integer('entered_at').notNull(),
   exitedAt:     integer('exited_at').notNull(),
-  kind:         text('kind').notNull().default('legacy'),
+  kind:         text('kind').notNull(),
 }, (table) => [
   index('idx_fne_invocation').on(table.invocationId),
   index('idx_fne_exited').on(table.exitedAt),
 ]);
-
-// flow_branches (branch storage) is still a real table in runtime.sqlite —
-// read directly via raw SQL by state/node-executions.js, never through
-// Drizzle — and deliberately has no schema export here: nothing imports
-// one.
 
 // Deliberately thin — pipeline_id/branch_item_id/failure_node/recovery_hint/
 // resolved status are reconstructed at read time via invocation_id/
@@ -225,7 +220,7 @@ export const nodeHealth = sqliteTable('node_health', {
 
 // Point lookup of one gate node's own record — keyed (flow_id, node_id) so
 // sibling gates never share a key that can go stale. Written/read via raw
-// SQL (like flow_branches below); the def exists so snapshots cover it.
+// SQL; the def exists so snapshots cover it.
 export const gateRecords = sqliteTable('gate_records', {
   flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   nodeId:     text('node_id').notNull(),
@@ -338,10 +333,10 @@ export const toolResults = sqliteTable('tool_results', {
   updatedAt:   integer('updated_at').notNull(),
 });
 
-// Lineage and cost telemetry, moved out of ops.sqlite: flow_id and
+// Lineage and cost telemetry live in runtime.sqlite: flow_id and
 // pipeline_id carry FKs to runtime parents, and SQLite cannot constrain a
-// column against a table in another file. The ops-side definitions stay in
-// schema.ops.js as the frozen shape of the old file.
+// column against a table in another file. schema.ops.js is the
+// ops.sqlite schema.
 export const queueItems = sqliteTable('queue_items', {
   id:               text('id').primaryKey(),
   label:            text('label').notNull(),

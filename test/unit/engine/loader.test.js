@@ -713,11 +713,11 @@ describe("validatePipeline — loop node (branch mode)", () => {
 
 });
 
-// ── validatePipeline: loop node childFlows (Phase 2) ────────────────────────
+// ── validatePipeline: loop node childFlows ─────────────────────────────────
 
-// childFlows is no longer a field validatePipeline reads — every subflow
+// validatePipeline does not read a childFlows field — every subflow
 // node's items become real child flows unconditionally — so this describe
-// block covers what remains real: a .flow definition is required, groupId
+// block covers that contract: a .flow definition is required, groupId
 // is always the node's own id, human-gate sub-nodes require
 // .pendingSelector, and the subflow registers as an addressable child
 // pipeline.
@@ -1282,7 +1282,7 @@ describe("loadPipelines — filesystem edge cases", () => {
 
   after(async () => { await cleanup(); });
 
-  test("skips legacy flat .js files and logs a warn", async () => {
+  test("skips flat .js pipeline files and logs a warn", async () => {
     await writeFile(path.join(dir, "legacy.js"), `export default {};`, "utf8");
     const { logger, warns } = makeLogger();
     await loadPipelines(dir, logger);
@@ -1304,7 +1304,7 @@ describe("loadPipelines — filesystem edge cases", () => {
   });
 });
 
-// ── validatePipeline — "needs:" (Option B, SUBFLOW_PARENT_STATE_ACCESS.
+// ── validatePipeline — "needs:" (SUBFLOW_PARENT_STATE_ACCESS.
 // design.md's "needs: v3") ──────────────────────────────────────────────────
 //
 // Keyed by local variable name — { varName: {hops, nodeId} } — not an
@@ -1379,7 +1379,7 @@ describe('validatePipeline — "needs:"', () => {
     assert.equal(loaded, undefined);
   });
 
-  test("needs: as an array (the old v2 shape) throws — must be a keyed object now", async () => {
+  test("needs: as an array (the v2 shape) throws — must be a keyed object", async () => {
     const { loaded } = await load((id) => `
       export default {
         id: "${id}",

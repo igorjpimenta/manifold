@@ -422,11 +422,11 @@ describe("describeWaitFallback", () => {
   });
 });
 
-// ── assembleState (Option B, Phase B1) ─────────────────────────────────────
+// ── assembleState ───────────────────────────────────────────────────────────
 // reconstructs the working state a node would see, replaying
 // flow_node_invocations.resultJson rows instead
-// of reading an accumulated blob. Not wired into the live dispatch loop
-// yet (that's B2); these tests validate the function in isolation.
+// of reading an accumulated blob. These tests validate the function in
+// isolation with stubbed stores.
 
 function resultRow(nodeId, { resultWrittenAt = 1000, resultJson = null, resultTooLargeBytes = null } = {}) {
   return { nodeId, resultWrittenAt, resultJson, resultTooLargeBytes };
@@ -499,16 +499,6 @@ describe("assembleState", () => {
     assert.deepEqual(state, {});
   });
 
-  it("a legacy pre-cap-removal row (resultJson null, resultTooLargeBytes set) gets a _resultTooLarge marker at its own node key instead of being silently absent", async () => {
-    // node-executions.js's writeResult() no longer caps results — this row
-    // shape can only exist from before that removal.
-    const { nodeExecutionsStore, runStore } = makeStore({
-      results: [resultRow("SCAN", { resultJson: null, resultTooLargeBytes: 165000 })],
-    });
-    const state = await assembleState("flow-1", { runStore, nodeExecutionsStore });
-    assert.deepEqual(state, { SCAN: { _resultTooLarge: true, bytes: 165000 } });
-  });
-
   it("a corrupted resultJson row is skipped, not fatal to the rest of assembly", async () => {
     const { nodeExecutionsStore, runStore } = makeStore({
       results: [
@@ -557,7 +547,7 @@ describe("assembleState", () => {
     assert.deepEqual(state.DRAFT, { text: "hi" });
   });
 
-  it("a resultJson value overlays baseState's own copy of the same key — resultJson wins, matching real-flow B1 validation (they're identical today)", async () => {
+  it("a resultJson value overlays baseState's own copy of the same key — resultJson wins", async () => {
     const { nodeExecutionsStore, runStore } = makeStore({
       results: [resultRow("DRAFT", { resultJson: JSON.stringify({ DRAFT: { text: "fresher" } }) })],
     });

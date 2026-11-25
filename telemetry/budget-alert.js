@@ -6,12 +6,12 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { displayRootLabel } from "./labels.js";
 import { execGet } from "./http-helpers.js";
 import { getSharedDb, withSharedWrite } from "../state/db.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
+import { resolveDataDir, opsDbPath } from "../state/paths.js";
 
 const DEFAULT_CAP_USD = 3.0;
 const DEFAULT_LOCK_THRESHOLD = 0.8;  // fraction of cap; operator-configurable via dashboard
@@ -23,12 +23,11 @@ const THRESHOLDS = [0.1, 0.5, 0.8, 1.0];
 
 // Persisted across gateway restarts so we don't re-alert on every reload of
 // the same already-over-budget day. The once-per-day-per-threshold debounce
-// is the only silencing mechanism — no operator-facing snooze (removed:
-// redundant with the debounce, no clear product job).
-const STATE_FILE = path.join(os.homedir(), ".openclaw", "lineage", ".alerted-thresholds.json");
+// is the only silencing mechanism — no operator-facing snooze.
+const STATE_FILE = path.join(resolveDataDir(), "lineage", ".alerted-thresholds.json");
 // Same physical file budget/index.js's gate_state lives in — each module
 // owns its own tables there.
-const DB_PATH = path.join(os.homedir(), ".openclaw", "ops.sqlite");
+const DB_PATH = opsDbPath(resolveDataDir());
 
 let state = readState();           // { day: "YYYY-MM-DD", fired: [0.5, 0.8, 1.0] }
 let lastObservedTotal = 0;
@@ -57,7 +56,7 @@ async function _getClient() {
  * api.registerService start hook.
  *
  * dbPath override is test-only (isolated per-test files) — production
- * always uses the ~/.openclaw default.
+ * always uses the dataDir default.
  */
 export async function initCapStore({ dbPath = DB_PATH } = {}) {
   _dbPath = dbPath;

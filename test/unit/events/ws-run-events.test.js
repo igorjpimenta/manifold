@@ -1,7 +1,7 @@
 /**
  * Unit tests for events/ws-run-events.js
  *
- * Verifies the gateway WS projection (previously zero coverage):
+ * Verifies the gateway WS projection:
  *   - every write emits a per-revision run.updated patch (no status-gated
  *     narrow events: no run.started, no gate.opened, no run.ended, no
  *     pipeline.stats.updated — subscribers that need lifecycle edges derive

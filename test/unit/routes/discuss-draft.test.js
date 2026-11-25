@@ -26,7 +26,6 @@ function makeFlow(overrides = {}) {
           requestPayload: {
             title: "Approve?",
             editableText: "original draft",
-            editableFields: [{ id: "budget", label: "Budget", type: "text", value: "500" }],
           },
         },
       ],
@@ -54,8 +53,8 @@ describe("persistRevisedDraft", () => {
   it("returns flow_not_found when flow does not exist", async () => {
     const store = { get: async () => null, setWaiting: async () => ({ applied: true }) };
     const r = await persistRevisedDraft({
-      flowId: "nonexistent", itemId: "item-1", newDraft: "hello world from the test suite",
-      source: "app", store, logger: null,
+      flowId: "nonexistent", itemId: "item-1", newDraft: "Updated draft text that is long enough to not look like meta",
+      store, logger: null,
     });
     assert.equal(r.applied, false);
     assert.equal(r.code, "flow_not_found");
@@ -65,8 +64,8 @@ describe("persistRevisedDraft", () => {
     const flow = makeFlow({ waitJson: { kind: "needs-info" } });
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
-      flowId: flow.flowId, itemId: "item-1", newDraft: "some real draft text here for testing",
-      source: "app", store, logger: null,
+      flowId: flow.flowId, itemId: "item-1", newDraft: "Updated draft text that is long enough to not look like meta",
+      store, logger: null,
     });
     assert.equal(r.applied, false);
     assert.equal(r.code, "not_a_gate");
@@ -77,7 +76,7 @@ describe("persistRevisedDraft", () => {
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "no-such-item", newDraft: "A draft with enough text to pass the meta check",
-      source: "app", store, logger: null,
+      store, logger: null,
     });
     assert.equal(r.applied, false);
     assert.equal(r.code, "item_not_found");
@@ -88,31 +87,21 @@ describe("persistRevisedDraft", () => {
     const store = makeStore(flow);
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "item-1", newDraft: "Updated draft text that is long enough to not look like meta",
-      source: "app", store, logger: null,
+      store, logger: null,
     });
     assert.equal(r.applied, true);
   });
 
-  it("rejects meta narration when source is not the operator", async () => {
+  it("rejects meta narration", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
     // Short text triggers looksLikeMetaNarration
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "item-1", newDraft: "Short",
-      source: "agent", store, logger: null,
+      store, logger: null,
     });
     assert.equal(r.applied, false);
     assert.equal(r.code, "rejected_meta_narration");
-  });
-
-  it("allows meta narration when source is the operator app (operator override)", async () => {
-    const flow = makeFlow();
-    const store = makeStore(flow);
-    const r = await persistRevisedDraft({
-      flowId: flow.flowId, itemId: "item-1", newDraft: "Short",
-      source: "app", store, logger: null,
-    });
-    assert.equal(r.applied, true);
   });
 });
 
@@ -147,7 +136,7 @@ describe("persistRevisedMeta", () => {
     assert.equal(r.code, "flow_not_found");
   });
 
-  it("applies field update — editableFields value patched, editableMeta set", async () => {
+  it("applies field update — editableMeta set", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
     const r = await persistRevisedMeta({
@@ -158,11 +147,9 @@ describe("persistRevisedMeta", () => {
     const updated = await store.get(flow.flowId);
     const updatedItem = updated.waitJson.items[0];
     assert.equal(updatedItem.requestPayload.editableMeta?.budget, "750");
-    const budgetField = updatedItem.requestPayload.editableFields?.find((f) => f.id === "budget");
-    assert.equal(budgetField?.value, "750");
   });
 
-  it("adds new fields to editableMeta even if not in editableFields", async () => {
+  it("adds new fields to editableMeta", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
     const r = await persistRevisedMeta({
@@ -174,11 +161,10 @@ describe("persistRevisedMeta", () => {
   });
 
   // Every current gate-layout.js (freelance_workana-proposal etc.) declares
-  // requestPayload.layout directly — there is no top-level editableFields
-  // in production (executor-helpers.js enforces this). gate-projector.js
-  // serves `layout` verbatim to clients, so a field-group edit has to land
-  // there or the chip never updates, regardless of editableMeta/
-  // editableFields being patched correctly.
+  // requestPayload.layout directly (executor-helpers.js enforces this).
+  // gate-projector.js serves `layout` verbatim to clients, so a field-group
+  // edit has to land there or the chip never updates, regardless of
+  // editableMeta being patched correctly.
   it("patches a field-group entry inside requestPayload.layout", async () => {
     const flow = makeFlow({
       waitJson: {

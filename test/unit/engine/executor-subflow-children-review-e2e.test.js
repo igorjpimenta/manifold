@@ -169,7 +169,7 @@ describe("childFlows:true REVIEW-shaped loop, full engine E2E", () => {
     assert.equal(child.waitJson.kind, "human-gate");
     assert.equal(child.waitJson.items[0].itemId, "slug-1");
 
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "slug-1", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "slug-1", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -189,7 +189,7 @@ describe("childFlows:true REVIEW-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "slug-2", decision: "reject", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "slug-2", decision: "reject", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded", "REVIEW's GATE edge is unconditional — APPLY runs either way");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -209,7 +209,7 @@ describe("childFlows:true REVIEW-shaped loop, full engine E2E", () => {
     const [childFlowId] = await childFlowIds(harness, record.flowId);
     await gateResolver.recordItemDecision({
       flowId: childFlowId, itemId: "slug-3", decision: "approve",
-      editedText: "The operator's edited replacement.", source: "cli",
+      editedText: "The operator's edited replacement.", source: "ws",
     });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
@@ -229,7 +229,7 @@ describe("childFlows:true REVIEW-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "slug-4", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "slug-4", decision: "approve", source: "ws" });
     await flush();
 
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });

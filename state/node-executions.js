@@ -32,25 +32,9 @@ function defaultDbPath() {
 
 // No size cap on resultJson: no cap width is both safe for real payloads
 // and small enough to matter, so writeResult() always stores the full
-// result. resultTooLargeBytes and the read-only handling in
-// result-replay.js/needs-resolver.js stay in place for rows whose capped
-// result cannot be recovered.
+// result.
 
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
-
-// Normalizes flow_branches.errors' mixed shape (bare strings vs
-// {node, itemId, message, at} objects) — only the last entry is taken.
-// Belongs to the flow_branches error backfill, not to the runtime write
-// path.
-export function lastErrorMessage(errorsJson) {
-  let arr;
-  try { arr = JSON.parse(errorsJson); } catch { return null; }
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  const last = arr[arr.length - 1];
-  if (typeof last === "string") return last;
-  if (last && typeof last === "object") return last.message ?? JSON.stringify(last);
-  return String(last);
-}
 
 let _singleton = null;
 
@@ -518,11 +502,11 @@ async function _createStore(dbPath) {
           if (!byInvocation.has(e.invocationId)) byInvocation.set(e.invocationId, []);
           byInvocation.get(e.invocationId).push(e);
         }
-        // No error field here (Phase 1.5 — this table doesn't know success
-        // vs failure at all anymore). latestExecutionId is exposed so
-        // callers can cross-reference failureStore.queryErrorsByFlow(Ids)
-        // themselves to determine whether the MOST RECENT attempt of this
-        // invocation failed — see routes/runs.js's buildTreeNodeRows.
+        // No error field here — this table doesn't know success vs
+        // failure. latestExecutionId is exposed so callers can
+        // cross-reference failureStore.queryErrorsByFlow(Ids) themselves
+        // to determine whether the MOST RECENT attempt of this invocation
+        // failed — see routes/runs.js's buildTreeNodeRows.
         return invocations.map((inv) => {
           const execs = byInvocation.get(inv.id) ?? [];
           const latest = execs.length > 0 ? execs[execs.length - 1] : null;
@@ -676,12 +660,12 @@ async function _createStore(dbPath) {
 
       // Batch sibling of getGateRecord — "every gate this flow has ever
       // opened," for a consumer that needs to display the whole flow's
-      // gate state at once (e.g. routes/runs.js's run-detail response,
-      // once B2.5 cuts it over) rather than one specific node. Each row
-      // is independently correct (no shared key, no merge), so building
-      // the {[nodeId]: record} dict here is just a fan-in of already-
-      // correct point values — nothing about batching reopens the
-      // staleness risk assembleState()'s own gates merge has.
+      // gate state at once (e.g. routes/runs.js's run-detail response)
+      // rather than one specific node. Each row is independently correct
+      // (no shared key, no merge), so building the {[nodeId]: record}
+      // dict here is just a fan-in of already-correct point values —
+      // nothing about batching reopens the staleness risk
+      // assembleState()'s own gates merge has.
       async listGateRecordsForFlow(flowId) {
         try {
           const { rows } = await client.execute({
@@ -698,9 +682,10 @@ async function _createStore(dbPath) {
         } catch { return {}; }
       },
 
-      // No error field here either — same Phase 1.5 reasoning. Callers
-      // needing per-attempt failure content cross-reference executionId
-      // against failureStore.queryErrorsByFlow(Ids) themselves (see
+      // No error field here either — this table doesn't know success vs
+      // failure. Callers needing per-attempt failure content
+      // cross-reference executionId against
+      // failureStore.queryErrorsByFlow(Ids) themselves (see
       // routes/runs.js's sendInvocationDetail).
       async listExecutionsForInvocation(invocationId) {
         const rows = await db.select().from(flowNodeExecutions)

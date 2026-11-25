@@ -178,8 +178,7 @@ export function createNodeRunner({
   }
 
   /**
-   * Run the node body. A node that declares `crossProcessLock` is refused:
-   * the option is no longer supported.
+   * Run the node body. A node that declares `crossProcessLock` is refused.
    */
   async function executeNode({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
     if (typeof node.crossProcessLock === "string" && node.crossProcessLock) {

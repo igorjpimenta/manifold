@@ -18,8 +18,7 @@ describe("REVISION_RETRY_LIMIT", () => {
 
 // ── fetchSessionError ─────────────────────────────────────────────────────────
 
-// The openclaw tasks DB is dropped legacy (core never reads harness
-// homes) — fetchSessionError always resolves null and callers fall back to
+// fetchSessionError always resolves null — callers fall back to
 // their default detail.
 describe("fetchSessionError", () => {
   it("returns null for null session", async () => {
@@ -28,7 +27,7 @@ describe("fetchSessionError", () => {
   it("returns null for undefined session", async () => {
     assert.equal(await fetchSessionError(undefined), null);
   });
-  it("returns null for any session — the tasks-DB fallback is gone", async () => {
+  it("returns null for any session key", async () => {
     assert.equal(await fetchSessionError("no-such-session-key-" + Math.random()), null);
   });
 });

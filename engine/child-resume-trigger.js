@@ -68,11 +68,11 @@ export function subflowOutcomeSatisfied(mode, children) {
 // moment its fan-out looks unsatisfiable, but a later retry of one of the
 // surviving children can still turn that same fan-out satisfied afterward.
 // When that happens and the caller supplies `repairGuard` (only
-// maybeResumeParent does — the boot/flow-revival.js and
-// engine/admission-promotion-resume.js callers don't, and get the
-// pre-repair legacy behavior: `flip_failed:not_terminal`), a 'failed'
+// maybeResumeParent does), a 'failed'
 // parent is force-unblocked back to 'blocked' first, then the normal
 // casSetRunning flip proceeds against the freshly-bumped revision.
+// Without it, an already-failed parent is never unblocked and the flip
+// fails with `flip_failed:not_terminal`.
 // 'succeeded'/'cancelled'/'skipped' are never repaired — only 'failed' is
 // eligible (a deliberate business outcome or an operator's cancel must
 // stay final).
@@ -226,8 +226,8 @@ export async function flipToRunningAndResume({ parentFlowId, runStore, resume, l
 // at this node via `failFlow` instead of resuming it, so a mode-mismatched
 // fan-out never silently continues into its normal next step. `pipelinesRef`
 // is optional — if omitted (or the node/pipeline can't be resolved), mode
-// enforcement is skipped and behavior is the pre-mode-check unconditional
-// resume; only real callers wire it, tests may omit it deliberately.
+// enforcement is skipped and the parent is resumed unconditionally;
+// only real callers wire it, tests may omit it deliberately.
 // Fire-and-forget by design — callers should not await this inline with a
 // CAS write; call it after, uninstrumented failures are logged and swallowed.
 //

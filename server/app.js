@@ -56,8 +56,7 @@ import { registerPipelineRoutes } from "../routes/pipelines.js";
 import { registerBudgetRoutes, openStore as openBudgetStore } from "../budget/index.js";
 import { registerTelemetry } from "../telemetry/index.js";
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "../boot/flow-revival.js";
-import { resolveStorePaths, ensureMigrated, stateFile } from "../state/paths.js";
-import { setStateFile } from "../gates/paused-flows.js";
+import { resolveStorePaths } from "../state/paths.js";
 
 // reviveOrphanFlows only runs once, at startup — a stuck-promotion leak
 // occurring hours into a long uptime would otherwise go undetected until the
@@ -91,8 +90,6 @@ export function createManifoldApp({ host, config = {} } = {}) {
   const getBroadcast = host.getBroadcast ?? (() => null);
 
   const storePaths = resolveStorePaths();
-  ensureMigrated({ dataDir: storePaths.dataDir, logger });
-  setStateFile(stateFile(storePaths.dataDir));
 
   const pipelinesDir = config.pipelinesDir;
   if (!pipelinesDir) throw new Error("createManifoldApp: config.pipelinesDir is required");

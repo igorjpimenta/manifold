@@ -236,7 +236,7 @@ describe("persistFailRetrying", () => {
     assert.equal(recorded?.executionId, "exec-1");
   });
 
-  it("threads errorType through to recordEngineFailure, null when omitted (Phase 1.5)", async () => {
+  it("threads errorType through to recordEngineFailure, null when omitted", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
     let recorded = null;
@@ -274,11 +274,9 @@ describe("persistFailRetrying", () => {
   // recordEngineFailure is a real async function — a synchronous mock throw
   // (the test above) is caught by try/catch regardless of whether the call
   // site awaits it, since the throw happens before any Promise is involved.
-  // It does NOT exercise the bug this test covers: an unawaited async call
+  // It does NOT exercise the case this test covers: an unawaited async call
   // rejects via an unhandled promise rejection that the try/catch can never
-  // see. Regression test for the missing `await` found while investigating
-  // why a flow with a genuine soft _error marker in its state had no
-  // failure_events row.
+  // see.
   it("does not throw (and settles before returning) when recordEngineFailure REJECTS asynchronously", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);

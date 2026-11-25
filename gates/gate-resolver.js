@@ -9,8 +9,8 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 // One write site for every consumer that records a decision on a gate
 // item: the dashboard's POST /approve (source="dashboard"), the MCP
 // manifold_approve tool (source="mcp"), and the companion bridge over
-// the engine REST surface (source="ws"). The "cli" and "pipeline"
-// labels stay valid for other writers. All of them call
+// the engine REST surface (source="ws"). The "pipeline" label stays
+// for automated writers. All of them call
 // `recordItemDecision`, which:
 //
 //   1. validates the flow (status, kind, item membership)
@@ -48,7 +48,7 @@ import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 // underlying state changed out from under the operator (e.g. poll-
 // inbox's EVICT_GATES cancelling reply/touch gates after the listing
 // got a reply or was won).
-const VALID_SOURCES = ["ws", "dashboard", "mcp", "cli", "pipeline"];
+const VALID_SOURCES = ["ws", "dashboard", "mcp", "pipeline"];
 
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;
@@ -452,31 +452,9 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     if (decision === "edit" && typeof editedText !== "string") {
       return { ok: false, code: "edit_requires_text" };
     }
-    // Defense in depth: detect payloads that echo the gate's own
-    // description back as `editedText` — a client edit intent can ship the
-    // whole dialog body (including its "Approve to send / Reject to drop /
-    // To edit, run in a terminal: openclaw manifold respond ..." footer)
-    // instead of the operator's typed input. The check looks for any of
-    // the description's telltale strings; one match is enough since these
-    // never appear in genuine reply text.
-    if (decision === "edit" && typeof editedText === "string") {
-      const tellTale = [
-        "Approve to send",
-        "Reject to drop",
-        "openclaw manifold respond",
-        "─── Approve to send",
-      ];
-      if (tellTale.some((s) => editedText.includes(s))) {
-        logger.warn(
-          `manifold [${flowId.slice(0, 8)}] gate-resolver: ${itemId} edit payload looks like the gate description itself (source=${source}); rejecting to avoid shipping it as a reply`
-        );
-        return { ok: false, code: "edit_text_looks_like_description" };
-      }
-    }
     // "edit" is caller-facing sugar for "approve, with modified text" — an
     // edit IS an approval, there's no distinct third resolution state.
-    // Normalize here (after the telltale check above, which still needs to
-    // see the literal "edit" value) so storage/idempotency-logging/
+    // Normalize here so storage/idempotency-logging/
     // applyResolutionsAndResume only ever see approve|reject; editedText
     // still carries through regardless of which spelling the caller used.
     if (decision === "edit") decision = "approve";

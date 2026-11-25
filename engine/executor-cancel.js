@@ -3,7 +3,7 @@
 // Precondition: cancelRequestedAt is already written on the flow (step 1 done).
 //
 // Sequence:
-//   step 2d — cascade-cancel non-terminal childFlows children (Phase 2),
+//   step 2d — cascade-cancel non-terminal childFlows children,
 //             recursive: a child's own childFlows subflow cascades too.
 //   step 3  — store.cancel() → writes status='cancelled' to DB
 //
@@ -20,7 +20,7 @@ import { getNodeExecutionsStore } from "../state/node-executions.js";
 
 const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "skipped"]);
 
-// Phase 2: find every non-terminal childFlows child of `flowId` and cancel
+// Find every non-terminal childFlows child of `flowId` and cancel
 // each one — recursively, so a child that itself has a childFlows subflow
 // cascades further down. Without this, cancelling a parent would leave live
 // children (and any in-flight agent session they're running — e.g. an

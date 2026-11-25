@@ -120,7 +120,7 @@ describe("reconcilePipelineVersions", () => {
     store.close();
   });
 
-  test("a changed node retires the old active row and inserts a new one", async () => {
+  test("a changed node retires the prior active row and inserts a new one", async () => {
     const store = makeStore();
     await store.reconcilePipelineVersions(pipelinesMap([
       { id: "p1", nodes: { A: { kind: "agent", agent: "scorer-v1" } } },
@@ -228,12 +228,11 @@ describe("getNodeVersionAt / getNodeVersionsBatch — point-in-time correctness"
     store.close();
   });
 
-  // A timestamp older than the earliest recorded version is expected, not
-  // an edge case — every flow that dispatched before this feature first
-  // started tracking pipelines has real invocations older than anything
-  // reconcile ever saw. Falls back to the earliest known version rather
-  // than null: returning null would lose correct rendering for every
-  // invocation older than tracking began.
+  // Timestamps older than the earliest recorded version are expected, not
+  // an edge case — invocations can predate pipeline tracking entirely, and
+  // anything reconcile never saw still needs a version. Falls back to the
+  // earliest known version rather than null: returning null would lose
+  // correct rendering for those invocations.
   test("a timestamp before any version was ever registered falls back to the EARLIEST known version, not null", async () => {
     const store = makeStore();
     await store.reconcilePipelineVersions(pipelinesMap([{ id: "p1", nodes: { A: { kind: "code" } } }]));
@@ -350,11 +349,11 @@ describe("node_id — persistent identity, author-declared or auto-minted", () =
     store.close();
   });
 
-  // Regression: nodeContentHash originally covered only {kind, agent, mode}
-  // — _reconcileOneNode's hash-match short-circuit meant retroactively
-  // adding `id` to an already-existing, otherwise-unchanged node was a
-  // silent no-op (the declared value was never even read). This is
-  // exactly the retroactive-backfill use case, so it must actually apply.
+  // nodeContentHash covers {kind, agent, mode, id} — without `id` in the
+  // hash, _reconcileOneNode's hash-match short-circuit swallows a
+  // retroactively added `id` on an already-existing, otherwise-unchanged
+  // node (the declared value never read). Retroactive-backfill declarations
+  // must actually apply.
   test("retroactively declaring id on an already-existing, otherwise-unchanged node DOES take effect (not swallowed by the hash-match short-circuit)", async () => {
     const store = makeStore();
     await store.reconcilePipelineVersions(pipelinesMap([{ id: "p1", nodes: { A: { kind: "code" } } }]));

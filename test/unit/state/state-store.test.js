@@ -1,11 +1,10 @@
 /**
- * Unit tests for state/state-store.js — currently scoped to the Phase 2
- * resume-trigger wiring: finish/skip/fail/cancel must call maybeResumeParent
- * when a terminal child completes the last non-terminal sibling under its loop
- * node, and must stay a safe no-op when nodeExecutionsStore/resumeParentRef
- * aren't wired in (today's real index.js call sites always wire them, but
- * every other test harness in this repo constructs createStateStore without
- * them, so that path must never throw).
+ * Unit tests for state/state-store.js: finish/skip/fail/cancel must call
+ * maybeResumeParent when a terminal child completes the last non-terminal
+ * sibling under its loop node, and must stay a safe no-op when
+ * nodeExecutionsStore/resumeParentRef aren't wired in (the real index.js
+ * call sites always wire them, but every other test harness in this repo
+ * constructs createStateStore without them, so that path must never throw).
  */
 import { test, describe, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
@@ -45,14 +44,11 @@ describe("createStateStore — create() pipelineId integrity", () => {
   let runStore;
   afterEach(() => { runStore?.close(); });
 
-  // Regression test for a real incident: the child-spawn path built
-  // initialState from a deep clone of the PARENT's own state, which already
-  // carried its own `pipelineId` field. create() originally spread
-  // `{ pipelineId, ...initialState }` — initialState's own pipelineId won,
-  // silently redirecting the new flow onto the WRONG pipeline. Caught by
-  // live end-to-end testing (tens of thousands of runaway rows in minutes),
-  // never shipped — but the underlying footgun in create() itself needed
-  // fixing, not just the one caller that happened to trip it.
+  // create() must let its own pipelineId argument win over initialState's
+  // pipelineId: the child-spawn path builds initialState from a deep clone
+  // of the parent's own state, which already carries the parent's
+  // pipelineId — the reverse spread order would silently redirect the new
+  // flow onto the WRONG pipeline.
   test("the intended pipelineId always wins, even when initialState carries its own (different) pipelineId field", async () => {
     runStore = await createRunStore({ dbPath: tmpPath("create-pid-runs") });
     const store = createStateStore({}, "test-owner", { runStore });
@@ -72,7 +68,7 @@ describe("createStateStore — create() pipelineId integrity", () => {
   });
 });
 
-describe("createStateStore — Phase 2 resume-trigger wiring", () => {
+describe("createStateStore — resume-trigger wiring", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 

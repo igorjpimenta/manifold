@@ -33,7 +33,7 @@ async function writeFlowsDb(dbPath, flows) {
   for (const f of flows) {
     await client.execute({
       sql: "INSERT INTO flow_runs VALUES (?, ?, ?, ?, ?)",
-      args: [f.flow_id, f.owner_key ?? "graph-flow-owner", f.pipeline_id ?? null, f.status ?? "succeeded", f.created_at ?? 1],
+      args: [f.flow_id, f.owner_key ?? "manifold-owner", f.pipeline_id ?? null, f.status ?? "succeeded", f.created_at ?? 1],
     });
   }
   client.close();

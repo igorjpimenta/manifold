@@ -5,14 +5,12 @@ import { replayResults } from "./result-replay.js";
 
 // Edge functions come in two modes, dispatched by declared arity (same
 // technique this file's own usesNamedParams() uses elsewhere):
-//   - direct edge (1 param):  (state) => nextNodeId | null — unchanged,
-//     every edge in the codebase before this mode existed.
+//   - direct edge (1 param):  (state) => nextNodeId | null.
 //   - edge function (2 params): (state, error) => nextNodeId | null — opts
 //     into receiving the node's thrown error (a {message, errorType}
 //     object, or null if the node succeeded / hasn't run) as its 2nd arg.
 //     Lets a cascade's edge decide retry-vs-fallback-vs-give-up from the
-//     REAL thrown error instead of a soft-returned state field, per the
-//     "Eradicate soft errors" push.
+//     REAL thrown error instead of a soft-returned state field.
 //   CAVEAT: a default value on the 2nd param (`(state, error = null) =>`)
 //   or a rest param collapses fn.length back down and silently falls back
 //   to direct-edge mode — no error ever passed. Don't do that.
@@ -241,10 +239,7 @@ export function detectSkippedSentinel(result) {
 //     makes — folded into this one function instead of a second call site.
 //
 // writeResult() (state/node-executions.js) does not cap results (see its
-// own header comment) — a node's real value is always what lands here. A
-// `{ _resultTooLarge: true, bytes }` marker at a node's own key surfaces
-// only for a row whose resultJson is null and whose resultTooLargeBytes is
-// set — a result that was never stored, and is not recoverable.
+// own header comment) — a node's real value is always what lands here.
 export async function assembleState(flowId, { runStore, nodeExecutionsStore, baseState = {} } = {}) {
   const results = (await nodeExecutionsStore?.listResultsForFlow?.(flowId)) ?? [];
   let state = replayResults(baseState, results);

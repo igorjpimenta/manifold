@@ -14,7 +14,7 @@ export function peersForKind(kind) {
 }
 
 // Trigger-edge re-attribution: re-root pipeline cost to its originating session
-// (cron / operator / telegram) instead of graph-flow-owner at query time.
+// (cron / operator / telegram) instead of the flow's owner session at query time.
 export const ATTR_JOIN = `
   LEFT JOIN session_lineage sl
     ON cbc.flow_id IS NOT NULL

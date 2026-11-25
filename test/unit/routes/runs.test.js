@@ -19,17 +19,16 @@ after(() => {
   else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
-// sendFullRun now calls failureStore.queryErrorsByFlow(...) (Phase 1.5,
-// moved from node-executions.js) and getNodeExecutionsStore().getInvocation(...)
-// (parent-link resolution), and the runs list handler calls
-// .summarizeChildrenByFlowIds(...) (Phase 2 dual-mode branch summary) — all
-// mocked so tests are deterministic regardless of the real (or
-// singleton-cached) DB.
+// sendFullRun calls failureStore.queryErrorsByFlow(...) and
+// getNodeExecutionsStore().getInvocation(...) (parent-link resolution), and
+// the runs list handler calls .summarizeChildrenByFlowIds(...) (branch
+// summary) — all mocked so tests are deterministic regardless of the real
+// (or singleton-cached) DB.
 let queryErrorsByFlowImpl = () => [];
 let queryErrorsByFlowIdsImpl = () => new Map();
 let summarizeChildrenByFlowIdsImpl = () => new Map();
 let getInvocationImpl = () => null;
-// B2.5 — sendFullRun now enriches via assembleState(), which reads
+// sendFullRun enriches via assembleState(), which reads
 // listResultsForFlow/listSubflowNodeIdsForFlow through optional chaining
 // (safe when absent from this mock — resolves to []), and separately
 // overrides .gates via listGateRecordsForFlow (called directly, not
@@ -346,7 +345,7 @@ describe("registerRunRoutes — runs list handler", () => {
   });
 });
 
-// ── sendFullRun (GET /manifold/runs/:flowId) — errorEntries (Phase 1.5) ───────
+// ── sendFullRun (GET /manifold/runs/:flowId) — errorEntries ─────────────────
 
 describe("registerRunRoutes — sendFullRun errorEntries", () => {
   test("includes a top-level errorEntries array sourced from failureStore.queryErrorsByFlow", async () => {
@@ -369,7 +368,7 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     assert.deepEqual(body.errorEntries, [{ nodeId: "SUBMIT", subflowKey: null, message: "boom", at: 1 }]);
     // stateJson otherwise ships unchanged — only `loop`/`errors` are
     // stripped, neither present on this fixture. `gates` is always present
-    // now (sourced from listGateRecordsForFlow, not the raw stateJson blob)
+    // (sourced from listGateRecordsForFlow, not the raw stateJson blob)
     // — {} here since this fixture's flow never opened a gate.
     assert.deepEqual(body.stateJson, { pipelineId: "team_pipe", gates: {} });
   });
@@ -390,13 +389,13 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     assert.deepEqual(body.errorEntries, []);
   });
 
-  test("strips the legacy errors[] key from stateJson", async () => {
+  test("strips the errors[] key from stateJson", async () => {
     queryErrorsByFlowImpl = () => [{ nodeId: "SUBMIT", subflowKey: null, message: "boom", at: 1 }];
     const { api, routes } = createMockApi();
     const fakeRun = {
       flowId: "flow-legacy", status: "failed",
-      // Historical row persisted before the redirect — still carries a
-      // baked-in errors[] in its stored stateJson.
+      // Fixture's stored stateJson carries a baked-in errors[] the handler
+      // must strip.
       stateJson: { pipelineId: "team_pipe", errors: [{ node: "SUBMIT", message: "boom", at: 1 }] },
       lastStep: "SUBMIT",
       createdAt: 1000, updatedAt: 2000,
@@ -491,10 +490,10 @@ describe("registerRunRoutes — sendFullRun parent-link resolution", () => {
   });
 });
 
-// ── sendFullRun — B2.5: assembleState() + gate_records ─────────────────────
-// stateJson now comes from assembleState() (baseState + each node's own
-// resultJson replayed on top) instead of the raw stateJson blob, and .gates
-// is always overridden from listGateRecordsForFlow — never assembleState()'s
+// ── sendFullRun — assembleState() + gate_records ────────────────────────────
+// stateJson comes from assembleState() (baseState + each node's own
+// resultJson replayed on top), and .gates is always overridden from
+// listGateRecordsForFlow — never assembleState()'s
 // own generic per-key merge, which is unsafe specifically for .gates (see
 // routes/runs.js's own comment on the staleness class this avoids).
 

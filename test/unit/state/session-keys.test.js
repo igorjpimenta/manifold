@@ -44,9 +44,9 @@ describe("sessions registry", () => {
 
   test("backfill registers every key already referenced by rows", async () => {
     const client = await freshDb();
-    // Rows that predate the registry were written before the FKs existed;
-    // simulate them with enforcement off, then let the backfill fix the key
-    // set the way migrateDatabase does after applying snapshots.
+    // Rows referencing keys absent from the registry can exist while FK
+    // enforcement is off; insert them that way, then let the backfill fix
+    // the key set the way migrateDatabase does after applying snapshots.
     await client.execute("PRAGMA foreign_keys = OFF");
     await client.execute({
       sql: `INSERT INTO session_lineage

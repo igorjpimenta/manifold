@@ -1,9 +1,9 @@
-// Unit tests for state/node-executions.js (renamed from step-timings.js) —
+// Unit tests for state/node-executions.js —
 // getNodeExecutionsStore singleton, write(), listInvocationsForFlow(),
 // listExecutionsForInvocation(), no-op fallback, v2 rebuild-and-backfill
-// migration (id retype to UUID4, branch_item -> branch_key rename,
-// flow_branches error backfill), lastErrorMessage(). As of Phase 1.5 this store
-// carries no error content at all — see state/failure-store.js instead.
+// migration (id retype to UUID4, branch_item -> branch_key rename).
+// This store carries no error content at all — see state/failure-store.js
+// instead.
 
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
@@ -15,7 +15,6 @@ import { createClient } from "@libsql/client";
 import {
   getNodeExecutionsStore,
   createNodeExecutionsStore,
-  lastErrorMessage,
 } from "../../../state/node-executions.js";
 import { createRunStore } from "../../../state/run-store.js";
 import { resolveOrCreateChild } from "../../../engine/spawn-child.js";
@@ -60,7 +59,7 @@ async function makeIsolatedStore() {
 
 // Joins invocation+execution for raw-SQL test assertions that need columns
 // (pipeline_id, the execution's own id) no public store method exposes —
-// mirrors the store's own internal join shape (Phase 2's invocation/
+// mirrors the store's own internal join shape (invocation/
 // execution split, see node-executions.js's header).
 async function rawExecutionRows(store, flowId) {
   const { rows } = await store._db.execute({
@@ -273,15 +272,8 @@ describe("write()", () => {
   });
 });
 
-// queryByFlow()/queryByNode() were deleted in Phase 1.5 — flow_node_executions
-// no longer stores error content, and nothing else called them (confirmed via
-// repo-wide grep before deletion). queryByPipeline() survives unchanged
-// (never selected error) and has its own coverage further down via
-// summarizeChildrenByFlowIds()'s harness where relevant.
-
 // ─── writeResult() ───────────────────────────────────────────────────────────
-// Option B, Phase B0 — additive
-// resultJson write. No size cap (see node-executions.js's
+// Additive resultJson write. No size cap (see node-executions.js's
 // own header comment): a result of any size is always stored in full,
 // resultTooLargeBytes always written null.
 
@@ -318,16 +310,14 @@ describe("writeResult()", () => {
     assert.deepEqual(JSON.parse(rows[0].result_json), { attempt: 2 });
   });
 
-  test("a result well over the old 64KB cap is stored in full, byte-for-byte, resultTooLargeBytes stays null", async () => {
+  test("a result well over 64KB is stored in full, byte-for-byte, resultTooLargeBytes stays null", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "SCAN", enteredAt: 1, exitedAt: 2, kind: "fresh" });
     // Same shape as the real SCAN node: tiny scalar fields (accessToken,
-    // bidderId) bundled flat alongside a large `listings` array — the
-    // shape where a size cap once silently dropped the whole result,
-    // including the tiny fields a later node (SUBMIT_CODE) depended on,
-    // failing only when that unrelated node failed. No size cap remains,
-    // so nothing is dropped.
+    // bidderId) bundled flat alongside a large `listings` array — a partial
+    // write would lose the tiny fields a later node (SUBMIT_CODE) depends on.
+    // No size cap applies, so nothing is dropped.
     const big = {
       accessToken: "tok-abc123",
       bidderId: 987654,
@@ -336,7 +326,7 @@ describe("writeResult()", () => {
     };
     const result = await store.writeResult(invocationId, big);
     assert.equal(result.ok, true);
-    assert.ok(result.bytes > 64 * 1024, "sanity: this really is bigger than the old cap");
+    assert.ok(result.bytes > 64 * 1024, "sanity: this really is bigger than 64KB");
     const { rows } = await store._db.execute({
       sql: `SELECT result_json, result_too_large_bytes FROM flow_node_invocations WHERE id = ?`,
       args: [invocationId],
@@ -345,7 +335,7 @@ describe("writeResult()", () => {
     assert.deepEqual(JSON.parse(rows[0].result_json), big, "the full result, including `listings`, is stored — nothing dropped");
   });
 
-  test("a bare array well over the old cap is also stored in full — no size-based special-casing left for any result shape", async () => {
+  test("a bare array well over 64KB is also stored in full — no size-based special-casing for any result shape", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "SCAN", enteredAt: 1, exitedAt: 2, kind: "fresh" });
@@ -479,8 +469,8 @@ describe("writeGateRecord() / getGateRecord()", () => {
 });
 
 // ─── listGateRecordsForFlow() ───────────────────────────────────────────────
-// Batch sibling of getGateRecord — B2.5's eventual routes/runs.js cutover
-// needs "every gate this flow has opened," not one specific node.
+// Batch sibling of getGateRecord — routes/runs.js needs "every gate this
+// flow has opened," not one specific node.
 
 describe("listGateRecordsForFlow()", () => {
   test("empty flow — no gates opened at all", async () => {
@@ -502,8 +492,8 @@ describe("listGateRecordsForFlow()", () => {
   test("each row is independently correct — no merge, no staleness, regardless of write order", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
-    // GATE_1 opens and resolves BEFORE GATE_2 even exists — the exact
-    // ordering that broke assembleState()'s own shallow-merge replay.
+    // GATE_1 opens and resolves BEFORE GATE_2 even exists — the ordering a
+    // shallow-merge replay of these records would get wrong.
     await store.writeGateRecord(flowId, "GATE_1", { pending: [], consumedAt: 1000 });
     await store.writeGateRecord(flowId, "GATE_2", { pending: ["y"] });
     const all = await store.listGateRecordsForFlow(flowId);
@@ -528,8 +518,7 @@ describe("listGateRecordsForFlow()", () => {
 });
 
 // ─── listResultsForFlow() ──────────────────────────────────────────────────
-// Option B, Phase B1 — feeds
-// engine/executor-helpers.js's assembleState().
+// Feeds engine/executor-helpers.js's assembleState().
 
 describe("listResultsForFlow()", () => {
   test("empty flow — no invocations at all", async () => {
@@ -734,11 +723,11 @@ describe("schema", () => {
     for (const col of ["id", "flow_id", "pipeline_id", "node_id", "subflow_key", "invoked_at"]) {
       assert.ok(cols.includes(col), `column '${col}' must exist in flow_node_invocations`);
     }
-    assert.ok(!cols.includes("group_id"), "group_id was dropped from flow_node_invocations (v4 migration)");
+    assert.ok(!cols.includes("group_id"), "group_id must not exist on flow_node_invocations");
     store.close();
   });
 
-  test("flow_node_executions table is narrowed to invocation_id + attempt timing, no error content (Phase 1.5)", async () => {
+  test("flow_node_executions table is narrowed to invocation_id + attempt timing, no error content", async () => {
     const store = await makeIsolatedStore();
     const { rows: info } = await store._db.execute({ sql: "PRAGMA table_info(flow_node_executions)", args: [] });
     const cols = info.map((r) => r.name);
@@ -783,47 +772,7 @@ describe("schema", () => {
   });
 });
 
-// ─── lastErrorMessage() ────────────────────────────────────────────────────────
-
-describe("lastErrorMessage()", () => {
-  test("bare-string array entry returns the string", () => {
-    assert.equal(lastErrorMessage('["subagent timeout: no error message"]'), "subagent timeout: no error message");
-  });
-
-  test("object entry returns .message", () => {
-    const json = JSON.stringify([{ node: "cancel", itemId: "alpha", message: "session abort", at: 123 }]);
-    assert.equal(lastErrorMessage(json), "session abort");
-  });
-
-  test("object entry with no .message falls back to JSON.stringify", () => {
-    const json = JSON.stringify([{ node: "cancel", itemId: "alpha" }]);
-    assert.equal(lastErrorMessage(json), JSON.stringify({ node: "cancel", itemId: "alpha" }));
-  });
-
-  test("malformed JSON returns null", () => {
-    assert.equal(lastErrorMessage("not json"), null);
-  });
-
-  test("empty array returns null", () => {
-    assert.equal(lastErrorMessage("[]"), null);
-  });
-
-  test("null input returns null", () => {
-    assert.equal(lastErrorMessage(null), null);
-  });
-
-  test("multi-entry array returns only the last entry", () => {
-    const json = JSON.stringify(["first error", "second error", "third error"]);
-    assert.equal(lastErrorMessage(json), "third error");
-  });
-
-  test("mixed string/object array returns the last entry regardless of shape", () => {
-    const json = JSON.stringify(["first (string)", { node: "n", message: "second (object)" }]);
-    assert.equal(lastErrorMessage(json), "second (object)");
-  });
-});
-
-// ─── v2 migration: rebuild-and-backfill (id retype, branch_item rename, flow_branches backfill) ──
+// ─── v2 migration: rebuild-and-backfill (id retype, branch_item rename) ──
 
 describe("getExecution()", () => {
   test("returns null for an unknown execution id", async () => {
@@ -1274,9 +1223,8 @@ describe("getLatestExecutionForNode()", () => {
   });
 });
 
-// summarizeChildrenByFlowIds — the dual-mode counterpart to
-// branchService.summarizeByFlowIds, sourced from real flow_runs children
-// instead of flow_branches. flow_node_invocations and flow_runs live in
+// summarizeChildrenByFlowIds buckets a flow's real flow_runs children by
+// status. flow_node_invocations and flow_runs live in
 // the same physical runtime.sqlite file, so these tests point a
 // createRunStore and a createNodeExecutionsStore at the SAME tmp path
 // (same pattern as engine/executor-loop-children.test.js's harness) and
@@ -1318,7 +1266,7 @@ describe("summarizeChildrenByFlowIds()", () => {
     runStore.close(); nodeExecutionsStore.close();
   });
 
-  test("buckets real children by status, matching branchService.summarizeByFlowIds' shape", async () => {
+  test("buckets real children by status into total/succeeded/failed/pending/skipped", async () => {
     const harness = await makeDualStore();
     const { runStore, nodeExecutionsStore } = harness;
     const flowId = randomUUID();
@@ -1334,12 +1282,12 @@ describe("summarizeChildrenByFlowIds()", () => {
     assert.equal(summary.total, 5);
     assert.equal(summary.succeeded, 2);
     assert.equal(summary.failed, 1);
-    assert.equal(summary.pending, 1, "blocked folds into pending, same as branchService");
+    assert.equal(summary.pending, 1, "blocked folds into pending");
     assert.equal(summary.skipped, 1);
     runStore.close(); nodeExecutionsStore.close();
   });
 
-  test("a flowId with no real children is absent from the Map (falls through to old-model/EMPTY_BRANCHES upstream)", async () => {
+  test("a flowId with no real children is absent from the Map (upstream falls through to EMPTY_SUBFLOWS)", async () => {
     const harness = await makeDualStore();
     const { runStore, nodeExecutionsStore } = harness;
     const flowWithChildren = randomUUID();
@@ -1493,8 +1441,8 @@ describe("listInvocationsForFlow()", () => {
     // item's own spawn invocation (subflow_key=<item key>) share the same
     // node_id but are semantically different things — the tree only wants
     // the former at root level; the latter is resolved separately via
-    // listInvocationIdsForNode when a subflow row is expanded. Regression
-    // guard: without this filter, a node that fanned out to N items
+    // listInvocationIdsForNode when a subflow row is expanded. Without this
+    // filter, a node that fanned out to N items
     // surfaced as N separate root-level rows instead of one.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();

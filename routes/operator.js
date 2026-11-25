@@ -168,9 +168,10 @@ export function registerOperatorRoutes({
         if (!result?.cancelled && result?.reason === "Flow not found.") {
           const sqlFlow = await readStore?.get(flowId);
           if (sqlFlow && !["succeeded", "failed", "cancelled", "skipped"].includes(sqlFlow.status)) {
-            // Use a store bound to the flow's actual ownerKey. Legacy flows were
-            // created under "graph-flow-owner"; the default store is bound to
-            // "manifold-owner". Mismatched ownerKey → setRunning returns applied=false.
+            // Use a store bound to the flow's actual ownerKey: a flow may
+            // belong to a different ownerKey than this process's default
+            // store, and a mismatched ownerKey → setRunning returns
+            // applied=false.
             //
             // Must carry the same dependency set as the primary `store` and
             // index.js's own createCancelStore factory (nodeExecutionsStore,
@@ -320,7 +321,7 @@ export function registerOperatorRoutes({
           return true;
         }
         const triggeredBy = {
-          kind: via.includes("app") ? "operator_http" : via.includes("cron") ? "cron" : via.includes("cli") ? "cli" : "operator_http",
+          kind: via.includes("app") ? "operator_http" : via.includes("cron") ? "cron" : "operator_http",
           label: `via ${via}`,
           ts: Date.now(),
         };
@@ -334,7 +335,7 @@ export function registerOperatorRoutes({
               parentSessionKey,
             });
           } else {
-            const source = triggeredBy.kind === "cli" ? "cli" : triggeredBy.kind === "operator_http" ? "app" : "operator";
+            const source = triggeredBy.kind === "operator_http" ? "app" : "operator";
             const synthSession = `agent:operator:${source}:${record.flowId}`;
             await api.runtime?.lineage?.recordTrigger?.({
               flowId: record.flowId,

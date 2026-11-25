@@ -118,11 +118,11 @@ describe("dispatchSubflowChildren", () => {
     }
   });
 
-  // buildChildInitialState no longer clones the parent's state at all; a
+  // buildChildInitialState does not clone the parent's state; a
   // child's initialState is exactly item/itemIndex/parentItem. Anything
   // else an inner node needs from an ancestor flow goes through the
-  // explicit needs: mechanism (engine/needs-resolver.js) instead of
-  // riding along in the spawn-time clone.
+  // explicit needs: mechanism (engine/needs-resolver.js) rather than
+  // riding along in the spawn-time state.
   test("child initialState carries ONLY item/itemIndex/parentItem — no parent state rides along", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -141,7 +141,7 @@ describe("dispatchSubflowChildren", () => {
     assert.deepEqual(child.stateJson.item, { id: "item-1" });
     assert.equal(child.stateJson.itemIndex, 0);
     assert.equal(child.stateJson.parentItem, undefined, "state.item was absent on the parent, so parentItem is too");
-    assert.equal(child.stateJson.shortlist, undefined, "parent's shortlist no longer rides along in the clone");
+    assert.equal(child.stateJson.shortlist, undefined, "parent's shortlist must not ride along");
     // pipelineId IS present — but it's the CHILD's own synthetic id (set by
     // spawn-child.js, not buildChildInitialState), never the parent's.
     assert.equal(child.stateJson.pipelineId, "p::LOOP");
@@ -149,16 +149,14 @@ describe("dispatchSubflowChildren", () => {
     assert.deepEqual(Object.keys(child.stateJson).sort(), ["item", "itemIndex", "pipelineId"], "no parent-cloned field survives the spawn beyond what spawn-child.js itself sets");
   });
 
-  // Regression for a single-item retry-cascade node
+  // A single-item retry-cascade node
   // (selector: () => [{id:"only"}], structuring a code -> infra-
-  // recovery -> agent-fallback chain, not a real per-item fan-out): it clobbers
-  // the parent branch's own real item (e.g. a listing/candidate/
-  // conversation) with its own placeholder — several cascades' inner code
-  // nodes were written assuming state.item still held the real object,
-  // silently operating on the literal string "only" instead (e.g.
-  // SUBMIT_CODE bidding on https://www.workana.com/messages/bid/only).
-  // parentItem preserves the real parent item specifically so a single-item
-  // cascade's own inner nodes can still reach it.
+  // recovery -> agent-fallback chain, not a real per-item fan-out): the
+  // child's state.item is this node's own placeholder, so parentItem
+  // preserves the parent branch's real item (e.g. a listing/candidate/
+  // conversation, as SUBMIT_CODE bidding on
+  // https://www.workana.com/messages/bid/<id> does) specifically so a
+  // single-item cascade's own inner nodes can still reach it.
   test("parentItem carries the PARENT branch's real item, even when this node's own selector returns a placeholder — the single-item retry-cascade case", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -201,16 +199,14 @@ describe("dispatchSubflowChildren", () => {
     }
   });
 
-  // Regression test for a real incident (caught by live end-to-end testing,
-  // never shipped): the parent's own state already carries its own
+  // The parent's own state already carries its own
   // `pipelineId` field (every flow's stateJson does). Cloning that whole
   // state into the child's initialState — without stripping pipelineId —
-  // let it silently override the intended child pipeline id once merged in
+  // would let it override the intended child pipeline id once merged in
   // state-store.js's create(), making the child re-resolve and re-run the
   // PARENT pipeline from __start__ instead of its own `.branch` — an
   // unbounded recursive fan-out (each "child" spawning more children of the
-  // whole parent pipeline again). Both the root cause (create()'s merge
-  // order) and this call site are now fixed; this test pins the call site.
+  // whole parent pipeline again). This test pins the call site.
   test("child's stateJson.pipelineId is the CHILD pipeline id, never the parent's own", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -556,7 +552,7 @@ describe("dispatchSubflowChildren", () => {
       assert.ok(rows.every((r) => r.status === "running"));
     });
 
-    test("re-entry: previously-queued children are left untouched, not re-queued or duplicated", async () => {
+    test("re-entry: already-queued children are left untouched, not re-queued or duplicated", async () => {
       harness = await makeHarness();
       const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
       const { runFlow, calls } = makeRunFlowSpy();
@@ -608,7 +604,7 @@ describe("dispatchSubflowChildren", () => {
     assert.equal(invocation.nodeId, "LOOP");
   });
 
-  // Bug fix regression coverage: a cascade-shape subflow (flow.kind:
+  // A cascade-shape subflow (flow.kind:
   // "cascade" — ENSURE_LOGIN/SUBMIT/SEND_REPLY's code-then-agent-fallback
   // shape) must never be gated at its own subflow-entry — that would hold
   // the whole flow for approval before its free code leg even gets a

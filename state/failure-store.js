@@ -192,8 +192,8 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     // branchItemId ("which item, if this failure happened inside a
     // subflow's spawned child") almost never lives on `inv` directly —
     // see resolveItemInvocation's own comment for why — so it's derived
-    // via the same parent-invocation walk, purely for display now
-    // (computeResolvedAt no longer uses item identity for resolution).
+    // via the same parent-invocation walk, purely for display
+    // (computeResolvedAt does not use item identity for resolution).
     const itemInv = await resolveItemInvocation(row, inv);
     const branchItemId = itemInv?.subflowKey ?? null;
 
@@ -329,9 +329,9 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     };
   }
 
-  // flow_node_executions no longer stores error content at all, so "which
-  // errors happened on this flow" can only be answered from failure_events
-  // now. Same ErrorEntry shape, same "every error for the flow, caller
+  // flow_node_executions stores no error content, so "which errors
+  // happened on this flow" can only be answered from failure_events.
+  // Same ErrorEntry shape, same "every error for the flow, caller
   // filters by subflowKey if it wants root-level only" contract.
   async function queryErrorsByFlow(flowId) {
     const { rows } = await client.execute({
@@ -364,17 +364,17 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
 
   // ── Mutations ──────────────────────────────────────────────────────
   // recordRetry/markIgnored/markUnignored/resolveOpenForBranch and the
-  // Skip action they supported are gone. retry_count/
+  // Skip action they supported don't exist here. retry_count/
   // last_retried_at are derivable (COUNT/MAX over flow_node_executions
-  // WHERE kind='retry' for the invocation) but confirmed not wanted in
-  // the UI at all, so no replacement is computed here either. Ignore
-  // state moved to client-side device-local storage entirely.
+  // WHERE kind='retry' for the invocation) but not wanted in the UI, so
+  // no replacement is computed here either. Ignore state lives in
+  // client-side device-local storage.
 
   // Engine-failed recorder — called both when a flow definitively fails
   // (node threw with no cascade left to try, edge resolved to nothing,
-  // unknown next-node id, pipeline-not-loaded) AND, as of Phase 1.5,
-  // immediately on every cascade-leg throw regardless of whether the
-  // cascade goes on to retry/escalate/succeed — every throw gets a
+  // unknown next-node id, pipeline-not-loaded) AND immediately on every
+  // cascade-leg throw regardless of whether the cascade goes on to
+  // retry/escalate/succeed — every throw gets a
   // permanent row here, no exceptions. errorType, when known, is the
   // node's own domain-specific reason (never_attempted|confirmed_absent|
   // inconclusive|infra_unavailable|blocked), or "subflow-mode-not-

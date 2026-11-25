@@ -1,11 +1,11 @@
-// events/kinds.js — canonical Phase-1 event-kind registry.
+// events/kinds.js — canonical event-kind registry.
 //
 // Core emits bare kinds (dots only, no `plugin.` prefix); the gateway
 // boundary adds the prefix. There are no legacy names: a breaking change
 // mints a new kind. Every payload contract here is the minimum a consumer
 // can rely on — producers may attach more fields, never fewer.
 
-// Every kind with a Phase-1 producer. Frozen: adding a kind is a
+// Every kind with a producer. Frozen: adding a kind is a
 // deliberate registry change, never an inline string at a call site.
 // Evolution rule (CloudEvents primer §versioning): additive payload
 // changes keep the kind; a breaking change mints a NEW kind and dual-
@@ -34,7 +34,8 @@ export const WIRE_KINDS = Object.freeze([
   "approval.requested",
 ]);
 
-// Named but producer-less: emitting one is a typo or a Phase-2 leak.
+// Named but producer-less: emitting one is a typo or a leak from a
+// producer outside this registry.
 export const RESERVED_KINDS = Object.freeze([
   "gate.dissolved",
 ]);
@@ -84,7 +85,7 @@ export function isReservedKind(kind) {
 // payload untouched — validation only, no normalization.
 export function assertPayload(kind, payload) {
   if (isReservedKind(kind)) {
-    throw new Error(`event kind reserved (no Phase-1 producer): ${kind}`);
+    throw new Error(`event kind reserved (no producer registered): ${kind}`);
   }
   const required = REQUIRED_FIELDS[kind];
   if (!required) {

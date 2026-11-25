@@ -11,8 +11,6 @@
 // the domain stores where they exist (failureStore, runStore) and raw
 // sqlite where no store reader exists (queue_items, gate_state,
 // gate_records — same precedent as budget/index.js).
-import os from "node:os";
-import path from "node:path";
 import {
   GraphQLSchema,
   GraphQLObjectType,
@@ -31,9 +29,10 @@ import { gateState } from "../state/schema.ops.js";
 import { getSharedDb } from "../state/db.js";
 import { objectType } from "./columns.js";
 import { noteDbFailure } from "../state/db-guard.js";
+import { resolveDataDir, runtimeDbPath, opsDbPath } from "../state/paths.js";
 
-export const DEFAULT_RUNTIME_DB = () => path.join(os.homedir(), ".openclaw", "runtime.sqlite");
-export const DEFAULT_OPS_DB = () => path.join(os.homedir(), ".openclaw", "ops.sqlite");
+export const DEFAULT_RUNTIME_DB = () => runtimeDbPath(resolveDataDir());
+export const DEFAULT_OPS_DB = () => opsDbPath(resolveDataDir());
 
 // Public leaf subsets: one word to publish a new column, internals
 // (state_json, tokens, handles) stay out by default. Joined extras

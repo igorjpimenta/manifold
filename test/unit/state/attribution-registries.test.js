@@ -102,18 +102,7 @@ describe("attribution registries", () => {
 
   test("backfill registers branch keys and the keys existing rows already name", async () => {
     const client = await freshDb();
-    // v7 no longer creates flow_branches; old files still carry the branch
-    // keys item attribution was written against.
-    await client.execute(`CREATE TABLE flow_branches (
-      flow_id TEXT NOT NULL, group_id TEXT NOT NULL, branch_key TEXT NOT NULL,
-      started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
-      PRIMARY KEY (flow_id, group_id, branch_key))`);
     await client.execute("PRAGMA foreign_keys = OFF");
-    await client.execute({
-      sql: `INSERT INTO flow_branches (flow_id, group_id, branch_key, started_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)`,
-      args: ["flow-1", "g", "branch-9", 1, 1],
-    });
     await insertLineage(client, { flow: "flow-1", item: "branch-9", run: "run-1", child: "agent:old" });
     await client.execute({
       sql: `INSERT INTO session_lineage

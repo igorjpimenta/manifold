@@ -1,33 +1,18 @@
-// subflow-state.js — read branch/subflow data for a flow, grouped by groupId.
+// subflow-state.js — read a flow's subflow children grouped by groupId.
 //
-// Dual-mode (Phase 2):
-// a subflow node's items may live as `flow_branches` rows (old model) OR
-// as real `flow_runs` children (new model, one child per item, linked via
-// parent_invocation_id — see engine/spawn-child.js). Per group, exactly one
-// model applies — a cutover takes a whole subflow node at once, never
-// mixing sources within one group. If
-// `nodeExecutionsStore.listInvocationIdsForNode` finds ANY child-spawn
-// invocation for a group, that group is treated as fully migrated (even
-// if a child row is momentarily missing mid-creation) — old and new data
-// are never blended for the same group, which would be more confusing
-// than a narrow race window.
-//
-// Both functions still return the same `{ [subflowKey]: <row> } `/
-// `{ [groupId]: { [subflowKey]: <row> } }` nested shape pre-Phase-2 callers
-// were already written against (field renamed branchKey -> subflowKey —
-// the old-model path below is normalized to the same field name so every
-// caller sees one consistent shape regardless of which model actually
-// answered) — see normalizeChildAsSubflowRow below for the new-model
-// row's shape, kept as close to branchService's mapBranchRow as the two
-// models allow.
+// A subflow node's items are real `flow_runs` children (one child per
+// item, linked via parent_invocation_id — see engine/spawn-child.js).
+// Both functions return the `{ [subflowKey]: <row> }` /
+// `{ [groupId]: { [subflowKey]: <row> } }` nested shape every caller
+// (routes/runs.js, dashboard, engine assembleState) reads — the row
+// shape is defined in normalizeChildAsSubflowRow below.
 
 import { replayResults } from "../engine/result-replay.js";
 
-// Maps one flow_runs child row (+ its invocation) into the old
-// flow_branches row shape. Fields with no clean new-model equivalent yet
-// (_display, activeSessionKey, per-subflow errors) default to empty/null —
-// real values arrive per-pipeline as each one's cutover lands and a real
-// caller demonstrates it needs them.
+// Maps one flow_runs child row (+ its invocation) into the grouped-row
+// shape callers read. Fields with no direct equivalent (_display,
+// activeSessionKey) default to null — real values arrive per-pipeline as
+// a caller demonstrates it needs them.
 //
 // `data`: replays that child's own completed resultJson rows onto its
 // entry-only stateJson, same merge engine-helpers.js's assembleState()
@@ -39,20 +24,18 @@ async function normalizeChildAsSubflowRow(child, invocation, nodeExecutionsStore
   const isBlockedOnGate = child.status === "blocked" && child.waitJson != null;
   const results = (await nodeExecutionsStore?.listResultsForFlow?.(child.flowId)) ?? [];
   return {
-    // invocation.nodeId, not a distinct groupId field (dropped from
-    // flow_node_invocations once every subflow node became childFlows-
-    // implicit). Kept as the "groupId" key here to match the old-model
-    // row shape every caller of getAllSubflowGroups/getSubflowGroup already
-    // expects — group_id and node_id were always identical for a real
-    // subflow-child invocation, so this is not a behavior change.
+    // invocation.nodeId, not a distinct groupId field. Kept as the
+    // "groupId" key because every caller of
+    // getAllSubflowGroups/getSubflowGroup addresses groups by node id —
+    // group_id and node_id are always identical for a real
+    // subflow-child invocation.
     groupId: invocation.nodeId,
     subflowKey: invocation.subflowKey,
-    // 'blocked' folds into "running" to match the old model, where status
-    // stayed 'running' for the whole branch lifetime and a pending gate
-    // was signaled via `awaiting` alone, not a distinct status value.
-    // 'queued' is passed through unchanged (Phase 4) — it has no old-model
-    // analogue to preserve, and clients already render it distinctly
-    // (self-resolving internal-resource wait, not a gate).
+    // 'blocked' folds into "running": a pending gate is signaled via
+    // `awaiting` alone, and clients render `awaiting` distinctly rather
+    // than a status value. 'queued' passes through unchanged — clients
+    // already render it distinctly (self-resolving internal-resource
+    // wait, not a gate).
     status: child.status === "blocked" ? "running" : child.status,
     step: child.lastStep,
     startedAt: child.createdAt,
@@ -61,7 +44,6 @@ async function normalizeChildAsSubflowRow(child, invocation, nodeExecutionsStore
     failedAt: child.status === "failed" ? child.endedAt : null,
     cancelledAt: child.status === "cancelled" ? child.endedAt : null,
     data: replayResults(child.stateJson ?? {}, results),
-    errors: [],
     awaiting: isBlockedOnGate
       ? { requestPayload: child.waitJson, requestedAt: child.updatedAt, subNodeId: child.currentStep ?? null }
       : null,
@@ -73,9 +55,9 @@ async function normalizeChildAsSubflowRow(child, invocation, nodeExecutionsStore
     statusReason: child.statusReason ?? null,
     _display: null,
     activeSessionKey: null,
-    // Additive — not on the old shape. The new-model row's own flow_runs
-    // id, for callers that want to navigate to it directly rather than
-    // treat it as an inline data blob.
+    // Additive — the row's own flow_runs id, for callers that want to
+    // navigate to it directly rather than treat it as an inline data
+    // blob.
     flowId: child.flowId,
   };
 }
@@ -96,10 +78,10 @@ async function getMigratedLoopGroup({ flowId, groupId, runStore, nodeExecutionsS
   // without also spawning one (engine/executor-subflow-children.js). If
   // invocationIds is non-empty but children comes back empty, these
   // invocations aren't real subflow children at all — they're historical
-  // pre-Milestone-9 sub-node timing rows that happen to share a node_id
-  // with this "group" (a real risk since flow_node_invocations.group_id
-  // was dropped — subflow_key IS NOT NULL alone can't distinguish this
-  // specific case). Return null so the caller sees an empty group.
+  // timing rows that happen to share a node_id with this "group"
+  // (flow_node_invocations has no group_id, and subflow_key IS NOT NULL
+  // alone can't distinguish this specific case). Return null
+  // so the caller sees an empty group.
   if (children.length === 0) return null;
   const group = {};
   for (const child of children) {

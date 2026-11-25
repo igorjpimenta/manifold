@@ -17,12 +17,11 @@ export async function buildDiscussPrompt({ flow, target, runStore, nodeExecution
   if (!target?.promptBuilder) return null;
   try {
     const ctx = {
-      // B2.5 — read via assembleState() (resultJson replayed on top of
-      // the still-live stateJson) instead of trusting the raw blob
-      // directly, matching how the engine's own dispatch loop reads
-      // state. Fixes a real gap too: this call site never enriched
-      // with _subflowGroups before, so a discuss promptBuilder reading
-      // state.loop (the pre-migration field name) always got nothing.
+      // Read via assembleState() (resultJson replayed on top of the
+      // still-live stateJson) instead of trusting the raw blob directly,
+      // matching how the engine's own dispatch loop reads state. The raw
+      // blob is never enriched with _subflowGroups, so a promptBuilder
+      // reading state.loop would always get nothing from it.
       state: await assembleState(flow.flowId, { runStore, nodeExecutionsStore, baseState: flow.stateJson ?? {} }),
       itemId: target.itemId,
       flowId: flow.flowId,
@@ -73,7 +72,6 @@ export function registerDiscussHandlers({
       normalizedItemId = resolveItemId(item.itemId) ?? String(item.itemId);
       gateNodeId = sourceFlow.waitJson?.nodeId;
     } else if (sourceFlow.status === "running") {
-      // Old-model mid-batch path (flow_branches / branchService) removed.
       // All subflow gates now surface their pending items via waitJson.
       return { ok: false, status: 503, code: "gate_transition", error: "gate is transitioning, try again shortly" };
     } else {
@@ -223,7 +221,7 @@ export function registerDiscussHandlers({
     // the transcripts endpoint attributes this thread from stored columns
     // (nodeId, branchItemId) instead of parsing the session. Best-effort:
     // the discuss turn itself is already durable in discuss-store above.
-    try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, session: target.session, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null, agent: target.agent ?? null }); } catch {}
+    try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, session: target.session, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null }); } catch {}
 
     setImmediate(async () => {
       try {
@@ -738,8 +736,8 @@ export function registerDiscussHandlers({
       if (!parsed) parsed = { ok: false, code: "internal", error: err?.message ?? String(err) };
     }
     if (parsed?.ok) {
-      // No channel plugin anymore: replies go back through the same HTTP
-      // discuss route this history came from, or the WS dialog door.
+      // Replies go back through this HTTP discuss route or the WS dialog
+      // door.
       parsed.channelId = "manifold-dialog";
       parsed.channelInboundUrl = null;
     }
@@ -761,7 +759,6 @@ export function registerDiscussHandlers({
     let fields = (body.fields && typeof body.fields === "object" && !Array.isArray(body.fields))
       ? body.fields
       : null;
-    const source = typeof body.source === "string" ? body.source : null;
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
     // Resolve target first so we can use target.itemId for the sidecar
     // lookup before checking whether payload is present.
@@ -794,7 +791,6 @@ export function registerDiscussHandlers({
         flowId: sourceFlow.flowId,
         itemId: target.itemId,
         newDraft: text,
-        source,
         store,
         logger: api.logger,
       });

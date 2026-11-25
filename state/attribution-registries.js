@@ -53,9 +53,7 @@ export async function ensurePipelineNodes(client, rows, now = Date.now()) {
 
 // Union backfill, one pass. Node names also come from the version registry
 // so a pipeline's declared nodes are known before their first turn. Each
-// batch item is one statement; the legacy flow_branches table is read only
-// when it exists, because files created before v7 still carry the branch
-// keys that item attribution was written against.
+// batch item is one statement.
 export const BACKFILL_FLOW_ITEMS_SQL = `
   INSERT OR IGNORE INTO flow_items (flow_id, item_key, first_seen_at)
   SELECT flow_id, item_key, ? FROM (
@@ -63,11 +61,6 @@ export const BACKFILL_FLOW_ITEMS_SQL = `
     UNION SELECT flow_id, item_key FROM cost_by_call WHERE item_key IS NOT NULL AND flow_id IS NOT NULL
     UNION SELECT flow_id, branch_item_id FROM flow_sessions WHERE branch_item_id IS NOT NULL
   )
-`;
-
-export const BACKFILL_LEGACY_BRANCH_ITEMS_SQL = `
-  INSERT OR IGNORE INTO flow_items (flow_id, item_key, first_seen_at)
-  SELECT DISTINCT flow_id, branch_key, ? FROM flow_branches
 `;
 
 export const BACKFILL_TURN_RUNS_SQL = `
@@ -88,15 +81,7 @@ export const BACKFILL_PIPELINE_NODES_SQL = `
 
 export const BACKFILL_ATTRIBUTION_SQL = [BACKFILL_FLOW_ITEMS_SQL, BACKFILL_TURN_RUNS_SQL, BACKFILL_PIPELINE_NODES_SQL];
 
-export async function hasLegacyBranches(client) {
-  const { rows } = await client.execute(
-    "SELECT 1 AS ok FROM sqlite_master WHERE type = 'table' AND name = 'flow_branches'",
-  );
-  return rows.length > 0;
-}
-
 export async function backfillAttribution(client, now = Date.now()) {
   const statements = [...BACKFILL_ATTRIBUTION_SQL];
-  if (await hasLegacyBranches(client)) statements.push(BACKFILL_LEGACY_BRANCH_ITEMS_SQL);
   await client.batch(statements.map((sql) => ({ sql, args: [now] })), "write");
 }

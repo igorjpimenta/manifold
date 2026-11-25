@@ -24,11 +24,11 @@ const api = { runtime: {}, config: {} };
 // defaults to ~/.openclaw/runtime.sqlite — without this, every test-flow-*
 // fixture created below would write real rows into production data.
 function makeNodeExecutionsStore() {
-  // resultJson-by-flow tracking (B4): assembleState() now reads
-  // listResultsForFlow() to reconstruct a node's own output — this mock used
-  // to omit it entirely, which was harmless while state_json still carried
-  // the full accumulated blob as a fallback baseState. Once B4 made
-  // state_json entry-only, any test pipeline whose edge function reads a
+  // resultJson-by-flow tracking: assembleState() reads
+  // listResultsForFlow() to reconstruct a node's own output — this mock must
+  // provide it, since state_json is entry-only and carries no accumulated
+  // blob as a fallback baseState. Without it, any test pipeline whose edge
+  // function reads a
   // prior node's own output (e.g. `state.WORK ? "__end__" : "WORK"`) would
   // see it as permanently undefined and loop forever.
   // enter() returns a deterministic
@@ -46,7 +46,7 @@ function makeNodeExecutionsStore() {
       latestInvocationByKey.set(`${args.flowId}::${args.nodeId}`, invocationId);
       return { invocationId, isNew: args.kind === "fresh" };
     },
-    // reviveAgentKindOrphan's invocation-lookup gap fix looks up the
+    // reviveAgentKindOrphan looks up the
     // crashed node's existing invocation by flowId+nodeId to call
     // writeResult() on it — mirrors the real store's getLatestInvocationForNode.
     getLatestInvocationForNode: async (flowId, nodeId) => {
@@ -56,9 +56,9 @@ function makeNodeExecutionsStore() {
     // async, matching the real store's contract — a plain sync return here
     // would silently tolerate a missing `await` at the call site (see
     // makeSpyNodeExecutionsStore's comment below for the exact bug class
-    // this guards against; found live via verification).
+    // this guards against).
     write: async () => {},
-    // Option B, Phase B0 — resultJson write, now actually recorded (see
+    // resultJson write, recorded (see
     // block comment above) so assembleState() can reconstruct real state.
     writeResult: async (invocationId, result) => {
       const meta = invocationMeta.get(invocationId);
@@ -96,7 +96,7 @@ function makeNodeExecutionsStore() {
 // case for tests that don't care about fresh-vs-continuation resolution.
 // Pass an override (a plain value, or a function of flowId) for tests
 // that specifically exercise runFlow's forceNew/kind derivation (see
-// "runFlow — kind threading" below), which now reads this instead of
+// "runFlow — kind threading" below), which reads this instead of
 // state._stepHistory.
 function makeSpyNodeExecutionsStore({ findCurrentStep: findCurrentStepOverride = null } = {}) {
   const calls = [];
@@ -104,8 +104,8 @@ function makeSpyNodeExecutionsStore({ findCurrentStep: findCurrentStepOverride =
   const resultCalls = [];
   let enterCount = 0;
   // invocationId -> {flowId, nodeId}, resultJson-by-flow — see
-  // makeNodeExecutionsStore's block comment above (B4) for why
-  // this is now load-bearing, not decorative. This mock has real
+  // makeNodeExecutionsStore's block comment above for why
+  // this is load-bearing, not decorative. This mock has real
   // invocationIds (unlike the plain one), so correlation is a direct map
   // lookup rather than "most recent write() call" inference.
   const invocationMeta = new Map();
@@ -149,7 +149,7 @@ function makeSpyNodeExecutionsStore({ findCurrentStep: findCurrentStepOverride =
         nodeId, visitSeq: 1, resultWrittenAt: Date.now(), resultTooLargeBytes: null, resultJson,
       }));
     },
-    // Option B, Phase B0 — records every call so tests can assert exactly
+    // records every call so tests can assert exactly
     // what got written to resultJson, same spy convention as write() above.
     writeResult: async (invocationId, result) => {
       const meta = invocationMeta.get(invocationId);
@@ -315,9 +315,8 @@ describe("start", () => {
     await assert.rejects(() => executor.start("nonexistent"), /unknown pipeline/);
   });
 
-  // admission-queue-store.js: start() no longer THROWS when the
-  // shared pool is full — it queues instead (same UX as child-dispatch
-  // already had). These 3 tests need a REAL
+  // admission-queue-store.js: start() queues when the
+  // shared pool is full rather than throwing. These 3 tests need a REAL
   // admissionQueueStore (not the file's own always-admits fake) since
   // they're specifically exercising real capacity behavior against
   // resetGlobalConcurrency(n).
@@ -496,7 +495,7 @@ describe("runFlow — _blocked without a _kind fails the flow", () => {
     const { executor, store } = makeExecutor({ p: pipeline });
     const r = await executor.start("p");
     await executor.runFlow(r.flowId);
-    // No implicit "needs-info" default anymore — a block without an explicit
+    // A block without an explicit
     // _kind is a programming error in the node, so the flow fails outright.
     const final = store.get(r.flowId);
     assert.equal(final?.status, "failed", `expected failed, got ${final?.status}`);
@@ -686,24 +685,16 @@ describe("runFlow — failure-linking", () => {
   });
 });
 
-// recordFromTerminalState's call site at the clean __end__ branch (and its
-// dedicated await-discipline regression coverage here — the missing-`await`
-// incident this section documented) is gone — the function itself was
-// deleted once STAMP/CACHE_SAVE, the last two soft-error producers, were
-// converted to throw. Nothing async remains at that branch to have the same
-// missing-await failure mode.
-
 // ── state persist failure on the plain success path ─────────────────────────
-// Regression coverage for the runaway-retry incident: a node
-// executes successfully, but persistRunningRetrying's underlying
+// A node executes successfully, but persistRunningRetrying's underlying
 // store.setRunning() fails for a reason OTHER than revision_conflict (e.g.
-// a corrupted runtime.sqlite returning run_store_failed). Before the fix,
-// this result was neither checked nor returned — control fell through to
+// a corrupted runtime.sqlite returning run_store_failed). The failure
+// must be checked and returned; control must not fall through to
 // nodeExecutions.write() and back to the top of runFlow's while(true),
-// which re-resolved the SAME edge (lastStep never advanced, since the
-// persist never landed) and re-dispatched the node. Left unchecked, this is
-// an unbounded loop: each iteration re-runs the node (an LLM call, in the
-// real incident) forever, never reaching a terminal state. It must instead
+// which would re-resolve the SAME edge (lastStep never advanced, since the
+// persist never landed) and re-dispatch the node. Left unchecked, this is
+// an unbounded loop: each iteration re-runs the node (an LLM call)
+// forever, never reaching a terminal state. It must instead
 // fail the flow immediately, exactly like every other failure branch in
 // this file.
 
@@ -772,7 +763,7 @@ describe("runFlow — state persist failure on the plain success path", () => {
   });
 });
 
-// ── runFlow — result-before-lastStep write ordering (regression) ────────────
+// ── runFlow — result-before-lastStep write ordering ────────────────────────
 // A gateway restart landing between "flow_runs.last_step advances to
 // nextNodeId" and "this node's own result_json actually commits" leaves
 // last_step durably claiming the node completed while its output is gone.
@@ -781,9 +772,8 @@ describe("runFlow — state persist failure on the plain success path", () => {
 // straight to resolving the node's outbound edge without re-running
 // apply() — so the edge function reads an empty
 // state.<nodeId> and returns null, which the engine surfaces as
-// "edge <nodeId> returned no next node". Live incident: freelance_workana-
-// proposal::SCORE (18 flows in one batch). The fix is a write-
-// order swap in executor.js — writeResult() must commit before setRunning
+// "edge <nodeId> returned no next node". writeResult() must
+// commit before setRunning
 // (persistRunningRetrying) advances lastStep past the node. This test
 // pins that order so it can't silently regress.
 describe("runFlow — writeResult commits before last_step advances", () => {
@@ -961,7 +951,7 @@ describe("runFlow — cascade-kind flow: cascading dispatch", () => {
     assert.equal(attempts, 2, "WORK must be dispatched again after cascading, not abandoned");
     const flow = store.get(r.flowId);
     assert.equal(flow.status, "succeeded", "the flow resolves normally — persistFailRetrying must never fire for a non-terminal throw");
-    assert.equal(spy.calls.length, 2, "both the failing and the succeeding attempt get their own tracked execution — the whole point of this redesign vs. the old untracked fallback mechanism");
+    assert.equal(spy.calls.length, 2, "both the failing and the succeeding attempt get their own tracked execution");
   });
 
   it("a throw: escalates to a sibling entry via the failed node's own edge, not a central router", async () => {
@@ -1030,7 +1020,7 @@ describe("runFlow — cascade-kind flow: cascading dispatch", () => {
 });
 
 // ── cascade-kind flow: NodeFailure / edge-function error passing ────────────
-// The "Eradicate soft errors" work — a cascade leg throws
+// A cascade leg throws
 // NodeFailure(message, {errorType}) instead of soft-
 // returning {ok:false, error_type}; the engine carries errorType across the
 // throw via a transient `_cascadeError` state key, consumed by a 2-arg edge
@@ -1135,16 +1125,15 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
     assert.equal(receivedOnRetry.errorType, null, "a non-NodeFailure throw must not fabricate an errorType");
   });
 
-  // Regression: found live (not by any unit test — this exact class of bug
-  // can't be caught in-process). Pipeline/shared code and the engine can
+  // Pipeline/shared code and the engine can
   // load executor-errors.js through different module registries (the
   // gateway daemon's data:-URL pipeline loader vs. jiti-transpiled CJS for
   // CLI tooling), producing structurally-identical but reference-distinct
-  // NodeFailure classes — `instanceof` silently returns false across that
+  // NodeFailure classes — `instanceof` returns false across that
   // boundary even for a genuine NodeFailure, discarding its errorType.
   // This test can't reproduce the cross-registry case directly (everything
-  // in a unit test runs in one registry), but it proves the actual fix:
-  // the engine now reads `err.errorType` directly (duck-typed) rather than
+  // in a unit test runs in one registry), but it proves the engine reads
+  // `err.errorType` directly (duck-typed) rather than
   // gating on `instanceof NodeFailure` — so an object that merely LOOKS
   // like a NodeFailure (same shape, not the same class reference) still
   // carries its errorType through correctly.
@@ -1237,7 +1226,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
   });
 
   it("_cascadeError is cleared once its node succeeds — a later edge call for the SAME node never sees a stale error", async () => {
-    // Regression: found while writing the test above it — a success doesn't
+    // A success doesn't
     // remove a stale _cascadeError from an earlier failed attempt on its
     // own, so without an explicit clear, an edge function checking `error`
     // before `state` would wrongly see attempt 1's error even after
@@ -1281,7 +1270,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
 
 // ── cascade-kind flow: every throw persists to failure_events, no duplicate ──
 // row on exhaustion ────────────────────────────────────────────────────────
-// Under "Eradicate soft errors", every single cascade-leg throw calls
+// Every cascade-leg throw calls
 // failureStore.recordEngineFailure immediately (unconditional on what the
 // edge decides next), not just the terminal give-up. The exhaustion path's
 // own persistFailRetrying->recordEngineFailure call reuses the SAME
@@ -1410,8 +1399,7 @@ describe("runFlow — blocked-wait reason synthesis", () => {
 // node.circuitBreaker:true opt-in, checked by dispatchAgentEntry
 // (executor-nodes.js) for ANY "agent"-kind node regardless of which kind of
 // flow it's running inside — not specific to cascade sub-nodes, though
-// those are exactly the nodes that need this opt-in now that kind:"fallback"
-// (which applied this unconditionally to every agent entry) is gone.
+// those are exactly the nodes that need this opt-in.
 
 // Methods return Promises — the real store is async, and a sync mock here
 // would let a missing `await` at the call site pass green.
@@ -1603,11 +1591,11 @@ describe("reviveAgentKindOrphan", () => {
     assert.equal(capturedSession, "agent:scout:orphan-session", "must resume the SAME session the original dispatch used");
     const final = store.get(flow.flowId);
     assert.equal(final.status, "succeeded", "flow continues past AGENT to __end__");
-    // B4: state_json is entry-only — agentReply (AGENT's own apply() output)
-    // never lands there anymore. Reconstruction via assembleState() is
+    // state_json is entry-only — agentReply (AGENT's own apply() output)
+    // does not land there. Reconstruction via assembleState() is
     // covered by executor-assemble-state-e2e.test.js; this test's own job
     // is the revival/session behavior above, not resultJson replay.
-    assert.equal(final.stateJson.agentReply, undefined, "state_json must not carry node output post-B4");
+    assert.equal(final.stateJson.agentReply, undefined, "state_json must not carry node output");
   });
 
   it("does nothing for a node that is not kind:agent", async () => {
@@ -1728,19 +1716,15 @@ describe("reviveAgentKindOrphan", () => {
   });
 });
 
-// ── reviveAgentKindOrphan — writeResult commits before last_step advances (regression) ──
+// ── reviveAgentKindOrphan — writeResult commits before last_step advances ──
 // reviveAgentKindOrphan is a separate code path from runFlow's main dispatch
-// loop (above) and only ever got half of the write-order fix: it
-// re-runs apply() before touching state (no stale-read-on-entry), but never
-// calls writeResult() for the node it just revived before persistRunningRetrying
-// advances last_step past it. The immediately-following runFlow(flowId,
-// "revival") call's assembleState() then sees an empty result for that node,
-// so any outbound edge depending on the node's own output dead-ends with
-// "no next node" — same symptom as the bug above, just reached via boot
-// revival after a restart instead of a live crash-restart race. Live
-// incident: freelance_workana-proposal::SCORE (a gateway restart
-// storm interrupted several SCORE_LLM dispatches; boot revival then failed
-// every one of them this exact way).
+// loop (above): it re-runs apply() before touching state (no
+// stale-read-on-entry), but must also call writeResult() for the node it
+// just revived before persistRunningRetrying
+// advances last_step past it — otherwise the immediately-following
+// runFlow(flowId, "revival") call's assembleState() sees an empty result
+// for that node, and any outbound edge depending on the node's own output
+// dead-ends with "no next node".
 describe("reviveAgentKindOrphan — writeResult commits before last_step advances", () => {
   it("calls nodeExecutionsStore.writeResult() before store.setRunning(), and the revived node's own output is visible to its outbound edge", async () => {
     const pipeline = makePipeline({
@@ -1808,7 +1792,7 @@ describe("reviveAgentKindOrphan — writeResult commits before last_step advance
     );
   });
 
-  // Same gap as the main dispatch loop's identical fix above, but more
+  // Same requirement as the main dispatch loop above, but more
   // reachable here: revival's invocationId comes from a pure read
   // (getLatestInvocationForNode) with no creation fallback, unlike the main
   // loop's enter(), so "no-such-invocation" is a real case, not just

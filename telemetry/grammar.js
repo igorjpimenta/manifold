@@ -31,7 +31,7 @@ const REGEX = {
   // here because those historic flows were actually cron-triggered and need
   // separate SQL attribution, not the operator label.
   OPERATOR_TRIGGER: /^agent:operator:(cli|operator):([0-9a-f-]{36})$/,
-  // Catch-all for legacy / manual sessions whose key is `agent:<id>:<tail>`
+  // Catch-all for manual sessions whose key is `agent:<id>:<tail>`
   // with no recognized scope prefix — e.g. hand-typed --session-id values
   // that don't follow a known scope. Treated as kind=explicit (same semantics
   // as the prefixed form). Tried LAST so specific rules win.

@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { loadFleet } from "../agent/fleet.js";
 import { ENTRY_FIELDS } from "./needs-resolver.js";
 
-// Phase 2: for every subflow node under `nodes`, register its .flow as an
+// For every subflow node under `nodes`, register its .flow as an
 // addressable pipeline (`${pipelineId}::${nodeId}`) so a real child
 // flow_run can be started against it via the normal
 // executor.start()/pipelinesRef path. Must happen HERE, inside
@@ -16,7 +16,7 @@ import { ENTRY_FIELDS } from "./needs-resolver.js";
 // stale entries backed by a real on-disk pipeline directory. Own
 // try/catch per node so one bad subflow doesn't block the parent pipeline
 // (already registered by the caller) or any other subflow node at the
-// same nesting level. Renamed from kind:"loop".
+// same nesting level.
 //
 // Recursive (first real nested-subflow site — freelance_workana-reply's
 // REPLY > ENSURE_INFRA): a synthesized child pipeline's own `.nodes` can
@@ -139,7 +139,7 @@ export async function loadPipelines(dir, logger) {
       result.set(pipeline.id, { ...pipeline, _filepath: indexPath, _dir: pipelineDir, _fleet });
       logger?.info?.(`manifold loader: loaded pipeline "${pipeline.id}" from ${ent.name}/${_fleet ? " (fleet.yaml found)" : ""}`);
 
-      // Phase 2: for every subflow node, register its .flow as an
+      // For every subflow node, register its .flow as an
       // addressable pipeline (`${pipeline.id}::${nodeId}`) so a real child
       // flow_run can be started against it via the normal
       // executor.start()/pipelinesRef path. Must happen HERE, inside
@@ -149,7 +149,7 @@ export async function loadPipelines(dir, logger) {
       // preserves stale entries backed by a real on-disk pipeline
       // directory. Own try/catch per node so one bad subflow doesn't block
       // the parent pipeline (already registered above) or any other
-      // subflow node in the same pipeline. Renamed from kind:"loop".
+      // subflow node in the same pipeline.
       registerSubflowChildren(pipeline.id, pipeline.nodes, { result, indexPath, pipelineDir, entName: ent.name, logger }, [], pipeline.proposalMeta);
     } catch (err) {
       logger?.warn?.(`manifold loader: ${ent.name}/ failed to load: ${err.message}`);
@@ -433,9 +433,8 @@ function validateSubflowNode(p, label, node, ancestorNodeMaps) {
     throw new Error(`pipeline ${p.id}: ${label} (subflow) requires .mode to be "any" or "all"`);
   }
   // Every subflow node's items become real flow_runs children — requires a
-  // .flow definition (.flow.nodes/.edges); there is no other subflow shape,
-  // the old branch-worker engine having been deleted outright. Renamed from
-  // kind:"loop" — a selector returning a single-item array is the
+  // .flow definition (.flow.nodes/.edges); there is no other subflow shape.
+  // A selector returning a single-item array is the
   // degenerate "spawn exactly one child" case, not a different kind.
   if (!node.flow) {
     throw new Error(`pipeline ${p.id}: ${label} (subflow) requires .flow (.flow.nodes/.edges)`);

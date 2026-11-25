@@ -1,5 +1,5 @@
 /**
- * Option B "needs:" — engine-mechanics E2E, matching this suite's own
+ * "needs:" — engine-mechanics E2E, matching this suite's own
  * established convention: a real createExecutor() driving a real dispatch loop
  * against isolated tmp-sqlite stores, proving lazy needs: resolution (via
  * ctx.needs(varName), NOT a bulk pre-fetch) actually works through the
@@ -118,10 +118,10 @@ function buildPipelines() {
       id: "test_needs_parent",
       state: {},
       nodes: {
-        // B4: shortlist must come from a real node's own
+        // shortlist must come from a real node's own
         // stateUpdate, not a raw store.setRunning() injection — a
         // manually-seeded, non-node-output field is exactly what
-        // state_json narrowing now correctly stops carrying
+        // state_json's entry-only narrowing stops carrying
         // forward. This mirrors how a real pipeline would actually shape
         // it: whatever node runs before a childFlows subflow returns the
         // selector's input as part of its own output.
@@ -139,7 +139,7 @@ function buildPipelines() {
   };
 }
 
-describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read', () => {
+describe('"needs:" — real dispatch loop, cross-boundary hops:1 read', () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
@@ -276,7 +276,7 @@ function buildNestedPipelines() {
   };
 }
 
-describe('Option B "needs:" — entry-based hops:2 read (root\'s own runId, real PROPOSE>SUBMIT nesting shape)', () => {
+describe('"needs:" — entry-based hops:2 read (root\'s own runId, real PROPOSE>SUBMIT nesting shape)', () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
@@ -305,11 +305,11 @@ describe('Option B "needs:" — entry-based hops:2 read (root\'s own runId, real
 // ── hops:0 (same-flow). Two
 // shapes: nodeId-based (a sibling's own resultJson, no walk at all) and
 // config-based (pipeline-declared static `state:`, read live off the
-// pipeline definition, never off stateJson). The config case reproduces
-// the actual system_memory-synthesis regression: a pipeline-declared field
-// (sourceFilter) that is NOT a node output and NOT in ENTRY_FIELDS, so it's
+// pipeline definition, never off stateJson). The config case: a
+// pipeline-declared field
+// (sourceFilter) that is NOT a node output and NOT in ENTRY_FIELDS is
 // dropped from stateJson the moment the flow persists past its first node
-// — confirmed here by asserting the persisted row really doesn't carry it,
+// — asserted here by checking the persisted row really doesn't carry it,
 // while ctx.needs() still resolves it correctly regardless.
 
 let sameFlowCalls;
@@ -323,10 +323,10 @@ function buildSameFlowPipeline() {
         // nodeId-based needs always unwraps via parsed[nodeId]
         // (needs-resolver.js:135) — a node must wrap its own return as
         // {[ownNodeId]: value} to be readable that way, regardless of
-        // hops. WALK does that here; EXTRACT does not (system_memory-
-        // synthesis's real WALK returns flat fields instead, which is
-        // exactly why its own EXTRACT migration left `sessions` on a
-        // plain state.sessions read rather than nodeId-based needs).
+        // hops. WALK does that here; EXTRACT does not, and a node whose
+        // return is flat fields rather than a wrapped value is not
+        // readable via nodeId-based needs (such a reader uses a plain
+        // state.sessions read instead).
         WALK: { kind: "code", run: () => ({ WALK: { sessions: ["s1", "s2"] } }) },
         EXTRACT: {
           kind: "code",
@@ -346,7 +346,7 @@ function buildSameFlowPipeline() {
   };
 }
 
-describe('Option B "needs:" — hops:0 (same-flow), both nodeId and config shapes', () => {
+describe('"needs:" — hops:0 (same-flow), both nodeId and config shapes', () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
@@ -363,11 +363,10 @@ describe('Option B "needs:" — hops:0 (same-flow), both nodeId and config shape
     assert.deepEqual(sameFlowCalls[0].sessions, ["s1", "s2"], "resolved WALK's own resultJson via nodeId-based needs at hops:0, no walk");
     assert.deepEqual(sameFlowCalls[0].sourceFilter, { includeAgentSelfRediscovery: true }, "resolved the pipeline-declared config live off the definition, not off stateJson");
 
-    // Regression guard: confirm sourceFilter genuinely is NOT in the
+    // Confirm sourceFilter genuinely is NOT in the
     // persisted stateJson by the time EXTRACT dispatches — proving
     // ctx.needs() is doing real work here, not just reading a field that
-    // happened to survive anyway (which is exactly how the original bug
-    // went unnoticed for the implicit `state.sourceFilter` read it replaced).
+    // happened to survive anyway.
     assert.equal(flow.stateJson?.sourceFilter, undefined, "sourceFilter must be absent from persisted stateJson — the whole point of routing this through config-type needs() instead");
   });
 });

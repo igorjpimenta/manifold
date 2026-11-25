@@ -9,13 +9,11 @@ const CAS_EXCLUDED_STATUSES = new Set(["succeeded", "failed", "cancelled", "skip
 // Force a terminal flow (succeeded/failed/cancelled/skipped) into `blocked`
 // so setRunning's CAS will accept it (its WHERE clause excludes those four
 // statuses — see run-store.js's casSetRunningStmt). Goes through the
-// injected `store` (state-store.js → run-store.js's forceBlock CAS) rather
-// than a raw DatabaseSync write — a prior version of this function opened
-// its own `new DatabaseSync(runtime.sqlite path)` here, bypassing `store`/
-// `readStore` entirely, so tests injecting in-memory store doubles could
-// neither observe nor control it (the write landed against a real DB file
-// the doubles knew nothing about, always returning "revision changed
-// during force-block" in tests).
+// injected `store` (state-store.js → run-store.js's forceBlock CAS) — a
+// raw DatabaseSync write would bypass `store`/`readStore` entirely, leaving
+// tests' in-memory store doubles unable to observe or control it (the write
+// would land against a real DB file the doubles know nothing about, always
+// returning "revision changed during force-block").
 // Exported so other retry paths can reuse this instead of hitting the same
 // `setRunning failed: terminal` result and having no recovery — a subflow
 // item can finish failed on a flow that has since gone fully terminal (the
@@ -196,15 +194,14 @@ export function createRetryFailure({
       // list. A raw nodeId Set can't tell "still failing" apart from
       // "failed once, historically." Narrow to nodes whose CURRENT (most
       // recent) execution is the one that errored — getLatestExecutionForNode
-      // (added for failure_events invocation-linking) makes this exact
-      // instead of inferred from string/nodeId equality alone.
+      // makes this exact instead of inferred from string/nodeId equality
+      // alone.
       //
-      // queryErrorsByFlow moved from nodeExecutionsStore to failureStore
-      // ("Eradicate soft errors") — flow_node_executions no longer stores
-      // error content at all, failure_events is the only place "which
-      // nodes errored" can be answered from now. getLatestExecutionForNode
-      // stays on nodeExecutionsStore below — it's identity/timing only,
-      // unaffected.
+      // queryErrorsByFlow lives on failureStore: failure_events is the only
+      // place "which nodes errored" can be answered from, as
+      // flow_node_executions carries identity/timing only.
+      // getLatestExecutionForNode lives on nodeExecutionsStore below —
+      // identity/timing, no error content.
       const nodeExecutionsStore = getNodeExecutionsStore();
       const allRootErrors = (await failureStore.queryErrorsByFlow(flowId)).filter((e) => e.subflowKey == null);
       const errorNodes = new Set();
@@ -212,25 +209,21 @@ export function createRetryFailure({
         const latest = await nodeExecutionsStore.getLatestExecutionForNode({ flowId, nodeId: e.nodeId, subflowKey: null });
         if (latest?.executionId === e.executionId) errorNodes.add(e.nodeId);
       }
-      // failure_node is always derived from a live flow_node_executions
-      // entry at the moment the failure was first recorded
-      // (state/failure-store.js's flow-level sweep). If it's gone from the
-      // CURRENT set of root-level errors, this specific failure has already
-      // been resolved — most commonly by an earlier retry of the same
-      // failure event — so there is nothing left to retry. Fail clean
-      // instead of silently re-running the node.
+      // failure_node is derived from a live flow_node_executions entry
+      // when the failure is first recorded (state/failure-store.js's
+      // flow-level sweep). If that execution isn't the node's
+      // latest, this specific failure has already been resolved — most
+      // commonly by an earlier retry of the same failure event — so there
+      // is nothing left to retry. Fail clean instead of silently re-running
+      // the node.
       //
-      // Prefer the exact execution_id anchor when the failure row has one
-      // (every failure recorded since this session's failure-linking work
-      // does) — ties eligibility to the SPECIFIC execution that produced
-      // this failure, not just "some node named failureNode currently has
-      // an error" (which errorNodes alone can't distinguish across
-      // visit_seq-repeated loop-back re-entries of the same node). Legacy
-      // rows recorded before invocation_id/execution_id existed fall back
-      // to the errorNodes Set membership check.
-      const stillLive = failure.execution_id
-        ? (await nodeExecutionsStore.getLatestExecutionForNode({ flowId, nodeId: failureNode, subflowKey: null }))?.executionId === failure.execution_id
-        : errorNodes.has(failureNode);
+      // Eligibility anchors to the failure row's exact execution_id — the
+      // SPECIFIC execution that produced this failure — because errorNodes
+      // alone can't distinguish visit_seq-repeated loop-back re-entries of
+      // the same node. A row with no execution_id never matches and takes
+      // the conflict path.
+      const stillLive =
+        (await nodeExecutionsStore.getLatestExecutionForNode({ flowId, nodeId: failureNode, subflowKey: null }))?.executionId === failure.execution_id;
       if (!stillLive) {
         return {
           code: "conflict",

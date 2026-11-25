@@ -65,14 +65,14 @@ describe("replayResults — row admission", () => {
 });
 
 describe("replayResults — truncated results", () => {
-  test("too-large with no stored JSON replays an explicit marker", () => {
+  test("too-large with no stored JSON is skipped (the value was never stored)", () => {
     const out = replayResults({}, [
       { nodeId: "BIG", resultWrittenAt: 1, resultJson: null, resultTooLargeBytes: 2048 },
     ]);
-    assert.deepEqual(out, { BIG: { _resultTooLarge: true, bytes: 2048 } });
+    assert.deepEqual(out, {});
   });
 
-  test("too-large WITH stored partial JSON merges the partial data instead of the marker", () => {
+  test("too-large WITH stored partial JSON merges the partial data", () => {
     const out = replayResults({}, [
       { nodeId: "PART", resultWrittenAt: 1, resultJson: '{"PART":{"kept":true}}', resultTooLargeBytes: 2048 },
     ]);
@@ -80,12 +80,12 @@ describe("replayResults — truncated results", () => {
     assert.equal(out.PART._resultTooLarge, undefined);
   });
 
-  test("a marker for one node does not disturb siblings", () => {
+  test("a skipped row does not disturb siblings", () => {
     const out = replayResults({}, [
       row("A", { A: { v: 1 } }),
       { nodeId: "BIG", resultWrittenAt: 1, resultJson: null, resultTooLargeBytes: 10 },
     ]);
     assert.deepEqual(out.A, { v: 1 });
-    assert.deepEqual(out.BIG, { _resultTooLarge: true, bytes: 10 });
+    assert.equal(out.BIG, undefined);
   });
 });

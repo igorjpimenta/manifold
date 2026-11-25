@@ -1,26 +1,22 @@
 /**
- * Full-engine E2E reproduction of a real production incident
- * (freelance_freelancer-proposal, flow 86238736, node SCORE):
- * a subflow node's synthetic child pipeline (id `${parentId}::${nodeId}`,
- * minted by loader.js's registerSubflowChildren) went transiently missing
- * from pipelinesRef.value. Every spawned child failed immediately at
+ * Full-engine E2E for a subflow node's synthetic child pipeline
+ * (id `${parentId}::${nodeId}`,
+ * minted by loader.js's registerSubflowChildren) going transiently missing
+ * from pipelinesRef.value. Every spawned child fails immediately at
  * pipeline resolution with "pipeline not loaded: ..." — before any node
  * ever dispatched, so its failure_events row has no invocation_id/
- * execution_id/error_type. The parent auto-failed with
- * subflow-mode-not-satisfied. Tapping Retry on the parent correctly
- * cascade-redirected to the real child failure(s) — but retryFailureBranch
- * required a failure_node to compute a retry target, and this class of
- * failure never has one, so every redirected retry 409'd with "can't
- * determine retry target".
+ * execution_id/error_type. The parent auto-fails with
+ * subflow-mode-not-satisfied, and tapping Retry on the parent
+ * cascade-redirects to the real child failure(s).
  *
- * This test reproduces the failure end-to-end through the REAL loader
+ * The test drives this through the REAL loader
  * (real on-disk pipeline, real registerSubflowChildren-minted synthetic
  * id), the REAL executor/state-store/child-resume-trigger stack, and the
- * REAL retryFailureBranch — then proves retrying the parent's failure now
- * actually recovers the run, instead of 409ing.
+ * REAL retryFailureBranch — then proves retrying the parent's failure
+ * recovers the run.
  *
- * Isolated-sandbox discipline (per the incident writeup, also
- * followed by executor-subflow-children-*-e2e.test.js): independent
+ * Isolated-sandbox discipline:
+ * independent
  * tmp-sqlite run-store/node-executions/failure-store instances, never
  * ~/.openclaw/runtime.sqlite; a real temp pipelines directory, never
  * touching workspace/.pipelines/.
@@ -159,7 +155,7 @@ function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-describe("incident reproduction — subflow child pipeline transiently missing, then Retry on the parent", () => {
+describe("subflow child pipeline transiently missing, then Retry on the parent", () => {
   let harness;
   afterEach(async () => {
     harness?.runStore?.close();
@@ -171,10 +167,9 @@ describe("incident reproduction — subflow child pipeline transiently missing, 
     harness = await makeHarness();
     const { executor, runStore, failureStore, pipelinesRef } = harness;
 
-    // Simulate the exact incident: the synthetic child pipeline entry goes
-    // transiently missing (what the OLD pipelines-watcher.js merge loop
-    // did on any parent reload hiccup — see engine/pipelines-watcher.test.js
-    // for the dedicated fix-in-isolation coverage of THAT mechanism).
+    // Simulate the synthetic child pipeline entry going transiently
+    // missing — see engine/pipelines-watcher.test.js for the merge-loop
+    // behavior itself.
     const savedChildPipeline = pipelinesRef.value.get("test_incident_parent::SCORE");
     pipelinesRef.value.delete("test_incident_parent::SCORE");
 
@@ -221,8 +216,8 @@ describe("incident reproduction — subflow child pipeline transiently missing, 
     assert.equal((await runStore.get(record.flowId)).status, "failed", "sanity: parent failed same as the previous test");
 
     // The transient window closes — the pipeline becomes resolvable again
-    // (in production this is either pipelines-watcher.js's fix keeping the
-    // entry alive throughout, or its next successful reload repopulating
+    // (in production pipelines-watcher.js either keeps the
+    // entry alive throughout, or its next successful reload repopulates
     // it; either way, by the time a human taps Retry, the pipeline is
     // loadable again).
     pipelinesRef.value.set("test_incident_parent::SCORE", savedChildPipeline);

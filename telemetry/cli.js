@@ -67,7 +67,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       // owner) is pulled in as a virtual child. Without this the tree from
       // a cron only reaches the trigger edge and stops — the scorer/content-
       // writer subagents would be missing because their parent_session_key
-      // points sideways at graph-flow-owner, not into the cron's chain.
+      // points sideways at the owner session, outside the cron's chain.
       const rows = await execAll(client, `
         WITH RECURSIVE descendants(child_session_key, depth) AS (
           SELECT child_session_key, 0 FROM session_lineage WHERE child_session_key = ?
@@ -93,8 +93,8 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       `, [key, maxDepth]);
       if (!rows.length) { console.log(`(no lineage row for ${key})`); return; }
       // Build parent → children map. For sessions whose parent_session_key
-      // points outside the visible subtree (e.g. flow children pointing to
-      // graph-flow-owner), reparent them under the flow:<id> trigger edge.
+      // points outside the visible subtree (e.g. flow children pointing at
+      // the owner session), reparent them under the flow:<id> trigger edge.
       const childrenOf = new Map();
       const byKey = new Map();
       for (const r of rows) byKey.set(r.child_session_key, r);

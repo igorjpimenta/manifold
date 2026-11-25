@@ -1,5 +1,5 @@
 /**
- * Unit tests for engine/child-resume-trigger.js — Phase 2's "wake the parent
+ * Unit tests for engine/child-resume-trigger.js — the "wake the parent
  * once every sibling child is terminal" mechanism. Uses real sqlite-backed
  * run-store.js/node-executions.js instances (tmp files) plus
  * engine/spawn-child.js to build genuine parent/child pairs, since the
@@ -514,13 +514,12 @@ describe("flipToRunningAndResume", () => {
   });
 });
 
-// Regression for the "orphaned promotion" bug class (see engine/admission-
-// promotion-resume.js's header): a CAS-lost cleanup release() here always
+// A CAS-lost cleanup release() here always
 // holds a genuinely 'admitted' row, so it can promote a DIFFERENT flow's
 // queued row from the shared combined pool as a side effect — discarding
-// that promotion strands the promoted flow exactly like the boot-time leak
-// sweep once did (fixed separately in boot/flow-revival.js's own admission-
-// leak release, which drives wakePromotedRelease on the same release).
+// that promotion strands the promoted flow (see engine/admission-
+// promotion-resume.js's header; boot/flow-revival.js's admission-
+// leak release drives wakePromotedRelease on the same release).
 describe("flipToRunningAndResume — CAS-lost-after-admitted release drives resumePromotedAdmission", () => {
   test("resumes the different flow promoted by this call's own cleanup release", async () => {
     const parentFlowId = "parent-flow";
@@ -638,7 +637,7 @@ describe("flipToRunningAndResume — repair propagation", () => {
     assert.equal(row.status, "running");
   });
 
-  test("does not repair when a fresh invocation has superseded the one the repairGuard expects (stale settlement)", async () => {
+  test("does not repair when a fresh invocation has replaced the one the repairGuard expects (stale settlement)", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;
     const parent = await store.create({ pipelineId: "p", initialState: {} });
@@ -694,7 +693,7 @@ describe("flipToRunningAndResume — repair propagation", () => {
     }
   });
 
-  test("a 'failed' parent with no repairGuard supplied (legacy callers) keeps the pre-repair behavior", async () => {
+  test("a 'failed' parent with no repairGuard supplied stays terminal — no flip, no resume", async () => {
     harness = await makeHarness();
     const { runStore, store } = harness;
     const parent = await store.create({ pipelineId: "p", initialState: {} });

@@ -215,7 +215,7 @@ describe("childFlows:true REPLY-shaped loop, full engine E2E", () => {
     assert.equal(child.waitJson.kind, "human-gate");
     assert.equal(child.waitJson.items[0].itemId, "job-1", "must block at GATE with the plain item id — REPLY has no round-scoping");
 
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-1", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-1", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -236,7 +236,7 @@ describe("childFlows:true REPLY-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-2", decision: "reject", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-2", decision: "reject", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -256,7 +256,7 @@ describe("childFlows:true REPLY-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-3", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-3", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded", "must recover after 2 real ENSURE_INFRA dispatches and reach a terminal state, not hang or fail");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -275,7 +275,7 @@ describe("childFlows:true REPLY-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-4", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-4", decision: "approve", source: "ws" });
     await flush(150);
 
     const settled = await runStore.get(childFlowId);
@@ -303,7 +303,7 @@ describe("childFlows:true REPLY-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-5", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-5", decision: "approve", source: "ws" });
     await flush();
 
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });

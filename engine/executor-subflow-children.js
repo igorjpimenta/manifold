@@ -1,9 +1,7 @@
 // executor-subflow-children.js — real child-flow dispatch for a
 // `kind:"subflow"` node.
 //
-// Deliberately small: unlike the old branch-worker model (subCtx/item
-// calling convention, auto-nested `data`, its own worker-pool concurrency
-// scheduler, gate-batching), a childFlows
+// Deliberately small: a childFlows
 // subflow's items are ordinary flow_runs children driven by the exact same
 // executor.js/runFlow() every other flow uses — this module's only job is
 // resolving items → spawning/finding each child → checking whether the
@@ -94,8 +92,7 @@ export async function dispatchSubflowChildren({ node, nodeId, flowId, state, sto
   }
 
   // Skip the subflow-entry gate for a cascade-shape node (flow.kind:
-  // "cascade" — the code-then-agent-fallback migration, e.g.
-  // ENSURE_LOGIN/SUBMIT/SEND_REPLY). A cascade's own code leg frequently
+  // "cascade"). A cascade's own code leg frequently
   // resolves the item for free (edge routes straight to "__end__" without ever touching the
   // agent leg — e.g. a cached login), so gating here, before that code leg
   // even runs, produces a false-positive hold on the common case. Real

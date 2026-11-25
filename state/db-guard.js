@@ -14,7 +14,7 @@
 // breaker open from config would defeat it.
 import fs from "node:fs";
 import path from "node:path";
-import os from "node:os";
+import { resolveDataDir } from "./paths.js";
 
 export const CORRUPT_CLASS = /(CORRUPT|IOERR|NOTADB|MALFORMED|database disk image is malformed)/i;
 export const TRIP_THRESHOLD = 3;
@@ -32,7 +32,7 @@ export function isCorruptClass(err) {
 }
 
 function writeAlert(detail) {
-  const dir = path.join(os.homedir(), ".openclaw", "logs");
+  const dir = path.join(resolveDataDir(), "logs");
   try {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(

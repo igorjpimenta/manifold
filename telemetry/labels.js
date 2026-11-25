@@ -58,14 +58,10 @@ export function displayRootLabel(rootKind, rootLabel) {
       return "Chat (Telegram)";
     case "operator-trigger":
       // rootLabel is the triggering pipelineId (routes/operator.js's
-      // recordTrigger call) — strip the team prefix for terseness. Legacy
-      // rows still literally "Operator runs" have no underscore, so
-      // stripTeamPrefix is a no-op on them.
+      // recordTrigger call) — strip the team prefix for terseness.
+      // stripTeamPrefix is a no-op on an un-prefixed label.
       return stripTeamPrefix(rootLabel);
     case "explicit":
-      // The most common explicit purpose is "graph-flow-owner" — used by
-      // any flow launched from the CLI or operator-initiated tool call.
-      if (rootLabel === "graph-flow-owner") return "Operator runs";
       // Skill-test / probe / forge sessions
       if (rootLabel.startsWith("skill-")) return `Skill test: ${rootLabel.replace(/^skill-/, "")}`;
       // Hand-typed or scripted --session-id values (test/forge scaffolding,

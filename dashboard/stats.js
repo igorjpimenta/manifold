@@ -41,7 +41,7 @@ const ACTIVE = new Set(["running", "blocked"]);
  * execution) is a different column and isn't consulted here.
  *
  * For failed runs, use the LAST entry in `runErrors` (sourced from
- * flow_node_executions, not the old state.errors[]) — the executor
+ * flow_node_executions) — the executor
  * records the throw site there. Handles cascade sub-nodes and other
  * subflow-internal failures the registry's lastStep can't see (e.g.
  * ENSURE_LOGIN_CODE fails, the cascade routes to ENSURE_LOGIN_AGENT,
@@ -74,7 +74,7 @@ export function resolveDisplayStep(run, runErrors = []) {
 // so downstream aggregations see the corrected semantics without each
 // site having to call the resolver itself. errorsByFlow is the
 // Map<flowId, ErrorEntry[]> callers fetch once via the gateway's
-// GET /manifold/errors (failureStore.queryErrorsByFlowIds, Phase 1.5) —
+// GET /manifold/errors (failureStore.queryErrorsByFlowIds) —
 // this function stays DB-free, just threading the lookup through.
 function withResolvedSteps(runs, errorsByFlow = null) {
   return runs.map((r) => {
@@ -379,7 +379,7 @@ function stepImpactHistogram(failedRuns, { windowDays = 14 } = {}, errorsByFlow 
  * the error entry matching the failing step; falls back to the last
  * error in the array. runErrors is the run's ErrorEntry[] from
  * flow_node_executions (sourced by the caller via queryErrorsByFlow/
- * queryErrorsByFlowIds), not the old state.errors[].
+ * queryErrorsByFlowIds).
  */
 function extractError(run, step, runErrors = []) {
   const stepErr = runErrors.find((e) => e?.nodeId === step);
@@ -621,9 +621,9 @@ function summariseForChart(r) {
  *
  * A node id may be either top-level ("SCORE") or qualified
  * ("PROPOSE.DRAFT") for subflow children. Subflow-internal step
- * histories live in the branch store (not top-level state since the
- * branch-store migration), and we don't currently aggregate those —
- * top-level visits is the source of truth for v1.
+ * histories live in the branch store, not top-level state, and we
+ * don't currently aggregate those — top-level visits is the source of
+ * truth for v1.
  */
 export function computeNodeStats(runs, pipelineId, nodeId, errorsByFlow = null, visitedByFlow = null, lineageByNodeId = null) {
   runs = withResolvedSteps(runs, errorsByFlow);

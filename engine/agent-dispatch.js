@@ -23,7 +23,7 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
    */
   async function dispatchAgentWithRetry({ node, nodeId, session, initialMessage, applyCtx, applyExtraArg, applyMeta, flowId, needsCtx }) {
     // The harness-owned session id stores verbatim.
-    if (sessionIndex?.record) await sessionIndex.record({ flowId, session, nodeId, agent: node.agent ?? null });
+    if (sessionIndex?.record) await sessionIndex.record({ flowId, session, nodeId });
     if (typeof runTurn !== "function") {
       throw new Error("manifold: no agent runtime bound — the harness must inject runTurn");
     }

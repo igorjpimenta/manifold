@@ -14,16 +14,6 @@ export function replayResults(baseState, results) {
   let state = { ...baseState };
   for (const r of results ?? []) {
     if (r.resultWrittenAt == null) continue;
-    if (r.resultTooLargeBytes != null && r.resultJson == null) {
-      // writeResult() (state/node-executions.js) does not cap results, so
-      // this can only fire for a row that kept nothing at all — the
-      // real value was never stored and isn't recoverable. A row that DID
-      // keep some fields has a non-null resultJson and falls through to the
-      // normal merge below: no reason to throw away real partial data just
-      // because resultTooLargeBytes also happens to be set on that row.
-      state = { ...state, [r.nodeId]: { _resultTooLarge: true, bytes: r.resultTooLargeBytes } };
-      continue;
-    }
     let update;
     try { update = JSON.parse(r.resultJson ?? "null"); } catch { continue; }
     if (update && typeof update === "object" && !Array.isArray(update)) {

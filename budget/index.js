@@ -1,4 +1,4 @@
-// budget — approval queue module absorbed into manifold.
+// budget — approval queue and budget-gate module for manifold.
 //
 // Owns gate_state and budget alerts in the store home's ops.sqlite; the
 // approval queue lives in the sibling runtime.sqlite. Registers HTTP
@@ -11,14 +11,12 @@ import { getSharedDb, withSharedWrite, resolveStorePaths } from "../state/db.js"
 import { createEmitter } from "../events/emit.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import os from "node:os";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "./lib.js";
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { ensureSessionKeys } from "../state/session-keys.js";
 import { ensurePipelineNodes } from "../state/attribution-registries.js";
 
-const STORE_DIR = path.join(os.homedir(), ".openclaw");
-const DB_PATH = path.join(STORE_DIR, "ops.sqlite");
+const DB_PATH = resolveStorePaths().opsDb;
 
 // queue_items lives in runtime.sqlite beside ops.sqlite. Alternate dbPaths
 // (tests, one-off stores) get their own sibling so two fixtures never share
@@ -429,10 +427,8 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     async isGateLocked() {
       // Awaits attachment in place instead of throwing when the client
       // isn't attached yet — a cold store on the first call after a reload
-      // is no longer a special "transient wait" case the caller has to
-      // park on and something else has to remember to wake; it's just a
-      // normal await, same as run-store.js's Proxy factory already does
-      // for every other store in this codebase. getSharedDb (state/db.js)
+      // is a normal await, same as run-store.js's Proxy factory does for
+      // every other store in this codebase. getSharedDb (state/db.js)
       // is what makes this cheap: a later generation's attach resolves
       // near-instantly from the cached connection.
       //

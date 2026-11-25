@@ -2,28 +2,11 @@
 // in a standalone process (bin/manifold.js's thin entry calls it).
 // This module imports no harness SDK, so it loads under plain node for
 // standalone use and node:test.
-import { resolveStorePaths } from "../state/paths.js";
 import { parseArgs } from "node:util";
 import { startMcpServer } from "../mcp/stdio.js";
 import { createRealOps } from "../mcp/wire-ops.js";
 import { createEventStream } from "../events/stream.js";
 import { startWsServer, DEFAULT_WS_PORT } from "../events/serve-ws.js";
-
-// Precedence: explicit --pipelines-dir flag wins, then the adapter seam
-// (resolvePipelinesDir: table -> env -> config -> default), then the store
-// seam (resolveStorePaths().pipelinesDir, honoring MANIFOLD_PIPELINES_DIR).
-// Throws when nothing resolves — callers fail loudly naming the flag/env
-// instead of silently falling back to a harness layout.
-export function resolveCliPipelinesDir({ flagDir = null, resolvePipelinesDir = null, storePaths = null, env = process.env } = {}) {
-  if (flagDir) return { dir: flagDir, source: "flag" };
-  try {
-    const adapter = resolvePipelinesDir?.();
-    if (adapter?.dir) return adapter;
-  } catch { /* adapter unavailable — fall through to the store seam */ }
-  const fromStore = storePaths?.pipelinesDir ?? resolveStorePaths({ env }).pipelinesDir;
-  if (fromStore) return { dir: fromStore, source: env?.MANIFOLD_PIPELINES_DIR && !storePaths?.pipelinesDir ? "env" : "store" };
-  throw new Error("manifold: no pipelines directory resolved — pass --pipelines-dir <dir> or set MANIFOLD_PIPELINES_DIR");
-}
 
 const USAGE = `usage: manifold <command>
 

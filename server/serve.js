@@ -149,7 +149,7 @@ export function resolveServeConfig({ env = process.env } = {}) {
     apiHost: env.MANIFOLD_API_HOST || DEFAULT_API_HOST,
     turnUrl: env.MANIFOLD_TURN_URL || null,
     sessionUrl: env.MANIFOLD_SESSION_URL || null,
-    turnToken: env.MANIFOLD_TURN_TOKEN || env.MANIFOLD_BEARER || null,
+    turnToken: env.MANIFOLD_TURN_TOKEN || null,
     bearer: env.MANIFOLD_BEARER || null,
   };
 }

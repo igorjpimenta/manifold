@@ -1,8 +1,7 @@
 /**
- * Unit tests for dashboard/event-log.js's node-invocation-based key diffing
- * (2026-08-17): stateKeysAdded/stateKeysRemoved now come from
- * nodeExecutionsStore.listVisitedNodeIdsByFlow(), not Object.keys(stateJson)
- * — prep for Option B/B4, where state_json stops growing a key per node.
+ * Unit tests for dashboard/event-log.js's node-invocation-based key diffing:
+ * stateKeysAdded/stateKeysRemoved come from
+ * nodeExecutionsStore.listVisitedNodeIdsByFlow(), not Object.keys(stateJson).
  * dbPath: null throughout so no real sqlite file is touched.
  */
 import { test, describe, afterEach } from "node:test";
@@ -66,8 +65,8 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
 
     // Simulate SCAN completing and DRAFT being newly invoked — state_json
     // itself never gains a "SCAN"/"DRAFT" key in this test (deliberately,
-    // to prove the diff no longer depends on it), only the invocation
-    // store's visited-set changes, same as it would post-B4.
+    // to prove the diff does not depend on it), only the invocation
+    // store's visited-set changes.
     nodeExecutionsStore._addVisited(flowId, "DRAFT");
     store._set({ ...row, revision: 2, lastStep: "DRAFT" });
     const evtPromise = waitForEvent(bus, (e) => e.kind === "run.updated" && e.flowId === flowId);

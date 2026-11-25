@@ -12,7 +12,7 @@ import { todayLocal } from "../../../budget/lib.js";
 // touching real sqlite or the gateway's service-registration lifecycle.
 
 // queue_items.flow_id/pipeline_id carry FKs to runtime parents; the
-  // fixture flows are real rows now, not just strings.
+  // fixture flows must be real rows, not just strings.
   async function seedFlow(dbPath, flowId, pipelineId = "p") {
     const store = createRunStore({ dbPath: `${dbPath}.runtime.sqlite` });
     await store.insert({ flowId, pipelineId, status: "running" });
@@ -176,8 +176,8 @@ function postReq(body) {
 }
 
 // ─── canonical budget emissions ─────────────────────────────────────────────
-// decide/lock/unlock go through the shared emitter: identical legacy wire
-// strings, envelope adds kind. Real sqlite at a tmp dbPath, same as above.
+// decide/lock/unlock go through the shared emitter: identical wire strings,
+// envelope adds kind. Real sqlite at a tmp dbPath, same as above.
 
 describe("registerBudgetRoutes — canonical emissions", () => {
   function tmpDbPath() {
@@ -275,7 +275,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
 
   it("lock/unlock emit budget.lock.changed with locked + day", async () => {
     const { api, calls, getBroadcast } = makeApiWithBroadcast();
-    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath(), legacyDbPath: null }), getBroadcast });
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath() }), getBroadcast });
     await api.runtime.approvalQueue.isGateLocked();
 
     const lockRoute = api._routes.find((r) => r.path === "/manifold/budget/gate/lock");

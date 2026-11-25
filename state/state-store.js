@@ -81,8 +81,7 @@ async function triggerAdmissionRelease(flowId, { admissionQueueStore, runStore, 
   }
 }
 
-// _session kept in signature for call-site compatibility, used as
-// ownerKey on new flows.
+// session seeds owner_key on new flows.
 //
 // nodeExecutionsStore + resumeParentRef support subflow-parent resumption
 // (see child-resume-trigger.js) — resumeParentRef is a mutable box because
@@ -93,7 +92,7 @@ async function triggerAdmissionRelease(flowId, { admissionQueueStore, runStore, 
 // resume-trigger.js's maybeResumeParent). failureStore is optional,
 // threaded through to maybeResumeParent so a mode-not-satisfied failure
 // gets a real failure_events row instead of a bare status write.
-export function createStateStore(api, _session, { runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger } = {}) {
+export function createStateStore(api, session, { runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger } = {}) {
   const store = {
     /**
      * Create a managed flow_run for a fresh pipeline execution.
@@ -112,7 +111,7 @@ export function createStateStore(api, _session, { runStore, nodeExecutionsStore,
       const stateJson = { ...initialState, pipelineId };
       await runStore.insert({
         flowId,
-        ownerKey:     _session ?? "",
+        ownerKey:     session ?? "",
         pipelineId,
         revision:     0,
         status:       "running",

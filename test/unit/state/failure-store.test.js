@@ -28,9 +28,9 @@ function tmpDb() {
 }
 
 async function makeStore(overrides = {}) {
-  // Always inject a noop nodeExecutionsStore so the unmigrated
-  // getNodeExecutionsStore() singleton (which still calls openDb() without
-  // await) is never triggered in tests.
+  // Always inject a noop nodeExecutionsStore so the real
+  // getNodeExecutionsStore() singleton — which opens and migrates the
+  // default DB path — is never triggered in tests.
   const store = createFailureStore({
     dbPath: tmpDb(),
     nodeExecutionsStore: makeFakeNodeExecutions(),
@@ -324,9 +324,7 @@ describe("deriveFailureContext — via get()", () => {
 // ─── computeResolvedAt — the two resolution mechanisms ───────────────────────
 
 describe("computeResolvedAt — via get()", () => {
-  // Phase 1.5 dropped the old execution.error != null gate on same-flow
-  // completion —
-  // every failure_events row is now guaranteed to trace to a real throw by
+  // Every failure_events row is guaranteed to trace to a real throw by
   // construction, so this mechanism is unconditional on flow status alone.
   test("same-flow completion resolves unconditionally once the flow reaches succeeded/skipped", async () => {
     const flowId = randomUUID();
@@ -480,7 +478,7 @@ describe("computeResolvedAt — via get()", () => {
     await seedChildOutcome(store, { pipelineId: "pipe", nodeId: "SUBMIT", subflowKey: "job-1", invokedAt: 6000, childStatus: "succeeded", childUpdatedAt: 5000 });
     const row = await store.get(id);
     assert.equal(row.branch_item_id, "job-1", "branch_item_id should still derive via the parent_invocation_id fallback");
-    assert.equal(row.resolved_at, null, "resolution no longer depends on cross-flow item identity");
+    assert.equal(row.resolved_at, null, "resolution does not depend on cross-flow item identity");
     store.close();
   });
 
@@ -508,7 +506,7 @@ describe("upsertFailureRow (via recordEngineFailure) — identity", () => {
     store.close();
   });
 
-  test("null execution_id falls back to manual dedup by flow_id — fixes the pre-redesign duplicate-row bug", async () => {
+  test("null execution_id falls back to manual dedup by flow_id", async () => {
     const store = await makeStore();
     const flowId = randomUUID();
     await store.recordEngineFailure({ flowId, pipelineId: "pipe", failureNode: "N", message: "first", state: {} });
@@ -699,7 +697,7 @@ describe("recordEngineFailure()", () => {
     store.close();
   });
 
-  test("threads errorType onto the row when passed, null when omitted (Phase 1.5)", async () => {
+  test("threads errorType onto the row when passed, null when omitted", async () => {
     const store = await makeStore();
     const flowIdA = randomUUID();
     const flowIdB = randomUUID();
@@ -729,13 +727,13 @@ describe("recordEngineFailure()", () => {
     store.close();
   });
 
-  test("is idempotent — second call with no execution_id UPDATES the existing row instead of duplicating (the pre-redesign bug, fixed)", async () => {
+  test("is idempotent — second call with no execution_id UPDATES the existing row instead of duplicating", async () => {
     const store = await makeStore();
     const flowId = randomUUID();
     await store.recordEngineFailure({ flowId, pipelineId: "pipe", failureNode: "N", message: "first", state: {} });
     await store.recordEngineFailure({ flowId, pipelineId: "pipe", failureNode: "N", message: "second", state: {} });
     const { rows } = await store._db.execute({ sql: "SELECT * FROM failure_events WHERE flow_id = ?", args: [flowId] });
-    assert.equal(rows.length, 1, "must not duplicate — this is the exact bug the execution_id/flow_id dedup fixes");
+    assert.equal(rows.length, 1, "must not duplicate — execution_id/flow_id dedup enforces this");
     assert.equal(rows[0].failure_summary, "second");
     store.close();
   });
@@ -770,9 +768,9 @@ describe("recordEngineFailure()", () => {
 });
 
 // ─── queryErrorsByFlow() / queryErrorsByFlowIds() ─────────────────────────────
-// Moved here from state/node-executions.js in Phase 1.5 — reimplemented
-// against failure_events LEFT JOIN flow_node_invocations, same ErrorEntry
-// shape as before. flow_node_invocations belongs to node-executions.js's own
+// queryErrorsByFlow()/queryErrorsByFlowIds() run against failure_events LEFT
+// JOIN flow_node_invocations, returning ErrorEntry-shaped rows.
+// flow_node_invocations belongs to node-executions.js's own
 // migrator, not failure-store.js's — these isolated test DBs need it
 // hand-created, same pattern seedFlowRun already uses for flow_runs.
 

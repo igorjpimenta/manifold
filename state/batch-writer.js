@@ -88,10 +88,9 @@ async function _flush(dbPath) {
       if (rawItems.length > 0) await withSharedWrite(dbPath, () => client.batch(rawItems.map((item) => ({ sql: item.sql, args: item.args }))));
     } catch (err) {
       // Matches the swallow-on-error contract every batchable call site
-      // already has (writes here were already fire-and-forget with errors
-      // swallowed before batching existed) — a batch failure is logged, not
-      // thrown, and the caller that originally enqueued each item never
-      // sees it, same as before.
+      // has: writes here are fire-and-forget with errors swallowed — a
+      // batch failure is logged, not thrown, and the caller that enqueued
+      // each item never sees it.
       q.logger?.warn?.(`batch-writer: flush failed for ${dbPath} (${batch.length} item(s) dropped): ${err?.message ?? err}`);
     }
   })();

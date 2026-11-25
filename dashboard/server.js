@@ -53,8 +53,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
 
   // ── Direct store reads ────────────────────────────────────────────────────
   // Every read below hits manifold's own stores with the same query logic
-  // the gateway's /manifold/* routes use — no gateway hop. Payload shapes
-  // match the old gateway responses field-for-field so the React app is untouched.
+  // the gateway's /manifold/* routes use — no gateway hop. The payload
+  // shape is the dashboard client's contract: field-for-field stable, so
+  // the React app is untouched.
 
   // Adapter-injected in production; process singleton otherwise (the same
   // binding the gateway routes read through).
@@ -173,15 +174,13 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
   }
 
   // Subflow rows for a flow — same { subflows: [...] } envelope the
-  // gateway's sendSubflowsList serves (legacy errors column stripped).
+  // engine's sendSubflowsList serves.
   async function fetchSubflows(flowId) {
     try {
       const grouped = await getAllSubflowGroups({
         flowId, runStore: readStore, nodeExecutionsStore: nx(),
       });
-      const subflows = Object.values(grouped).flatMap((group) =>
-        Object.values(group).map(({ errors: _errors, ...rest }) => rest)
-      );
+      const subflows = Object.values(grouped).flatMap((group) => Object.values(group));
       return { subflows };
     } catch { return {}; }
   }
@@ -502,10 +501,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, cost);
       }
 
-      // /api/runs/:flowId/subflows — subflow rows grouped by groupId,
-      // shaped like the old stateJson.subflows mirror ({[groupId]:
-      // {[subflowKey]: SubflowData}}) so SubflowsCard can consume it
-      // without a shape change on the frontend.
+      // /api/runs/:flowId/subflows — subflow rows grouped by groupId as
+      // {[groupId]: {[subflowKey]: SubflowData}} — the shape SubflowsCard
+      // consumes as its contract.
       const runSubflowsMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/subflows$/i);
       if (req.method === "GET" && runSubflowsMatch) {
         const flowId = runSubflowsMatch[1];
@@ -619,8 +617,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       }
 
       // ── Static SPA fallback ─────────────────────────────────────────────
-      // Live events moved to the WS door (/api/events/ws, attached in
-      // start()); there is no HTTP fallback — a client that cannot
+      // Live events arrive on the WS door (/api/events/ws, attached in
+      // start()); HTTP has no event stream — a client that cannot
       // Upgrade must poll the REST history endpoints instead.
       // Any unmatched GET maps to a file inside `dist/`. `/` and `/index.html`
       // serve the SPA shell; vite-emitted `/assets/<hash>.{js,css}` URLs land
@@ -999,10 +997,9 @@ function summariseSubflowRollup(r) {
 }
 
 function fullRun(r, runErrors = []) {
-  // Strip `errors` — failure_events is now the sole store for error history
-  // ("Eradicate soft errors" Phase 1.5); errorEntries below (runErrors,
-  // read from failureStore) is the normalized replacement. Only historical rows persisted before that
-  // redirect still carry a baked-in errors[] in their stored stateJson.
+  // Strip `errors` from stateJson — failure_events is the sole store for
+  // error history; errorEntries below (runErrors, read from failureStore)
+  // is the normalized replacement.
   const { errors: _errors, ...stateWithoutLegacy } = r.stateJson ?? {};
   return {
     flowId: r.flowId,

@@ -349,13 +349,6 @@ describe("costForRun — time-window filtering", () => {
     const r = await costForRun(flowId, { sinceMs: Date.now() - 10_000, _dbPath: LINEAGE_DB_PATH });
     assert.ok(Math.abs(r.total - 3.0) < 1e-9);
   });
-
-  test("_sessionIndex param is accepted and ignored", async () => {
-    const flowId = randomUUID();
-    await insertRow({ flowId, costTotal: 0.5 });
-    const r = await costForRun(flowId, DB, { some: "legacy", data: true });
-    assert.ok(r.total > 0);
-  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

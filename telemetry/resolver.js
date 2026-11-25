@@ -13,13 +13,14 @@ import path from "node:path";
 import { getSharedDb } from "../state/db.js";
 import os from "node:os";
 import fs from "node:fs";
+import { resolveDataDir, runtimeDbPath } from "../state/paths.js";
 import { classify, agentIdOf } from "./grammar.js";
 import { execAll } from "./http-helpers.js";
 
-// runtime.sqlite, not flows/registry.sqlite — manifold no longer writes
-// flow_runs rows to the latter; runtime.sqlite is the live store (same
-// table shape) everywhere else in manifold.
-const FLOWS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+// runtime.sqlite, the store everywhere else in manifold — flow_runs lives
+// there with the same table shape. The cron path is the harness's own
+// jobs.json (an external join, not a manifold store).
+const FLOWS_DB_PATH = runtimeDbPath(resolveDataDir());
 const CRON_JSON_PATH = path.join(os.homedir(), ".openclaw", "cron", "jobs.json");
 
 // ─── External joins (lazy-loaded, cached per resolver instance) ──────────────
@@ -142,9 +143,9 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
         // Link the child to the flow's TRIGGER EDGE (synthetic `flow:<id>`
         // row in session_lineage), not the flow's owner_key. The trigger
         // edge carries the genuine root (cron-tick / operator-trigger /
-        // etc.); owner_key is always graph-flow-owner and would mis-
-        // attribute every discuss session and gate-spawned subagent to
-        // the "Operator runs" instance.
+        // etc.); owner_key names the owner session, not the trigger —
+        // using it would mis-attribute discuss sessions and gate-spawned
+        // subagents to the owner's instance.
         out.parentKey = `flow:${fr.flow_id}`;
         out.flowId = fr.flow_id;
         out.pipelineId = fr.pipeline_id;

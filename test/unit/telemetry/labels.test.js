@@ -47,12 +47,8 @@ describe("displayRootLabel", () => {
     assert.equal(displayRootLabel("operator-trigger", "system_memory-synthesis"), "memory-synthesis");
   });
 
-  it("passes through the legacy literal 'Operator runs' unchanged (pre-fix historical rows)", () => {
+  it("passes through a label with no team prefix unchanged", () => {
     assert.equal(displayRootLabel("operator-trigger", "Operator runs"), "Operator runs");
-  });
-
-  it("translates graph-flow-owner explicit to Operator runs", () => {
-    assert.equal(displayRootLabel("explicit", "graph-flow-owner"), "Operator runs");
   });
 
   it("translates skill- explicit to Skill test: ...", () => {

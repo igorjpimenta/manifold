@@ -1,6 +1,6 @@
 // node-health-store.js — circuit breaker for any node's agent dispatch.
 //
-// Storage: the store home's runtime.sqlite (sibling of flow_branches, failure_events).
+// Storage: the store home's runtime.sqlite (sibling of failure_events).
 //
 // Any "agent"-kind node can opt in via node.circuitBreaker: true, checked by
 // the ordinary agent dispatch path regardless of which kind of flow it's
@@ -66,10 +66,10 @@ export async function createNodeHealthStore({ logger, dbPath = defaultDbPath() }
   // this purely to sequence before re-throwing the original dispatch error
   // and never inspects a return value. rowsAffected (and therefore whether
   // this was a genuinely new block vs. a no-op against an already-blocked
-  // row) isn't known until flush, so the old conditional "marked unhealthy"
-  // log is dropped rather than logged on a guess. reset() below stays
-  // immediate — its CLI caller reports a different message to the operator
-  // based on the real rowsAffected, so it can't be deferred the same way.
+  // row) isn't known until flush, so no conditional "marked unhealthy" log
+  // is emitted — logging would be a guess. reset() below stays immediate —
+  // its CLI caller reports a different message to the operator based on
+  // the real rowsAffected, so it can't be deferred the same way.
   function markUnhealthy(pipelineId, nodeId, { reason, flowId } = {}) {
     if (!pipelineId || !nodeId) return;
     const now = Date.now();

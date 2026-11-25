@@ -215,7 +215,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     assert.equal(child.waitJson.kind, "human-gate");
     assert.equal(child.waitJson.items[0].itemId, "p-1", "must block at GATE with the plain item id — TOUCH has no round-scoping");
 
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-1", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-1", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -237,7 +237,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-2", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-2", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -257,7 +257,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-3", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-3", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -278,7 +278,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-4", decision: "reject", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-4", decision: "reject", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -299,7 +299,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-5", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-5", decision: "approve", source: "ws" });
     await flush();
 
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });

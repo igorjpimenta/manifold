@@ -22,7 +22,6 @@ let listInvocationsForFlowImpl = () => [];
 let getInvocationImpl = () => null;
 let listExecutionsForInvocationImpl = () => [];
 let hasInvocationsImpl = () => new Set();
-// Phase 1.5:
 // flow_node_executions carries no error content at all — buildTreeNodeRows/
 // sendInvocationDetail cross-reference failureStore.queryErrorsByFlow
 // instead. ErrorEntry-shaped rows (executionId/invocationId/message) tests
@@ -197,12 +196,10 @@ describe("GET /manifold/runs/:flowId/tree", () => {
 
   test("the LAST invocation with no error mirrors the flow's own live status (running/blocked/queued) — independent of any currentStep field", async () => {
     resetMocks();
-    // Real flow_runs rows never carry a currentStep field (column dropped
-    // in migration v7, state/run-store.js "Phase 2.5") — deliberately
-    // omitted here so this test can't silently pass for the wrong reason
-    // the way the old version did (it hand-built a currentStep field the
-    // real code path never receives, so it kept passing even after the
-    // comparison it was meant to exercise became permanently dead code).
+    // Real flow_runs rows never carry a currentStep field — deliberately
+    // omitted here so this test can't silently pass for the wrong reason:
+    // a hand-built currentStep field the real code path never receives would
+    // keep the test green even when the comparison it exercises is dead.
     const flow = { flowId: "flow-c", status: "blocked", stateJson: { pipelineId: "team_pipe" } };
     listInvocationsForFlowImpl = () => [
       { invocationId: "inv-1", nodeId: "CACHE_CHECK", subflowKey: null, visitSeq: 1, invokedAt: 100, executionCount: 1, enteredAt: 100, exitedAt: 110, latestExecutionId: null, kind: "fresh" },
@@ -378,11 +375,10 @@ describe("GET /manifold/runs/:flowId/tree", () => {
     assert.equal(body.items[0].hasChildren, false, "unresolvable kind can't be subflow, so never expandable");
   });
 
-  // Real evidence this once actually happened in production: a flow ran
-  // and rendered correctly, its pipeline's directory got deleted
-  // afterward (or a node renamed/its kind changed), and the SAME flow's
-  // tree silently degraded to kind:null with no error. pipelineRegistryStore
-  // is what's supposed to prevent that — this row's kind/agent must come
+  // A pipeline's directory can be deleted (or a node renamed/its kind
+  // changed) after a flow runs; without a registry the SAME flow's tree
+  // silently degrades to kind:null with no error. pipelineRegistryStore
+  // is what prevents that — this row's kind/agent must come
   // from the historical snapshot, not from pipelinesRef (which here has
   // nothing at all for this pipeline, simulating the deleted-directory case).
   test("a node whose pipeline definition has since changed/vanished still renders its ORIGINAL kind/agent, not null", async () => {
@@ -396,11 +392,11 @@ describe("GET /manifold/runs/:flowId/tree", () => {
     registerRunRoutes(makeDeps(api, {
       readStore: { list: () => [], get: (id) => id === "flow-h" ? flow : null },
       // pipelinesRef has NOTHING for this pipeline at all — the directory
-      // is gone, exactly like the design doc's own repro.
+      // is gone.
       pipelinesRef: { value: new Map() },
-      // pipelineRegistryStore still remembers what these nodes WERE at
-      // their own dispatch time (invokedAt 5000/6000) — the whole point
-      // of keeping SCD2 history independent of the live, mutable Map.
+      // pipelineRegistryStore records what these nodes were at
+      // their own dispatch time (invokedAt 5000/6000) — SCD2 history kept
+      // independent of the live, mutable Map.
       pipelineRegistryStore: {
         getNodeVersionsBatch: async (requests) => requests.map((r) => {
           if (r.pipelineId !== "deleted_pipe") return null;
@@ -739,7 +735,7 @@ describe("GET /manifold/runs/:flowId/tree/invocation/:invocationId", () => {
       { executionId: "e1", enteredAt: 100, exitedAt: 110, kind: "fresh" },
       { executionId: "e2", enteredAt: 200, exitedAt: 230, kind: "retry" },
     ] : [];
-    // Error content is cross-referenced from failureStore now (Phase 1.5) —
+    // Error content is cross-referenced from failureStore —
     // sendInvocationDetail merges message onto the matching executionId.
     queryErrorsByFlowImpl = () => [{ nodeId: "SCORE_LLM", subflowKey: null, message: "timeout", at: 110, executionId: "e1", invocationId: "inv-retried" }];
     const { api, routes } = createMockApi();

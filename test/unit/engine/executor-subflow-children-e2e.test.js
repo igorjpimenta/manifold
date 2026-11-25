@@ -11,7 +11,7 @@
  * node functions' own mocked-I/O unit tests under workspace/.pipelines/
  * test/unit/nyxen_linkedin-prospect/nodes/connect/).
  *
- * Isolated-sandbox discipline (per the incident writeup):
+ * Isolated-sandbox discipline:
  * independent tmp-sqlite run-store/node-executions/state-store instances,
  * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
  * in-memory Map, never touching workspace/.pipelines/.
@@ -47,7 +47,7 @@ function tmpPath(prefix) {
 
 // CONNECT's exact edge topology, sub-nodes replaced by no-op stand-ins.
 // GATE's edge reads state.approvedIds/rejectedIds, same as the real
-// nodes/connect/index.js post-Milestone-7b rewrite.
+// nodes/connect/index.js.
 function makeConnectLikeNode({ sendMode = "ok" } = {}) {
   return {
     kind: "subflow",
@@ -188,7 +188,7 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     const [childFlowId] = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "CONNECT", 1);
     await waitForStatus(runStore, childFlowId, (r) => r.status === "blocked");
 
-    const result = await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "approve", source: "cli" });
+    const result = await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "approve", source: "ws" });
     assert.equal(result.ok, true);
     const child = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(child.status, "succeeded");
@@ -212,7 +212,7 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     await waitForStatus(runStore, childFlowId, (r) => r.status === "blocked");
 
     const childSettled1 = waitForTerminal((q) => q.flowId === childFlowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "reject", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "reject", source: "ws" });
     await childSettled1;
 
     const child = await runStore.get(childFlowId);
@@ -238,10 +238,10 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
       byItem[c.waitJson.items[0].itemId] = flowId;
     }
 
-    await gateResolver.recordItemDecision({ flowId: byItem.def, itemId: "def", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: byItem.def, itemId: "def", decision: "approve", source: "ws" });
     assert.equal((await runStore.get(record.flowId)).status, "blocked", "one sibling (abc) still pending — parent must not resume yet");
 
-    await gateResolver.recordItemDecision({ flowId: byItem.abc, itemId: "abc", decision: "reject", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: byItem.abc, itemId: "abc", decision: "reject", source: "ws" });
     assert.equal((await waitForTerminalStatus(runStore, record.flowId)).status, "succeeded", "last sibling now terminal — parent must auto-resume");
   });
 
@@ -256,7 +256,7 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     await waitForStatus(runStore, childFlowId, (r) => r.status === "blocked");
 
     const childSettled2 = waitForTerminal((q) => q.flowId === childFlowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "abc", decision: "approve", source: "ws" });
     await childSettled2;
 
     const child = await runStore.get(childFlowId);
@@ -266,17 +266,16 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     assert.ok(childState.STAMP_SENT);
   });
 
-  test("state/subflow-state.js's getAllSubflowGroups reports the group as migrated, normalized like an old branch row", async () => {
+  test("state/subflow-state.js's getAllSubflowGroups reports the group as migrated with its normalized row", async () => {
     harness = await makeHarness();
     const { executor, runStore, nodeExecutionsStore } = harness;
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc" }]);
     // The child's runFlow is dispatched fire-and-forget, so a fixed sleep
-    // and hoping it had reached its gate is unreliable: under CI load it
-    // hadn't, and the assertion read an undefined waitJson.
+    // can't tell whether it reached its gate — wait for
     // gate.opened on any flow other than the
-    // parent is exactly the condition being waited for.
+    // parent instead, which is exactly the condition being waited for.
     const childAtGate = waitForGateOpen((q) => q.flowId !== record.flowId);
     await executor.runFlow(record.flowId);
     await childAtGate;
@@ -284,8 +283,8 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });
     assert.ok(groups.CONNECT);
     const row = groups.CONNECT.abc;
-    assert.ok(row, "keyed by branchKey, same shape old branchService rows used");
-    assert.equal(row.status, "running", "blocked-on-gate child folds into 'running' to match the old model");
+    assert.ok(row, "keyed by branchKey");
+    assert.equal(row.status, "running", "blocked-on-gate child folds into 'running'");
     assert.equal(row.awaiting?.requestPayload?.kind, "human-gate");
     assert.ok(row.flowId);
   });

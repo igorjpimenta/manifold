@@ -29,11 +29,11 @@ import { openDb } from "../state/db.js";
 import { enqueueRaw } from "../state/batch-writer.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import os from "node:os";
+import { resolveDataDir, runtimeDbPath } from "../state/paths.js";
 import { flowStateEmitter } from "../events.js";
 import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 
-const DEFAULT_EVENTS_DB_PATH = path.join(os.homedir(), ".openclaw", "runtime.sqlite");
+const DEFAULT_EVENTS_DB_PATH = runtimeDbPath(resolveDataDir());
 
 async function openEventsDb(dbPath, logger) {
   try {
@@ -178,8 +178,8 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
       running = true;
       // Prime the snapshot without emitting flow_created for pre-existing rows.
       // One batched listVisitedNodeIdsByFlow() call for every row instead of
-      // one query per flow — same batching rationale as stats.js's Phase 3a
-      // tree-summary fix.
+      // one query per flow — same batching rationale as stats.js's
+      // tree-summary batching.
       try {
         const rows = await store.list();
         const visitedByFlow = (await nodeExecutionsStore?.listVisitedNodeIdsByFlow?.(rows.map((r) => r.flowId))) ?? new Map();
@@ -236,7 +236,7 @@ export function createEventBus({ store, nodeExecutionsStore, logger, dbPath = DE
         });
         return rows.map((r) => ({
           // event_type stores the canonical kind outright; no read-time
-          // translation — pre-break rows are out of scope by design.
+          // translation.
           kind: r.event_type,
           flowId: r.flow_id,
           at: r.occurred_at,

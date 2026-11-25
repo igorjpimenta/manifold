@@ -2,8 +2,8 @@
 // These functions mutate flow waitJson (via store.setWaiting).
 import { looksLikeMetaNarration } from "./discuss-helpers.js";
 
-export async function persistRevisedDraft({ flowId, itemId, newDraft, source, store, logger }) {
-  if (source !== "app" && looksLikeMetaNarration(newDraft)) {
+export async function persistRevisedDraft({ flowId, itemId, newDraft, store, logger }) {
+  if (looksLikeMetaNarration(newDraft)) {
     return { applied: false, code: "rejected_meta_narration" };
   }
   {
@@ -85,7 +85,7 @@ export async function persistRevisedMeta({ flowId, itemId, fields, store, logger
     // Reject the whole call if any field the pipeline declares numeric
     // (type: "money"/"number" in its own gate-layout.js) is being set to
     // something other than a real number — e.g. a numeric-looking string.
-    // Fields the layout doesn't know about (legacy callers, unknown ids)
+    // Fields the layout doesn't know about (unknown ids)
     // fall through unchecked since there's no declared type to enforce.
     const fieldTypes = collectLayoutFieldTypes(items[idx]?.requestPayload?.layout);
     for (const [key, v] of Object.entries(fields)) {
@@ -97,23 +97,11 @@ export async function persistRevisedMeta({ flowId, itemId, fields, store, logger
     const nextItems = items.map((it, i) => {
       if (i !== idx) return it;
       const rp = it.requestPayload ?? {};
-      // Legacy shape — no current gate-layout.js produces a top-level
-      // requestPayload.editableFields (executor-helpers.js enforces every
-      // gate declares `layout` explicitly), but patch it too in case
-      // anything still reads it.
       const isPatchable = (v) => typeof v === "string" || typeof v === "number";
-      const nextFieldsArr = Array.isArray(rp.editableFields)
-        ? rp.editableFields.map((f) => {
-            if (!f || typeof f.id !== "string") return f;
-            const v = fields[f.id];
-            if (!isPatchable(v)) return f;
-            return { ...f, value: String(v) };
-          })
-        : rp.editableFields;
-      // Real shape — gate-projector.js's projectGateItem() serves
-      // rp.layout verbatim to clients, so a budget/timeframe/language edit
-      // has to land here or the chip never reflects it, regardless of
-      // editableMeta/editableFields getting updated correctly.
+      // gate-projector.js's projectGateItem() serves rp.layout verbatim to
+      // clients, so a budget/timeframe/language edit has to land here or the
+      // chip never reflects it, regardless of editableMeta getting updated
+      // correctly.
       const nextLayout = Array.isArray(rp.layout)
         ? rp.layout.map((entry) => {
             if (!entry) return entry;
@@ -138,7 +126,6 @@ export async function persistRevisedMeta({ flowId, itemId, fields, store, logger
         requestPayload: {
           ...rp,
           editableMeta: { ...(rp.editableMeta ?? {}), ...fields },
-          editableFields: nextFieldsArr,
           layout: nextLayout,
         },
       };

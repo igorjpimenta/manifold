@@ -1,8 +1,7 @@
-// telemetry/index.js — lineage + cost attribution wired into manifold.
-// Absorbed from extensions/lineage/; exposes registerTelemetry(api) instead of
-// definePluginEntry so manifold's own plugin entry calls it inline.
+// telemetry/index.js — lineage + cost attribution for manifold.
+// Exposes registerTelemetry(api), called inline by manifold's plugin entry.
 //
-// Responsibilities (unchanged from lineage):
+// Responsibilities:
 //   - session_lineage + cost_by_call writes via before_agent_start /
 //     subagent_spawned / session_start / before_message_write hooks
 //   - /manifold/telemetry/* HTTP read-only endpoints (cost, tree, budget cap)
@@ -94,7 +93,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
   // Harnesses observe their own lifecycle; core decides what those
   // observations mean. Adapters post semantic events (lineage.session,
   // lineage.spawn, cost.usage) and ingest.js derives the rows.
-  const ingestToken = process.env.MANIFOLD_INGEST_TOKEN || process.env.MANIFOLD_BEARER || "";
+  const ingestToken = process.env.MANIFOLD_INGEST_TOKEN || "";
 
   api.registerHttpRoute({
     path: "/manifold/telemetry/event",

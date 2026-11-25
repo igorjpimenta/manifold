@@ -25,8 +25,8 @@ after(async () => {
   rmSync(ISOLATED_DATA_DIR, { recursive: true, force: true });
 });
 
-// B2.5 — handleDiscuss/handleDiscussAudio build their promptBuilder ctx via
-// assembleState() instead of trusting sourceFlow.stateJson directly. Mocked
+// handleDiscuss/handleDiscussAudio build their promptBuilder ctx via
+// assembleState(). Mocked
 // here so the wiring test below doesn't need a real DB-backed runStore/
 // nodeExecutionsStore.
 let assembleStateCalls = [];
@@ -195,10 +195,10 @@ describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identit
   });
 });
 
-// ── handleDiscuss — assembleState() wiring (B2.5) ─────────────────────────
-// promptBuilder's ctx.state now comes from assembleState(), not the raw
-// sourceFlow.stateJson blob — this proves the wiring, not assembleState()'s
-// own behavior (that has its own dedicated test coverage).
+// ── handleDiscuss — assembleState() wiring ────────────────────────────────────
+// promptBuilder's ctx.state comes from assembleState() — this proves the
+// wiring, not assembleState()'s own behavior (that has its own dedicated
+// test coverage).
 
 describe("registerDiscussHandlers — handleDiscuss builds ctx.state via assembleState()", () => {
   const testFlowId = `unit-test-discuss-${Date.now()}`;
@@ -445,14 +445,14 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.ok(transcriptCall, "must emit session.transcript.updated");
     assert.equal(transcriptCall.payload.scope, "discuss");
     assert.equal(transcriptCall.payload.text, "hello canonical");
-    assert.equal(transcriptCall.payload.transcript, undefined, "no legacy transcript dupe — text is canonical");
+    assert.equal(transcriptCall.payload.transcript, undefined, "transcript must not be duplicated — text is canonical");
 
     const turnCall = emitted.find((c) => c.kind === "session.transcript.completed");
     assert.ok(turnCall, "must emit session.transcript.completed for the agent turn");
     assert.equal(turnCall.payload.scope, "discuss");
     assert.equal(turnCall.payload.turnId, turnId);
     assert.equal(turnCall.payload.text, "agent reply");
-    assert.equal(turnCall.payload.reply, undefined, "no legacy reply dupe — text is canonical");
+    assert.equal(turnCall.payload.reply, undefined, "reply must not be duplicated — text is canonical");
     assert.equal(turnCall.payload.status, undefined, "no status dupe — the kind carries it");
   });
 

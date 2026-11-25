@@ -28,7 +28,6 @@ function getClient(dbPath) {
 
 // costForRun — sum all cost_by_call rows for a given flow_id.
 // opts: { sinceMs?, untilMs?, _dbPath? }
-// _sessionIndex: legacy param, accepted and ignored.
 //
 // Returns:
 //   { flowId, total, tokens, byModel, byNode, bySession }
@@ -36,7 +35,7 @@ function getClient(dbPath) {
 // byModel: { [model]: { total, calls, inputTokens, outputTokens } }
 // byNode:  { [nodeId]: { total, calls, items: { [itemKey]: { total, calls } } } }
 // bySession: { [session]: { total, calls, inputTokens, outputTokens, model, agentId } }
-export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPath = null } = {}, _sessionIndex = null) {
+export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPath = null } = {}) {
   const result = {
     flowId,
     total: 0,

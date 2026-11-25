@@ -67,9 +67,6 @@ const PUBLIC_API = {
       "runtimeDbPath",
       "opsDbPath",
       "pipelinesDir",
-      "stateFile",
-      "ensureMigrated",
-      "readMigrationMarker",
     ],
   },
   "./state/batch-writer": {
