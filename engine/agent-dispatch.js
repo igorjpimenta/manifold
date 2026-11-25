@@ -1,5 +1,5 @@
 import { usesNamedParams } from "./executor-helpers.js";
-import { clearPendingResult } from "../state/tool-handoff.js";
+import { clearPendingResult, readPendingResult } from "../state/tool-handoff.js";
 
 // agent-dispatch.js — the engine's agent-node dispatch: run one turn
 // through the injected harness runtime, then reduce the result with the
@@ -29,6 +29,7 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
     }
     // `session` is core's whole contract here — the harness adapter
     // (run-turn.js) maps it to the runtime's own `sessionKey` field.
+    const before = await readPendingResult(session).catch(() => null);
     const output = await runTurn({
       session,
       message: initialMessage,
@@ -49,14 +50,24 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
     // that hasn't opted in yet. output.toolResult carries the delivered row
     // (when a tool fired); the row is consumed here so a retried turn never
     // rereads a stale result.
+    // A tool call can land before the wait starts or after the turn's own run
+    // ends (the model retries a rejected call); the harness races only up to
+    // the run's end. Read the session's row one last time so apply() still sees
+    // a payload that arrived outside that window.
+    // Only a row that appeared or changed during this turn counts: an unchanged
+    // one belongs to a previous attempt and apply() must not resurrect it.
+    const pending = output?.toolResult ? null : await readPendingResult(session).catch(() => null);
+    const fresh = pending && (pending.updatedAt ?? 0) > (before?.updatedAt ?? 0) ? pending : null;
+    const delivered = output?.toolResult ?? fresh;
+    const merged = output?.toolResult || !delivered ? output : { ...output, toolResult: delivered };
     try {
       return usesNamedParams(node.apply)
-        ? await Promise.resolve(node.apply({ state: applyCtx, output, item: applyExtraArg ?? undefined, meta: applyMeta, needs: needsCtx }))
+        ? await Promise.resolve(node.apply({ state: applyCtx, output: merged, item: applyExtraArg ?? undefined, meta: applyMeta, needs: needsCtx }))
         : applyExtraArg !== undefined
-          ? await Promise.resolve(node.apply(applyCtx, output, applyExtraArg, applyMeta, needsCtx))
-          : await Promise.resolve(node.apply(applyCtx, output, undefined, applyMeta, needsCtx));
+          ? await Promise.resolve(node.apply(applyCtx, merged, applyExtraArg, applyMeta, needsCtx))
+          : await Promise.resolve(node.apply(applyCtx, merged, undefined, applyMeta, needsCtx));
     } finally {
-      if (output?.toolResult) await clearPendingResult(session).catch(() => {});
+      if (merged?.toolResult) await clearPendingResult(session).catch(() => {});
     }
   }
 
