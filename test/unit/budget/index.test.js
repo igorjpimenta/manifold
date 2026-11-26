@@ -81,6 +81,18 @@ describe("registerBudgetRoutes — isGateLocked awaits attachment without an ext
       /disk full/,
     );
   });
+
+  it("a gate_state read failure fails closed — the gate never reports unlocked on error", async () => {
+    const api = makeFakeApi();
+    const openStore = async () => ({
+      execute: async () => { throw new Error("db is corrupt"); },
+      close: () => {},
+    });
+
+    registerBudgetRoutes(api, { openStore });
+
+    assert.equal(await api.runtime.approvalQueue.isGateLocked(), true);
+  });
 });
 
 describe("registerBudgetRoutes — real openStore(), connection reuse across generations", () => {

@@ -148,6 +148,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       function renderNode(node, prefix, isLast) {
         const tree$ = subtreeCost(node.child_session_key);
         if (!showZero && tree$ === 0 && (childrenOf.get(node.child_session_key)?.length ?? 0) === 0) {
+          return;
         }
         const self$ = node.cost;
         const costStr =

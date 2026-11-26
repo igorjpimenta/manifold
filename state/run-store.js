@@ -357,15 +357,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       } catch { return null; }
     },
 
-    async list() {
-      try {
-        const rows = await db.select().from(flowRuns)
-          .where(isNull(flowRuns.parentInvocationId))
-          .orderBy(desc(flowRuns.updatedAt));
-        return rows.map(mapRow);
-      } catch { return []; }
-    },
-
     async listFor(pipelineId) {
       try {
         const rows = await db.select().from(flowRuns)

@@ -133,6 +133,7 @@ function validatePipeline(p, filename, ancestorNodeMaps = []) {
   if (!p.id || typeof p.id !== "string") throw new Error(`pipeline ${filename} missing .id`);
   if (!p.state || typeof p.state !== "object") throw new Error(`pipeline ${p.id}: missing .state`);
   if (!p.nodes || typeof p.nodes !== "object") throw new Error(`pipeline ${p.id}: missing .nodes`);
+  if (Array.isArray(p.nodes)) throw new Error(`pipeline ${p.id}: .nodes must be an object map, not an array`);
   if (!p.edges || typeof p.edges !== "object") throw new Error(`pipeline ${p.id}: missing .edges`);
   if (!p.edges.__start__) throw new Error(`pipeline ${p.id}: edges must define __start__`);
 
