@@ -1,12 +1,11 @@
 
-import { test, describe, before, after } from "node:test";
+import { test, describe, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createRealOps } from "../../../mcp/wire-ops.js";
-import { readPendingResult } from "../../../state/tool-handoff.js";
 
 const PIPELINE_SOURCE = `
 export default {
@@ -121,13 +120,39 @@ describe("cancelFlow", () => {
 });
 
 describe("deliverResult", () => {
-  test("writes the pending tool result where the bridge can read it", async () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = realFetch; delete process.env.MANIFOLD_TOOL_RESULT_URL; delete process.env.MANIFOLD_TURN_TOKEN; });
+
+  test("posts the result to the harness endpoint", async () => {
+    process.env.MANIFOLD_TOOL_RESULT_URL = "http://127.0.0.1:18789/api/manifold/tool-result";
+    process.env.MANIFOLD_TURN_TOKEN = "turn-secret";
+    const seen = [];
+    globalThis.fetch = async (url, init) => {
+      seen.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) });
+      return { ok: true, status: 200, text: async () => "" };
+    };
     const session = `ses_${randomUUID()}`;
     const payload = { content: [{ type: "text", text: "done" }] };
     const out = await ops.deliverResult({ session, runId: "r1", agentId: "a1", kind: "result", payload });
     assert.deepEqual(out, { ok: true, session });
-    const stored = await readPendingResult(session);
-    assert.deepEqual(stored.payload, payload);
-    assert.equal(stored.kind, "result");
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].url, process.env.MANIFOLD_TOOL_RESULT_URL);
+    assert.equal(seen[0].headers.authorization, "Bearer turn-secret");
+    assert.deepEqual(seen[0].body, { session, runId: "r1", agentId: "a1", kind: "result", payload });
+  });
+
+  test("refuses when the harness endpoint is unknown", async () => {
+    const out = await ops.deliverResult({ session: "s", payload: {} });
+    assert.equal(out.ok, false);
+    assert.match(out.error, /TOOL_RESULT_URL|TURN_TOKEN/);
+  });
+
+  test("reports a refusal from the harness", async () => {
+    process.env.MANIFOLD_TOOL_RESULT_URL = "http://127.0.0.1:18789/api/manifold/tool-result";
+    process.env.MANIFOLD_TURN_TOKEN = "turn-secret";
+    globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => "unauthorized" });
+    const out = await ops.deliverResult({ session: "s", payload: {} });
+    assert.equal(out.ok, false);
+    assert.match(out.error, /401/);
   });
 });

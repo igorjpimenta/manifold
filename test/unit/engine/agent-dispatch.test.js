@@ -1,15 +1,7 @@
-import { test, it, describe, before } from "node:test";
+import { test, it, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import path from "node:path";
-import os from "node:os";
-import { mkdtempSync } from "node:fs";
 import { createAgentDispatch } from "../../../engine/agent-dispatch.js";
-import { writePendingResult, readPendingResult } from "../../../state/tool-handoff.js";
-
-before(() => {
-  process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-agent-dispatch-"));
-});
 
 const logger = { info: () => {}, warn: () => {} };
 
@@ -136,17 +128,6 @@ describe("dispatchAgentWithRetry — the delivered tool result", () => {
     assert.deepEqual(saw, { kind: "draft", payload: { text: "hi" } });
   });
 
-  it("leaves the hand-off store alone when no tool result was delivered", async () => {
-    const session = `sk-dispatch-${randomUUID()}`;
-    await writePendingResult({ session, payload: { stale: true } });
-    const turn = makeTurn();
-    const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
-    await dispatchAgentWithRetry({
-      node: makeNode(), nodeId: "DRAFT", session, initialMessage: "go",
-      applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x",
-    });
-    assert.ok(await readPendingResult(session), "a row this dispatch did not consume stays put");
-  });
 });
 
 describe("dispatchAgentWithRetry — session transcript event", () => {

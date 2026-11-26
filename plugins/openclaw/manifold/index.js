@@ -17,6 +17,7 @@ import { wrapSubagentKeys } from "./session-keys.js";
 import { newNodeSessionId } from "./sessions.js";
 import { invokeElevated } from "@igorjpimenta/manifold/elevation";
 import { createRunTurn } from "./run-turn.js";
+import { createToolResults } from "./tool-results.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { registerTelemetryHooks } from "./telemetry.js";
 import { registerGatewayReadiness } from "./gateway-readiness.js";
@@ -31,6 +32,7 @@ const ELEV_TURN_PATH = "/api/manifold/_elev/turn";
 // loopback's timeout is an idle timer, so it must outlast any single turn.
 const ELEV_TURN_TIMEOUT_MS = 3_600_000;
 const SESSION_PATH = "/api/manifold/session";
+const TOOL_RESULT_PATH = "/api/manifold/tool-result";
 const MAX_TURN_BODY_BYTES = 1024 * 1024;
 const RESTART_BACKOFF_MS = [2000, 5000, 15000];
 
@@ -70,13 +72,14 @@ function resolveCoreEntry() {
 // rest of the environment passes through untouched (PATH, HOME, the store
 // home env vars an operator set).
 export function buildCoreEnv({
-  userCfg = {}, coreApiPort, turnUrl, turnToken, sessionUrl, dashboardPort, dashboardHost, baseEnv = process.env,
+  userCfg = {}, coreApiPort, turnUrl, turnToken, sessionUrl, toolResultUrl, dashboardPort, dashboardHost, baseEnv = process.env,
 }) {
   const env = {
     ...baseEnv,
     MANIFOLD_HARNESS: "openclaw",
     MANIFOLD_API_PORT: String(coreApiPort),
     MANIFOLD_TURN_URL: turnUrl,
+    MANIFOLD_TOOL_RESULT_URL: toolResultUrl,
     MANIFOLD_SESSION_URL: sessionUrl,
     MANIFOLD_TURN_TOKEN: turnToken,
     MANIFOLD_INGEST_TOKEN: turnToken,
@@ -200,6 +203,7 @@ export default definePluginEntry({
     const gatewayPort = Number(process.env.OPENCLAW_GATEWAY_PORT) || DEFAULT_GATEWAY_PORT;
     const turnUrl = userCfg.turnUrl || `http://127.0.0.1:${gatewayPort}${TURN_PATH}`;
     const sessionUrl = `http://127.0.0.1:${gatewayPort}${SESSION_PATH}`;
+    const toolResultUrl = `http://127.0.0.1:${gatewayPort}${TOOL_RESULT_PATH}`;
 
     registerManifoldMetaHook(api);
     registerTelemetryHooks(api, {
@@ -210,10 +214,40 @@ export default definePluginEntry({
 
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
     const moduleState = { workingSubagent: null };
+    // The turn buffer lives with the turns it serves: a tool posts here, the
+    // turn reads it, and it dies with this process like the session does. The
+    // durable copy is the flow state apply() writes afterwards.
+    const toolResults = createToolResults();
     const { runTurn } = createRunTurn({
       getRuntime: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null),
       whenGatewayReady: () => gatewayReadiness.whenReady(),
       logger: api.logger,
+      toolResults,
+    });
+
+    // Tool plugins reach the buffer over this route (same bearer as the turn
+    // bridge) instead of importing manifold for a store they must not open.
+    api.registerHttpRoute({
+      path: TOOL_RESULT_PATH,
+      auth: "plugin",
+      match: "exact",
+      handler: async (req, res) => {
+        if (req.method !== "POST") {
+          res.setHeader("allow", "POST");
+          sendJson(res, 405, { ok: false, error: "method not allowed" });
+          return true;
+        }
+        if (!bearerMatches(req.headers?.authorization, turnToken)) {
+          sendJson(res, 401, { ok: false, error: "unauthorized" });
+          return true;
+        }
+        const body = await readJsonBody(req);
+        if (body.error) { sendJson(res, body.status, { ok: false, error: body.error }); return true; }
+        const stored = toolResults.write(body.value ?? {});
+        if (!stored) { sendJson(res, 400, { ok: false, error: "session and payload required" }); return true; }
+        sendJson(res, 200, { ok: true });
+        return true;
+      },
     });
 
     // Two routes for one turn. The gateway refuses `runtime.subagent.run`
@@ -306,7 +340,7 @@ export default definePluginEntry({
 
     function spawnCore() {
       const env = buildCoreEnv({
-        userCfg, coreApiPort, turnUrl, turnToken, sessionUrl, dashboardPort, dashboardHost,
+        userCfg, coreApiPort, turnUrl, turnToken, sessionUrl, toolResultUrl, dashboardPort, dashboardHost,
       });
 
       const proc = spawn(process.execPath, [coreEntry, "serve"], {

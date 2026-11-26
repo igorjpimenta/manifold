@@ -13,8 +13,7 @@
     "./state/batch-writer": "./state/batch-writer.js",
     "./state/db": "./state/db.js",
     "./state/paths": "./state/paths.js",
-    "./state/schema": "./state/schema.js",
-    "./tool-handoff": "./state/tool-handoff.js"
+    "./state/schema": "./state/schema.js"
   },
   "scripts": {
     "prepare": "env -u npm_config_allow_scripts npm --prefix dashboard ci --no-audit --no-fund && npm --prefix dashboard run build",

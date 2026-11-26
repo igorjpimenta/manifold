@@ -13,7 +13,6 @@
 // ordinary error; it is not retried.
 
 import { GatewayHandoffNeeded, isRequestScopedSubagentError, fetchSessionError } from "@igorjpimenta/manifold/errors";
-import { clearPendingResult, readPendingResult, waitForToolResult } from "@igorjpimenta/manifold/tool-handoff";
 
 // A lapsed agent.wait window answers with the same bare "timeout" status a
 // timed-out run gets — waitForRun drops endedAt, so the two can't be told
@@ -61,7 +60,7 @@ export function createGatewaySubagentGate({ whenGatewayReady } = {}) {
 // Builds the turn function core injects. getRuntime resolves the harness's
 // agent runtime per call (it can appear late — the gateway binds it during
 // startup) and may return null.
-export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = null } = {}) {
+export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = null, toolResults }) {
   const gate = createGatewaySubagentGate({ whenGatewayReady });
 
   async function runTurn({ session, message, skill, agentId }) {
@@ -78,16 +77,13 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;
     }
-    // Race waitForRun against a tool-result poll (state/tool-handoff.js): an
-    // MCP deliver_result call for this session lands a row the waiter picks
-    // up, so a turn whose structured result already arrived finishes early
-    // instead of waiting out the model's natural end. The row is read through
-    // the shared store, so the delivering side and this waiter may live in
-    // different processes. No manifold-side deadline: a dispatched run can
-    // sit silently in the gateway's own lane queue
-    // (agents.defaults.maxConcurrent) for arbitrarily long, and neither
-    // silence nor wall-clock time there means the run is hung.
-    const toolWait = waitForToolResult(sessionKey);
+    // Race waitForRun against the session's tool result: a tool that already
+    // delivered finishes the turn early instead of waiting out the model's
+    // natural end. No manifold-side deadline: a dispatched run can sit
+    // silently in the gateway's own lane queue (agents.defaults.maxConcurrent)
+    // for arbitrarily long, and neither silence nor wall-clock time there
+    // means the run is hung.
+    const toolWait = toolResults.wait(sessionKey);
     let waitResult;
     try {
       waitResult = await Promise.race([
@@ -107,9 +103,11 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     // Tool already delivered everything apply() needs — skip fetching the
     // model's own wrap-up reply, often just a "submitted" confirmation.
     // output.text is only ever a fallback for apply()s with no tool result.
-    if (waitResult.toolFired) {
+    // A result stamped before this turn began belongs to a previous attempt
+    // and must not answer this one; fall through to the model's own reply.
+    if (waitResult.toolFired && (waitResult.toolRow?.updatedAt ?? 0) >= startedAt) {
       const toolRow = waitResult.toolRow ?? null;
-      if (toolRow) await clearPendingResult(sessionKey).catch(() => {});
+      if (toolRow) toolResults.clear(sessionKey);
       return {
         text: "",
         runId: runResult.runId,
@@ -143,9 +141,9 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     // rejected call); the race above only covers up to that end. Read one last
     // time, and only accept a row stamped at or after this turn's start — an
     // older stamp belongs to a previous attempt and must not be resurrected.
-    const late = await readPendingResult(sessionKey).catch(() => null);
+    const late = toolResults.read(sessionKey);
     if (late && (late.updatedAt ?? 0) >= startedAt) {
-      await clearPendingResult(sessionKey).catch(() => {});
+      toolResults.clear(sessionKey);
       return {
         text: "",
         runId: runResult.runId,

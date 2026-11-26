@@ -8,7 +8,6 @@ import { createRunStore } from "../state/run-store.js";
 import { createStateStore } from "../state/state-store.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { createFailureStore } from "../state/failure-store.js";
-import { writePendingResult } from "../state/tool-handoff.js";
 import { createAdmissionQueueStore } from "../state/admission-queue-store.js";
 import { createNodeHealthStore } from "../state/node-health-store.js";
 import { createSessionIndex } from "../state/session-index.js";
@@ -164,7 +163,22 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
       return runStore.cancelFlow(flowId, reason);
     },
     async deliverResult({ session, runId, agentId, kind, payload }) {
-      await writePendingResult({ session, runId, agentId, kind, payload });
+      // The turn that consumes this lives in the harness process, so the
+      // result is posted there; the core never buffers one.
+      const url = String(process.env.MANIFOLD_TOOL_RESULT_URL ?? "").trim();
+      const token = String(process.env.MANIFOLD_TURN_TOKEN ?? "").trim();
+      if (!url || !token) {
+        return { ok: false, error: "no harness tool-result endpoint (MANIFOLD_TOOL_RESULT_URL/MANIFOLD_TURN_TOKEN unset)" };
+      }
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ session, runId, agentId, kind, payload }),
+      }).catch((err) => ({ ok: false, status: 0, text: async () => String(err?.message ?? err) }));
+      if (!res.ok) {
+        const detail = await res.text?.().catch(() => "");
+        return { ok: false, error: `harness refused the result (${res.status})${detail ? `: ${detail.slice(0, 200)}` : ""}` };
+      }
       return { ok: true, session };
     },
     logger,

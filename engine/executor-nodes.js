@@ -108,9 +108,9 @@ export function createNodeRunner({
     // Session ids belong to the harness, not manifold: entry.session /
     // sessionBuilder pass through verbatim; otherwise the harness adapter
     // mints one so pipelines carry no harness key syntax. A refused
-    // dispatch means no mint function was injected — tool-handoff, the
-    // session index and the lineage ledger all key off this value, so
-    // neither core nor a silent default may invent one.
+    // dispatch means no mint function was injected — the harness's tool
+    // result, the session index and the lineage ledger all key off this
+    // value, so neither core nor a silent default may invent one.
     let session = entry.session ?? entry.sessionBuilder?.(state, flowId) ?? null;
     // The mint may be a bridge call to the harness process, so it's
     // awaited and type-checked before anything keys off it.

@@ -39,10 +39,15 @@ function fakeReq({ method = "POST", authorization, body = {} } = {}) {
 }
 
 describe("adapter registration", () => {
-  it("serves the turn, elevated-turn and session bridges and supervises exactly one core process", () => {
+  it("serves the turn, elevated-turn, session and tool-result bridges and supervises exactly one core process", () => {
     const { api, routes, services } = makeApi();
     entry.register(api);
-    assert.deepEqual(routes.map((r) => r.path), ["/api/manifold/_elev/turn", "/api/manifold/turn", "/api/manifold/session"]);
+    assert.deepEqual(routes.map((r) => r.path).sort(), [
+      "/api/manifold/_elev/turn",
+      "/api/manifold/session",
+      "/api/manifold/tool-result",
+      "/api/manifold/turn",
+    ]);
     assert.deepEqual(services.map((s) => s.id), ["manifold-core", "manifold-runtime-capture"]);
   });
 

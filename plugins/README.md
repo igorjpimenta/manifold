@@ -21,7 +21,7 @@ may pin `entry.session` (static) or `entry.sessionBuilder(state, flowId)`
 (derived); when it declares neither, the adapter's
 `sessions.newNodeSessionId({agentId, flowId, nodeId})` supplies one, and
 `dispatchAgentEntry` passes whichever it got through verbatim. A dispatch
-with no session from either source is refused loudly — tool-handoff and the
+with no session from either source is refused loudly — the tool result and the
 lineage ledger both key off this value.
 `entry.agent` is required too; no env fallback, ever.
 
@@ -70,7 +70,8 @@ Structured results travel the same way: an agent calls
 `manifold_deliver_result` with a JSON `payload` (+ optional `kind`/`runId`)
 and the result is stored under the caller's stamped session key, where the
 waiting dispatch picks it up instead of waiting out the agent run. See
-`state/tool-handoff.js` for the rendezvous contract.
+`plugins/openclaw/manifold/tool-results.js` for the rendezvous: a tool posts
+to the harness route, the turn reads it in-process.
 
 ### openclaw
 

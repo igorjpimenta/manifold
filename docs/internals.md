@@ -14,7 +14,6 @@ subpaths. Deep file paths are not a contract — only this table is.
 | `…/errors` | `NodeFailure`, `NodeBlocked`, `GatewayHandoffNeeded`, error classifiers | oc-config |
 | `…/elevation` | `invokeElevated` | oc-config |
 | `…/digest` | `sendDigestPush`, `configureApi` | oc-config |
-| `…/tool-handoff` | structured result rendezvous (`writePendingResult`, `readPendingResult`, `clearPendingResult`, `waitForToolResult`) | oc-config |
 | `…/routes/bearer-auth` | `authorizeBearerRequest`, `sendUnauthorized` (MANIFOLD_BEARER) | sibling extension |
 | `…/state/db` | `openDb`, `getSharedDb`, `withSharedWrite`, `isSqliteBusy` | sibling extension (shared `runtime.sqlite`) |
 | `…/state/batch-writer` | `enqueue`, `enqueueRaw`, `flush`, `flushAll` | sibling extension |
