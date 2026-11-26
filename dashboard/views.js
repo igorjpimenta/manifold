@@ -123,8 +123,6 @@ async function loadRecords(source, { sinceMs }) {
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 
-// Flat `key: value` lines only — a full YAML parser would be overkill for
-// five-key headers and would change the build surface.
 function parseFrontmatter(text) {
   const m = text.match(FRONTMATTER_RE);
   if (!m) return null;
