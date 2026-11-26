@@ -3,7 +3,7 @@
 //
 // loadPipelines otherwise runs only at gateway boot, so new or edited
 // pipeline folders would stay invisible until the next restart. Poll every
-// `pollMs`, fingerprint each `<dir>/<entry>/index.js` (and fleet.yaml) by
+// `pollMs`, fingerprint each `<dir>/<entry>/index.js` by
 // name + mtime, and on change reload and swap into `pipelinesRef.value`.
 // The loader cache-busts its own imports (data: URLs), so the swap picks
 // up edited code.
@@ -44,11 +44,6 @@ export function createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger, pol
       } catch {
         // index.js missing — the loader skips it too.
       }
-      const fleet = path.join(pipelinesDir, ent.name, "fleet.yaml");
-      try {
-        const sf = await stat(fleet);
-        parts.push(`${ent.name}:fleet:${sf.mtimeMs}`);
-      } catch { /* optional */ }
     }
     return parts.join("|");
   }

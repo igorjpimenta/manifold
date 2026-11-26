@@ -3,7 +3,6 @@
 import { readdir, stat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { loadFleet } from "../agent/fleet.js";
 import { ENTRY_FIELDS } from "./needs-resolver.js";
 
 // Registers each subflow node's .flow as an addressable pipeline
@@ -35,7 +34,7 @@ function registerSubflowChildren(pipelineId, nodes, { result, indexPath, pipelin
       // thread it through so those lookups still find the root's config.
       result.set(syntheticId, {
         ...synthetic,
-        _filepath: indexPath, _dir: pipelineDir, _fleet: null, _synthetic: true,
+        _filepath: indexPath, _dir: pipelineDir, _synthetic: true,
         _parentPipelineId: pipelineId, _parentNodeId: nodeId,
         ...(proposalMeta ? { proposalMeta } : {}),
       });
@@ -95,10 +94,8 @@ export async function loadPipelines(dir, logger) {
         logger?.warn?.(`manifold loader: duplicate pipeline id "${pipeline.id}" in ${ent.name}/; keeping first`);
         continue;
       }
-      let _fleet = null;
-      try { _fleet = await loadFleet(pipelineDir); } catch {}
-      result.set(pipeline.id, { ...pipeline, _filepath: indexPath, _dir: pipelineDir, _fleet });
-      logger?.info?.(`manifold loader: loaded pipeline "${pipeline.id}" from ${ent.name}/${_fleet ? " (fleet.yaml found)" : ""}`);
+      result.set(pipeline.id, { ...pipeline, _filepath: indexPath, _dir: pipelineDir });
+      logger?.info?.(`manifold loader: loaded pipeline "${pipeline.id}" from ${ent.name}/`);
 
       registerSubflowChildren(pipeline.id, pipeline.nodes, { result, indexPath, pipelineDir, entName: ent.name, logger }, [], pipeline.proposalMeta);
     } catch (err) {
