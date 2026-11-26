@@ -19,13 +19,14 @@
 // snapshots must keep that property; the snapshot hygiene tests fail the
 // build otherwise. Never hand-edit snapshots to add DROP/RENAME.
 import path from "node:path";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as runtimeSchema from "./schema.js";
 import * as opsSchema from "./schema.ops.js";
+import { getTableName, isTable } from "drizzle-orm";
 import { SESSION_KEYS_FROM_ROWS_SQL } from "./session-keys.js";
 import { BACKFILL_ATTRIBUTION_SQL } from "./attribution-registries.js";
 
@@ -39,6 +40,38 @@ const SCHEMAS = new Map([
   [RUNTIME_MIGRATIONS_FOLDER, runtimeSchema],
   [OPS_MIGRATIONS_FOLDER, opsSchema],
 ]);
+
+// A journal can be ahead of its tables (a store restored from an older backup):
+// migrate() then no-ops and the table stays missing until a write fails on it.
+// Replaying a missing table's creation statement is safe on a live file —
+// every snapshot's CREATE carries IF NOT EXISTS and nothing existing is
+// touched. A table altered by a later snapshot returns in its creation shape,
+// so each repair is logged rather than assumed silent.
+export function repairMissingTables({ sqlite, migrationsFolder, schema, logger = null } = {}) {
+  if (!sqlite || !migrationsFolder || !schema) return { repaired: [] };
+  const declared = Object.values(schema).filter((t) => isTable(t)).map((t) => getTableName(t));
+  if (declared.length === 0) return { repaired: [] };
+  const existing = new Set(
+    sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name),
+  );
+  const missing = declared.filter((name) => !existing.has(name));
+  if (missing.length === 0) return { repaired: [] };
+  const files = readdirSync(migrationsFolder).filter((f) => f.endsWith(".sql")).sort();
+  const repaired = [];
+  for (const name of missing) {
+    const create = files
+      .flatMap((f) => readFileSync(path.join(migrationsFolder, f), "utf8").split("--> statement-breakpoint"))
+      .find((stmt) => new RegExp(`CREATE TABLE IF NOT EXISTS [\`"]?${name}[\`"]?\\s*\\(`).test(stmt));
+    if (!create) {
+      logger?.warn?.(`migrate: ${name} is missing and no snapshot creates it`);
+      continue;
+    }
+    sqlite.exec(create);
+    repaired.push(name);
+    logger?.warn?.(`migrate: restored ${name} — the journal was current but the table was absent`);
+  }
+  return { repaired };
+}
 
 const migratedPaths = new Set();
 
@@ -60,6 +93,7 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
     // second process mid-migration.
     sqlite.exec("PRAGMA busy_timeout = 30000;");
     migrate(drizzle(sqlite, { schema: SCHEMAS.get(migrationsFolder) ?? {} }), { migrationsFolder });
+    repairMissingTables({ sqlite, migrationsFolder, schema: SCHEMAS.get(migrationsFolder), logger });
     sqlite.exec("PRAGMA foreign_keys = ON;");
   } catch (err) {
     throw new Error(
