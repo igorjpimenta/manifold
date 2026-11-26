@@ -19,12 +19,19 @@ import {
   waitForToolResult,
 } from "../../../state/tool-handoff.js";
 import { createRunStore } from "../../../state/run-store.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../../../state/migrate.js";
 import { resolveStorePaths } from "../../../state/paths.js";
 
 let tmpDir;
-before(() => {
+before(async () => {
   tmpDir = mkdtempSync(path.join(os.tmpdir(), "manifold-tool-handoff-"));
   process.env.MANIFOLD_DATA_DIR = tmpDir;
+  // The owner migrates; this module never does (see its header). Do it here the
+  // way the core does, before any hand-off call.
+  await migrateDatabase({
+    dbPath: resolveStorePaths().runtimeDb,
+    migrationsFolder: RUNTIME_MIGRATIONS_FOLDER,
+  });
 });
 
 function session() {
@@ -37,6 +44,21 @@ async function seedRun(flowId) {
 }
 
 describe("writePendingResult / readPendingResult", () => {
+  test("an unmigrated store is refused, never created here", async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), "manifold-handoff-bare-"));
+    const previous = process.env.MANIFOLD_DATA_DIR;
+    process.env.MANIFOLD_DATA_DIR = dir;
+    try {
+      await assert.rejects(
+        () => writePendingResult({ session: session(), payload: { score: 1 } }),
+        (err) => /no such table/i.test(String(err?.message ?? err)),
+        "a harness-side writer must fail loudly instead of migrating the owner's file",
+      );
+    } finally {
+      process.env.MANIFOLD_DATA_DIR = previous;
+    }
+  });
+
   test("readPendingResult returns null when nothing was written", async () => {
     assert.equal(await readPendingResult(session()), null);
   });

@@ -34,30 +34,20 @@
 
 import { eq } from "drizzle-orm";
 import { getSharedDb, withSharedWrite } from "./db.js";
-import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "./migrate.js";
 import { toolResults, flowRuns } from "./schema.js";
 import { resolveStorePaths } from "./paths.js";
 import { ensureSessionKeys } from "./session-keys.js";
 
-// One shared client per DB path, migrated once. Concurrent first callers
-// share the same promise, so the migration never races itself. Cross-
-// process races resolve the same way every other store's do: each process
-// migrates idempotently, then shares its own connection.
-const _clients = new Map();
-
+// This module is published for harness use (package.json "./tool-handoff") and
+// therefore runs on both sides of the rendezvous: inside the core process and
+// inside a harness that only reports tool results. It must never migrate or
+// otherwise open the file with a second driver — the owner process migrates
+// before any handle exists, and a harness-side writer opens the same libsql
+// connection the rest of the store uses. A database that has not been migrated
+// fails the write with the missing table named instead of being rewritten
+// underneath a live owner.
 async function toolDb(dbPath) {
-  let pending = _clients.get(dbPath);
-  if (!pending) {
-    pending = (async () => {
-      await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
-      return getSharedDb(dbPath);
-    })().catch((err) => {
-      _clients.delete(dbPath);
-      throw err;
-    });
-    _clients.set(dbPath, pending);
-  }
-  return pending;
+  return getSharedDb(dbPath);
 }
 
 function storeDbPath() {

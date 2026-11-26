@@ -12,9 +12,16 @@ import os from "node:os";
 import { mkdtempSync } from "node:fs";
 import { createAgentDispatch } from "../../../engine/agent-dispatch.js";
 import { writePendingResult, readPendingResult } from "../../../state/tool-handoff.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../../../state/migrate.js";
+import { resolveStorePaths } from "../../../state/paths.js";
 
-before(() => {
+before(async () => {
   process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-agent-dispatch-"));
+  // The owner migrates; tool-handoff never does.
+  await migrateDatabase({
+    dbPath: resolveStorePaths().runtimeDb,
+    migrationsFolder: RUNTIME_MIGRATIONS_FOLDER,
+  });
 });
 
 const logger = { info: () => {}, warn: () => {} };

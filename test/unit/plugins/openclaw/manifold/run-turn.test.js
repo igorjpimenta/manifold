@@ -13,9 +13,16 @@ import { mkdtempSync } from "node:fs";
 import { createRunTurn, createGatewaySubagentGate } from "../../../../../plugins/openclaw/manifold/run-turn.js";
 import { GatewayHandoffNeeded } from "../../../../../engine/executor-errors.js";
 import { writePendingResult, readPendingResult, clearPendingResult } from "../../../../../state/tool-handoff.js";
+import { migrateDatabase, RUNTIME_MIGRATIONS_FOLDER } from "../../../../../state/migrate.js";
+import { resolveStorePaths } from "../../../../../state/paths.js";
 
-before(() => {
+before(async () => {
   process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-run-turn-"));
+  // The owner migrates; the adapter only ever writes rows into an existing schema.
+  await migrateDatabase({
+    dbPath: resolveStorePaths().runtimeDb,
+    migrationsFolder: RUNTIME_MIGRATIONS_FOLDER,
+  });
 });
 
 const logger = { info: () => {}, warn: () => {} };
