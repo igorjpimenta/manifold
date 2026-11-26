@@ -8,9 +8,11 @@ import { createClient } from "@libsql/client";
 import { getTableConfig } from "drizzle-orm/sqlite-core";
 import {
   migrateDatabase,
+  repairMissingTables,
   RUNTIME_MIGRATIONS_FOLDER,
   OPS_MIGRATIONS_FOLDER,
 } from "../../../state/migrate.js";
+import Database from "better-sqlite3";
 import * as runtimeSchema from "../../../state/schema.js";
 import * as opsSchema from "../../../state/schema.ops.js";
 
@@ -419,4 +421,45 @@ describe("schema parity — live boot vs drizzle defs", () => {
       );
     }
   }, { timeout: 120000 });
+});
+
+describe("repairMissingTables", () => {
+  test("restores a table the journal already counts as applied", async () => {
+    const { dbPath } = tmpDb("repair");
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger: silentLogger });
+    const sqlite = new Database(dbPath);
+    try {
+      sqlite.exec("DROP TABLE harnesses");
+      const { repaired } = repairMissingTables({
+        sqlite,
+        migrationsFolder: RUNTIME_MIGRATIONS_FOLDER,
+        schema: runtimeSchema,
+        logger: silentLogger,
+      });
+      assert.deepEqual(repaired, ["harnesses"]);
+      const has = sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'harnesses'").get();
+      assert.ok(has, "the missing table is back");
+      const cols = sqlite.prepare("PRAGMA table_info(harnesses)").all().map((c) => c.name);
+      assert.deepEqual(cols.sort(), ["created_at", "id", "updated_at"]);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  test("leaves a complete store untouched", async () => {
+    const { dbPath } = tmpDb("repair-noop");
+    await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger: silentLogger });
+    const sqlite = new Database(dbPath);
+    try {
+      const { repaired } = repairMissingTables({
+        sqlite,
+        migrationsFolder: RUNTIME_MIGRATIONS_FOLDER,
+        schema: runtimeSchema,
+        logger: silentLogger,
+      });
+      assert.deepEqual(repaired, []);
+    } finally {
+      sqlite.close();
+    }
+  });
 });
