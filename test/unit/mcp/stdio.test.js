@@ -31,7 +31,7 @@ test("declared harness ok: tools listed, stamped call invokes op stub", async ()
   const c = await connect();
   const { tools } = await c.listTools();
   assert.deepEqual(tools.map((t) => t.name).sort(), [
-    "manifold_approve", "manifold_cancel", "manifold_deliver_result", "manifold_runs", "manifold_start", "manifold_status",
+    "manifold_approve", "manifold_cancel", "manifold_runs", "manifold_start", "manifold_status",
   ]);
   const r = await c.callTool(
     { name: "manifold_runs", arguments: {}, _meta: { manifold: { agent: "a1", session: "s1" } } }

@@ -58,7 +58,7 @@ Versioning, tagging and publishing: [Releases](docs/releases.md).
    ([Dashboard](docs/dashboard.md)) or `GET /manifold/runs` on the API.
    Agents get the same operations as MCP tools (`manifold serve --mcp http`):
    `manifold_start`, `manifold_status`, `manifold_runs`, `manifold_approve`,
-   `manifold_cancel`, `manifold_deliver_result`
+   `manifold_cancel`
    ([Operations](docs/operations.md#tool-surface-agent-facing)).
 
 ## How it fits together

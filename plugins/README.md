@@ -58,7 +58,7 @@ new plugin config keys (env + table only).
 ## MCP transport (per harness)
 
 The pipeline tools (`manifold_start`, `manifold_status`, `manifold_runs`,
-`manifold_approve`, `manifold_cancel`, `manifold_deliver_result`) ship over
+`manifold_approve`, `manifold_cancel`) ship over
 MCP stdio and Streamable HTTP (`bin/manifold.js` → `mcp/stdio.js`,
 `mcp/http.js`). Identity is declared per call: the **harness** is declared
 at construction (`MANIFOLD_HARNESS` env for stdio, `X-Manifold-Harness`
@@ -66,12 +66,11 @@ header for HTTP), **agent**+**session** arrive per call (`_meta.manifold`,
 or stamped `manifold_agent`/`manifold_session` args). Unstamped calls are
 refused; nothing defaults, ever.
 
-Structured results travel the same way: an agent calls
-`manifold_deliver_result` with a JSON `payload` (+ optional `kind`/`runId`)
-and the result is stored under the caller's stamped session key, where the
-waiting dispatch picks it up instead of waiting out the agent run. See
-`plugins/openclaw/manifold/tool-results.js` for the rendezvous: a tool posts
-to the harness route, the turn reads it in-process.
+Structured results are an API concern, not an MCP one: a tool POSTs
+`{kind: "tool-result", session, payload}` to the harness's turn endpoint and
+the waiting dispatch picks it up instead of waiting out the agent run. See
+`plugins/openclaw/manifold/tool-results.js` for the rendezvous: the harness
+buffers the result in the process that owns the turn.
 
 ### openclaw
 

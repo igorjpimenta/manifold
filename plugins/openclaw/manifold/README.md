@@ -4,7 +4,7 @@ OpenClaw companion for [manifold](https://github.com/igorjpimenta/manifold). Thr
 
 1. **MCP surface** — manifold's pipeline tools (`manifold_start`,
    `manifold_status`, `manifold_runs`, `manifold_approve`,
-   `manifold_cancel`, `manifold_deliver_result`) ship as an MCP server
+   `manifold_cancel`) ship as an MCP server
    (`mcp/stdio.js`, `mcp/http.js`). The plugin registers no raw tools of its
    own; the host connects the MCP server. Pipeline-specific tools live in
    companion packages.

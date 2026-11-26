@@ -68,7 +68,7 @@ async function waitForStatus(flowId, want, timeoutMs = 5000) {
 
 describe("createRealOps — surface", () => {
   test("exposes the six tool ops plus a logger hook", () => {
-    for (const name of ["startRun", "runStatus", "listRuns", "approveGate", "cancelFlow", "deliverResult"]) {
+    for (const name of ["startRun", "runStatus", "listRuns", "approveGate", "cancelFlow"]) {
       assert.equal(typeof ops[name], "function", `${name} must be callable`);
     }
     assert.ok("logger" in ops);
@@ -116,43 +116,5 @@ describe("cancelFlow", () => {
     await ops.cancelFlow({ flowId: record.flowId, reason: "test cancel" });
     const flow = await waitForStatus(record.flowId, (f) => f.status === "cancelled" || f.status === "succeeded");
     assert.ok(flow.status === "cancelled", `expected cancelled, got ${flow.status}`);
-  });
-});
-
-describe("deliverResult", () => {
-  const realFetch = globalThis.fetch;
-  afterEach(() => { globalThis.fetch = realFetch; delete process.env.MANIFOLD_TURN_URL; delete process.env.MANIFOLD_TURN_TOKEN; });
-
-  test("posts the result to the harness endpoint", async () => {
-    process.env.MANIFOLD_TURN_URL = "http://127.0.0.1:18789/api/manifold/turn";
-    process.env.MANIFOLD_TURN_TOKEN = "turn-secret";
-    const seen = [];
-    globalThis.fetch = async (url, init) => {
-      seen.push({ url: String(url), headers: init.headers, body: JSON.parse(init.body) });
-      return { ok: true, status: 200, text: async () => "" };
-    };
-    const session = `ses_${randomUUID()}`;
-    const payload = { content: [{ type: "text", text: "done" }] };
-    const out = await ops.deliverResult({ session, runId: "r1", agentId: "a1", kind: "result", payload });
-    assert.deepEqual(out, { ok: true, session });
-    assert.equal(seen.length, 1);
-    assert.equal(seen[0].url, process.env.MANIFOLD_TURN_URL);
-    assert.equal(seen[0].headers.authorization, "Bearer turn-secret");
-    assert.deepEqual(seen[0].body, { kind: "tool-result", session, runId: "r1", agentId: "a1", payload });
-  });
-
-  test("refuses when the harness endpoint is unknown", async () => {
-    const out = await ops.deliverResult({ session: "s", payload: {} });
-    assert.equal(out.ok, false);
-    assert.match(out.error, /TURN_URL|TURN_TOKEN/);
-  });
-
-  test("reports a refusal from the harness", async () => {
-    process.env.MANIFOLD_TURN_URL = "http://127.0.0.1:18789/api/manifold/turn";
-    process.env.MANIFOLD_TURN_TOKEN = "turn-secret";
-    globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => "unauthorized" });
-    const out = await ops.deliverResult({ session: "s", payload: {} });
-    assert.equal(out.ok, false);
-    assert.match(out.error, /401/);
   });
 });

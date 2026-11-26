@@ -1,8 +1,7 @@
-// Agent-facing pipeline tools (manifold_start/_status/_runs/_approve/_cancel/
-// _deliver_result). `createManifoldToolHandlers(ops)` returns static TOOL_DEFS
-// plus a `handle(name, args, identity)` dispatcher; ops (startRun, runStatus,
-// listRuns, approveGate, cancelFlow, deliverResult, logger) are injected by
-// the host. The caller identity is the resolved `identity` — never a tool
+// Agent-facing pipeline tools (manifold_start/_status/_runs/_approve/_cancel).
+// `createManifoldToolHandlers(ops)` returns static TOOL_DEFS plus a
+// `handle(name, args, identity)` dispatcher; ops (startRun, runStatus,
+// listRuns, approveGate, cancelFlow, logger) are injected by the host. The caller identity is the resolved `identity` — never a tool
 // param — so agents cannot start runs or approve gates under another agent's name.
 
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
@@ -90,29 +89,10 @@ export const TOOL_DEFS = [
       },
     },
   },
-  {
-    name: "manifold_deliver_result",
-    description:
-      "Deliver a structured tool result for the calling session: the dispatch " +
-      "waiting on this session's turn picks it up instead of waiting out the " +
-      "agent run. The session is identified from the caller's stamped identity, " +
-      "never from a parameter — a result cannot be filed under another session. " +
-      "Latest write wins per session; the dispatch consumes and clears it.",
-    inputSchema: {
-      type: "object",
-      additionalProperties: false,
-      required: ["payload"],
-      properties: {
-        payload: { description: "JSON result payload the node's apply() receives as output.toolResult.payload." },
-        kind: { type: "string", description: "Result kind (e.g. score, draft) — routed opaquely, never interpreted here." },
-        runId: { type: "string", description: "Agent run id, when known (traceability only)." },
-      },
-    },
-  },
 ];
 
 export function createManifoldToolHandlers(ops = {}) {
-  const { startRun, runStatus, listRuns, approveGate, cancelFlow, deliverResult, logger } = ops;
+  const { startRun, runStatus, listRuns, approveGate, cancelFlow, logger } = ops;
 
   function need(fn, name) {
     if (typeof fn !== "function") throw new Error(`manifold: op ${name} is not wired (no ${name} in injected ops)`);
@@ -203,23 +183,6 @@ export function createManifoldToolHandlers(ops = {}) {
       }
     },
 
-    async manifold_deliver_result(args, identity) {
-      if (args?.payload === undefined) {
-        return err("manifold_deliver_result: payload is required", "rejected");
-      }
-      try {
-        await need(deliverResult, "deliverResult")({
-          session: identity.session,
-          runId: typeof args?.runId === "string" ? args.runId : null,
-          agentId: identity.agent,
-          kind: typeof args?.kind === "string" ? args.kind : null,
-          payload: args.payload,
-        });
-        return ok("delivered", { status: "ok", session: identity.session });
-      } catch (e) {
-        return err(`manifold_deliver_result failed: ${e?.message ?? e}`, "error");
-      }
-    },
   };
 
   async function handle(name, args, identity) {
