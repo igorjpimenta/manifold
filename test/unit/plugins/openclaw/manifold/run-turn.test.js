@@ -1,18 +1,13 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import path from "node:path";
-import os from "node:os";
-import { mkdtempSync } from "node:fs";
 import { createRunTurn, createGatewaySubagentGate } from "../../../../../plugins/openclaw/manifold/run-turn.js";
+import { createToolResults } from "../../../../../plugins/openclaw/manifold/tool-results.js";
 import { GatewayHandoffNeeded } from "../../../../../engine/executor-errors.js";
-import { writePendingResult, readPendingResult, clearPendingResult } from "../../../../../state/tool-handoff.js";
-
-before(() => {
-  process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-run-turn-"));
-});
 
 const logger = { info: () => {}, warn: () => {} };
+// One buffer per test, exactly like one turn per plugin registration.
+const toolResults = createToolResults();
 const STARTUP = () => new Error("agent.wait unavailable during gateway startup");
 
 function deferred() {
@@ -69,7 +64,7 @@ describe("createRunTurn — the turn", () => {
       run: async (args) => { seen.push(["run", args]); return { runId: "run-abc" }; },
       getSessionMessages: async (args) => { seen.push(["msgs", args]); return { messages: [{ role: "assistant", content: "reply text" }] }; },
     });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     const out = await runTurn({ session: "k", message: "hi" });
     assert.equal(seen[0][1].sessionKey, "k", "core session maps to the harness sessionKey at run");
     assert.equal(seen[1][1].sessionKey, "k", "core session maps to the harness sessionKey at getSessionMessages");
@@ -84,7 +79,7 @@ describe("createRunTurn — the turn", () => {
       run: async (args) => { seen.push(["run", args]); return { runId: "run-case" }; },
       getSessionMessages: async (args) => { seen.push(["msgs", args]); return { messages: [{ role: "assistant", content: "ok" }] }; },
     });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     const out = await runTurn({ session: "agent:SCOUT:manifold:abc-SCORE_LLM", message: "hi" });
     assert.equal(seen[0][1].sessionKey, "agent:scout:manifold:abc-score_llm");
     assert.equal(seen[1][1].sessionKey, "agent:scout:manifold:abc-score_llm");
@@ -92,7 +87,7 @@ describe("createRunTurn — the turn", () => {
   });
 
   test("refuses loudly when no runtime is bound", async () => {
-    const { runTurn } = createRunTurn({ getRuntime: () => null, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => null, logger, toolResults });
     await assert.rejects(
       () => runTurn({ session: "k", message: "x" }),
       (err) => err instanceof GatewayHandoffNeeded,
@@ -101,7 +96,7 @@ describe("createRunTurn — the turn", () => {
 
   test("a startup refusal is no longer a request-scope handoff", async () => {
     const raw = makeRuntime({ waitForRun: async () => { throw STARTUP(); } });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     await assert.rejects(
       () => runTurn({ session: "k", message: "x" }),
       (err) => !(err instanceof GatewayHandoffNeeded) && /unavailable during gateway startup/.test(err.message),
@@ -110,7 +105,7 @@ describe("createRunTurn — the turn", () => {
 
   test("a non-ok wait status fails the turn with the status in the message", async () => {
     const raw = makeRuntime({ waitForRun: async () => ({ status: "timeout", error: "agent timed out" }) });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     await assert.rejects(
       () => runTurn({ session: "k", message: "x" }),
       /agent turn timeout: agent timed out/,
@@ -123,7 +118,7 @@ describe("createRunTurn — the turn", () => {
         messages: [{ role: "assistant", content: [{ type: "text", text: "part 1" }, { type: "text", text: "part 2" }] }],
       }),
     });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     const out = await runTurn({ session: "k", message: "x" });
     assert.ok(out.text.includes("part 1") && out.text.includes("part 2"), out.text);
   });
@@ -139,7 +134,7 @@ describe("createRunTurn — the turn", () => {
         ],
       }),
     });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     const out = await runTurn({ session: "k", message: "x" });
     assert.equal(out.text, "final reply");
   });
@@ -151,15 +146,15 @@ describe("createRunTurn — the turn", () => {
       waitForRun: () => new Promise(() => {}),
       getSessionMessages: async () => { fetched = true; return { messages: [] }; },
     });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     const pending = runTurn({ session, message: "x" });
     await new Promise((r) => setImmediate(r));
-    await writePendingResult({ session, runId: "run-tool", kind: "score", payload: { score: 7 } });
+    toolResults.write({ session, runId: "run-tool", kind: "score", payload: { score: 7 } });
     const out = await pending;
     assert.equal(out.text, "");
     assert.deepEqual(out.toolResult, { kind: "score", payload: { score: 7 } });
     assert.equal(fetched, false, "the tool-fired path must not fetch the model's wrap-up reply");
-    assert.equal(await readPendingResult(session), null, "the delivered row is consumed by the turn");
+    assert.equal(toolResults.read(session), null, "the delivered row is consumed by the turn");
   });
 
   test("finds a result the model delivered after its run ended, and consumes it", async () => {
@@ -167,26 +162,26 @@ describe("createRunTurn — the turn", () => {
     const raw = makeRuntime({
       getSessionMessages: async () => {
         // A retried tool call landing after waitForRun already returned.
-        await writePendingResult({ session, kind: "score", payload: { score: 41 } });
+        toolResults.write({ session, kind: "score", payload: { score: 41 } });
         return { messages: [{ role: "assistant", content: "submitted" }] };
       },
     });
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults });
     const out = await runTurn({ session, message: "x" });
     assert.equal(out.text, "", "the tool payload wins over the model's confirmation text");
     assert.deepEqual(out.toolResult, { kind: "score", payload: { score: 41 } });
-    assert.equal(await readPendingResult(session), null);
+    assert.equal(toolResults.read(session), null);
   });
 
   test("never resurrects a row stamped before the turn started", async () => {
     const session = `sk-stale-${randomUUID()}`;
-    await writePendingResult({ session, kind: "score", payload: { score: 1 } });
+    toolResults.write({ session, kind: "score", payload: { score: 1 } });
     await new Promise((r) => setTimeout(r, 5));
-    const { runTurn } = createRunTurn({ getRuntime: () => makeRuntime(), logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => makeRuntime(), logger, toolResults });
     const out = await runTurn({ session, message: "x" });
     assert.equal(out.toolResult ?? null, null);
-    assert.ok(await readPendingResult(session), "a previous attempt's row is left for whoever still owns it");
-    await clearPendingResult(session);
+    assert.ok(toolResults.read(session), "a previous attempt's row is left alone");
+    toolResults.clear(session);
   });
 
   test("waits for gateway readiness before the first call", async () => {
@@ -197,7 +192,7 @@ describe("createRunTurn — the turn", () => {
       waitForRun: async () => { calls.push("wait"); return { status: "ok" }; },
       getSessionMessages: async () => ({ messages: [{ role: "assistant", content: "drafted" }] }),
     };
-    const { runTurn } = createRunTurn({ getRuntime: () => raw, whenGatewayReady: () => ready.promise, logger });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, whenGatewayReady: () => ready.promise, logger, toolResults });
     const turn = runTurn({ session: "k", message: "continue" });
     await tick();
     assert.deepEqual(calls, [], "no run started inside the startup window");

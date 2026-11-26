@@ -17,6 +17,7 @@ import { wrapSubagentKeys } from "./session-keys.js";
 import { newNodeSessionId } from "./sessions.js";
 import { invokeElevated } from "@igorjpimenta/manifold/elevation";
 import { createRunTurn } from "./run-turn.js";
+import { createToolResults } from "./tool-results.js";
 import { registerManifoldMetaHook } from "./meta.js";
 import { registerTelemetryHooks } from "./telemetry.js";
 import { registerGatewayReadiness } from "./gateway-readiness.js";
@@ -210,10 +211,19 @@ export default definePluginEntry({
 
     const gatewayReadiness = registerGatewayReadiness(api, { logger: api.logger });
     const moduleState = { workingSubagent: null };
+    // The turn buffer lives with the turns it serves: a tool posts here, the
+    // turn reads it, and it dies with this process like the session does. The
+    // durable copy is the flow state apply() writes afterwards.
+    const toolResults = createToolResults();
+    // One ingress for anything harness-bound: a tool posts its result to the
+    // turn URL, so tools need the coordinate the core already has.
+    process.env.MANIFOLD_TURN_URL = turnUrl;
+    process.env.MANIFOLD_TURN_TOKEN = turnToken;
     const { runTurn } = createRunTurn({
       getRuntime: () => moduleState.workingSubagent ?? (api.runtime?.subagent ? wrapSubagentKeys(api.runtime.subagent) : null),
       whenGatewayReady: () => gatewayReadiness.whenReady(),
       logger: api.logger,
+      toolResults,
     });
 
     // Two routes for one turn. The gateway refuses `runtime.subagent.run`
@@ -262,6 +272,14 @@ export default definePluginEntry({
         }
         const body = await readJsonBody(req);
         if (body.error) { sendJson(res, body.status, { ok: false, error: body.error }); return true; }
+        // A tool has no channel to the node that spawned it, so it posts its
+        // result to the same ingress the core uses, discriminated by `kind`.
+        if (body.value?.kind === "tool-result") {
+          const stored = toolResults.write(body.value);
+          if (!stored) { sendJson(res, 400, { ok: false, error: "session and payload required" }); return true; }
+          sendJson(res, 200, { ok: true });
+          return true;
+        }
         const elevated = await invokeElevated(ELEV_TURN_PATH, body.value ?? {}, { timeoutMs: ELEV_TURN_TIMEOUT_MS });
         if (!elevated.ok) {
           sendJson(res, elevated.status || 502, { ok: false, error: parseErrorOf(elevated.body) ?? "turn failed" });

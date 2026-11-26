@@ -30,15 +30,6 @@ const PUBLIC_API = {
     file: "./routes/bearer-auth.js",
     exports: ["authorizeBearerRequest", "sendUnauthorized"],
   },
-  "./tool-handoff": {
-    file: "./state/tool-handoff.js",
-    exports: [
-      "writePendingResult",
-      "readPendingResult",
-      "clearPendingResult",
-      "waitForToolResult",
-    ],
-  },
   "./state/db": {
     file: "./state/db.js",
     exports: ["openDb", "getSharedDb", "isSqliteBusy", "withSharedWrite"],

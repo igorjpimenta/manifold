@@ -15,7 +15,7 @@ The binary serves; run-manipulation lives on the HTTP API and MCP tools
 
 ## Tool surface (agent-facing)
 
-Six tools, declared in `mcp/tools.js` (`TOOL_DEFS`) and registered by both
+Five tools, declared in `mcp/tools.js` (`TOOL_DEFS`) and registered by both
 transports — `mcp/stdio.js` and `mcp/http.js` register every `TOOL_DEFS`
 entry, so there is no per-tool wiring:
 
@@ -26,7 +26,6 @@ entry, so there is no per-tool wiring:
 | `manifold_runs` | optional filters | List flows. |
 | `manifold_approve` | `flowId`, `itemId`, `decision` | Resolve a gate item. |
 | `manifold_cancel` | `flowId`, optional `reason` | Cancel a non-terminal flow. |
-| `manifold_deliver_result` | JSON `payload`, optional `kind`/`runId` | Structured result rendezvous (`state/tool-handoff.js`): stored under the caller's stamped session key, where the waiting dispatch picks it up. |
 
 Agents reach them through a harness that connects MCP (`manifold serve
 --mcp stdio|http`); identity is stamped per call — see

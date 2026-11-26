@@ -106,9 +106,9 @@ sessions.newNodeSessionId({agentId, flowId, nodeId})   // harness adapter
 ```
 
 Resolution order is node-declared first, then the adapter's mint function.
-`dispatchAgentEntry` refuses a dispatch that ends with neither — tool-handoff
-and the lineage ledger both key off this value, so neither manifold nor a
-default may invent one. `sessions` is the same harness-adapter object the
+`dispatchAgentEntry` refuses a dispatch that ends with neither — the tool
+result and the lineage ledger both key off this value, so neither manifold nor
+a default may invent one. `sessions` is the same harness-adapter object the
 discuss routes get (`newDiscussSessionId`); `manifold serve` ships a
 harness-neutral one, and each in-process adapter provides its own. A discuss
 thread carries its own session id, locked on the first turn and re-used for

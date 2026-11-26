@@ -42,7 +42,11 @@ describe("adapter registration", () => {
   it("serves the turn, elevated-turn and session bridges and supervises exactly one core process", () => {
     const { api, routes, services } = makeApi();
     entry.register(api);
-    assert.deepEqual(routes.map((r) => r.path), ["/api/manifold/_elev/turn", "/api/manifold/turn", "/api/manifold/session"]);
+    assert.deepEqual(routes.map((r) => r.path).sort(), [
+      "/api/manifold/_elev/turn",
+      "/api/manifold/session",
+      "/api/manifold/turn",
+    ]);
     assert.deepEqual(services.map((s) => s.id), ["manifold-core", "manifold-runtime-capture"]);
   });
 
@@ -69,6 +73,25 @@ describe("adapter registration", () => {
     const res = createMockRes();
     await routeAt(routes, "/api/manifold/turn").handler(fakeReq({ authorization: "Bearer not-the-token" }), res);
     assert.equal(res.statusCode, 401);
+  });
+
+  it("buffers a tool result posted to the turn bridge instead of starting a turn", async () => {
+    const { api, routes } = makeApi();
+    let runs = 0;
+    api.runtime.subagent.run = async () => { runs += 1; return { runId: "run-x" }; };
+    entry.register(api);
+    assert.equal(process.env.MANIFOLD_TURN_URL, "http://127.0.0.1:18789/api/manifold/turn", "tools get the ingress coordinate");
+    const res = createMockRes();
+    await routeAt(routes, "/api/manifold/turn").handler(
+      fakeReq({
+        authorization: `Bearer ${process.env.MANIFOLD_TURN_TOKEN}`,
+        body: { kind: "tool-result", session: "agent:a:manifold:abcdef01-n", runId: "r1", payload: { score: 1 } },
+      }),
+      res,
+    );
+    assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { ok: true });
+    assert.equal(runs, 0, "a tool result is buffered, not turned");
   });
 
   it("runs the turn on the gateway-scoped route, which carries the operator scope its runtime call needs", async () => {

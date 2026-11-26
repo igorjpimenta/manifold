@@ -1,12 +1,11 @@
 
-import { test, describe, before, after } from "node:test";
+import { test, describe, before, after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createRealOps } from "../../../mcp/wire-ops.js";
-import { readPendingResult } from "../../../state/tool-handoff.js";
 
 const PIPELINE_SOURCE = `
 export default {
@@ -69,7 +68,7 @@ async function waitForStatus(flowId, want, timeoutMs = 5000) {
 
 describe("createRealOps — surface", () => {
   test("exposes the six tool ops plus a logger hook", () => {
-    for (const name of ["startRun", "runStatus", "listRuns", "approveGate", "cancelFlow", "deliverResult"]) {
+    for (const name of ["startRun", "runStatus", "listRuns", "approveGate", "cancelFlow"]) {
       assert.equal(typeof ops[name], "function", `${name} must be callable`);
     }
     assert.ok("logger" in ops);
@@ -117,17 +116,5 @@ describe("cancelFlow", () => {
     await ops.cancelFlow({ flowId: record.flowId, reason: "test cancel" });
     const flow = await waitForStatus(record.flowId, (f) => f.status === "cancelled" || f.status === "succeeded");
     assert.ok(flow.status === "cancelled", `expected cancelled, got ${flow.status}`);
-  });
-});
-
-describe("deliverResult", () => {
-  test("writes the pending tool result where the bridge can read it", async () => {
-    const session = `ses_${randomUUID()}`;
-    const payload = { content: [{ type: "text", text: "done" }] };
-    const out = await ops.deliverResult({ session, runId: "r1", agentId: "a1", kind: "result", payload });
-    assert.deepEqual(out, { ok: true, session });
-    const stored = await readPendingResult(session);
-    assert.deepEqual(stored.payload, payload);
-    assert.equal(stored.kind, "result");
   });
 });

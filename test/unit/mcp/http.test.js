@@ -11,7 +11,6 @@ const ops = {
   listRuns: async () => [],
   approveGate: async () => ({}),
   cancelFlow: async () => ({}),
-  deliverResult: async () => ({ ok: true }),
 };
 
 let server;
