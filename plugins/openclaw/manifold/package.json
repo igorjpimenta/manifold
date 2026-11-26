@@ -1,6 +1,6 @@
 {
   "name": "@igorjpimenta/manifold-openclaw",
-  "version": "2026.11.23-beta.2",
+  "version": "2026.11.26-beta.1",
   "description": "OpenClaw companion for manifold: spawns and supervises `manifold serve`, bridges agent and discuss turns into the engine, and exposes manifold's pipeline tools over MCP.",
   "exports": {
     ".": "./index.js"
@@ -31,7 +31,7 @@
     }
   },
   "dependencies": {
-    "@igorjpimenta/manifold": "^2026.11.23-beta.2"
+    "@igorjpimenta/manifold": "^2026.11.26-beta.1"
   },
   "publishConfig": {
     "registry": "https://registry.npmjs.org",

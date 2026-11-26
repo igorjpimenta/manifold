@@ -123,22 +123,20 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
 });
 
 describe("dispatchAgentWithRetry — the delivered tool result", () => {
-  it("passes output.toolResult to apply() and consumes the row afterwards", async () => {
+  it("passes output.toolResult to apply() as the harness returned it", async () => {
     const session = `sk-dispatch-${randomUUID()}`;
     const turn = makeTurn({ result: { text: "", runId: "run-tool", toolResult: { kind: "draft", payload: { text: "hi" } } } });
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
     let saw = null;
     const node = makeNode({ apply: (state, output) => { saw = output.toolResult; return {}; } });
-    await writePendingResult({ session, payload: { text: "hi" } });
     await dispatchAgentWithRetry({
       node, nodeId: "DRAFT", session, initialMessage: "go",
       applyCtx: {}, applyExtraArg: undefined, flowId: "flow-x",
     });
     assert.deepEqual(saw, { kind: "draft", payload: { text: "hi" } });
-    assert.equal(await readPendingResult(session), null, "consumed rows do not linger for the next turn");
   });
 
-  it("leaves the row alone when no tool result was delivered", async () => {
+  it("leaves the hand-off store alone when no tool result was delivered", async () => {
     const session = `sk-dispatch-${randomUUID()}`;
     await writePendingResult({ session, payload: { stale: true } });
     const turn = makeTurn();

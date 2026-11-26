@@ -51,6 +51,7 @@ function toRow(r) {
     agentId: r.agentId ?? null,
     kind: r.kind ?? null,
     payload,
+    updatedAt: r.updatedAt ?? null,
   };
 }
 

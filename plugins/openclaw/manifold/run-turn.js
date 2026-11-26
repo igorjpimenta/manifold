@@ -13,7 +13,7 @@
 // ordinary error; it is not retried.
 
 import { GatewayHandoffNeeded, isRequestScopedSubagentError, fetchSessionError } from "@igorjpimenta/manifold/errors";
-import { waitForToolResult } from "@igorjpimenta/manifold/tool-handoff";
+import { clearPendingResult, readPendingResult, waitForToolResult } from "@igorjpimenta/manifold/tool-handoff";
 
 // A lapsed agent.wait window answers with the same bare "timeout" status a
 // timed-out run gets — waitForRun drops endedAt, so the two can't be told
@@ -22,6 +22,14 @@ import { waitForToolResult } from "@igorjpimenta/manifold/tool-handoff";
 // thing that settles the wait; the runtime's agents.defaults.timeoutSeconds
 // still bounds the run itself.
 const WAIT_UNTIL_RUN_ENDS_MS = 2_147_483_647;
+
+// This gateway lowercases session keys. Node ids arrive SCREAMING_CASE, so the
+// turn must address the runtime, the tool's ctx.sessionKey and the hand-off row
+// with the spelling the gateway will actually store; the hand-off stays
+// entirely inside the harness, and core only ever sees the returned toolResult.
+function gatewaySessionKey(session) {
+  return String(session ?? "").trim().toLowerCase();
+}
 
 const GATED_METHODS = ["run", "waitForRun", "getSessionMessages"];
 
@@ -57,13 +65,15 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
   const gate = createGatewaySubagentGate({ whenGatewayReady });
 
   async function runTurn({ session, message, skill, agentId }) {
+    const sessionKey = gatewaySessionKey(session);
+    const startedAt = Date.now();
     const runtime = gate(typeof getRuntime === "function" ? getRuntime() : getRuntime);
     if (!runtime?.run) throw new GatewayHandoffNeeded("agent runtime unavailable on this api instance");
     let runResult;
     try {
       // Adapter edge: the harness runtime names its own field `sessionKey`;
       // core passes its single `session` as that field.
-      runResult = await runtime.run({ sessionKey: session, message, skill, agentId });
+      runResult = await runtime.run({ sessionKey, message, skill, agentId });
     } catch (err) {
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;
@@ -77,7 +87,7 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     // sit silently in the gateway's own lane queue
     // (agents.defaults.maxConcurrent) for arbitrarily long, and neither
     // silence nor wall-clock time there means the run is hung.
-    const toolWait = waitForToolResult(session);
+    const toolWait = waitForToolResult(sessionKey);
     let waitResult;
     try {
       waitResult = await Promise.race([
@@ -91,7 +101,7 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     }
     toolWait.cancel();
     if (waitResult.status !== "ok") {
-      const errDetail = waitResult.error ?? (await fetchSessionError(session)) ?? "no error message";
+      const errDetail = waitResult.error ?? (await fetchSessionError(sessionKey)) ?? "no error message";
       throw new Error(`agent turn ${waitResult.status}: ${errDetail}`);
     }
     // Tool already delivered everything apply() needs — skip fetching the
@@ -99,6 +109,7 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     // output.text is only ever a fallback for apply()s with no tool result.
     if (waitResult.toolFired) {
       const toolRow = waitResult.toolRow ?? null;
+      if (toolRow) await clearPendingResult(sessionKey).catch(() => {});
       return {
         text: "",
         runId: runResult.runId,
@@ -109,7 +120,7 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     }
     let msgsResult;
     try {
-      msgsResult = await runtime.getSessionMessages({ sessionKey: session, limit: 5 });
+      msgsResult = await runtime.getSessionMessages({ sessionKey, limit: 5 });
     } catch (err) {
       if (isRequestScopedSubagentError(err)) throw new GatewayHandoffNeeded(err.message);
       throw err;
@@ -127,6 +138,19 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
           .join("\n");
         if (text) { lastText = text; break; }
       }
+    }
+    // A tool call can land after the run's own end (the model retries a
+    // rejected call); the race above only covers up to that end. Read one last
+    // time, and only accept a row stamped at or after this turn's start — an
+    // older stamp belongs to a previous attempt and must not be resurrected.
+    const late = await readPendingResult(sessionKey).catch(() => null);
+    if (late && (late.updatedAt ?? 0) >= startedAt) {
+      await clearPendingResult(sessionKey).catch(() => {});
+      return {
+        text: "",
+        runId: runResult.runId,
+        toolResult: { kind: late.kind ?? null, payload: late.payload ?? null },
+      };
     }
     logger?.info?.(`manifold: agent turn ${runResult.runId} returned ${lastText.length} chars`);
     return { text: lastText, runId: runResult.runId };

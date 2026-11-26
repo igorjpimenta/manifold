@@ -468,7 +468,7 @@ describe("registerDiscussHandlers — resolveDiscussTarget harness-owned ids", (
     const { resolveDiscussTarget } = registerDiscussHandlers(deps);
     const target = await resolveDiscussTarget(gateFlow(), "item-1");
     assert.equal(target.ok, true);
-    assert.equal(target.session, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-GATE-item-1`);
+    assert.equal(target.session, `agent:test-agent:discuss:${testFlowId.slice(0, 8)}-gate-item-1`);
     assert.ok(!("sessionKey" in target) && !("sessionId" in target), "core exposes one session term");
   });
 

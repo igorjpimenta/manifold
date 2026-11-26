@@ -28,7 +28,7 @@ describe("newDiscussSessionId", () => {
       agentId: "scout", flowId: "abcdef01-0000-0000-0000-000000000000",
       gateNodeId: "PROPOSE", itemId: "round-1",
     });
-    assert.equal(a, "agent:scout:discuss:abcdef01-PROPOSE-round-1");
+    assert.equal(a, "agent:scout:discuss:abcdef01-propose-round-1");
     const b = newDiscussSessionId({
       agentId: "scout", flowId: "abcdef01-0000-0000-0000-000000000000",
       gateNodeId: "PROPOSE", itemId: "round-1",
@@ -50,7 +50,7 @@ describe("newDiscussSessionId", () => {
 describe("newNodeSessionId", () => {
   it("mints in the harness namespace, deterministic in (agent, flow, node)", () => {
     const args = { agentId: "scorer", flowId: "abcdef01-0000-0000-0000-000000000000", nodeId: "SCORE_LLM" };
-    assert.equal(newNodeSessionId(args), "agent:scorer:manifold:abcdef01-SCORE_LLM");
+    assert.equal(newNodeSessionId(args), "agent:scorer:manifold:abcdef01-score_llm");
     assert.equal(newNodeSessionId({ ...args }), newNodeSessionId(args), "a retry must reuse the same session");
   });
 

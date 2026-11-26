@@ -1,5 +1,4 @@
 import { usesNamedParams } from "./executor-helpers.js";
-import { clearPendingResult } from "../state/tool-handoff.js";
 
 // agent-dispatch.js — the engine's agent-node dispatch: run one turn
 // through the injected harness runtime, then reduce the result with the
@@ -15,6 +14,9 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
     if (typeof runTurn !== "function") {
       throw new Error("manifold: no agent runtime bound — the harness must inject runTurn");
     }
+    // `session` is core's whole contract here — the harness adapter
+    // (run-turn.js) maps it to the runtime's own `sessionKey` field and owns
+    // every spelling rule that comes with it.
     const output = await runTurn({
       session,
       message: initialMessage,
@@ -27,18 +29,17 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
     if (emit && output?.text) {
       try { await emit("session.transcript.completed", { scope: "node", nodeId, session, text: output.text }); } catch {}
     }
-    // needsCtx is additive on both apply() calling conventions — existing
-    // apply() functions ignore the extra arg/key. toolResult is consumed
-    // in finally so a retried turn never rereads a stale result.
-    try {
-      return usesNamedParams(node.apply)
-        ? await Promise.resolve(node.apply({ state: applyCtx, output, item: applyExtraArg ?? undefined, meta: applyMeta, needs: needsCtx }))
-        : applyExtraArg !== undefined
-          ? await Promise.resolve(node.apply(applyCtx, output, applyExtraArg, applyMeta, needsCtx))
-          : await Promise.resolve(node.apply(applyCtx, output, undefined, applyMeta, needsCtx));
-    } finally {
-      if (output?.toolResult) await clearPendingResult(session).catch(() => {});
-    }
+    // needsCtx is threaded through both calling conventions as a new field /
+    // 5th positional arg. Additive: every existing apply() function ignores
+    // an argument/key it doesn't ask for, so this is a no-op for every apply()
+    // that hasn't opted in yet. output.toolResult carries the delivered row
+    // (when a tool fired); how that row is written, found and cleared is the
+    // harness's business.
+    return usesNamedParams(node.apply)
+      ? await Promise.resolve(node.apply({ state: applyCtx, output, item: applyExtraArg ?? undefined, meta: applyMeta, needs: needsCtx }))
+      : applyExtraArg !== undefined
+        ? await Promise.resolve(node.apply(applyCtx, output, applyExtraArg, applyMeta, needsCtx))
+        : await Promise.resolve(node.apply(applyCtx, output, undefined, applyMeta, needsCtx));
   }
 
   return { dispatchAgentWithRetry };

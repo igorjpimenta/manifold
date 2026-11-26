@@ -6,7 +6,7 @@ import os from "node:os";
 import { mkdtempSync } from "node:fs";
 import { createRunTurn, createGatewaySubagentGate } from "../../../../../plugins/openclaw/manifold/run-turn.js";
 import { GatewayHandoffNeeded } from "../../../../../engine/executor-errors.js";
-import { writePendingResult, clearPendingResult } from "../../../../../state/tool-handoff.js";
+import { writePendingResult, readPendingResult, clearPendingResult } from "../../../../../state/tool-handoff.js";
 
 before(() => {
   process.env.MANIFOLD_DATA_DIR = mkdtempSync(path.join(os.tmpdir(), "manifold-run-turn-"));
@@ -78,6 +78,19 @@ describe("createRunTurn — the turn", () => {
     assert.equal(out.toolResult ?? null, null);
   });
 
+  test("addresses the runtime and reports back the gateway's folded session", async () => {
+    const seen = [];
+    const raw = makeRuntime({
+      run: async (args) => { seen.push(["run", args]); return { runId: "run-case" }; },
+      getSessionMessages: async (args) => { seen.push(["msgs", args]); return { messages: [{ role: "assistant", content: "ok" }] }; },
+    });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const out = await runTurn({ session: "agent:SCOUT:manifold:abc-SCORE_LLM", message: "hi" });
+    assert.equal(seen[0][1].sessionKey, "agent:scout:manifold:abc-score_llm");
+    assert.equal(seen[1][1].sessionKey, "agent:scout:manifold:abc-score_llm");
+    assert.equal(out.text, "ok");
+  });
+
   test("refuses loudly when no runtime is bound", async () => {
     const { runTurn } = createRunTurn({ getRuntime: () => null, logger });
     await assert.rejects(
@@ -146,6 +159,33 @@ describe("createRunTurn — the turn", () => {
     assert.equal(out.text, "");
     assert.deepEqual(out.toolResult, { kind: "score", payload: { score: 7 } });
     assert.equal(fetched, false, "the tool-fired path must not fetch the model's wrap-up reply");
+    assert.equal(await readPendingResult(session), null, "the delivered row is consumed by the turn");
+  });
+
+  test("finds a result the model delivered after its run ended, and consumes it", async () => {
+    const session = `sk-late-${randomUUID()}`;
+    const raw = makeRuntime({
+      getSessionMessages: async () => {
+        // A retried tool call landing after waitForRun already returned.
+        await writePendingResult({ session, kind: "score", payload: { score: 41 } });
+        return { messages: [{ role: "assistant", content: "submitted" }] };
+      },
+    });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });
+    const out = await runTurn({ session, message: "x" });
+    assert.equal(out.text, "", "the tool payload wins over the model's confirmation text");
+    assert.deepEqual(out.toolResult, { kind: "score", payload: { score: 41 } });
+    assert.equal(await readPendingResult(session), null);
+  });
+
+  test("never resurrects a row stamped before the turn started", async () => {
+    const session = `sk-stale-${randomUUID()}`;
+    await writePendingResult({ session, kind: "score", payload: { score: 1 } });
+    await new Promise((r) => setTimeout(r, 5));
+    const { runTurn } = createRunTurn({ getRuntime: () => makeRuntime(), logger });
+    const out = await runTurn({ session, message: "x" });
+    assert.equal(out.toolResult ?? null, null);
+    assert.ok(await readPendingResult(session), "a previous attempt's row is left for whoever still owns it");
     await clearPendingResult(session);
   });
 
