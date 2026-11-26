@@ -23,49 +23,6 @@ function runtimeSibling(dbPath) {
     : `${dbPath}.runtime.sqlite`;
 }
 
-// Sample rows for the preview endpoint: real forecasts come from runs.
-const MOCK_ITEMS = [
-  {
-    label: "CLASSIFY × 12 items",
-    agent: "analyst",
-    agentEmoji: "⚖️",
-    trigger: "cron",
-    pipeline: "example-pipeline",
-    node: "classify",
-    tokenEstimate: 10800,
-    costLow: 0.0018,
-    costHigh: 0.0054,
-    brief: "Classify 12 new items against the declared rubric",
-    modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
-  },
-  {
-    label: "DRAFT × 3 items",
-    agent: "writer",
-    agentEmoji: "✍️",
-    trigger: "cron",
-    pipeline: "example-pipeline",
-    node: "draft",
-    tokenEstimate: 33000,
-    costLow: 0.067,
-    costHigh: 0.2,
-    brief: "Draft the response for the first three shortlisted items",
-    modelChain: ["zai/glm-5.1", "openrouter/deepseek/deepseek-v4-pro"],
-  },
-  {
-    label: "SUBMIT × 1 item",
-    agent: "sender",
-    agentEmoji: "📤",
-    trigger: "cron",
-    pipeline: "example-pipeline",
-    node: "submit",
-    tokenEstimate: 3200,
-    costLow: 0.0005,
-    costHigh: 0.0016,
-    brief: "Submit the approved draft for the top item",
-    modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
-  },
-];
-
 // getSharedDb() rather than a fresh openDb(): first call does the real work
 // (open + migrate); every call after — including a new registerBudgetRoutes
 // closure from a plugin reload — returns the SAME cached connection
@@ -254,37 +211,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ items: rows.map(deserialize) }));
-      return true;
-    },
-  });
-
-  api.registerHttpRoute({
-    path: "/manifold/budget/mock",
-    auth: "plugin",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
-      const body = (await readBody(req)) ?? {};
-      const count = Math.min(Number(body.count ?? MOCK_ITEMS.length), MOCK_ITEMS.length);
-      const now = Date.now();
-      const created = [];
-      for (let i = 0; i < count; i++) {
-        const t = MOCK_ITEMS[i];
-        const id = randomUUID();
-        await withSharedWrite(runtimeDbPath, () => runtimeClient.execute({
-          sql: `INSERT OR REPLACE INTO queue_items
-                  (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain, pipeline, node, token_estimate, kind, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'node', 'pending', ?)`,
-          args: [id, t.label, t.agent, t.agentEmoji, t.trigger,
-                 t.costLow, t.costHigh, t.brief, JSON.stringify(t.modelChain),
-                 t.pipeline ?? null, t.node ?? null, t.tokenEstimate ?? null,
-                 now],
-        }));
-        created.push(id);
-      }
-      res.statusCode = 201;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: true, created }));
       return true;
     },
   });
