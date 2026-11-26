@@ -404,7 +404,10 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
           }
           return isGateLocked(row, today);
         });
-      } catch { return false; }
+      } catch {
+        // Fail closed: a gate_state read error must never report the gate unlocked.
+        return true;
+      }
     },
     async lookupNodeDecision({ flowId, nodeId }) {
       if (!flowId || !nodeId) return null;

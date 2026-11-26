@@ -181,26 +181,32 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     return null;
   }
 
-  // Reads: `resolved` is computed at read time (deriveFailureContext),
-  // not a stored column — filtering happens in JS after derivation.
+  // Reads: `resolved` is computed from flow_runs status (succeeded/skipped)
+  // at read time — not a stored column — so the filter is a SQL join and
+  // LIMIT applies before any per-row context derivation (cost otherwise
+  // grows linearly with failure history).
   // undefined/false → open failures (default "Recover" view);
   // true → resolved ("Done"); null → both.
   async function list({ resolved, limit = 50, since, flowId } = {}) {
     const where = [];
     const args = [];
-    if (since != null) { where.push("failed_at >= ?"); args.push(since); }
-    if (flowId != null) { where.push("flow_id = ?"); args.push(flowId); }
+    if (since != null) { where.push("f.failed_at >= ?"); args.push(since); }
+    if (flowId != null) { where.push("f.flow_id = ?"); args.push(flowId); }
+    if (resolved === undefined || resolved === false) {
+      where.push("(fr.flow_id IS NULL OR fr.status NOT IN ('succeeded', 'skipped'))");
+    } else if (resolved === true) {
+      where.push("fr.status IN ('succeeded', 'skipped')");
+    }
     const sqlText = `
-      SELECT * FROM failure_events
+      SELECT f.* FROM failure_events f
+      LEFT JOIN flow_runs fr ON fr.flow_id = f.flow_id
       ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
-      ORDER BY failed_at DESC
+      ORDER BY f.failed_at DESC
+      LIMIT ?
     `;
+    args.push(limit);
     const { rows } = await client.execute({ sql: sqlText, args });
-    const withContext = await Promise.all(rows.map((r) => deriveFailureContext(r)));
-    let filtered = withContext;
-    if (resolved === undefined || resolved === false) filtered = withContext.filter((r) => r.resolved_at == null);
-    else if (resolved === true) filtered = withContext.filter((r) => r.resolved_at != null);
-    return filtered.slice(0, limit);
+    return Promise.all(rows.map((r) => deriveFailureContext(r)));
   }
 
   async function get(id) {

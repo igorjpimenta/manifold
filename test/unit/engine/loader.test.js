@@ -191,19 +191,12 @@ describe("validatePipeline — top-level shape", () => {
     );
   });
 
-  test("does not throw when .nodes is an empty array (Array is typeof object — validator allows it)", async () => {
-    const name = "nodes_array";
-    const pDir = path.join(dir, name);
-    await mkdir(pDir, { recursive: true });
-    await writeFile(
-      path.join(pDir, "index.js"),
+  test("throws when .nodes is an empty array (Array is typeof object — zero-node pipelines are rejected)", async () => {
+    await expectSkipped(
+      "nodes_array",
       `export default { id: "p_arr_nodes", state: {}, nodes: [], edges: { __start__: "x" } };`,
-      "utf8"
+      "failed to load"
     );
-    const { logger } = makeLogger();
-    const result = await loadPipelines(dir, logger);
-    const loaded = [...result.values()].find((p) => p._dir === pDir);
-    assert.ok(loaded, "empty array nodes loads as zero-node pipeline");
   });
 
   test("throws when .edges is missing", async () => {
