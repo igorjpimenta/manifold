@@ -1,5 +1,5 @@
-// meta.js — pure before_tool_call identity stamping. No plugin-SDK import,
-// so it loads under `node --test` outside the openclaw gateway.
+// Pure before_tool_call identity stamping. No plugin-SDK import, so it loads
+// under `node --test` outside the openclaw gateway.
 
 // openclaw exposes MCP tools as mcp__<server>__<tool> (e.g.
 // mcp__manifold__manifold_start); the substring match survives a prefix change.
@@ -7,13 +7,12 @@ export function isManifoldTool(name) {
   return typeof name === "string" && name.includes("manifold");
 }
 
-// Session resolution order is most stable first: the live session key,
-// then the session id, then the single-run id, then the same fields off
-// the event. A null dimension stays null in the stamp: mcp/identity.js
-// treats it as a miss and refuses the call, so a half-stamped call fails
-// loudly instead of minting a default key. With no resolvable dimension
-// at all the hook returns undefined and the call proceeds unstamped, for
-// the server to refuse.
+// Session resolution order is most stable first: live session key, session
+// id, single-run id, then the same fields off the event. A null dimension
+// stays null: mcp/identity.js treats it as a miss and refuses the call, so a
+// half-stamped call fails loudly instead of minting a default key. With no
+// resolvable dimension the hook returns undefined and the call proceeds
+// unstamped, for the server to refuse.
 export function buildManifoldMeta(event, ctx) {
   const toolName = event?.toolName ?? ctx?.toolName;
   if (!isManifoldTool(toolName)) return undefined;
@@ -32,9 +31,8 @@ export function buildManifoldMeta(event, ctx) {
   };
 }
 
-// Gateway wiring: stamps _meta.manifold on every manifold tool call. The
-// before_tool_call return channel carries the stamp (a returned { params }
-// replaces the outgoing params; undefined leaves the call untouched).
+// The before_tool_call return channel carries the stamp: a returned { params }
+// replaces the outgoing params; undefined leaves the call untouched.
 export function registerManifoldMetaHook(api) {
   api.on("before_tool_call", (event, ctx) => buildManifoldMeta(event, ctx));
 }

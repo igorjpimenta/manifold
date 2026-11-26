@@ -6,7 +6,6 @@ import { createClient } from "@libsql/client";
 import { randomUUID } from "node:crypto";
 import { registerTreeRoutes } from "../../../telemetry/http-tree.js";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 async function makeClient() {
   const dbPath = join(tmpdir(), `http-tree-test-${randomUUID()}.sqlite`);
@@ -66,7 +65,6 @@ function makeReq(path) {
   return { method: "GET", url: `http://x${path}` };
 }
 
-// ── route registration ────────────────────────────────────────────────────────
 
 describe("registerTreeRoutes registration", () => {
   it("registers /tree/expand route", async () => {
@@ -78,7 +76,6 @@ describe("registerTreeRoutes registration", () => {
   });
 });
 
-// ── /tree/expand __root__ ─────────────────────────────────────────────────────
 
 describe("/tree/expand parent=__root__", () => {
   it("returns 503 when store is null", async () => {
@@ -135,7 +132,6 @@ describe("/tree/expand parent=__root__", () => {
   });
 });
 
-// ── /tree/expand trigger:<kind> parent (instance level) ─────────────────────
 
 describe("/tree/expand parent=trigger:<kind>", () => {
   it("merges UUID-suffixed explicit labels into one non-expandable Ad-hoc sessions row", async () => {
@@ -145,7 +141,7 @@ describe("/tree/expand parent=trigger:<kind>", () => {
     const rows = [
       ["explicit", "scorer-creation-c61af7cf-3cf1-43ff-873a-40ceb6b2cb17", 0.03],
       ["explicit", "test-positive-e3b48771-baf6-4815-8fc9-35b222701b4d", 0.02],
-      ["explicit", "freelance_workana-proposal", 0.10], // a real pipeline id — must stay separate
+      ["explicit", "freelance_workana-proposal", 0.10],
     ];
     for (const [rootKind, rootLabel, cost] of rows) {
       await client.execute({
@@ -173,7 +169,6 @@ describe("/tree/expand parent=trigger:<kind>", () => {
   });
 });
 
-// ── /tree/expand invalid parents ─────────────────────────────────────────────
 
 describe("/tree/expand invalid parent shapes", () => {
   it("returns 400 for unknown parent shape", async () => {
@@ -210,7 +205,6 @@ describe("/tree/expand invalid parent shapes", () => {
   });
 });
 
-// ── /tree/expand flow: parent ─────────────────────────────────────────────────
 
 describe("/tree/expand parent=flow:<id>", () => {
   it("returns node children for a known flow", async () => {

@@ -1,10 +1,7 @@
 // pipeline-graph.js — serialize a loaded pipeline definition into UI-safe JSON.
-//
-// The in-memory pipeline def holds function values (run/promptBuilder/apply for
-// nodes; conditional edge resolvers). We strip those before shipping over HTTP
-// — the browser only needs topology and labels. For conditional edges, we
-// regex-scan the function's source for quoted node ids so the dashboard can
-// render every possible branch instead of just one.
+// Function values (run/promptBuilder/apply, edge resolvers) are stripped before
+// shipping; conditional edges are regex-scanned for quoted node ids so the
+// dashboard renders every possible branch.
 
 const NODE_ID_RE = /["'`]([A-Za-z_][A-Za-z0-9_]*|__end__|__start__)["'`]/g;
 
@@ -61,15 +58,9 @@ export function serializePipeline(pipeline) {
     dir: pipeline._dir ?? null,
     nodes,
     edges,
-    // Optional logical groupings the dashboard renders as compound parents
-    // around their member nodes.
     groups: pipeline.groups ?? null,
-    // Declared dashboard views — opt-in extra surfaces rendered by
-    // the generic <DeclaredView> dispatcher on PipelineDetail. The
-    // serializer ships the declarations themselves (not the computed
-    // view data); the data comes from /api/stats/pipelines/:id/views.
-    // Stored as `null` for pipelines that don't declare any so the
-    // type stays stable across pipelines.
+    // Declarations only — computed data comes from
+    // /api/stats/pipelines/:id/views. null when none, so the type is stable.
     views: Array.isArray(pipeline.views) && pipeline.views.length > 0
       ? pipeline.views
       : null,
@@ -92,11 +83,6 @@ function shorten(src) {
   return oneLine.length > 200 ? oneLine.slice(0, 197) + "..." : oneLine;
 }
 
-/**
- * Serialize a subflow node's inner pipeline ("flow") so the dashboard can
- * render it as an inset graph. Shape mirrors the top-level serialization
- * but keeps the namespace local (no clash with parent node ids).
- */
 function serializeFlow(flow, parentNodeId, groupId) {
   const flowNodeIds = new Set(Object.keys(flow.nodes ?? {}));
   const nodes = [

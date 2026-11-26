@@ -5,12 +5,11 @@ export function defaultDataDir(home = os.homedir()) {
   return path.join(home, ".manifold");
 }
 
-// A value that arrived wrapped in matching quotes is a config error, and a
-// silent one: the quotes become part of the path, so the process opens (and
-// creates) a store whose name merely looks like the intended one, while every
-// other reader — dashboard, CLI, telemetry — sees an empty history. Refuse
-// loudly instead of stripping them: the environment is the authority on its
-// own paths, and a typo there should not be papered over.
+// A value that arrived wrapped in matching quotes is a config error, and
+// a silent one: the quotes become part of the path, so the process opens
+// (and creates) a store whose name merely looks like the intended one,
+// while every other reader sees an empty history. Refuse loudly instead
+// of stripping them — the environment is the authority on its own paths.
 function unquotedEnvPath(env, name) {
   const raw = env?.[name];
   if (typeof raw !== "string") return undefined;

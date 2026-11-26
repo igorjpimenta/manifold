@@ -1,12 +1,4 @@
-// server.js — read-only HTTP dashboard for manifold.
-//
-// Bound to 127.0.0.1 only (no LAN exposure, no auth surface). All routes are
-// read-only — actuation stays in the CLI and Telegram surfaces. Live updates
-// are pushed over WebSocket from the event-bus (event-log.js), which fires
-// on every store write — no polling lag, no per-client catch-up stream:
-// the run-detail page reloads full state from REST after any reconnect.
-//
-// File-serving for the bundled SPA uses node:http only; no express/fastify.
+// server.js — HTTP/WS dashboard server; loopback-only, no auth surface.
 
 import http from "node:http";
 import { attachWsEndpoint } from "../events/ws-frame.js";
@@ -26,8 +18,6 @@ import { getAllSubflowGroups } from "../state/subflow-state.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-// Static assets come from vite's build output under `dist/`. Run `npm run
-// build` from this directory after editing the React sources to refresh.
 const DIST_DIR = path.join(HERE, "dist");
 
 const MIME = {
@@ -47,24 +37,14 @@ const MIME = {
 
 export function createDashboardServer({ writeStore, readStore, failureStore, discussStore, nodeExecutionsStore, pipelinesRef, pipelineRegistryStore, ensurePipelinesLoaded, executor, eventBus, port, host, logger, recordItemDecision, admissionQueueStore = null }) {
   let server = null;
-  // Live WS door (events/ws-frame.js) — opened in start(), drained on stop().
   let door = null;
   let unsubscribe = null;
 
-  // ── Direct store reads ────────────────────────────────────────────────────
-  // Every read below hits manifold's own stores with the same query logic
-  // the gateway's /manifold/* routes use — no gateway hop. The payload
-  // shape is the dashboard client's contract: field-for-field stable, so
-  // the React app is untouched.
-
-  // Adapter-injected in production; process singleton otherwise (the same
-  // binding the gateway routes read through).
+  // Adapter-injected in production, process singleton otherwise.
   function nx() {
     return nodeExecutionsStore ?? getNodeExecutionsStore();
   }
 
-  // Normalize a listRunsPage row: *Ms suffix timestamps + synthesized
-  // stateJson so stats functions that access stateJson.pipelineId work.
   function adaptRun(r) {
     return {
       ...r,
@@ -75,8 +55,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     };
   }
 
-  // All top-level runs, trimmed to the same 500-row window the gateway's
-  // list endpoint served (limit=min(500, 9999), limit+1 fetch, pop).
   async function fetchAllRuns({ pipelineId, status } = {}) {
     const page = await readStore.listRunsPage({
       pipelineId: pipelineId || null,
@@ -103,10 +81,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     return runs.map(adaptRun);
   }
 
-  // Full run payload — same shape as the gateway's sendFullRun
-  // (routes/runs.js): assembleState-enriched stateJson, gate_records gates,
-  // failure_events errorEntries, *Ms timestamps, parent linkage. Returns
-  // null when the flow does not exist.
+  // Same payload shape as the gateway's sendFullRun (routes/runs.js).
   async function fetchFlow(flowId) {
     const flow = await readStore.get(flowId);
     if (!flow) return null;
@@ -153,18 +128,13 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     };
   }
 
-  // Errors for a set of flowIds → Map<flowId, ErrorEntry[]> (same source as
-  // the gateway's /manifold/errors: failureStore.queryErrorsByFlowIds).
   async function fetchErrors(flowIds) {
     if (!flowIds.length) return new Map();
     if (!failureStore) return new Map();
     return failureStore.queryErrorsByFlowIds(flowIds);
   }
 
-  // Batched "which top-level nodes did each flow visit" → Map<flowId,
-  // Set<nodeId>>, backing the auto-funnel visit check without one round-trip
-  // per run. Empty Map on error — the funnel then reports 0 for every
-  // stage, same as "no runs visited yet", rather than throwing.
+  // Empty Map on error: the funnel reports 0 per stage instead of throwing.
   async function fetchTreeSummary(flowIds) {
     if (!flowIds.length) return new Map();
     try {
@@ -173,8 +143,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     } catch { return new Map(); }
   }
 
-  // Subflow rows for a flow — same { subflows: [...] } envelope the
-  // engine's sendSubflowsList serves.
   async function fetchSubflows(flowId) {
     try {
       const grouped = await getAllSubflowGroups({
@@ -185,10 +153,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     } catch { return {}; }
   }
 
-  // This flow's own top-level node list — the same row shape the gateway's
-  // /tree root serves (one row per invocation, ordered by invokedAt).
-  // Empty array on error rather than throwing — callers treat "no tree
-  // data" the same as "flow has no history yet".
   async function fetchTree(flowId) {
     try {
       const flow = await readStore.get(flowId);
@@ -197,8 +161,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     } catch { return []; }
   }
 
-  // Ports routes/runs.js's buildTreeNodeRows (same flow-status fallback and
-  // point-in-time kind/agent reads, same shallow immediate-children rollup).
+  // Mirrors routes/runs.js's buildTreeNodeRows — keep the two in sync.
   async function buildTreeNodeRows(flow) {
     const store = nx();
     const pipelineId = flow.stateJson?.pipelineId;
@@ -262,8 +225,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     });
   }
 
-  // Shallow rollup (immediate children only) — same status-bucket shape
-  // summarizeChildrenByFlowIds uses.
   function bucketChildFlowsByStatus(childFlowRows) {
     const rollup = { succeeded: 0, failed: 0, pending: 0, skipped: 0, cancelled: 0 };
     for (const c of childFlowRows) {
@@ -276,9 +237,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     return rollup;
   }
 
-  // TTL cache for stats endpoints — these are polled by the SPA on a timer
-  // and can tolerate a few seconds of staleness. Keyed on fetch parameters;
-  // runs + errors are always fetched together and cached as a pair.
   const _statsCache = new Map();
   const STATS_TTL_MS = 5_000;
 
@@ -293,9 +251,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     return data;
   }
 
-  // Same /graph prefix strip as handle() below: the bundle is built with
-  // vite base `/graph/`, so the WS URL embeds the prefix when served
-  // under it and arrives bare on direct loopback.
   function wsPathMatch(pathname) {
     return pathname === "/api/events/ws" || pathname === "/graph/api/events/ws";
   }
@@ -308,20 +263,16 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
 
   async function handle(req, res) {
     const url = new URL(req.url, `http://${req.headers.host}`);
-    // The bundle is built with vite base `/graph/`, so all HTML references
-    // (assets, API client URLs) embed that prefix. We strip it here so the
-    // route table below stays prefix-agnostic. This works two ways:
-    //   - Direct loopback: `127.0.0.1:44300/graph/...` arrives with the prefix.
-    //   - Behind `tailscale serve --set-path=/graph`: tailscale already strips
-    //     the mount prefix before forwarding, so backend sees the unprefixed
-    //     path and the `if` is a no-op.
+    // The bundle ships vite base `/graph/`, so HTML references embed that
+    // prefix. Stripped here so the route table stays prefix-agnostic: direct
+    // loopback arrives prefixed, while `tailscale serve --set-path=/graph`
+    // strips the mount prefix before forwarding, so the check is a no-op there.
     let pathname = url.pathname;
     if (pathname.startsWith("/graph/")) {
       pathname = pathname.slice("/graph".length);
     }
 
     try {
-      // ── API ────────────────────────────────────────────────────────────────
       if (req.method === "GET" && pathname === "/api/health") {
         return sendJson(res, 200, {
           ok: true,
@@ -336,10 +287,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
           ...serializePipeline(p),
           historical: false,
         }));
-        // Augment with pipeline ids that exist only in flow_runs history — the
-        // operator may have run them in the past and then removed the
-        // definition file. We show them dimmed so the dashboard surfaces all
-        // runs in context, not just the ones whose source still exists.
+        // Ids whose definition file is gone but whose runs remain in
+        // flow_runs — surfaced dimmed so history stays in context.
         const implementedIds = new Set(implemented.map((p) => p.id));
         const runCounts = new Map();
         for (const r of await fetchAllRuns()) {
@@ -363,10 +312,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, serializePipeline(p));
       }
 
-      // /api/lanes — the admission pool as a live picture: how many lanes are
-      // held, by which flows, and whether a holder is leaked or merely slow.
-      // Without this the only symptom of a dead dispatch is a shrinking free
-      // count with no way to tell which flow is eating it.
+      // Which flows hold lanes, and whether a holder is leaked or just slow —
+      // otherwise a dead dispatch only shows up as a shrinking free count.
       if (req.method === "GET" && pathname === "/api/lanes") {
         if (!admissionQueueStore) {
           return sendJson(res, 200, {
@@ -397,9 +344,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, computeGlobalStats(runs, errorsByFlow));
       }
 
-      // /api/stats/cost?sinceDays=N — cross-pipeline cost roll-up for the
-      // home-page sidebar. One disk walk per run (via costForRun); fine
-      // at <1k runs, revisit when it bites.
       if (req.method === "GET" && pathname === "/api/stats/cost") {
         const sinceDays = Number(url.searchParams.get("sinceDays") ?? "");
         const sinceMs = Number.isFinite(sinceDays) && sinceDays > 0
@@ -409,9 +353,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, cost);
       }
 
-      // Cost subroute must precede the broader pipelineStats match below —
-      // otherwise the `.+$` regex captures "<id>/cost" as the pipelineId
-      // and the more specific endpoint is never reached.
+      // Must precede the broader pipelineStats match below: that regex's `.+`
+      // would swallow "<id>/cost" as the pipelineId.
       const pipeCostMatch = pathname.match(/^\/api\/stats\/pipelines\/(.+)\/cost$/);
       if (req.method === "GET" && pipeCostMatch) {
         const pipelineId = decodeURIComponent(pipeCostMatch[1]);
@@ -424,11 +367,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, cost);
       }
 
-      // /api/stats/pipelines/:id/views?sinceDays=N — pipeline-declared
-      // view payloads. Each entry is the computed result for one
-      // `views[]` declaration (see views.js header for the
-      // declaration shape). Empty array when the pipeline declares
-      // none — caller skips rendering.
       const pipeViewsMatch = pathname.match(/^\/api\/stats\/pipelines\/(.+)\/views$/);
       if (req.method === "GET" && pipeViewsMatch) {
         const pipelineId = decodeURIComponent(pipeViewsMatch[1]);
@@ -445,24 +383,14 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       const pipelineStatsMatch = pathname.match(/^\/api\/stats\/pipelines\/(.+)$/);
       if (req.method === "GET" && pipelineStatsMatch) {
         const pipelineId = decodeURIComponent(pipelineStatsMatch[1]);
-        // Pass the pipeline def so the funnel + any future
-        // pipeline-declared metrics are read transparently rather than
-        // looked up in a hardcoded dashboard-side map.
         const pipeline = pipelinesRef.value.get(pipelineId) ?? null;
         const { runs, errorsByFlow } = await cachedRunsAndErrors("all");
         const mine = runs.filter((r) => (r.stateJson?.pipelineId ?? "") === pipelineId);
         const visitedByFlow = await fetchTreeSummary(mine.map((r) => r.flowId));
-        // Lets an older run's invocation under a since-renamed node id
-        // still count toward the auto-derived funnel's current stage —
-        // see pipeline-registry.js's getNodeLineageBatch.
         const lineageByNodeId = await pipelineRegistryStore.getNodeLineageBatch(pipelineId, Object.keys(pipeline?.nodes ?? {}));
         return sendJson(res, 200, await computePipelineStats(runs, pipelineId, pipeline, errorsByFlow, null, null, visitedByFlow, lineageByNodeId));
       }
 
-      // /api/pipelines/:id/nodes/:nodeId/stats — per-node aggregation for the
-      // graph-view click panel. Scans the pipeline's runs and counts how many
-      // visited / failed at / blocked at / terminated at this node, plus the
-      // most-recent 10 runs that touched it.
       const nodeStatsMatch = pathname.match(/^\/api\/pipelines\/([^/]+)\/nodes\/([^/]+)\/stats$/);
       if (req.method === "GET" && nodeStatsMatch) {
         const pipelineId = decodeURIComponent(nodeStatsMatch[1]);
@@ -474,13 +402,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, computeNodeStats(runs, pipelineId, nodeId, errorsByFlow, nodeStatsVisited, nodeStatsLineage));
       }
 
-      // /api/search?q=<query>&status=<status>&limit=N — substring
-      // search over structured fields + errorEntries[] (flow_node_executions,
-      // covers both root and subflow errors) + top-level state keys.
-      // `status` is a structured filter applied before the free-text match
-      // (exact equality vs r.status). Both q and status are optional;
-      // status-only returns every run with that status, snippet-less. See
-      // search.js header for design call.
       if (req.method === "GET" && pathname === "/api/search") {
         const q = url.searchParams.get("q") ?? "";
         const status = url.searchParams.get("status") ?? "";
@@ -491,19 +412,13 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, searchRuns(searchRunsList, q, { limit, status, errorsByFlow }));
       }
 
-      // /api/runs/:flowId/cost — sum usage.cost.total across every agent
-      // session the flow spawned. Disk-walks the agent session JSONLs
-      // (same data source as the transcript endpoint). See cost.js for
-      // the aggregation shape.
       const runCostMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/cost$/i);
       if (req.method === "GET" && runCostMatch) {
         const cost = await costForRun(runCostMatch[1]);
         return sendJson(res, 200, cost);
       }
 
-      // /api/runs/:flowId/subflows — subflow rows grouped by groupId as
-      // {[groupId]: {[subflowKey]: SubflowData}} — the shape SubflowsCard
-      // consumes as its contract.
+      // {[groupId]: {[subflowKey]: SubflowData}} — the shape SubflowsCard consumes.
       const runSubflowsMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/subflows$/i);
       if (req.method === "GET" && runSubflowsMatch) {
         const flowId = runSubflowsMatch[1];
@@ -511,10 +426,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendJson(res, 200, grouped);
       }
 
-      // /api/runs/:flowId/tree — node-invocation tree, the same
-      // shape/endpoint companion clients already consume at the gateway
-      // level. Backs PathTrail/GraphView's executed-path rendering
-      // instead of stateJson._stepHistory.
       const runTreeMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/tree$/i);
       if (req.method === "GET" && runTreeMatch) {
         const items = await fetchTree(runTreeMatch[1]);
@@ -532,10 +443,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       if (req.method === "GET" && pathname === "/api/runs") {
         const statusFilter = url.searchParams.get("status");
         const pipelineFilter = url.searchParams.get("pipelineId");
-        // since/until filter by createdAt — used when the home pins a
-        // day on the runs/day chart. Lets the table show runs from
-        // older days that the default top-200-by-updatedAt window
-        // wouldn't otherwise include.
+        // since/until filter createdAt, for when the home chart pins a day —
+        // the default window is top-N by updatedAt.
         const sinceParam = parseInt(url.searchParams.get("since") ?? "", 10);
         const untilParam = parseInt(url.searchParams.get("until") ?? "", 10);
         const sinceMs = Number.isFinite(sinceParam) ? sinceParam : null;
@@ -583,10 +492,7 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return sendArtifact(res, artifactGetMatch[1], decodeURIComponent(artifactGetMatch[2]));
       }
 
-      // ── Actuation: respond to a gate item ───────────────────────────────
-      // Delegates to the shared recordItemDecision helper (same write site
-      // as TG callback, CLI, and the bridge's /manifold/gate/resolve).
-      // POST body: { itemId, decision: "approve"|"reject"|"edit", text? }.
+      // Actuation: POST body { itemId, decision: "approve"|"reject"|"edit", text? }.
       const approveMatch = pathname.match(/^\/api\/runs\/([0-9a-f-]+)\/approve$/i);
       if (req.method === "POST" && approveMatch) {
         return handleApprove(req, res, approveMatch[1]);
@@ -616,14 +522,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
         return handleBulkCancel(req, res);
       }
 
-      // ── Static SPA fallback ─────────────────────────────────────────────
-      // Live events arrive on the WS door (/api/events/ws, attached in
-      // start()); HTTP has no event stream — a client that cannot
-      // Upgrade must poll the REST history endpoints instead.
-      // Any unmatched GET maps to a file inside `dist/`. `/` and `/index.html`
-      // serve the SPA shell; vite-emitted `/assets/<hash>.{js,css}` URLs land
-      // here too. Path-traversal guarded by ensuring the resolved absolute
-      // path stays inside DIST_DIR.
+      // Live events arrive only over the WS door (/api/events/ws); HTTP has
+      // no event stream, so a client that cannot Upgrade must poll REST.
+      // Any unmatched GET serves a file from dist/, path-traversal guarded.
       if (req.method === "GET") {
         const rel = pathname === "/" ? "index.html" : pathname.slice(1);
         const resolved = path.resolve(DIST_DIR, rel);
@@ -665,8 +566,8 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     }
   }
 
-  // Sessions are opaque: transcript attribution comes from the session
-  // ledger, never from the session's shape.
+  // Always empty: transcript attribution comes from the session ledger, never
+  // from the session's own shape.
   async function sendTranscripts(res, flowId) {
     const flow = await fetchFlow(flowId);
     if (!flow) return sendJson(res, 404, { error: "run not found" });
@@ -707,10 +608,9 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
       return sendJson(res, 500, { error: "gate resolver unavailable", message: "createDashboardServer was not given recordItemDecision" });
     }
 
-    // Delegates to the shared recordItemDecision helper. Same write site as
-    // the /manifold/gate/resolve route that companion harnesses POST to.
-    // Resolution -> state.approvalPending[itemId] = {decision, source: "dashboard"};
-    // the existing consolidator advances the flow when all items decide.
+    // Same write site as the TG callback, CLI, and bridge
+    // /manifold/gate/resolve; the consolidator advances the flow once every
+    // item has decided.
     const result = await recordItemDecision({
       flowId,
       itemId,
@@ -740,15 +640,15 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     try { record = executor.rerun(sourceFlowId, argsOverride); }
     catch (err) {
       const msg = err?.message ?? String(err);
-      // Singleton-guard rejection surfaces as "pipeline already has N active flow(s)";
-      // surface as 409 so the client can offer "cancel the active one first".
+      // Singleton-guard rejection → 409, so the client can offer
+      // "cancel the active one first".
       if (msg.includes("active flow")) return sendJson(res, 409, { error: msg });
       if (msg.includes("not found")) return sendJson(res, 404, { error: msg });
       logger?.warn?.(`manifold dashboard rerun: ${sourceFlowId.slice(0, 8)} failed: ${msg}`);
       return sendJson(res, 500, { error: "rerun failed", message: msg });
     }
-    // Fire the executor loop in the background; the HTTP response returns
-    // the new flowId immediately and the WS door drives the dashboard.
+    // Background: the response returns flowId immediately and the WS door
+    // drives the dashboard.
     setImmediate(() => {
       Promise.resolve()
         .then(() => ensurePipelinesLoaded?.())
@@ -860,7 +760,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     const pipelineId = state.pipelineId;
     const pipeline = pipelineId ? pipelinesRef.value.get(pipelineId) : null;
 
-    // Try pipeline-declared runAudit.summarize first.
     const audit = pipeline?.runAudit;
     if (audit?.runsDir && typeof audit.summarize === "function" && state.runId) {
       try {
@@ -927,7 +826,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
     if (!pipeline?._dir) return sendJson(res, 404, { error: "pipeline dir unknown" });
     const runDir = path.join(pipeline._dir, "runs", runId);
     const resolved = path.resolve(runDir, name);
-    // Path-traversal guard: resolved must live inside runDir.
     if (!resolved.startsWith(runDir + path.sep)) {
       return sendJson(res, 403, { error: "forbidden" });
     }
@@ -963,8 +861,6 @@ export function createDashboardServer({ writeStore, readStore, failureStore, dis
   };
 }
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
 async function summariseRun(r, runErrors = []) {
   return {
     flowId: r.flowId,
@@ -979,13 +875,12 @@ async function summariseRun(r, runErrors = []) {
     updatedAt: r.updatedAt ?? null,
     endedAt: r.endedAt ?? null,
     errorsCount: runErrors.length,
-    // Derive compact subflow summary from the pre-aggregated child counts.
     subflows: summariseSubflowRollup(r),
   };
 }
 
-// Compact subflow summary from the pre-aggregated child counts merged onto
-// each list row (summarizeChildrenByFlowIds) — avoids N+1 subflow queries.
+// From the child counts already merged onto each list row — no per-run
+// subflow queries.
 function summariseSubflowRollup(r) {
   const total = r.subflowTotal ?? 0;
   if (total === 0) return null;
@@ -997,9 +892,8 @@ function summariseSubflowRollup(r) {
 }
 
 function fullRun(r, runErrors = []) {
-  // Strip `errors` from stateJson — failure_events is the sole store for
-  // error history; errorEntries below (runErrors, read from failureStore)
-  // is the normalized replacement.
+  // failure_events is the sole store for error history; `stateJson.errors` is
+  // the legacy copy.
   const { errors: _errors, ...stateWithoutLegacy } = r.stateJson ?? {};
   return {
     flowId: r.flowId,
@@ -1011,9 +905,8 @@ function fullRun(r, runErrors = []) {
     statusReason: r.statusReason ?? null,
     stateJson: stateWithoutLegacy,
     waitJson: r.waitJson ?? null,
-    // Normalized error history sourced from flow_node_executions — sibling
-    // to stateJson (not nested inside it) so flow-level and subflow-level
-    // shapes stay symmetric.
+    // Sibling to stateJson, not nested, so flow-level and subflow-level shapes
+    // stay symmetric.
     errorEntries: runErrors,
     createdAt: r.createdAt ?? null,
     updatedAt: r.updatedAt ?? null,

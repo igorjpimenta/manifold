@@ -1,7 +1,3 @@
-// ws-dialog.test.js — WS message transport into open discuss sessions:
-// connect-time bearer gate, the message/ack/reply/error protocol, and the
-// turn lifecycle (persist, stamp, run, reply, emit) against stub deps.
-// Real server + real sockets on an ephemeral port.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createDialogServer } from "../../../events/ws-dialog.js";
@@ -85,7 +81,7 @@ function connect(url, qs = "") {
     ws.onmessage = (e) => { ws.inbox.push(JSON.parse(String(e.data))); };
     const timer = setTimeout(() => reject(new Error("ws open timed out")), 5000);
     ws.onopen = () => { clearTimeout(timer); resolve(ws); };
-    ws.onerror = () => { /* handshake failures surface as close, not error payloads */ };
+    ws.onerror = () => {  };
     ws.onclose = () => { clearTimeout(timer); resolve(ws); };
   });
 }
@@ -132,7 +128,6 @@ test("full turn: ack, operator persist, stamp, run, reply, emit", async () => {
   assert.equal(reply.text, "echo: hello agent");
   assert.equal(deps.calls.run.length, 1);
   assert.equal(deps.calls.run[0].session, TARGET.session);
-  // operator message + running status persisted, session stamped, lineage recorded
   assert.ok(deps.calls.append.some((a) => a.msg.role === "operator" && a.msg.turnId === ack.turnId));
   assert.ok(deps.calls.append.some((a) => a.msg.role === "agent" && a.msg.text === "echo: hello agent"));
   assert.ok(deps.calls.status.some((s) => s.status === "running" && s.turnId === ack.turnId));
@@ -183,7 +178,6 @@ test("malformed frames are rejected without killing the socket", async () => {
   ws.send(JSON.stringify({ type: "message", flowId: FLOW.flowId }));
   const [missing] = await collect(ws, 1);
   assert.equal(missing.code, "invalid_body");
-  // socket still alive: a good turn works afterwards
   ws.send(JSON.stringify({ type: "message", id: "ok", flowId: FLOW.flowId, text: "again" }));
   const [ack, reply] = await collect(ws, 2);
   assert.equal(ack.type, "ack");

@@ -1,20 +1,3 @@
-/**
- * Unit tests for engine/pipelines-watcher.js's createPipelinesWatcher.
- *
- * state/pipeline-registry.js's write path depends on two
- * specific onReload guarantees that were never covered by a test before:
- * pipelinesRef.value is already swapped to the NEW Map before listeners
- * run (index.js's reconcilePipelineVersions call reads pipelinesRef.value
- * directly rather than the callback's own {size, ids} argument), and
- * multiple independent listeners can subscribe without interfering with
- * each other (index.js registers two: the existing dashboard-broadcast
- * one, and the new reconcile one).
- *
- * Drives `_tick()`/`_fingerprint()` directly (both exposed "for tests /
- * probes" by the source) rather than real setInterval timers — same
- * real-filesystem-integration style as pipelines-loader.test.js, just
- * deterministic instead of timer-based.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, rm } from "node:fs/promises";
@@ -32,9 +15,6 @@ export default {
 };
 `;
 
-// A pipeline with one kind:"subflow" node — loader.js's registerSubflowChildren
-// mints a synthetic entry for it (id `${id}::NODE`), never disk-backed at its
-// own directory.
 const SUBFLOW_PARENT_PIPELINE = (id) => `
 export default {
   id: "${id}",
@@ -54,10 +34,7 @@ export default {
 };
 `;
 
-// Valid JS, but throws at import time — simulates a real transient reload
-// failure (the exact class of bug pipelines-watcher.js's stale-entry merge
-// exists to tolerate), as opposed to a syntax error the loader would also
-// skip the same way.
+// Valid JS that throws at import — a transient reload failure, not a syntax error.
 const BROKEN_PIPELINE = (id) => `
 import { missing } from "./does-not-exist.js";
 export default {
@@ -103,10 +80,10 @@ describe("createPipelinesWatcher — onReload timing/ordering", () => {
       await writePipeline(dir, "test_p1");
       const pipelinesRef = { value: new Map() };
       const watcher = createPipelinesWatcher({ pipelinesDir: dir, pipelinesRef, logger: null, pollMs: 999999 });
-      await watcher._tick(); // prime
+      await watcher._tick();
       let fired = false;
       watcher.onReload(() => { fired = true; });
-      await watcher._tick(); // nothing changed on disk
+      await watcher._tick();
       assert.equal(fired, false);
     } finally {
       await cleanup();
@@ -119,17 +96,14 @@ describe("createPipelinesWatcher — onReload timing/ordering", () => {
       await writePipeline(dir, "test_p1");
       const pipelinesRef = { value: new Map() };
       const watcher = createPipelinesWatcher({ pipelinesDir: dir, pipelinesRef, logger: null, pollMs: 999999 });
-      await watcher._tick(); // prime
+      await watcher._tick();
 
       let seenAtCallbackTime = null;
       watcher.onReload(() => {
-        // This is the exact guarantee index.js's reconcilePipelineVersions
-        // wiring depends on: read pipelinesRef.value from inside the
-        // callback, not the callback's own {size, ids} argument.
         seenAtCallbackTime = pipelinesRef.value.has("test_p2");
       });
 
-      await writePipeline(dir, "test_p2"); // real on-disk change
+      await writePipeline(dir, "test_p2");
       await watcher._tick();
 
       assert.equal(seenAtCallbackTime, true, "pipelinesRef.value must already contain the new pipeline by the time the listener runs");
@@ -145,7 +119,7 @@ describe("createPipelinesWatcher — onReload timing/ordering", () => {
       await writePipeline(dir, "test_p1");
       const pipelinesRef = { value: new Map() };
       const watcher = createPipelinesWatcher({ pipelinesDir: dir, pipelinesRef, logger: null, pollMs: 999999 });
-      await watcher._tick(); // prime
+      await watcher._tick();
 
       const calls = [];
       watcher.onReload(() => calls.push("a"));
@@ -170,7 +144,7 @@ describe("createPipelinesWatcher — onReload timing/ordering", () => {
         pipelinesDir: dir, pipelinesRef, pollMs: 999999,
         logger: { warn: (m) => warnings.push(m), info: () => {} },
       });
-      await watcher._tick(); // prime
+      await watcher._tick();
 
       let secondFired = false;
       watcher.onReload(() => { throw new Error("boom"); });
@@ -192,7 +166,7 @@ describe("createPipelinesWatcher — onReload timing/ordering", () => {
       await writePipeline(dir, "test_p1");
       const pipelinesRef = { value: new Map() };
       const watcher = createPipelinesWatcher({ pipelinesDir: dir, pipelinesRef, logger: null, pollMs: 999999 });
-      await watcher._tick(); // prime
+      await watcher._tick();
 
       let fired = false;
       const unsubscribe = watcher.onReload(() => { fired = true; });
@@ -208,16 +182,6 @@ describe("createPipelinesWatcher — onReload timing/ordering", () => {
   });
 });
 
-// A pipeline's own index.js can transiently fail to reload (an unrelated
-// import error, a file mid-write during a git op) — the merge loop keeps
-// the stale PARENT entry alive as long as its index.js is still on disk,
-// but a synthetic subflow-child pipeline (id `${parentId}::${nodeId}`,
-// minted in-memory by loader.js's registerSubflowChildren) has no
-// directory of its own to stat, so it must be kept alive alongside its
-// parent whenever the parent survives. Otherwise the child fails at
-// pipeline resolution with "pipeline not loaded", and the parent's own
-// cascade-redirect retry can't recover either — it hits the exact same
-// missing map entry.
 describe("createPipelinesWatcher — synthetic subflow-child pipelines survive a transient parent reload failure", () => {
   test("a synthetic child entry survives when its parent's index.js transiently fails to import but is still on disk", async () => {
     const { dir, cleanup } = await makeTempPipelinesDir();
@@ -229,17 +193,13 @@ describe("createPipelinesWatcher — synthetic subflow-child pipelines survive a
         pipelinesDir: dir, pipelinesRef, pollMs: 999999,
         logger: { warn: (m) => warnings.push(m), info: () => {} },
       });
-      await watcher._tick(); // prime
+      await watcher._tick();
 
-      // Force a real reload that successfully loads test_parent — this is
-      // what actually mints the synthetic "test_parent::NODE" entry.
       await writePipeline(dir, "test_other");
       await watcher._tick();
       assert.ok(pipelinesRef.value.has("test_parent"), "sanity: parent loaded");
       assert.ok(pipelinesRef.value.has("test_parent::NODE"), "sanity: synthetic child was minted");
 
-      // Now break test_parent's index.js (transient import failure) and
-      // force another reload.
       await writePipeline(dir, "test_parent", BROKEN_PIPELINE("test_parent"));
       await watcher._tick();
 
@@ -261,12 +221,11 @@ describe("createPipelinesWatcher — synthetic subflow-child pipelines survive a
       await writePipeline(dir, "test_parent", SUBFLOW_PARENT_PIPELINE("test_parent"));
       const pipelinesRef = { value: new Map() };
       const watcher = createPipelinesWatcher({ pipelinesDir: dir, pipelinesRef, logger: null, pollMs: 999999 });
-      await watcher._tick(); // prime
+      await watcher._tick();
       await writePipeline(dir, "test_other");
       await watcher._tick();
       assert.ok(pipelinesRef.value.has("test_parent::NODE"), "sanity: synthetic child was minted");
 
-      // A genuine, intentional removal — not a transient failure.
       await rm(path.join(dir, "test_parent"), { recursive: true, force: true });
       await writePipeline(dir, "test_yet_another");
       await watcher._tick();

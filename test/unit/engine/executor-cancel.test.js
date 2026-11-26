@@ -1,14 +1,3 @@
-/**
- * Unit tests for engine/executor-cancel.js
- *
- * Covers: completeCancellation — returns store.cancel's result. Also
- * covers the cascade-cancel step — real sqlite-backed stores, since
- * that logic is a real join across run-store.js/node-executions.js.
- *
- * See executor-cancel.js's own header comment and CANCEL_SESSION_ABORT
- * .design.md for a still-open gap: cancelling a flow doesn't interrupt
- * an in-flight `kind:"agent"` dispatch, root or subflow.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -89,8 +78,6 @@ describe("completeCancellation — accepts any stateJson shape without throwing"
   });
 });
 
-// ── cascade-cancel ──────────────────────────────────────────────────────────
-
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
 }
@@ -169,7 +156,6 @@ describe("completeCancellation — cascade-cancel childFlows children", () => {
     const { store, runStore, nodeExecutionsStore } = harness;
     const parentFlowId = randomUUID();
     const child = await spawnChild(harness, parentFlowId, "item-1");
-    // The child itself has its own childFlows loop node, spawning a grandchild.
     const grandchild = await spawnChild(harness, child, "sub-item-1", { nodeId: "INNER" });
 
     await completeCancellation({

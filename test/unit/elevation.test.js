@@ -1,17 +1,8 @@
-// Unit tests for elevation.js — the loopback POST that re-enters a route
-// registered with auth:"gateway" using the env-var Bearer, so the handler
-// runs with CLI_DEFAULT_OPERATOR_SCOPES ambient.
-//
-// GATEWAY_PORT and the token are read at module load, so each test imports a
-// fresh instance (ESM query-string cache busting) configured for the port it
-// is about to bind. That keeps one test's port from leaking into the next.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
 
-// GATEWAY_PORT is module-level, so it must be set only for the import; the
-// token is read per call, so it stays set for the whole file.
 const TOKEN = "sekret";
 process.env.OPENCLAW_GATEWAY_TOKEN = TOKEN;
 

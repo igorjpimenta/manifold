@@ -1,13 +1,7 @@
-/**
- * Unit tests for dashboard/stats.js: resolveDisplayStep/extractError/
- * stepImpactHistogram take an already-fetched ErrorEntry[] (or
- * Map<flowId, ErrorEntry[]>) — stats.js stays DB-free.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { resolveDisplayStep, computeGlobalStats, computePipelineStats, computeNodeStats } from "../../../dashboard/stats.js";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 function makeRun(overrides = {}) {
   return {
@@ -27,7 +21,6 @@ function errEntry(nodeId, message, at = 1_700_000_005_000) {
   return { nodeId, branchKey: null, message, at };
 }
 
-// ── resolveDisplayStep ──────────────────────────────────────────────────────
 
 describe("resolveDisplayStep()", () => {
   test("succeeded run returns lastStep regardless of runErrors", () => {
@@ -52,13 +45,9 @@ describe("resolveDisplayStep()", () => {
   });
 });
 
-// ── computeGlobalStats / computePipelineStats — failureStops via errorsByFlow ──
 
 describe("computeGlobalStats() — failureStops threading", () => {
   test("a bare-string-originated error (already normalized to .message by the DB layer) clusters cleanly", () => {
-    // By the time an error reaches stats.js it is already a flat ErrorEntry
-    // with a plain string .message (the DB layer normalizes the stored value),
-    // so stats.js has no object-vs-string branching to handle.
     const run = makeRun({ flowId: "flow-legacy", status: "failed", lastStep: "SUBMIT_CODE" });
     const errorsByFlow = new Map([
       ["flow-legacy", [errEntry("SUBMIT_CODE", "weekly-cap-reached (18/0 sent)")]],
@@ -108,9 +97,6 @@ describe("computePipelineStats() — failureStops threading", () => {
   });
 });
 
-// The default auto-funnel's
-// per-node visit check reads visitedByFlow (a Map<flowId, Set<nodeId>> the
-// caller fetches in one batched round-trip).
 describe("computePipelineStats() — auto-funnel visitedByFlow", () => {
   const FUNNEL_PIPELINE = {
     id: "test_pipe",
@@ -151,9 +137,6 @@ describe("computePipelineStats() — auto-funnel visitedByFlow", () => {
   });
 
   test("aggregates across multiple runs — total is the count of runs that visited the node", async () => {
-    // PRIME (declared first): visited by both runs → total 2.
-    // DRAFT (declared last, so computeFunnel's backward-propagation pass
-    // never bumps it from a later stage): visited only by flow-a → total 1.
     const runA = makeRun({ flowId: "flow-a", status: "succeeded" });
     const runB = makeRun({ flowId: "flow-b", status: "succeeded" });
     const visitedByFlow = new Map([
@@ -166,9 +149,6 @@ describe("computePipelineStats() — auto-funnel visitedByFlow", () => {
   });
 });
 
-// computeNodeStats' visit
-// count reads visitedByFlow (same batched Map the auto-funnel uses) — a
-// separate function from the auto-funnel, both in this file.
 describe("computeNodeStats() — visitedByFlow", () => {
   test("a run whose visitedByFlow set contains the node counts as a visit", () => {
     const run = makeRun({ flowId: "flow-1", lastStep: "GATE" });
@@ -210,10 +190,6 @@ describe("computeNodeStats() — visitedByFlow", () => {
   });
 });
 
-// node identity (node_uuid) — a run recorded under a superseded node id in
-// visitedByFlow still counts toward the current
-// stage once the caller resolves lineageByNodeId via pipeline-registry.js's
-// getNodeLineageBatch and threads it through.
 describe("computePipelineStats() — auto-funnel lineageByNodeId (rename continuity)", () => {
   const RENAMED_PIPELINE = {
     id: "test_pipe",
@@ -222,8 +198,6 @@ describe("computePipelineStats() — auto-funnel lineageByNodeId (rename continu
 
   test("a run recorded under a superseded node id still counts toward the current stage", async () => {
     const run = makeRun({ flowId: "flow-old", status: "succeeded" });
-    // Its invocation was recorded as VERIFY_SUBMIT, which is not a stage id
-    // in this pipeline — it reaches SUBMIT_SUMMARY only via lineageByNodeId.
     const visitedByFlow = new Map([["flow-old", new Set(["PRIME", "VERIFY_SUBMIT"])]]);
     const lineageByNodeId = new Map([["SUBMIT_SUMMARY", new Set(["SUBMIT_SUMMARY", "VERIFY_SUBMIT"])]]);
     const result = await computePipelineStats([run], "test_pipe", RENAMED_PIPELINE, null, null, null, visitedByFlow, lineageByNodeId);
@@ -246,9 +220,6 @@ describe("computePipelineStats() — auto-funnel lineageByNodeId (rename continu
     const visitedByFlow = new Map([["flow-old", new Set(["VERIFY_SUBMIT"])]]);
     const lineageByNodeId = new Map([["sent", new Set(["sent", "VERIFY_SUBMIT"])]]);
     const result = await computePipelineStats([run], "test_pipe", declaredFunnelPipeline, null, null, null, visitedByFlow, lineageByNodeId);
-    // Sized from state.sent (an array of length 1), not from visitedByFlow/
-    // lineageByNodeId at all — proves the declared-funnel path never even
-    // looks at lineage.
     assert.equal(result.funnel.find((s) => s.id === "sent").total, 1);
   });
 });

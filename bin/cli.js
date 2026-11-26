@@ -1,7 +1,6 @@
-// cli.js — the engine CLI: runCli(argv) boots the app, MCP, or WS modes
-// in a standalone process (bin/manifold.js's thin entry calls it).
-// This module imports no harness SDK, so it loads under plain node for
-// standalone use and node:test.
+// The engine CLI: runCli(argv) boots the app, MCP, or WS modes in a
+// standalone process (bin/manifold.js's thin entry calls it). Imports no
+// harness SDK, so it loads under plain node for standalone use and node:test.
 import { parseArgs } from "node:util";
 import { startMcpServer } from "../mcp/stdio.js";
 import { createRealOps } from "../mcp/wire-ops.js";
@@ -68,9 +67,8 @@ export async function runCli(argv) {
       }
       const logger = stderrLogger();
       if (modes.length === 0) {
-        // No mode flag: the full app — stores, executor, pipelines watcher,
-        // revival, HTTP API and dashboard — as its own process. The harness
-        // adapter spawns exactly this and bridges agent turns over HTTP.
+        // Full app as its own process — the harness adapter spawns exactly
+        // this and bridges agent turns over HTTP.
         if (values["pipelines-dir"]) process.env.MANIFOLD_PIPELINES_DIR = values["pipelines-dir"];
         const { serve } = await import("../server/serve.js");
         await serve({ logger }).catch((err) => fail(`manifold serve: ${err?.message ?? err}`, 1));

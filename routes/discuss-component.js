@@ -1,10 +1,6 @@
-// routes/discuss-component.js — component fan-out for gate discuss.
-//
-// componentEmitter persists the component, then emits the canonical
-// discuss.component.proposed plus the derived discuss.pending.updated
-// through the shared emitter. The pending derivation (draft→text,
-// meta→fields) lives here, beside the emit — not duplicated in each
-// producer — because it is what cold-reconnect replays.
+// Persists the component, then emits discuss.component.proposed plus the
+// derived discuss.pending.updated (draft→text, meta→fields) — the
+// derivation lives beside the emit because cold-reconnect replays it.
 export function createComponentEmitter({ discussStore, emit }) {
   return function componentEmitter({ flowId, itemId, component }) {
     return Promise.resolve().then(async () => {

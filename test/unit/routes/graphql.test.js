@@ -1,10 +1,3 @@
-/**
- * Unit tests for routes/graphql.js
- *
- * Verifies registration (exactly 1 route, POST /manifold/graphql),
- * method guard before auth, and happy-path execution with stub stores
- * (auth mocked — failures.test.js pattern).
- */
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -14,7 +7,6 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
 const TEST_BEARER = "test-bearer-graphql";
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = TEST_BEARER;

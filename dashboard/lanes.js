@@ -1,32 +1,17 @@
 // lanes.js — the admission pool as the dashboard shows it.
 //
-// Every running flow holds exactly one lane (state/admission-queue-store.js);
-// a flow that goes blocked or terminal releases it, so a lane still held by a
-// flow that is not running is a leak, and a lane held by a running flow whose
-// row has not moved for a long time is the signature of a dead agent dispatch
-// (the dispatch's own timeout is the only thing that eventually frees it).
-// Both are visible here rather than inferred from a shrinking free count.
-//
-// Pure: callers pass the admitted rows, the queued count and a flow lookup, so
-// the attribution rules are testable without a database.
+// Every running flow holds exactly one lane; blocked/terminal flows release
+// theirs. So a lane held by a non-running flow is a leak, and a lane held by
+// a running flow whose row hasn't moved is a dead dispatch (only its own
+// timeout eventually frees it). Both are surfaced here rather than inferred
+// from a shrinking free count.
 
-/**
- * How long a running flow's row may sit un-updated before its lane is called
- * suspect. Agent dispatches legitimately run for minutes (a draft turn), so
- * this is deliberately far above any normal node duration; the point is to
- * catch a lane that will only be freed by a timeout, not to report slow work.
- */
+/** How long a running flow's row may sit un-updated before its lane is called
+ *  suspect — far above any real node duration (dispatches legitimately run
+ *  minutes); the point is to catch a lane only a timeout will free, not to
+ *  report slow work. */
 export const SUSPECT_STALE_MS = 15 * 60_000;
 
-/**
- * @param {object} args
- * @param {number} args.limit          pool size (global concurrency limit)
- * @param {number} args.queued         entries waiting for a lane
- * @param {Array<{flowId: string, nodeId?: string|null, kind: string, admittedAt: number|null}>} args.admitted
- * @param {Map<string, object>} args.runsByFlow  flowId → { status, lastStep, pipelineId, updatedAt }
- * @param {number} args.now            current epoch ms
- * @param {number} [args.staleMs]
- */
 export function buildLanesSnapshot({ limit, queued, admitted, runsByFlow, now, staleMs = SUSPECT_STALE_MS }) {
   const held = admitted.length;
   const lanes = admitted.map((a) => {

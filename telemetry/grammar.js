@@ -1,14 +1,10 @@
-// session scope grammar — every session shape we know about,
-// with a single `classify` entry point that returns the parent breadcrumb (or
-// null for roots). The breadcrumb might be:
-//   { parentKind: "flow", flow8: "..." }   → resolver joins to flow_runs
-//   { parentKind: "session-key", key: "..." } → resolver walks up
-//   { parentKind: "cron-id", cronId: "..." }  → resolver joins to cron jobs
-//   { parentKind: "memory-synth", runId: "..." } → root (no on-disk session)
-//   null → this is a root, no parent
-//
-// Adding a new scope: just add a regex + a CLASSIFIERS entry. The rest of the
-// pipeline (resolver, store, hooks) is grammar-agnostic.
+// session scope grammar — every session shape we know about, with one
+// `classify` entry point returning the parent breadcrumb: { kind: "flow", flow8 }
+// (resolver joins flow_runs), { kind: "session-key", key } (resolver walks up),
+// { kind: "cron-id", cronId } (resolver joins cron jobs), { kind: "memory-synth",
+// runId } (root, no on-disk session), or null (this is a root). New scopes:
+// add a regex plus a CLASSIFIERS entry; the rest of the pipeline is
+// grammar-agnostic.
 
 const REGEX = {
   CRON_RUN:  /^agent:([^:]+):cron:([0-9a-f-]{36}):run:([0-9a-f-]+)$/,
@@ -18,27 +14,20 @@ const REGEX = {
   EXPLICIT:  /^agent:([^:]+):explicit:(.+)$/,
   MEMSYNTH:  /^agent:([^:]+):memory-synth:([^:]+):c-(\d+)$/,
   AGENT_DEF: /^agent:([^:]+):main$/,
-  // Agent-node dispatch key minted by the openclaw adapter
-  // (plugins/openclaw/manifold/sessions.js newNodeSessionId). Format:
-  //   agent:<agentId>:manifold:<flow8>-<node>
-  // The flow segment joins back to flow_runs, so a run's dispatches are
-  // attributable even when the session index row is missing.
+  // Adapter-minted node dispatch key: agent:<agentId>:manifold:<flow8>-<node>.
+  // The flow segment joins back to flow_runs, so dispatches stay attributable
+  // even when the session index row is missing.
   MANIFOLD_NODE: /^agent:([^:]+):manifold:([0-9a-f]{8})-([A-Za-z0-9._-]+)$/,
-  // Synthetic operator-trigger keys minted by the `_elev/start` HTTP route
-  // when a pipeline is started via CLI or another harness. Format:
-  //   agent:operator:(cli|operator):<flowId-uuid>
-  // Treated as root (no parent). The `unknown` source variant is NOT included
-  // here because those historic flows were actually cron-triggered and need
-  // separate SQL attribution, not the operator label.
+  // Route-minted operator trigger: agent:operator:(cli|operator):<flowId-uuid>,
+  // treated as root. The `unknown` source variant is excluded — those historic
+  // flows were cron-triggered and need SQL attribution, not an operator label.
   OPERATOR_TRIGGER: /^agent:operator:(cli|operator):([0-9a-f-]{36})$/,
-  // Catch-all for manual sessions whose key is `agent:<id>:<tail>`
-  // with no recognized scope prefix — e.g. hand-typed --session-id values
-  // that don't follow a known scope. Treated as kind=explicit (same semantics
-  // as the prefixed form). Tried LAST so specific rules win.
+  // Catch-all for `agent:<id>:<tail>` with no recognized scope prefix
+  // (hand-typed --session-id values). Same semantics as the prefixed form;
+  // tried LAST so specific rules win.
   EXPLICIT_BARE: /^agent:([^:]+):([^:]+)$/,
 };
 
-/** Returns { kind, agentId, pipelineId?, flowShort?, nodeId?, itemKey?, parentHint } */
 export function classify(session) {
   if (typeof session !== "string" || !session) {
     return { kind: "unknown", agentId: null, parentHint: null };
@@ -57,7 +46,7 @@ export function classify(session) {
     const [, agentId, cronName] = m;
     return {
       kind: "cron-owner", agentId, cronName,
-      parentHint: null,                              // ROOT
+      parentHint: null,
     };
   }
   if ((m = REGEX.MEMSYNTH.exec(session))) {
@@ -71,21 +60,21 @@ export function classify(session) {
     const [, agentId, uuid] = m;
     return {
       kind: "bare-subagent", agentId, bareUuid: uuid,
-      parentHint: null,                              // Parent must come from spawn hook
+      parentHint: null,  // parent must come from the spawn hook
     };
   }
   if ((m = REGEX.TG_DM.exec(session))) {
     const [, agentId, chatId] = m;
     return {
       kind: "telegram-dm", agentId, telegramChatId: chatId,
-      parentHint: null,                              // ROOT
+      parentHint: null,
     };
   }
   if ((m = REGEX.OPERATOR_TRIGGER.exec(session))) {
     const [, source, triggerFlowId] = m;
     return {
       kind: "operator-trigger", agentId: "operator", operatorSource: source, triggerFlowId,
-      parentHint: null,                              // ROOT
+      parentHint: null,
     };
   }
   if ((m = REGEX.MANIFOLD_NODE.exec(session))) {
@@ -99,24 +88,21 @@ export function classify(session) {
     const [, agentId, purpose] = m;
     return {
       kind: "explicit", agentId, explicitPurpose: purpose,
-      parentHint: null,                              // ROOT
+      parentHint: null,
     };
   }
   if ((m = REGEX.AGENT_DEF.exec(session))) {
     const [, agentId] = m;
     return {
       kind: "agent-default", agentId,
-      parentHint: null,                              // ROOT
+      parentHint: null,
     };
   }
-  // Fallback: bare-shape explicit (no scope prefix). Specific rules above
-  // (cron-owner, subagent, telegram-dm, etc.) get first crack, so this only
-  // matches truly unprefixed `agent:<id>:<tail>` keys.
   if ((m = REGEX.EXPLICIT_BARE.exec(session))) {
     const [, agentId, purpose] = m;
     return {
       kind: "explicit", agentId, explicitPurpose: purpose,
-      parentHint: null,                              // ROOT
+      parentHint: null,
     };
   }
   return { kind: "unknown", agentId: agentIdOf(session), parentHint: null };
@@ -126,7 +112,7 @@ export function agentIdOf(session) {
   if (typeof session !== "string") return null;
   const i1 = session.indexOf(":");
   const i2 = session.indexOf(":", i1 + 1);
-  if (i1 !== 5 || i2 === -1) return null;            // must start "agent:"
+  if (i1 !== 5 || i2 === -1) return null;  // must start "agent:"
   return session.slice(i1 + 1, i2) || null;
 }
 

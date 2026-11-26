@@ -1,8 +1,6 @@
-// Daily-budget guard. Called from the before_message_write hook after each
-// cost insert. When today's total exceeds CAP_USD, writes the
-// budget_alert_events row and emits a manifold.budget.alert event for a
-// consumer to deliver (once per day per threshold — debounced via
-// lastAlertedLocalDay). Delivery is not manifold's job.
+// Daily-budget guard: on a threshold crossing, write a budget_alert_events
+// row and emit manifold.budget.alert for a consumer to deliver. Delivery is
+// not manifold's job.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -14,27 +12,19 @@ import { migrateDatabase, OPS_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { resolveDataDir, opsDbPath } from "../state/paths.js";
 
 const DEFAULT_CAP_USD = 3.0;
-const DEFAULT_LOCK_THRESHOLD = 0.8;  // fraction of cap; operator-configurable via dashboard
+const DEFAULT_LOCK_THRESHOLD = 0.8;
 
-// Thresholds — fraction of cap. Each fires at most once per local day.
-// 50% lets the operator intervene before damage is done; 80% is the
-// "approaching" warning; 100% means we've crossed the line.
 const THRESHOLDS = [0.1, 0.5, 0.8, 1.0];
 
-// Persisted across gateway restarts so we don't re-alert on every reload of
-// the same already-over-budget day. The once-per-day-per-threshold debounce
-// is the only silencing mechanism — no operator-facing snooze.
+// Persisted so a restart doesn't re-alert on an already-over-budget day.
 const STATE_FILE = path.join(resolveDataDir(), "lineage", ".alerted-thresholds.json");
-// Same physical file budget/index.js's gate_state lives in — each module
-// owns its own tables there.
+// Same physical file budget/index.js's gate_state lives in; each module owns
+// its own tables there.
 const DB_PATH = opsDbPath(resolveDataDir());
 
-let state = readState();           // { day: "YYYY-MM-DD", fired: [0.5, 0.8, 1.0] }
+let state = readState();
 let lastObservedTotal = 0;
 
-// In-memory cache — read on the hot checkBudget path with zero I/O.
-// Populated by initCapStore() at service start; updated optimistically
-// (before the DB write lands) by the setters below.
 let configuredCapUSD = DEFAULT_CAP_USD;
 let configuredLockThreshold = DEFAULT_LOCK_THRESHOLD;
 
@@ -50,13 +40,9 @@ async function _getClient() {
 }
 
 /**
- * Loads the active cap_versions row into the in-memory cache, seeding one
- * row from the hardcoded defaults on a bare table. Must complete before
- * checkBudget()/the HTTP cap routes see traffic; registered as its own
- * api.registerService start hook.
- *
- * dbPath override is test-only (isolated per-test files) — production
- * always uses the dataDir default.
+ * Seeds the in-memory cap from the active cap_versions row (or the hardcoded
+ * defaults on a bare table). Must complete before checkBudget() and the HTTP
+ * cap routes see traffic. dbPath override is test-only.
  */
 export async function initCapStore({ dbPath = DB_PATH } = {}) {
   _dbPath = dbPath;
@@ -78,12 +64,9 @@ export async function initCapStore({ dbPath = DB_PATH } = {}) {
   configuredLockThreshold = DEFAULT_LOCK_THRESHOLD;
 }
 
-/**
- * SCD2 write — retires the current active row and inserts a new one in a
- * single atomic batch, same pattern as pipeline_versions. A no-op when the
- * patch doesn't actually change anything, so re-PUTting the same value
- * doesn't churn out a spurious history row.
- */
+/** SCD2: retire the active row and insert its replacement in one batch —
+ *  no-op when the patch changes nothing, so a repeat PUT doesn't churn
+ *  history. */
 async function _writeCapVersion(patch) {
   const client = await _getClient();
   const { rows } = await client.execute(
@@ -103,11 +86,7 @@ async function _writeCapVersion(patch) {
   await withSharedWrite(_dbPath, () => client.batch(queries));
 }
 
-/** Set cap, persist as a new cap_versions row. Only ever called from the
- *  (already-async) PUT /budget/cap route handler — awaited there so the
- *  response only confirms ok:true once the write actually landed, same
- *  durable-before-response guarantee the old synchronous fs.writeFileSync
- *  gave for free. */
+/** Awaited before responding, so ok:true means the write landed. */
 export async function setCapAndPersist(usd) {
   if (typeof usd !== "number" || usd <= 0 || !Number.isFinite(usd)) return;
   configuredCapUSD = usd;
@@ -116,20 +95,15 @@ export async function setCapAndPersist(usd) {
 
 export function currentCapUSD() { return configuredCapUSD; }
 
-/** Fraction of daily cap at which the gate auto-locks (0 < x ≤ 1). */
 export function currentLockThreshold() { return configuredLockThreshold; }
 
-/** Set gate-lock threshold, persist as a new cap_versions row. Same
- *  await-before-respond contract as setCapAndPersist above. */
+/** Same await-before-respond contract as setCapAndPersist. */
 export async function setLockThresholdAndPersist(fraction) {
   if (typeof fraction !== "number" || fraction <= 0 || fraction > 1 || !Number.isFinite(fraction)) return;
   configuredLockThreshold = fraction;
   await _writeCapVersion({ lockThreshold: fraction });
 }
 
-/** Full cap/threshold history, oldest first — e.g. for rendering the actual
- *  cap in place at each point on a spend-over-time chart, rather than
- *  assuming today's cap applied retroactively. */
 export async function getCapHistory() {
   const client = await _getClient();
   const { rows } = await client.execute(
@@ -139,8 +113,8 @@ export async function getCapHistory() {
   return rows;
 }
 
-/** Records one threshold crossing. Fire-and-forget from checkBudget — a
- *  failed write here should never block the alert push itself. */
+/** Fire-and-forget from checkBudget: a failed write must never block the
+ *  alert push itself. */
 async function _recordAlertEvent({ threshold, total, cap }) {
   const client = await _getClient();
   await withSharedWrite(_dbPath, () => client.execute({
@@ -149,8 +123,6 @@ async function _recordAlertEvent({ threshold, total, cap }) {
   }));
 }
 
-/** Threshold-crossing history, newest first — powers a cap-hit chart's
- *  tap-to-detail (which threshold, what time), not just "was that day bad". */
 export async function getAlertHistory({ limit = 60 } = {}) {
   const client = await _getClient();
   const { rows } = await client.execute({
@@ -209,18 +181,13 @@ async function _unlockGate(logger) {
 }
 
 function localDayKey(d = new Date()) {
-  // Local-time YYYY-MM-DD (the spend rolls over at local midnight, not UTC).
+  // Local-time YYYY-MM-DD: spend rolls over at local midnight, not UTC.
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
 }
 
-/**
- * Returns today's total spend in USD by summing cost_by_call rows whose
- * ts falls within the local-time day boundaries. Uses sqlite's localtime
- * modifier so the boundary is consistent regardless of timezone.
- */
 async function todaysTotalUSD(store) {
   const row = await execGet(store._client, `
     SELECT COALESCE(SUM(cost_total), 0) AS total
@@ -231,25 +198,16 @@ async function todaysTotalUSD(store) {
 }
 
 /**
- * Should be called after every successful cost insert. Cheap — one indexed
- * SELECT and an in-memory threshold check. No-op when already alerted for
- * every threshold today.
- *
- * Behavior:
- * - On a NEW local day with prior history, silently mark already-crossed
- *   thresholds as fired (so a mid-day gateway restart doesn't retroactively
- *   re-fire pushes for thresholds the operator already saw).
- * - For each threshold (50% / 80% / 100%), fire the alert at most once
- *   per local day. Crossing two thresholds in one cost insert (rare) fires
- *   both notifications.
+ * Cheap: one indexed SELECT plus an in-memory threshold check; no-op once
+ * every threshold has fired today. On a NEW local day, thresholds already
+ * crossed are marked fired without dispatching, so a mid-day restart doesn't
+ * re-push alerts the operator already saw. Two thresholds crossed by one
+ * insert both fire.
  */
 export async function checkBudget({ store, logger, justWroteUsd = 0, notify }) {
   try {
     const today = localDayKey();
 
-    // New-day rollover: reset fired list. To avoid spamming pushes after a
-    // mid-day restart of an already-over-budget day, silently mark any
-    // already-crossed thresholds as fired without dispatching.
     if (state.day !== today) {
       state = { day: today, fired: [] };
       const totalNow = await todaysTotalUSD(store);
@@ -257,14 +215,11 @@ export async function checkBudget({ store, logger, justWroteUsd = 0, notify }) {
       for (const t of THRESHOLDS) if (fracNow >= t) state.fired.push(t);
       writeState(state);
       lastObservedTotal = totalNow;
-      // New day: unlock the gate so pipelines run freely again
       _unlockGate(logger).catch(() => {});
-      // Don't fire on the first call of a new day even if we crossed —
-      // alerts only fire on transitions observed during this process.
       return;
     }
 
-    if (state.fired.length === THRESHOLDS.length) return; // all fired today
+    if (state.fired.length === THRESHOLDS.length) return;
 
     const total = await todaysTotalUSD(store);
     lastObservedTotal = total;
@@ -277,7 +232,7 @@ export async function checkBudget({ store, logger, justWroteUsd = 0, notify }) {
       writeState(state);
       _recordAlertEvent({ threshold: t, total, cap: configuredCapUSD })
         .catch((err) => logger?.warn?.(`lineage[budget-alert] record(${t}) error: ${err?.message ?? err}`));
-      // Fire-and-forget so the hook isn't blocked on push round-trip.
+      // Fire-and-forget: the hook must not block on the push round-trip.
       fireAlert({ threshold: t, total, cap: configuredCapUSD, store, logger, notify })
         .catch((err) => logger?.warn?.(`lineage[budget-alert] fire(${t}) error: ${err?.message ?? err}`));
     }
@@ -286,8 +241,6 @@ export async function checkBudget({ store, logger, justWroteUsd = 0, notify }) {
   }
 }
 
-// ─── alert composition + dispatch ──────────────────────────────────────────
-
 async function fireAlert({ threshold, total, cap, store, logger, notify }) {
   const text = await composeText({ threshold, total, cap, store });
   const title = composeTitle({ threshold, total, cap });
@@ -295,10 +248,9 @@ async function fireAlert({ threshold, total, cap, store, logger, notify }) {
     _lockGate(logger).catch(() => {});
     logger?.info?.(`lineage[budget-alert] approval gate locked (threshold=${threshold} >= lock=${configuredLockThreshold})`);
   }
-  // The budget_alert_events row is written unconditionally, so the threshold
-  // crossing is never lost even when no consumer is attached. Delivery
-  // belongs to whoever subscribes (app bridge, notifier); manifold only
-  // states the event.
+  // The budget_alert_events row is written unconditionally, so a crossing is
+  // never lost even with no consumer attached; delivery belongs to whoever
+  // subscribes.
   if (typeof notify === "function") {
     try {
       notify({ title, body: text.body, threshold, total, cap });
@@ -326,8 +278,6 @@ async function composeText({ threshold, total, cap, store }) {
   return { body };
 }
 
-/** Highest-spending root in today's data — used to point the operator at
- *  the driver without having to open the app first. Best-effort. */
 async function topDriverToday(store) {
   try {
     const row = await execGet(store._client, `
@@ -342,9 +292,8 @@ async function topDriverToday(store) {
   } catch { return null; }
 }
 
-/** Fire a one-off alert through the normal event path, ignoring the
- *  once-per-day debounce. For operator validation only — does not mutate the
- *  persistent threshold-fired state. */
+/** Ignores the once-per-day debounce and does not mutate threshold state —
+ *  operator validation only. */
 export async function testFireAlert({ store, logger, threshold = 0.5, notify }) {
   const total = await todaysTotalUSD(store);
   await fireAlert({ threshold, total, cap: configuredCapUSD, store, logger, notify });

@@ -1,12 +1,9 @@
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
 export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePipelinesLoaded }) {
-  // GET /manifold/pipelines — catalog of pipeline definitions joined with
-  // run-history vitals. Mirrors the dashboard's /api/pipelines but trimmed
-  // to what a pipelines list view needs at a glance (lastRunAt,
-  // todayCount, succeeded/failed today, success-rate over a recent window).
-  // No cost (slow JSONL walking lives in the per-pipeline detail route).
-  // Historical pipelines (no def on disk but runs in db) are appended last.
+  // Catalog of pipeline definitions joined with run-history vitals, trimmed
+  // to what a list view needs (no cost — that's the detail route).
+  // Historical pipelines (no def on disk but runs in db) append last.
   api.registerHttpRoute({
     path: "/manifold/pipelines",
     auth: "plugin",
@@ -24,10 +21,8 @@ export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePip
       try {
         await ensurePipelinesLoaded?.();
         const nowMs = Date.now();
-      // Caller-supplied "today" boundary so clients can bucket by
-      // their local-day midnight (the operator thinks in their own TZ).
-        // Falls back to UTC midnight to keep behaviour identical for
-        // any caller that doesn't send it (parity with the dashboard).
+      // Caller-supplied "today" boundary so clients can bucket by their own
+      // local-day midnight; UTC midnight fallback matches callers that omit it.
         const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
         const todayParam = url.searchParams.get("todayStartMs");
         const parsedToday = todayParam ? Number(todayParam) : null;
@@ -36,15 +31,12 @@ export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePip
           : (() => { const d = new Date(nowMs); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); })();
         const sevenDaysMs = nowMs - 7 * 86_400_000;
 
-        // SQL GROUP BY + window function replace the JS aggregation loop —
-        // two queries instead of iterating 7K rows in JS.
         const agg = await readStore.listAllPipelineStats({ todayStartMs, sevenDaysMs });
 
-        // _synthetic: true — a subflow node's .flow registered as its own
-        // addressable pipeline (`${pipelineId}::${nodeId}`) so childFlows
-        // can start a real child flow_run against it (see engine/loader.js).
-        // Purely an internal dispatch target, never a pipeline an operator
-        // runs or sees on its own — must not appear in the catalog.
+        // _synthetic: a subflow node's .flow registered as its own
+        // addressable pipeline (`${pipelineId}::${nodeId}`) for childFlows
+        // dispatch (engine/loader.js) — internal target, never shown to an
+        // operator, so it must not appear in the catalog.
         const implemented = [...pipelinesRef.value.values()].filter((p) => !p._synthetic).map((p) => {
           const a = agg.get(p.id) ?? null;
           const nodeCount = Object.keys(p.nodes ?? {}).length;
@@ -91,9 +83,8 @@ export function registerPipelineRoutes({ api, pipelinesRef, readStore, ensurePip
           });
         }
 
-        // Sort by recent activity: implemented-with-runs first (by
-        // lastRunAt desc), then implemented-no-runs (alpha), then
-        // historical last (lastRunAt desc).
+        // Recent activity first: implemented-with-runs (lastRunAt desc),
+        // then implemented-no-runs (alpha), then historical (lastRunAt desc).
         const sortKey = (p) => p.lastRunAtMs ?? 0;
         const live = implemented.filter((p) => p.lastRunAtMs).sort((a, b) => sortKey(b) - sortKey(a));
         const idle = implemented.filter((p) => !p.lastRunAtMs).sort((a, b) => a.id.localeCompare(b.id));

@@ -1,6 +1,3 @@
-// Unit tests for mcp/wire-ops.js — the store-backed ops behind `serve --mcp`,
-// which runs outside the gateway (no agent runtime). Everything here drives
-// the real stores against a temp store home; nothing is stubbed.
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -56,7 +53,7 @@ before(async () => {
 
 after(() => {
   delete process.env.MANIFOLD_DATA_DIR;
-  try { rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
+  try { rmSync(home, { recursive: true, force: true }); } catch {  }
 });
 
 async function waitForStatus(flowId, want, timeoutMs = 5000) {

@@ -1,7 +1,3 @@
-// Unit tests for state/discuss-store.js — covers createDiscussStore schema setup,
-// getState, appendMessage, stampMessageError, setTurnStatus, setPending,
-// mergePendingFields, clearPending, setComponent, getComponents,
-// getBulkSummaries, migration idempotency, ensureRow safety, and tryParse edge cases.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -11,8 +7,6 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createDiscussStore } from "../../../state/discuss-store.js";
 import { createRunStore } from "../../../state/run-store.js";
-
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 function tmpDb() {
   return path.join(os.tmpdir(), `gf-discuss-test-${randomUUID()}.sqlite`);
@@ -37,14 +31,11 @@ async function makeStore(overrides = {}) {
   });
 }
 
-// ─── createDiscussStore — schema + migration ──────────────────────────────────
-
 describe("createDiscussStore — DB setup", () => {
   test("creates DB and table without throwing", async () => {
     const store = await makeStore();
-    // Verify table exists by querying it
     const rows = await store.getState(randomUUID(), randomUUID());
-    assert.equal(rows, null); // no row yet — just confirms table exists
+    assert.equal(rows, null);
   });
 
   test("schema is idempotent — opening twice on the same file does not throw", async () => {
@@ -56,32 +47,25 @@ describe("createDiscussStore — DB setup", () => {
   });
 
   test("migration column components_json exists after open", async () => {
-    // We verify the column exists by calling a method that reads it
     const store = await makeStore();
     const flowId = randomUUID();
     const itemId = randomUUID();
-    // setComponent requires components_json; if column were missing it would throw
     await store.setComponent(flowId, itemId, { kind: "shortlist", data: [1] });
     const comps = await store.getComponents(flowId, itemId);
     assert.equal(comps.length, 1);
   });
 
   test("runMigrations silently skips duplicate column errors", async () => {
-    // Opening the same DB twice triggers MIGRATIONS again; duplicate-column
-    // errors must be swallowed, not thrown.
     const dbPath = tmpDb();
     const s1 = await createDiscussStore({ dbPath });
     const flowId = randomUUID();
     const runs = await createRunStore({ dbPath });
     await runs.insert({ flowId, status: "running" });
     await s1.setComponent(flowId, randomUUID(), { kind: "x" });
-    // Re-open: migration re-runs ALTER TABLE → duplicate column → must not throw
     const s2 = await createDiscussStore({ dbPath });
-    assert.ok(s2); // still alive
+    assert.ok(s2);
   });
 });
-
-// ─── getState ────────────────────────────────────────────────────────────────
 
 describe("getState", () => {
   test("returns null for unknown (flowId, itemId)", async () => {
@@ -118,8 +102,6 @@ describe("getState", () => {
     assert.equal(state.messages[1].role, "agent");
   });
 });
-
-// ─── appendMessage ────────────────────────────────────────────────────────────
 
 describe("appendMessage", () => {
   test("auto-generates id when omitted", async () => {
@@ -213,8 +195,6 @@ describe("appendMessage", () => {
   });
 });
 
-// ─── stampMessageError ────────────────────────────────────────────────────────
-
 describe("stampMessageError", () => {
   test("stamps error on the last operator message matching turnId", async () => {
     const store = await makeStore();
@@ -225,9 +205,7 @@ describe("stampMessageError", () => {
     await store.appendMessage(flowId, itemId, { role: "operator", text: "q2", turnId: randomUUID() });
     await store.stampMessageError(flowId, itemId, turnId, "LLM timeout");
     const { messages } = await store.getState(flowId, itemId);
-    // The first message (matching turnId) should have the error
     assert.equal(messages[0].error, "LLM timeout");
-    // The second message (different turnId) should not
     assert.equal(messages[1].error, null);
   });
 
@@ -240,7 +218,6 @@ describe("stampMessageError", () => {
     await store.appendMessage(flowId, itemId, { role: "operator", text: "second op" });
     await store.stampMessageError(flowId, itemId, null, "network error");
     const { messages } = await store.getState(flowId, itemId);
-    // Last operator message (index 2) gets the error
     assert.equal(messages[2].error, "network error");
     assert.equal(messages[0].error, null);
   });
@@ -250,7 +227,6 @@ describe("stampMessageError", () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     await store.appendMessage(flowId, itemId, { role: "agent", text: "only agent" });
-    // Must not throw
     await store.stampMessageError(flowId, itemId, null, "irrelevant");
     const { messages } = await store.getState(flowId, itemId);
     assert.equal(messages[0].error, null);
@@ -258,7 +234,6 @@ describe("stampMessageError", () => {
 
   test("is a no-op when row does not exist (no throw)", async () => {
     const store = await makeStore();
-    // No row — ensureRow creates it, then there are no operator messages
     await assert.doesNotReject(() => store.stampMessageError(randomUUID(), randomUUID(), null, "err"));
   });
 
@@ -272,13 +247,10 @@ describe("stampMessageError", () => {
     await store.appendMessage(flowId, itemId, { role: "operator", text: "later", turnId });
     await store.stampMessageError(flowId, itemId, turnId, "err");
     const { messages } = await store.getState(flowId, itemId);
-    // The LAST one matching (index 2) gets the error
     assert.equal(messages[2].error, "err");
     assert.equal(messages[0].error, null);
   });
 });
-
-// ─── setTurnStatus ────────────────────────────────────────────────────────────
 
 describe("setTurnStatus", () => {
   test("persists status and activeTurnId", async () => {
@@ -321,14 +293,11 @@ describe("setTurnStatus", () => {
     const store = await makeStore();
     const flowId = randomUUID();
     const itemId = randomUUID();
-    // No prior row — should not throw
     await store.setTurnStatus(flowId, itemId, "running", randomUUID());
     const state = await store.getState(flowId, itemId);
     assert.equal(state.turnStatus, "running");
   });
 });
-
-// ─── setPending ───────────────────────────────────────────────────────────────
 
 describe("setPending", () => {
   test("writes text and draftId", async () => {
@@ -355,13 +324,10 @@ describe("setPending", () => {
     const store = await makeStore();
     const flowId = randomUUID();
     const itemId = randomUUID();
-    // First set some fields via mergePendingFields
     await store.mergePendingFields(flowId, itemId, { budget: 500, title: "old title" });
-    // Then call setPending — should not wipe the `fields` sub-object
     await store.setPending(flowId, itemId, "new draft text");
     const state = await store.getState(flowId, itemId);
     assert.equal(state.pending.text, "new draft text");
-    // fields should still be there from the prior merge
     assert.deepEqual(state.pending.fields, { budget: 500, title: "old title" });
   });
 
@@ -375,8 +341,6 @@ describe("setPending", () => {
     assert.equal(state.pending.text, "second draft");
   });
 });
-
-// ─── mergePendingFields ───────────────────────────────────────────────────────
 
 describe("mergePendingFields", () => {
   test("shallow-merges fields without overwriting unrelated keys", async () => {
@@ -420,8 +384,6 @@ describe("mergePendingFields", () => {
   });
 });
 
-// ─── readPending ──────────────────────────────────────────────────────────────
-
 describe("readPending", () => {
   test("returns null for an unknown thread", async () => {
     const store = await makeStore();
@@ -461,7 +423,6 @@ describe("readPending", () => {
     const itemId = randomUUID();
     await store.setPending(flowId, itemId, "proposal body");
     const written = await store.readPending(flowId, itemId);
-    // A later message moves the thread's updated_at, not the proposal's.
     await new Promise((r) => setTimeout(r, 5));
     await store.appendMessage(flowId, itemId, { role: "operator", text: "more" });
     const after = await store.readPending(flowId, itemId);
@@ -477,8 +438,6 @@ describe("readPending", () => {
     assert.equal(await store.readPending(flowId, itemId), null);
   });
 });
-
-// ─── one row per thread ───────────────────────────────────────────────────────
 
 describe("one row per (flowId, itemId)", () => {
   test("concurrent writes land on a single row", async () => {
@@ -506,8 +465,6 @@ describe("one row per (flowId, itemId)", () => {
   });
 });
 
-// ─── clearPending ─────────────────────────────────────────────────────────────
-
 describe("clearPending", () => {
   test("sets pending to null", async () => {
     const store = await makeStore();
@@ -523,14 +480,11 @@ describe("clearPending", () => {
     const store = await makeStore();
     const flowId = randomUUID();
     const itemId = randomUUID();
-    // Ensure row exists
     await store.appendMessage(flowId, itemId, { role: "operator", text: "x" });
     await assert.doesNotReject(() => store.clearPending(flowId, itemId));
     await assert.doesNotReject(() => store.clearPending(flowId, itemId));
   });
 });
-
-// ─── setComponent ─────────────────────────────────────────────────────────────
 
 describe("setComponent", () => {
   test("upserts by kind — last-write-wins", async () => {
@@ -558,7 +512,6 @@ describe("setComponent", () => {
     const flowId = randomUUID();
     const itemId = randomUUID();
     await store.setComponent(flowId, itemId, null);
-    // No row created, no throw
     const result = await store.getState(flowId, itemId);
     assert.equal(result, null);
   });
@@ -599,8 +552,6 @@ describe("setComponent", () => {
   });
 });
 
-// ─── getComponents ────────────────────────────────────────────────────────────
-
 describe("getComponents", () => {
   test("returns empty array when no row exists", async () => {
     const store = await makeStore();
@@ -616,8 +567,6 @@ describe("getComponents", () => {
     assert.deepEqual(await store.getComponents(flowId, itemId), []);
   });
 });
-
-// ─── getBulkSummaries ────────────────────────────────────────────────────────
 
 describe("getBulkSummaries", () => {
   test("returns empty object for empty flowIds array", async () => {
@@ -655,7 +604,6 @@ describe("getBulkSummaries", () => {
 
     await store.setPending(flowId, item1, "draft 1");
     await store.setPending(flowId, item2, "draft 2");
-    // item3 has no pending
     await store.appendMessage(flowId, item3, { role: "operator", text: "no pending" });
 
     const result = await store.getBulkSummaries([flowId]);
@@ -678,7 +626,7 @@ describe("getBulkSummaries", () => {
     const store = await makeStore();
     const flowA = randomUUID();
     const flowB = randomUUID();
-    const flowC = randomUUID(); // no rows at all
+    const flowC = randomUUID();
     const itemA = randomUUID();
     const itemB = randomUUID();
 
@@ -692,8 +640,6 @@ describe("getBulkSummaries", () => {
   });
 });
 
-// ─── ensureRow safety (ON CONFLICT DO NOTHING) ───────────────────────────────
-
 describe("ensureRow — ON CONFLICT DO NOTHING", () => {
   test("repeated appendMessage calls on same (flowId, itemId) do not duplicate the row", async () => {
     const store = await makeStore();
@@ -703,7 +649,6 @@ describe("ensureRow — ON CONFLICT DO NOTHING", () => {
     await store.appendMessage(flowId, itemId, { role: "agent",    text: "b" });
     await store.appendMessage(flowId, itemId, { role: "operator", text: "c" });
     const { messages } = await store.getState(flowId, itemId);
-    // Should have exactly 3 messages in one row, not 3 rows
     assert.equal(messages.length, 3);
   });
 
@@ -718,8 +663,6 @@ describe("ensureRow — ON CONFLICT DO NOTHING", () => {
   });
 });
 
-// ─── tryParse edge cases (exercised via stored state) ────────────────────────
-
 describe("tryParse — invalid JSON / null handling", () => {
   test("tryParse returns fallback for null input — pending returns null on fresh row", async () => {
     const store = await makeStore();
@@ -727,13 +670,10 @@ describe("tryParse — invalid JSON / null handling", () => {
     const itemId = randomUUID();
     await store.appendMessage(flowId, itemId, { role: "operator", text: "x" });
     const state = await store.getState(flowId, itemId);
-    // pending_json is NULL in DB; tryParse(null, null) → null
     assert.equal(state.pending, null);
   });
 
   test("tryParse returns fallback [] for invalid messages_json if DB row corrupted", async () => {
-    // We can't inject invalid JSON through the public API, so we write
-    // directly to the underlying DB to simulate corruption.
     const dbPath = tmpDb();
     const store = await createDiscussStore({ dbPath });
     const flowId = randomUUID();
@@ -742,7 +682,6 @@ describe("tryParse — invalid JSON / null handling", () => {
     await runs.insert({ flowId, status: "running" });
     await store.appendMessage(flowId, itemId, { role: "operator", text: "seed" });
 
-    // Access internal DB to corrupt messages_json
     const corruptClient = createClient({ url: `file:${dbPath}` });
     await corruptClient.execute({
       sql: "UPDATE discuss_state SET messages_json = ? WHERE flow_id = ? AND item_id = ?",
@@ -750,7 +689,6 @@ describe("tryParse — invalid JSON / null handling", () => {
     });
     corruptClient.close();
 
-    // Re-open store and read — tryParse should return []
     const store2 = await createDiscussStore({ dbPath });
     const state = await store2.getState(flowId, itemId);
     assert.deepEqual(state.messages, []);
@@ -777,8 +715,6 @@ describe("tryParse — invalid JSON / null handling", () => {
   });
 });
 
-// ─── cross-method integration ─────────────────────────────────────────────────
-
 describe("cross-method integration", () => {
   test("full discuss lifecycle: operator message → running → agent reply → idle → clear pending", async () => {
     const store = await makeStore();
@@ -786,16 +722,13 @@ describe("cross-method integration", () => {
     const itemId = randomUUID();
     const turnId = randomUUID();
 
-    // Operator sends a message
     await store.appendMessage(flowId, itemId, { role: "operator", text: "Please review this proposal", turnId });
     await store.setTurnStatus(flowId, itemId, "running", turnId);
 
-    // Mid-turn: agent proposes a draft and emits components
     await store.setPending(flowId, itemId, "Proposal draft v1");
     await store.mergePendingFields(flowId, itemId, { budget: 1500 });
     await store.setComponent(flowId, itemId, { kind: "shortlist", items: ["item a"] });
 
-    // Agent reply lands
     await store.appendMessage(flowId, itemId, {
       role: "agent",
       text: "Here is my proposal",
@@ -810,7 +743,6 @@ describe("cross-method integration", () => {
     assert.equal(state.turnStatus, "idle");
     assert.equal(state.activeTurnId, null);
     assert.equal(state.pending, null);
-    // Components should still be present (only cleared on gate resolve)
     assert.equal(state.components.length, 1);
   });
 
@@ -866,8 +798,6 @@ describe("cross-method integration", () => {
     assert.equal(stateB.pending, null);
   });
 });
-
-// ─── listForFlow() ────────────────────────────────────────────────────────────
 
 describe("listForFlow()", () => {
   test("returns every thread for the flow with parsed messages", async () => {

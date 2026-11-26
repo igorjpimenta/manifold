@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus, todayLocal } from "../../../budget/lib.js";
 
-// ── deserialize ────────────────────────────────────────────────────────────────
 
 describe("deserialize", () => {
   const base = {
@@ -74,7 +73,6 @@ describe("deserialize", () => {
   });
 });
 
-// ── isGateLocked ───────────────────────────────────────────────────────────────
 
 describe("isGateLocked", () => {
   it("returns false when row is null", () => {
@@ -102,11 +100,6 @@ describe("isGateLocked", () => {
   });
 });
 
-// ── todayLocal ─────────────────────────────────────────────────────────────────
-//
-// Pins that the gate's writer and reader agree on one clock, holding in any
-// timezone and at any hour. A bare end-to-end lock/check assertion only fails
-// while local trails UTC, so it would miss a regression for most of the day.
 
 describe("todayLocal", () => {
   it("stamps the local calendar day, not the UTC one", () => {
@@ -114,7 +107,6 @@ describe("todayLocal", () => {
     const utc = justAfterUtcMidnight.toISOString().slice(0, 10);
     const local = todayLocal(justAfterUtcMidnight);
 
-    // West of UTC the two disagree; at or east of UTC they coincide.
     if (justAfterUtcMidnight.getTimezoneOffset() > 0) {
       assert.equal(utc, "2026-09-29");
       assert.equal(local, "2026-09-28");
@@ -124,31 +116,26 @@ describe("todayLocal", () => {
   });
 
   it("zero-pads single-digit months and days", () => {
-    const d = new Date(2026, 0, 5, 12, 0, 0); // local noon, so zone-independent
+    const d = new Date(2026, 0, 5, 12, 0, 0);
     assert.equal(todayLocal(d), "2026-01-05");
   });
 
   it("is the day isGateLocked() defaults to, so a same-day lock always reads back locked", () => {
-    // The no-argument default is the path executor-budget.js takes per node.
     const row = { locked: 1, day: todayLocal() };
     assert.equal(isGateLocked(row), true);
     assert.equal(isGateLocked(row), isGateLocked(row, todayLocal()));
   });
 
   it("keeps a lock stamped late in the local day valid while UTC has already rolled over", () => {
-    // 00:30 UTC on the 29th is still the 28th west of UTC, so a lock stamped
-    // "now" must survive being checked against the same instant.
     const lateEvening = new Date("2026-09-29T00:30:00Z");
     const stamped = { locked: 1, day: todayLocal(lateEvening) };
     assert.equal(isGateLocked(stamped, todayLocal(lateEvening)), true);
-    // Guards against a vacuous pass: the stamp must be the local day.
     if (lateEvening.getTimezoneOffset() > 0) {
       assert.equal(todayLocal(lateEvening), "2026-09-28");
     }
   });
 });
 
-// ── resolveNodeDecision ────────────────────────────────────────────────────────
 
 describe("resolveNodeDecision", () => {
   it("returns null when row is null", () => {
@@ -176,7 +163,6 @@ describe("resolveNodeDecision", () => {
   });
 });
 
-// ── classifyDecisionStatus ─────────────────────────────────────────────────────
 
 describe("classifyDecisionStatus", () => {
   it("maps 'approve' to 'approved'", () => {

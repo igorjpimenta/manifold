@@ -1,5 +1,3 @@
-// bearer-auth.test.js — the bearer guard: scheme, secret,
-// timing-safe compare, fail-closed unset secret, and the 401 shape.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { authorizeBearerRequest, sendUnauthorized } from "../../../routes/bearer-auth.js";

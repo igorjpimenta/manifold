@@ -8,10 +8,6 @@ import {
   setCapAndPersist, setLockThresholdAndPersist, getCapHistory,
 } from "../../../telemetry/budget-alert.js";
 
-// Each test gets its own fresh SQLite file so cap_versions history doesn't
-// leak between cases — never touches the real ~/.openclaw/ops.sqlite; that
-// path is likewise pointed at a nonexistent file so seeding stays on an
-// isolated tmp file — deterministic (DEFAULT_CAP_USD/DEFAULT_LOCK_THRESHOLD).
 async function freshStore() {
   const dbPath = path.join(os.tmpdir(), `manifold-cap-history-test-${randomUUID()}.sqlite`);
   await initCapStore({ dbPath });
@@ -39,7 +35,6 @@ describe("budget-alert cap_versions (SCD2)", () => {
     assert.equal(history[0].capUSD, 3.0);
     assert.equal(history[1].retiredAt, null, "second row is active");
     assert.equal(history[1].capUSD, 1.0);
-    // lockThreshold carries forward unchanged onto the new row
     assert.equal(history[1].lockThreshold, 0.8);
   });
 
@@ -55,12 +50,11 @@ describe("budget-alert cap_versions (SCD2)", () => {
     assert.equal(active.retiredAt, null);
     assert.equal(active.capUSD, 2.0);
     assert.equal(active.lockThreshold, 0.5);
-    // exactly one active row at any time
     assert.equal(history.filter((h) => h.retiredAt === null).length, 1);
   });
 
   it("setting the same value is a no-op (no new row)", async () => {
-    await setCapAndPersist(3.0); // same as the seeded default
+    await setCapAndPersist(3.0);
     const history = await getCapHistory();
     assert.equal(history.length, 1);
   });
@@ -93,7 +87,6 @@ describe("budget-alert cap_versions (SCD2)", () => {
     await initCapStore({ dbPath });
     await setCapAndPersist(1.23);
 
-    // Simulate a gateway restart: re-run initCapStore against the same file.
     await initCapStore({ dbPath });
     assert.equal(currentCapUSD(), 1.23);
     const history = await getCapHistory();

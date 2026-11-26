@@ -2,14 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createExecutor } from "../../../engine/executor.js";
 
-// ── helpers (mirrored from executor.test.js) ──────────────────────────────────
-
 const logger = { info: () => {}, warn: () => {}, error: () => {} };
 const api = { runtime: {}, config: {} };
 
-// Always-admits-immediately fake — admissionQueueStore is required by
-// createExecutor's start()/subflow-children paths. These
-// tests don't exercise queue/capacity behavior.
 function makeAdmissionQueueStore() {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -17,24 +12,8 @@ function makeAdmissionQueueStore() {
   };
 }
 
-// createExecutor's nodeExecutionsStore is injectable specifically so tests
-// don't fall through to the real getNodeExecutionsStore() singleton, which
-// defaults to ~/.openclaw/runtime.sqlite — without this, every sc-* fixture
-// flow created below would write real rows into production data.
+// Must inject — the real singleton defaults to ~/.openclaw/runtime.sqlite.
 function makeNodeExecutionsStore() {
-  // resultJson-by-flow tracking (B4) — see executor.test.js's
-  // makeNodeExecutionsStore for the full rationale: assembleState() now
-  // reads listResultsForFlow() to reconstruct a node's own output, since
-  // state_json is entry-only post-B4. The __end__ branch's own
-  // pipeline.display()/successCriteria() read via assembleState() now too
-  // (executor.js), so this mock needs to actually track results or every
-  // sc-* fixture's node output silently vanishes before reaching them.
-  //
-  // enter() must return an invocationId, with results correlated by
-  // that id — the write-ordering (writeResult() may commit BEFORE
-  // write() for the same dispatch) makes correlating by "the
-  // {flowId,nodeId} the most recent write() call named" unsafe.
-  // Correlate through a real invocationId map — order-independent.
   const resultsByFlow = new Map();
   const invocationMeta = new Map();
   return {
@@ -142,7 +121,6 @@ function makeExecutor(pipelineMap) {
   return { executor, store };
 }
 
-// Single node pipeline with optional runAudit and optional NOOP state return.
 function makePipeline({ runAudit, noopReturn } = {}) {
   return {
     goal: "test",
@@ -153,8 +131,6 @@ function makePipeline({ runAudit, noopReturn } = {}) {
     ...(runAudit !== undefined ? { runAudit } : {}),
   };
 }
-
-// ── routing based on successCriteria verdict ──────────────────────────────────
 
 describe("executor __end__: successCriteria routing", () => {
   it("marks flow succeeded when successCriteria returns 'succeeded'", async () => {

@@ -1,15 +1,9 @@
-// graphql/columns.js — derive GraphQL leaf fields from the drizzle
-// table defs, so the query layer inherits the database schema instead
-// of restating it.
-//
-// Single source of truth stays state/schema*.js (the same files
-// drizzle-kit generates migrations from). What is PUBLIC is still an
-// explicit choice: each GraphQL type lists the columns it exposes, so a
-// new column is one word to publish and never leaks silently —
-// internals like state_json or tokens stay out by default. A test
-// asserts the built SDL, so a renamed column breaks loudly instead of
-// drifting. Joined/derived extras (pipeline_id via flow_runs, joined
-// node ids) are declared with explicit types beside the table list.
+// graphql/columns.js — derive GraphQL leaf fields from the drizzle table
+// defs, so the query layer inherits state/schema*.js (what drizzle-kit
+// generates migrations from) instead of restating it. Exposure is explicit:
+// each type lists its columns, so a new column is one word to publish and
+// internals (state_json, tokens, handles) never leak by default; a test
+// asserts the built SDL, so a renamed column breaks loudly.
 import {
   GraphQLObjectType,
   GraphQLString,
@@ -32,13 +26,10 @@ function camel(name) {
 }
 
 /**
- * Build the fields map for one GraphQL object type from a drizzle table.
- * columns: exposed entries — a db snake_case name, or { name, as } to
- * pin a stable API name that differs from the column (renames still
- * break loudly: the db name must exist). Extras: { gqlName: type } for
- * joined/derived values that travel beside the row. `id` columns
- * surface as ID!; everything else stays nullable because LEFT JOINs and
- * derivation make DB nullability a liar.
+ * `columns` entries are db snake_case names, or { name, as } to pin an API
+ * name (the db name must still exist, so renames break loudly). Extras are
+ * joined/derived values declared with explicit types. Only `id` is non-null:
+ * LEFT JOINs and derivation make DB nullability a liar for the rest.
  */
 export function columnFields(table, columns, extras = {}) {
   const byName = {};

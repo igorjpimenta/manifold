@@ -1,30 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors freelance_workana-proposal's PROPOSE
- * (DEDUP_CHECK → DRAFT → [GAP_GATE ↔ SETTLE_GAP_ANSWER ↔ DRAFT]* → GATE →
- * STAMP/STAMP_REJECT → SUBMIT), with every sub-node replaced by a trivial
- * no-op stand-in — zero real filesystem, subprocess, or agent dispatch I/O
- * anywhere in this fixture. GAP_GATE and GATE's pendingSelector/edge logic
- * are NOT stubbed — they use the real gapGateItemId helper, since proving
- * round-scoping collisions are handled end-to-end (not just as
- * a pure-function unit test) is the whole point of this file. This proves
- * the loop-back → real second invocation-worth-of-executions →
- * GAP_GATE-then-GATE-both-present → parent-resume plumbing works for
- * PROPOSE's exact edge shape, before any real draft/submit script or
- * agent is ever involved (that fidelity is covered by the real node
- * functions' own mocked-I/O unit tests under workspace/.pipelines/
- * test/unit/freelance_workana-proposal/nodes/propose/).
- *
- * SUBMIT is a plain single "code" stand-in like every other node in this
- * fixture; the real cascade-migration coverage lives
- * in workspace/.pipelines/test/unit/freelance_workana-proposal/nodes/
- * propose/submit/.
- *
- * Isolated-sandbox discipline:
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -39,8 +12,6 @@ import { createGateResolver } from "../../../gates/gate-resolver.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -53,12 +24,7 @@ function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
 }
 
-// Real round-scoping logic (same shape as
-// workspace/.pipelines/freelance_workana-proposal/nodes/propose/gap-gate-id.js)
-// — deliberately reimplemented here rather than imported, since this test
-// lives in a different package (extensions/manifold) than the pipeline
-// file. Kept byte-for-byte equivalent so the mechanics this test proves
-// actually match what the real pipeline does.
+// Reimplemented, not imported — the real pipeline lives in another package; kept equivalent so the test proves the real mechanics.
 function gapGateItemId(state) {
   const listingId = state.item?.id;
   if (!listingId) return null;
@@ -184,10 +150,6 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// Retained only for waits with no corresponding emitter — anything waiting on a
-// flow reaching a state uses waitForGateOpen/waitForTerminal instead; a
-// fixed sleep is too long on a fast machine and too short on a loaded
-// runner.
 function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -251,9 +213,6 @@ describe("childFlows:true PROPOSE-shaped loop, full engine E2E", () => {
     await waitForStatus(runStore, childFlowId,
       (r) => r.status === "blocked" && r.waitJson?.items?.[0]?.itemId === "job-2");
 
-    // Loop-back completed: DRAFT re-ran with priorRounds=1 >= gapRoundsNeeded=1,
-    // so it now proceeds to the REAL GATE — must actually present, not be
-    // silently auto-skipped because "job-2" was mistaken for already-decided.
     child = await runStore.get(childFlowId);
     assert.equal(child.status, "blocked", "child must still be blocked — now at the real GATE, not terminal");
     assert.equal(child.waitJson.items[0].itemId, "job-2", "GATE must present with the plain item id, unaffected by GAP_GATE's round-1 approval");

@@ -1,15 +1,8 @@
-// wire-ops.js — real core ops for the MCP servers.
-//
-// createRealOps builds the six tool ops from live core pieces: the
-// run-store for status/runs/cancel, the executor + gate-resolver for
-// start/approve, and the tool-results store for deliver_result.
-// Everything is store-backed — no stubs, no fakes.
-//
-// Standalone note: `serve --mcp` runs outside the gateway, so there is no
-// agent runtime. Code/manual/subflow nodes drive fine; an agent-node
-// dispatch refuses loudly at dispatch time (the injected runTurn throws),
-// naming the missing runtime instead of hanging. Status/runs/cancel always
-// work — they are pure store reads/writes.
+// Real core ops for the MCP servers: `serve --mcp` runs outside the gateway,
+// so there is no agent runtime — code/manual/subflow nodes drive fine, an
+// agent-node dispatch refuses loudly at dispatch time (the injected runTurn
+// throws), naming the missing runtime instead of hanging. Status/runs/cancel
+// are pure store reads/writes and always work.
 
 import { createRunStore } from "../state/run-store.js";
 import { createStateStore } from "../state/state-store.js";
@@ -99,8 +92,6 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     pipelinesRef,
     ensurePipelinesLoaded,
     logger: logger ?? console,
-    // No agent runtime outside the gateway: an agent-node dispatch refuses
-    // here, naming the missing runtime instead of hanging.
     runTurn: async () => {
       throw new Error("manifold standalone serve: agent dispatch needs a gateway agent runtime");
     },

@@ -1,7 +1,3 @@
-// serve-ws.test.js — the event pipe: welcome, history replay, live
-// broadcast to every connected client. Real server + real sockets on an
-// ephemeral port; entries stream verbatim. Uses the global WebSocket client
-// (Node 24).
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -26,9 +22,6 @@ function seed() {
   return stream.append({ event: "agent.dispatched", flow: { id: "F1", nodeId: "n1" }, session: { harness: "h", agent: "a", session: "k" } });
 }
 
-// The inbox is attached at connect time and never replaced: with several
-// clients racing the same broadcast, attaching a fresh onmessage per
-// collect() call drops frames that land between collects.
 function connect(port) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/`);

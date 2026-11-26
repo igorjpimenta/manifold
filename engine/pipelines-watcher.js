@@ -1,22 +1,16 @@
 // pipelines-watcher.js — keep `pipelinesRef` in sync with the on-disk
 // pipelines directory handed in as `pipelinesDir`.
 //
-// Why: without this, `loadPipelines` only runs once at gateway boot (via the
-// `manifold-loader` service or `ensurePipelinesLoaded`'s "load once if
-// empty" guard). New pipeline folders dropped after boot, or edits to existing
-// `index.js` files, are invisible until the next gateway restart.
+// loadPipelines otherwise runs only at gateway boot, so new or edited
+// pipeline folders would stay invisible until the next restart. Poll every
+// `pollMs`, fingerprint each `<dir>/<entry>/index.js` (and fleet.yaml) by
+// name + mtime, and on change reload and swap into `pipelinesRef.value`.
+// The loader cache-busts its own imports (data: URLs), so the swap picks
+// up edited code.
 //
-// How: poll every `pollMs` (default 1000). Each tick, compute a fingerprint
-// of `<dir>/<entry>/index.js` files keyed by name and mtime. If the
-// fingerprint changed since last tick, call `loadPipelines` and swap into
-// `pipelinesRef.value`. The loader already cache-busts imports by reading
-// each index.js itself and importing it as a base64-encoded `data:` URL
-// (each payload is a unique URL, so Node's ESM cache can't return a stale
-// module), so the swap picks up edited code.
-//
-// Note on directory mtime: the top-level `.pipelines/` mtime only changes on
-// add/remove at depth 1 — it does NOT change when an `index.js` is edited.
-// That's why we fingerprint each `index.js`'s mtime explicitly.
+// Directory mtime alone is not enough: the top-level dir only changes on
+// add/remove at depth 1, never when an index.js is edited — hence the
+// per-file mtime fingerprint.
 
 import { readdir, stat } from "node:fs/promises";
 import path from "node:path";
@@ -35,8 +29,8 @@ export function createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger, pol
     try {
       entries = await readdir(pipelinesDir, { withFileTypes: true });
     } catch (err) {
-      // Directory missing — treat as empty fingerprint. If it later appears,
-      // the next tick reloads.
+      // Directory missing — empty fingerprint; if it appears later, the
+      // next tick reloads.
       if (err.code === "ENOENT") return "";
       throw err;
     }
@@ -48,13 +42,13 @@ export function createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger, pol
         const s = await stat(idx);
         parts.push(`${ent.name}:${s.mtimeMs}`);
       } catch {
-        // index.js missing — skip; loader would skip it too.
+        // index.js missing — the loader skips it too.
       }
       const fleet = path.join(pipelinesDir, ent.name, "fleet.yaml");
       try {
         const sf = await stat(fleet);
         parts.push(`${ent.name}:fleet:${sf.mtimeMs}`);
-      } catch { /* fleet.yaml optional */ }
+      } catch { /* optional */ }
     }
     return parts.join("|");
   }
@@ -65,28 +59,24 @@ export function createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger, pol
     try {
       const fp = await fingerprint();
       if (lastFingerprint === null) {
-        // First tick: prime the fingerprint without reloading — the loader
-        // service has already loaded pipelines at gateway boot.
+        // First tick primes the fingerprint only — the loader service
+        // already loaded pipelines at boot.
         lastFingerprint = fp;
         return;
       }
       if (fp === lastFingerprint) return;
       const loaded = await loadPipelines(pipelinesDir, logger);
-      // Merge rather than full-replace: if a pipeline that was previously live
-      // fails to reload (transient ESM cache error, file mid-write during a git
-      // op) its entry would silently vanish from the live Map and stay missing
-      // until the next mtime change. Instead, keep stale entries whose index.js
-      // is still on disk — they stay live until the disk copy is actually gone.
+      // Merge, don't fully replace: a transient reload failure (file
+      // mid-write, ESM error) would otherwise silently vanish a live
+      // pipeline until its mtime changed again. Stale entries stay live
+      // while their index.js is still on disk.
       const merged = new Map(loaded);
       for (const [id, existing] of pipelinesRef.value) {
         if (merged.has(id)) continue;
-        // Synthetic subflow-child pipelines (id = `${parentPipelineId}::${nodeId}`,
-        // registered in-memory by loader.js's registerSubflowChildren) are never
-        // disk-backed at <pipelinesDir>/<id>/ — stat-ing their own id always
-        // throws, so they'd be dropped every time their real parent transiently
-        // fails to reload, even though the parent itself survives via this same
-        // loop. Check the parent's directory instead (loader.js tags every
-        // synthetic entry with _parentPipelineId for exactly this).
+        // Synthetic subflow-child ids (`parent::node`) have no directory of
+        // their own — stat-ing them always throws, so they'd be dropped
+        // whenever their real parent transiently fails to reload. Check the
+        // parent's directory instead (_parentPipelineId).
         const diskCheckId = existing._parentPipelineId ?? id;
         try {
           await stat(path.join(pipelinesDir, diskCheckId, "index.js"));
@@ -126,7 +116,6 @@ export function createPipelinesWatcher({ pipelinesDir, pipelinesRef, logger, pol
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
-    // Exposed for tests / probes.
     _tick: tick,
     _fingerprint: fingerprint,
   };

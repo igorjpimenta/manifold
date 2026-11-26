@@ -33,7 +33,6 @@ export function registerOperatorRoutes({
   runStore,
   admissionQueueStore,
     resumeParentRef,
-    // The discuss store owns the pending proposal (discuss_state.pending_json).
     discussStore,
     getBroadcast,
   // Injected gateway adapter, not core state: session reads go through
@@ -50,8 +49,6 @@ export function registerOperatorRoutes({
     const { handleDiscuss } = createDiscussHandler({
       api, discussStore, sessions,
     });
-
-  // ── POST /manifold/gate/resolve ───────────────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/gate/resolve",
@@ -70,11 +67,10 @@ export function registerOperatorRoutes({
       try { body = raw ? JSON.parse(raw) : {}; }
       catch { res.statusCode = 400; res.end("invalid json"); return true; }
       try {
-        // recordItemDecision can trigger executor.resume(), which may
-        // dispatch a kind:"agent" node (e.g. SETTLE_GAP_ANSWER) — that
-        // needs operator.write scope, which this auth:"plugin" route never
-        // has ambient. Loop back through invokeElevated to a sibling
-        // auth:"gateway" route that does, same pattern as /manifold/start.
+        // recordItemDecision can dispatch a kind:"agent" node needing
+        // operator.write scope, which this auth:"plugin" route never has
+        // ambient — loop through invokeElevated to the auth:"gateway"
+        // sibling, same pattern as /manifold/start.
         const elev = await invokeElevated("/manifold/_elev/gate-resolve", {
           flowId: body.flowId,
           itemId: body.itemId,
@@ -97,8 +93,6 @@ export function registerOperatorRoutes({
       return true;
     },
   });
-
-  // ── POST /manifold/_elev/gate-resolve ─────────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/_elev/gate-resolve",
@@ -138,8 +132,6 @@ export function registerOperatorRoutes({
     },
   });
 
-  // ── POST /manifold/cancel ─────────────────────────────────────────────────
-
   api.registerHttpRoute({
     path: "/manifold/cancel",
     auth: "plugin",
@@ -168,20 +160,14 @@ export function registerOperatorRoutes({
         if (!result?.cancelled && result?.reason === "Flow not found.") {
           const sqlFlow = await readStore?.get(flowId);
           if (sqlFlow && !["succeeded", "failed", "cancelled", "skipped"].includes(sqlFlow.status)) {
-            // Use a store bound to the flow's actual ownerKey: a flow may
-            // belong to a different ownerKey than this process's default
-            // store, and a mismatched ownerKey → setRunning returns
-            // applied=false.
-            //
-            // Must carry the same dependency set as the primary `store` and
-            // index.js's own createCancelStore factory (nodeExecutionsStore,
-            // resumeParentRef, pipelinesRef, failureStore, admissionQueueStore):
-            // state-store.js's cancel()/finish()/fail() silently no-op
+            // Cancel store bound to the flow's actual ownerKey — a mismatched
+            // ownerKey makes setRunning return applied=false. Must carry the
+            // same dependency set as index.js's createCancelStore:
+            // state-store's cancel()/finish()/fail() silently no-op
             // triggerAdmissionRelease without admissionQueueStore and
-            // triggerParentResume without nodeExecutionsStore/resumeParentRef —
-            // a fallback missing either leaks the flow's start/child-dispatch
-            // admission slot permanently and leaves a waiting parent on
-            // "children-pending" forever.
+            // triggerParentResume without nodeExecutionsStore/resumeParentRef
+            // — a fallback missing either leaks the admission slot forever
+            // and leaves a waiting parent on "children-pending" forever.
             const flowOwnerKey = sqlFlow.ownerKey ?? ownerSessionKey;
             const cancelStore =
               flowOwnerKey === ownerSessionKey
@@ -198,8 +184,8 @@ export function registerOperatorRoutes({
               stateJson: sqlFlow.stateJson ?? {},
             });
             if (setResult.applied) {
-              // completeCancellation stamps branches + writes stateJson to DB.
-              // Pass revision+1 because setRunning just incremented it.
+              // completeCancellation stamps branches + writes stateJson; its
+              // revision must be setRunning's increment (sqlFlow.revision + 1).
               result = await completeCancellation({
                 store: cancelStore,
                 flowId,
@@ -233,8 +219,6 @@ export function registerOperatorRoutes({
       return true;
     },
   });
-
-  // ── POST /manifold/start ──────────────────────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/start",
@@ -283,8 +267,6 @@ export function registerOperatorRoutes({
       return true;
     },
   });
-
-  // ── POST /manifold/_elev/start ────────────────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/_elev/start",
@@ -382,8 +364,6 @@ export function registerOperatorRoutes({
     },
   });
 
-  // ── POST /manifold/resume-from-gate ──────────────────────────────────────
-
   api.registerHttpRoute({
     path: "/manifold/resume-from-gate",
     auth: "gateway",
@@ -400,9 +380,6 @@ export function registerOperatorRoutes({
         res.statusCode = 400; res.setHeader("Content-Type", "application/json");
         res.end(JSON.stringify({ ok: false, error: "flowId required" })); return true;
       }
-      // Core resume lives in routes/operator-resume.js (shared with the
-      // budget decide route, which calls it in-process); this stays a thin
-      // validating wrapper mapping outcomes to status codes.
       const result = await resumeFlowFromGate({
         store, readStore, admissionQueueStore, runStore, executor,
         logger: api.logger, api, flowId, nodeId: body.nodeId, decision: body.decision,
@@ -427,8 +404,6 @@ export function registerOperatorRoutes({
       res.end(JSON.stringify({ ok: true, flowId, queued: result.queued })); return true;
     },
   });
-
-  // ── POST /manifold/_elev/rerun ────────────────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/_elev/rerun",
@@ -483,8 +458,6 @@ export function registerOperatorRoutes({
     },
   });
 
-  // ── POST /manifold/_elev/retry-failure ────────────────────────────────────
-
   api.registerHttpRoute({
     path: "/manifold/_elev/retry-failure",
     auth: "gateway",
@@ -513,8 +486,6 @@ export function registerOperatorRoutes({
       return true;
     },
   });
-
-  // ── POST /manifold/_elev/discuss ──────────────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/_elev/discuss",

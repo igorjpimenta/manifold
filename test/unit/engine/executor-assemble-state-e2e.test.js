@@ -1,27 +1,3 @@
-/**
- * Engine-mechanics E2E for assembleState(), one test per node
- * shape, matching this suite's own established convention (see
- * executor-subflow-children-e2e.test.js):
- * a real createExecutor() driving a real dispatch loop against isolated tmp
- * sqlite stores, asserting assembleState()'s output against the SAME flow's
- * real stateJson rather than a hand-built mock of listResultsForFlow.
- *
- * nodeExecutions.writeResult() records results for the ordinary code/agent
- * success branch (executor.js's main loop) — human-gate's own
- * *completion* write goes through that same branch once its pendingSelector
- * clears, but a gate's approvedIds/rejectedIds (written by gate-resolver.js
- * directly onto stateJson, never through a node's own stateUpdate) and
- * dispatchSubflowChildren's parent-side write (always stateUpdate:{}, per
- * the design doc's corrected "SCORE is itself a subflow" resolution) are
- * NOT node-keyed results — assembleState() correctly has no way to see them.
- * Several tests below assert that gap explicitly, as documented current
- * behavior.
- *
- * Isolated-sandbox discipline:
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal } from "../../helpers/wait-for-event.js";
@@ -35,8 +11,6 @@ import { createExecutor } from "../../../engine/executor.js";
 import { createGateResolver } from "../../../gates/gate-resolver.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -115,11 +89,6 @@ describe("assembleState() against a real dispatch loop, per node shape", () => {
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
 
-    // state_json is entry-only — A/B/C never land
-    // there at all. assembleState() is the only source for a node's own
-    // output; this test proves stateJson has nothing to compare against
-    // and that assembleState()
-    // alone is still correct.
     assert.equal(flow.stateJson.A, undefined, "state_json must not carry node output");
     assert.equal(flow.stateJson.B, undefined);
     assert.equal(flow.stateJson.C, undefined);
@@ -144,19 +113,11 @@ describe("assembleState() against a real dispatch loop, per node shape", () => {
     const { executor, runStore, nodeExecutionsStore } = harness;
 
     const record = await executor.start("test_loop", {}, { kind: "test" });
-    // Unlike the other tests in this file, LOOP revisits the SAME nodeId
-    // within one runFlow() call — isFreshNodeEntry only forces "fresh" on a
-    // genuinely new node, so the 2nd/3rd dispatch falls through to whatever
-    // `kind` runFlow() itself was called with. The real call sites (agent/
-    // cli.js, routes/operator.js, dashboard/server.js) always pass "fresh"
-    // after start() — match that convention rather than the no-arg form the
-    // other tests in this file get away with (they never revisit a node).
+// LOOP revisits the same nodeId mid-run; isFreshNodeEntry only forces "fresh" on genuinely new nodes, and real call sites pass "fresh" after start() — so this test does too.
     await executor.runFlow(record.flowId, "fresh");
 
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
-    // state_json is entry-only — LOOP's count never lands there
-    // at all. assembleState() (below) is the only place it survives.
     assert.equal(flow.stateJson.LOOP, undefined, "state_json must not carry node output");
 
     const assembled = await assembleState(record.flowId, { runStore, nodeExecutionsStore });
@@ -207,10 +168,6 @@ describe("assembleState() against a real dispatch loop, per node shape", () => {
     flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
 
-    // gate_records is the correctness-safe source for gate state (a
-    // shared-key snapshot on stateJson goes stale across sibling gates —
-    // see its own MIGRATIONS v11 comment); stateJson carries no gate
-    // snapshot. Both gates' own point-lookup rows are the whole story.
     const gate1 = await nodeExecutionsStore.getGateRecord(record.flowId, "GATE_1");
     const gate2 = await nodeExecutionsStore.getGateRecord(record.flowId, "GATE_2");
     assert.ok(gate1?.consumedAt, "GATE_1's own record survives independently, keyed by its own nodeId");
@@ -312,9 +269,6 @@ describe("assembleState() against a real dispatch loop, per node shape", () => {
 
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
-    // state_json is entry-only — BIG never lands there regardless of
-    // size. assembleState() (below) is the only place a node's own output
-    // survives.
     assert.equal(flow.stateJson.BIG, undefined, "state_json must not carry node output");
 
     const assembled = await assembleState(record.flowId, { runStore, nodeExecutionsStore });
@@ -323,11 +277,6 @@ describe("assembleState() against a real dispatch loop, per node shape", () => {
   });
 
   test("a result well over the size cap, flat small+bulk fields: assembled state keeps ALL fields, including the bulk one", async () => {
-    // A flat (unwrapped) node result mixing tiny scalars
-    // (accessToken, bidderId) with a large array (listings) must keep
-    // EVERY field when assembled — the tiny fields
-    // a later node (SUBMIT_CODE) depends on must survive alongside
-    // the bulk one. With no size cap, nothing gets dropped at all.
     harness = await makeHarness({
       test_oversize_mixed: {
         id: "test_oversize_mixed",

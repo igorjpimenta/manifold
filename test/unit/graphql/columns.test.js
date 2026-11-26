@@ -1,6 +1,3 @@
-// Unit tests for graphql/columns.js — derives GraphQL leaf fields from the
-// drizzle table defs so the query layer inherits the database schema instead
-// of restating it.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

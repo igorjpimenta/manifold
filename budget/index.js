@@ -1,10 +1,6 @@
-// budget — approval queue and budget-gate module for manifold.
-//
-// Owns gate_state and budget alerts in the store home's ops.sqlite; the
-// approval queue lives in the sibling runtime.sqlite. Registers HTTP
-// routes under /manifold/budget/*. Sets api.runtime.approvalQueue with the
-// async API that executor.js calls per-node (isGateLocked,
-// lookupNodeDecision, enqueueNodeApproval).
+// Budget approval queue and gate: gate_state + alerts in ops.sqlite, the
+// approval queue in sibling runtime.sqlite; routes under /manifold/budget/*;
+// api.runtime.approvalQueue is the async API executor.js calls per-node.
 
 import { mkdirSync } from "node:fs";
 import { getSharedDb, withSharedWrite, resolveStorePaths } from "../state/db.js";
@@ -69,22 +65,14 @@ const MOCK_ITEMS = [
   },
 ];
 
-// getSharedDb() instead of a fresh openDb() call: on the first call ever for
-// this dbPath, this does the real work (open + migrate). On every call
-// after — including a brand-new registerBudgetRoutes closure created by a
-// gateway plugin reload — it returns the SAME already-open connection
-// straight from db.js's process-wide cache, instantly. That shared cached
-// connection is what closes the "budget store not attached yet" race: a
-// fresh connection per reload opens a genuine "not ready" window each time
-// by construction (see ensureClient's own comment below for the hazard).
-// Snapshots are idempotent no-ops once applied, so re-running openStore
-// against an already-migrated cached connection on a later reload costs
-// one quick journal SELECT, not a meaningful delay.
-// Exported so tests can exercise the real getSharedDb-backed path against a
-// tmp dbPath (see test/unit/budget/index.test.js's "real openStore()"
-// suite) instead of only ever testing through a fully-fake openStore DI
-// override that bypasses this function — and by extension getSharedDb —
-// entirely.
+// getSharedDb() rather than a fresh openDb(): first call does the real work
+// (open + migrate); every call after — including a new registerBudgetRoutes
+// closure from a plugin reload — returns the SAME cached connection
+// instantly. That cache is what closes the "budget store not attached yet"
+// race: a fresh connection per reload opens a genuine "not ready" window by
+// construction (see ensureClient below). Snapshots are idempotent no-ops once
+// applied, so re-running openStore on a cached connection costs one journal
+// SELECT. Exported so tests can exercise this path against a tmp dbPath.
 export async function openStore({ dbPath = DB_PATH, runtimeDbPath = runtimeSibling(dbPath) } = {}) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: OPS_MIGRATIONS_FOLDER });
@@ -93,9 +81,9 @@ export async function openStore({ dbPath = DB_PATH, runtimeDbPath = runtimeSibli
   // The singleton row is runtime state, not schema: every gate_state reader
   // assumes it exists, so seed it unconditionally on every open.
   await client.execute(`INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)`);
-  // queue_items lives in runtime.sqlite; gate_state and the alert tables stay
-  // in ops. The extra handle rides on the ops client so callers that only
-  // inject one fake still work.
+  // queue_items lives in runtime.sqlite; gate_state and alerts stay in ops.
+  // The extra handle rides on the ops client so callers that only inject one
+  // fake still work.
   await migrateDatabase({ dbPath: runtimeDbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { client: runtimeClient } = await getSharedDb(runtimeDbPath);
   client.runtime = runtimeClient;
@@ -125,8 +113,6 @@ async function _loopback(path, body, extraHeaders = {}) {
 }
 
 export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume } = {}) {
-  // Canonical-kind fan-out for the three WS emissions below: canonical
-  // wire names, envelope adds kind.
   // onFlowResume({flowId, nodeId, decision}) resumes a flow-bound approval
   // in-process (routes/operator-resume.js, injected by index.js) — no HTTP
   // loopback. Absent (tests), per-node resume is skipped but the decision
@@ -137,24 +123,16 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
   let runtimeClient;
   let clientPromise = null;
 
-  // `client` must NOT be attached only from registerService's start() — a
-  // single external lifecycle hook fired once per registerBudgetRoutes call.
-  // When the gateway's plugin set reloads twice in quick succession, the
-  // LAST registerBudgetRoutes call's `api.runtime.approvalQueue` closure can
-  // end up the one left installed while an EARLIER generation's start() is
-  // the one that actually ran — or neither generation's start() runs for the
-  // closure left live. That closure's `client` would then stay undefined
-  // forever and isGateLocked() would throw on every call in that state,
-  // parking the calling node on a wait that nothing ever woke.
-  //
-  // So: any call into THIS closure's own isGateLocked() attaches the client
-  // itself, on demand, the first time it's actually needed, and every caller
-  // simply awaits
-  // that attachment instead of throwing and needing something else to wake
-  // it later. Self-healing regardless of whether this generation's
-  // registerService start() ever fires, and getSharedDb (state/db.js) means
-  // a LATER generation's ensureClient() resolves near-instantly from the
-  // cached connection rather than paying a fresh open+migrate every time.
+  // `client` must NOT be attached only from registerService's start(): under
+  // rapid plugin reloads the LAST closure's api.runtime.approvalQueue can be
+  // the one installed while an EARLIER generation's start() is the one that
+  // ran — or neither. That closure's `client` would stay undefined forever
+  // and isGateLocked() would throw on every call, parking the calling node
+  // on a wait nothing ever woke. So any call into this closure attaches the
+  // client itself on demand; every caller awaits that attachment instead of
+  // throwing. Self-healing regardless of whether this generation's start()
+  // ever fires, and getSharedDb makes a later generation's attach resolve
+  // near-instantly from the cached connection.
   function ensureClient() {
     if (client) return Promise.resolve(client);
     if (!clientPromise) {
@@ -183,7 +161,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // GET /manifold/budget/pending
   api.registerHttpRoute({
     path: "/manifold/budget/pending",
     auth: "plugin",
@@ -200,7 +177,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /manifold/budget/decide  { ids: string[], decision: "approve"|"reject" }
   api.registerHttpRoute({
     path: "/manifold/budget/decide",
     auth: "plugin",
@@ -233,9 +209,8 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         });
         for (const row of decided) {
           if (row.flow_id) {
-            // In-process resume (routes/operator-resume.js, injected). The
-            // start-gate branch below still loops back: elevation needs
-            // gateway scope.
+            // In-process resume (routes/operator-resume.js). The start-gate
+            // branch below still loops back: elevation needs gateway scope.
             if (onFlowResume) {
               try { await onFlowResume({ flowId: row.flow_id, nodeId: row.node, decision }); } catch {}
             }
@@ -266,7 +241,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // GET /manifold/budget/history
   api.registerHttpRoute({
     path: "/manifold/budget/history",
     auth: "plugin",
@@ -283,7 +257,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /manifold/budget/mock  { count?: number }
   api.registerHttpRoute({
     path: "/manifold/budget/mock",
     auth: "plugin",
@@ -315,7 +288,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // GET /manifold/budget/gate
   api.registerHttpRoute({
     path: "/manifold/budget/gate",
     auth: "plugin",
@@ -337,7 +309,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /manifold/budget/gate/lock
   api.registerHttpRoute({
     path: "/manifold/budget/gate/lock",
     auth: "plugin",
@@ -355,7 +326,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /manifold/budget/gate/unlock
   api.registerHttpRoute({
     path: "/manifold/budget/gate/unlock",
     auth: "plugin",
@@ -373,7 +343,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // POST /manifold/budget/items — programmatic item creation (called by manifold gate)
   api.registerHttpRoute({
     path: "/manifold/budget/items",
     auth: "gateway",
@@ -419,26 +388,10 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     },
   });
 
-  // ── Runtime API: async libsql reads + writes ──────────────────────────────
-  // executor.js calls these per-node (isGateLocked, lookupNodeDecision,
-  // enqueueNodeApproval) without an HTTP hop.
+  // executor.js calls these per-node without an HTTP hop.
   api.runtime = api.runtime ?? {};
   api.runtime.approvalQueue = {
     async isGateLocked() {
-      // Awaits attachment in place instead of throwing when the client
-      // isn't attached yet — a cold store on the first call after a reload
-      // is a normal await, same as run-store.js's Proxy factory does for
-      // every other store in this codebase. getSharedDb (state/db.js)
-      // is what makes this cheap: a later generation's attach resolves
-      // near-instantly from the cached connection.
-      //
-      // A genuine attach FAILURE (not "still attaching" — that case never
-      // rejects, it just takes longer) is deliberately NOT caught here: it
-      // propagates and fails this node closed, same as any other thrown
-      // error reaching maybeBudgetGate. Treating "the store is broken, we
-      // can't tell if spend is locked" as "not locked" would let arbitrarily
-      // expensive nodes dispatch with zero budget control — the one case
-      // this function must never fail open on.
       const c = await ensureClient();
       try {
         return await withSharedWrite(DB_PATH, async () => {

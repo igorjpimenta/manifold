@@ -1,5 +1,3 @@
-// The adapter's whole job is the seam: spawn the core, serve the turn
-// bridge, stamp metadata. These tests pin the seam without a gateway.
 
 import { registerHooks } from "node:module";
 import { describe, it } from "node:test";

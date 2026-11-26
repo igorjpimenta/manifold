@@ -1,5 +1,3 @@
-// Unit tests for state/session-index.js — createSessionIndex: record(), close(), no-op shim on DB failure.
-
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -8,8 +6,6 @@ import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { createSessionIndex } from "../../../state/session-index.js";
 import { createRunStore } from "../../../state/run-store.js";
-
-// ─── helpers ────────────────────────────────────────────────────────────────
 
 function tmpDb() {
   return path.join(os.tmpdir(), `gf-test-${randomUUID()}.sqlite`);
@@ -35,8 +31,6 @@ async function makeIndex(overrides = {}) {
     },
   });
 }
-
-// ─── createSessionIndex — DB setup ──────────────────────────────────────────
 
 describe("createSessionIndex — DB setup", () => {
   test("creates the DB, table, and indexes without throwing", async () => {
@@ -65,8 +59,6 @@ describe("createSessionIndex — DB setup", () => {
     idx.close();
   });
 });
-
-// ─── record() — no-op guards ─────────────────────────────────────────────────
 
 describe("record() — no-op when required fields missing", () => {
   test("record() is a no-op when flowId is missing", async () => {
@@ -101,8 +93,6 @@ describe("record() — no-op when required fields missing", () => {
     idx.close();
   });
 });
-
-// ─── record() — correct insertion ───────────────────────────────────────────
 
 describe("record() — successful insertion", () => {
   test("inserts a row with correct flowId, session, nodeId, branchItemId, and a numeric spawned_at", async () => {
@@ -176,15 +166,13 @@ describe("record() — successful insertion", () => {
   });
 });
 
-// ─── record() — UNIQUE constraint / INSERT OR IGNORE ────────────────────────
-
 describe("record() — deduplication via UNIQUE(flow_id, session_key)", () => {
   test("recording the same (flowId, session) pair twice is a no-op (INSERT OR IGNORE)", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
     const session = "sess-dup";
     await idx.record({ flowId, session, nodeId: "NODE_A" });
-    await idx.record({ flowId, session, nodeId: "NODE_B" }); // should be silently ignored
+    await idx.record({ flowId, session, nodeId: "NODE_B" });
     const { rows } = await idx._db.execute({
       sql: "SELECT * FROM flow_sessions WHERE flow_id = ?",
       args: [flowId],
@@ -222,8 +210,6 @@ describe("record() — deduplication via UNIQUE(flow_id, session_key)", () => {
   });
 });
 
-// ─── close() ─────────────────────────────────────────────────────────────────
-
 describe("close()", () => {
   test("close() on the real instance does not throw", async () => {
     const idx = await makeIndex();
@@ -237,11 +223,7 @@ describe("close()", () => {
   });
 });
 
-// ─── no-op shim on DB failure ────────────────────────────────────────────────
-
-// Helper: write invalid (non-SQLite) content to a file in an existing directory
-// so mkdirSync (dirname = tmpdir) succeeds but the client throws on open,
-// triggering the no-op shim path in createSessionIndex.
+// Non-SQLite content: mkdir succeeds, client open throws → shim path.
 function makeCorruptDbPath() {
   const filePath = path.join(os.tmpdir(), `gf-corrupt-${randomUUID()}.sqlite`);
   writeFileSync(filePath, "THIS IS NOT SQLITE \x00\x01\x02");
@@ -281,8 +263,6 @@ describe("no-op shim — DB open failure", () => {
   });
 });
 
-// ─── logger integration ───────────────────────────────────────────────────────
-
 describe("logger integration", () => {
   test("does not throw when no logger is provided (default)", async () => {
     const idx = await makeIndex();
@@ -299,8 +279,6 @@ describe("logger integration", () => {
     assert.equal(warnings.length, 0);
   });
 });
-
-// ─── hasSessionForNode() ──────────────────────────────────────────────────────
 
 describe("hasSessionForNode()", () => {
   test("returns false when no record exists for the (flowId, nodeId) pair", async () => {
@@ -344,7 +322,7 @@ describe("hasSessionForNode()", () => {
   test("a record with nodeId=null does not satisfy a hasSessionForNode lookup for a real nodeId", async () => {
     const idx = await makeIndex();
     const flowId = randomUUID();
-    await idx.record({ flowId, session: "sess-1" }); // nodeId defaults to null
+    await idx.record({ flowId, session: "sess-1" });
     assert.equal(await idx.hasSessionForNode(flowId, "SOME_NODE"), false);
     idx.close();
   });
@@ -357,11 +335,6 @@ describe("hasSessionForNode()", () => {
     });
   });
 });
-
-// ─── flowIdForSessionKey() ────────────────────────────────────────────────────
-//
-// The reverse of hasSessionForNode: given just a session key (no flowId
-// in hand), resolve which flow it belongs to.
 
 describe("flowIdForSessionKey()", () => {
   test("returns null when no record exists for that session key", async () => {
@@ -393,8 +366,6 @@ describe("flowIdForSessionKey()", () => {
     });
   });
 });
-
-// ─── integration: record persistence roundtrip ───────────────────────────────
 
 describe("record persistence roundtrip", () => {
   test("multiple sessions for one flow are all persisted", async () => {
@@ -458,8 +429,6 @@ describe("record persistence roundtrip", () => {
   });
 });
 
-// ─── listForFlow() ────────────────────────────────────────────────────────────
-
 describe("listForFlow()", () => {
   test("returns this flow's rows in spawn order with stored attribution", async () => {
     const idx = await makeIndex();
@@ -483,8 +452,6 @@ describe("listForFlow()", () => {
     idx.close();
   });
 });
-
-// ─── recordThread / findThread — discuss thread roster ───────────────────────
 
 describe("recordThread / findThread", () => {
   test("findThread returns null when no turn ran yet", async () => {

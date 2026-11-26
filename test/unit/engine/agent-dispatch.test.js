@@ -1,9 +1,3 @@
-// Unit tests for engine/agent-dispatch.js — the engine's agent-node
-// dispatch: it drives the injected harness turn, hands the reply to the
-// node's apply(), and consumes the delivered tool result.
-//
-// The turn itself (runtime call shape, readiness gate, the wait race) is the
-// harness plugin's — see plugins/openclaw/manifold/run-turn.test.js.
 import { test, it, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -33,8 +27,6 @@ function makeTurn(overrides = {}) {
 function makeNode(overrides = {}) {
   return { agent: "cyrano", apply: (state, output) => ({ text: output.text }), ...overrides };
 }
-
-// ── the injected turn ────────────────────────────────────────────────────────
 
 describe("dispatchAgentWithRetry — the injected turn", () => {
   it("dispatches once and calls apply with the turn's output", async () => {
@@ -72,8 +64,6 @@ describe("dispatchAgentWithRetry — the injected turn", () => {
     );
   });
 });
-
-// ── apply() wiring ───────────────────────────────────────────────────────────
 
 describe("dispatchAgentWithRetry — apply() contract", () => {
   it("threads needsCtx through to apply() as the 5th positional arg", async () => {
@@ -132,8 +122,6 @@ describe("dispatchAgentWithRetry — apply() contract", () => {
   });
 });
 
-// ── the tool result ──────────────────────────────────────────────────────────
-
 describe("dispatchAgentWithRetry — the delivered tool result", () => {
   it("passes output.toolResult to apply() and consumes the row afterwards", async () => {
     const session = `sk-dispatch-${randomUUID()}`;
@@ -153,7 +141,7 @@ describe("dispatchAgentWithRetry — the delivered tool result", () => {
   it("leaves the row alone when no tool result was delivered", async () => {
     const session = `sk-dispatch-${randomUUID()}`;
     await writePendingResult({ session, payload: { stale: true } });
-    const turn = makeTurn(); // no toolResult in the output
+    const turn = makeTurn();
     const { dispatchAgentWithRetry } = createAgentDispatch({ runTurn: turn, sessionIndex: null, logger });
     await dispatchAgentWithRetry({
       node: makeNode(), nodeId: "DRAFT", session, initialMessage: "go",
@@ -162,8 +150,6 @@ describe("dispatchAgentWithRetry — the delivered tool result", () => {
     assert.ok(await readPendingResult(session), "a row this dispatch did not consume stays put");
   });
 });
-
-// ── transcript event ──────────────────────────────────────────────────────────
 
 describe("dispatchAgentWithRetry — session transcript event", () => {
   function makeEmit() {

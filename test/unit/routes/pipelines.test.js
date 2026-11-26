@@ -1,16 +1,7 @@
-/**
- * Unit tests for routes/pipelines.js
- *
- * Verifies:
- *   - registerPipelineRoutes registers 1 route at the right path/auth/match.
- *   - Method guard fires before auth.
- *   - Happy-path handler returns {pipelines, todayStartMs, generatedAtMs} shape.
- */
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
 const TEST_BEARER = "test-bearer-pipelines";
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = TEST_BEARER;
@@ -123,12 +114,6 @@ describe("registerPipelineRoutes — handler", () => {
     assert.equal(orphan.historical, true);
   });
 
-  // Regression test: engine/loader.js registers every loop node's .branch
-  // as its own addressable pipeline (`${pipelineId}::${nodeId}`, flagged
-  // _synthetic:true) purely so childFlows has a dispatch target — it is
-  // never a pipeline an operator runs or should see. Before this filter,
-  // it appeared as a real (zero-run) catalog entry, cluttering the
-  // Pipelines list with one fake row per loop node ever migrated.
   test("_synthetic child-flow pipelines (loop-node dispatch targets) are excluded from the catalog", async () => {
     const { api, routes } = createMockApi();
     const realPipeline = {

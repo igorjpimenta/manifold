@@ -1,9 +1,3 @@
-/**
- * Unit tests for dashboard/event-log.js's node-invocation-based key diffing:
- * stateKeysAdded/stateKeysRemoved come from
- * nodeExecutionsStore.listVisitedNodeIdsByFlow(), not Object.keys(stateJson).
- * dbPath: null throughout so no real sqlite file is touched.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { createEventBus } from "../../../dashboard/event-log.js";
@@ -19,14 +13,9 @@ function makeStore(rows) {
 }
 
 function makeNodeExecutionsStore(initial) {
-  // Map<flowId, Set<nodeId>>, mutable so tests can simulate new invocations.
   const visited = new Map(Object.entries(initial).map(([k, v]) => [k, new Set(v)]));
   return {
     async listVisitedNodeIdsByFlow(flowIds) {
-      // Fresh Set per call, matching the real store's own query-time
-      // construction (state/node-executions.js) — returning the SAME live
-      // Set reference here would let a later mutation silently corrupt an
-      // already-snapshotted "prev" entry via aliasing.
       const result = new Map();
       for (const id of flowIds) result.set(id, new Set(visited.get(id) ?? []));
       return result;
@@ -63,10 +52,6 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     bus = createEventBus({ store, nodeExecutionsStore, logger: null, dbPath: null });
     await bus.start();
 
-    // Simulate SCAN completing and DRAFT being newly invoked — state_json
-    // itself never gains a "SCAN"/"DRAFT" key in this test (deliberately,
-    // to prove the diff does not depend on it), only the invocation
-    // store's visited-set changes.
     nodeExecutionsStore._addVisited(flowId, "DRAFT");
     store._set({ ...row, revision: 2, lastStep: "DRAFT" });
     const evtPromise = waitForEvent(bus, (e) => e.kind === "run.updated" && e.flowId === flowId);
@@ -98,7 +83,7 @@ describe("dashboard/event-log.js — invocation-based stateKeysAdded/Removed", (
     const flowId = "no-node-execs-flow";
     const row = { flowId, revision: 1, status: "running", lastStep: "A", stateJson: {} };
     const store = makeStore([row]);
-    bus = createEventBus({ store, logger: null, dbPath: null }); // no nodeExecutionsStore at all
+    bus = createEventBus({ store, logger: null, dbPath: null });
     await bus.start();
 
     store._set({ ...row, revision: 2, lastStep: "B" });

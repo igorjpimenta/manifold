@@ -1,19 +1,11 @@
-// manifold — openclaw adapter for the manifold pipeline engine.
-//
-// The engine runs as its own process (`manifold serve`, spawned here). This
-// adapter holds the only harness-specific pieces:
-//
-//   - it starts and supervises the core process;
-//   - it serves POST /api/manifold/turn, the endpoint the core calls when a
-//     flow needs an agent turn — the gateway's agent runtime never leaves
-//     this process;
-//   - it serves POST /api/manifold/session, which mints the session id for an
-//     agent-node dispatch: ids are harness-owned, and the core process has no
-//     way to know this harness's format;
-//   - it stamps manifold session metadata on openclaw sessions.
-//
-// Nothing in core imports this file, and this file imports core only through
-// the published package (no relative paths into the repo).
+// Openclaw adapter for the manifold pipeline engine. The engine runs as its
+// own process (`manifold serve`, spawned here); this adapter holds the only
+// harness-specific pieces: supervising the core process, POST
+// /api/manifold/turn (the core's agent-turn endpoint — the gateway's agent
+// runtime never leaves this process), POST /api/manifold/session (mints
+// dispatch session ids — ids are harness-owned), and stamping manifold
+// session metadata on openclaw sessions. Nothing in core imports this file;
+// this file imports core only through the published package.
 
 import crypto from "node:crypto";
 import path from "node:path";
@@ -44,8 +36,6 @@ const RESTART_BACKOFF_MS = [2000, 5000, 15000];
 
 const require = createRequire(import.meta.url);
 
-// Dispatch coordinates in, this harness's session id out. Missing coordinates
-// are refused rather than defaulted: the id labels a real transcript.
 // The elevated sibling answers with its own JSON error envelope; reuse its
 // message rather than wrapping it again.
 function parseErrorOf(raw) {
@@ -57,6 +47,8 @@ function parseErrorOf(raw) {
   }
 }
 
+// Missing coordinates are refused rather than defaulted: the id labels a
+// real transcript.
 export function sessionIdFor(body) {
   const { agentId, flowId, nodeId } = body ?? {};
   if (!agentId || !flowId || !nodeId) return { error: "agentId, flowId and nodeId are required" };
@@ -224,7 +216,6 @@ export default definePluginEntry({
       logger: api.logger,
     });
 
-    // ── Turn bridge ──────────────────────────────────────────────────────────
     // Two routes for one turn. The gateway refuses `runtime.subagent.run`
     // outside an operator-scoped request ("missing scope: operator.write"),
     // and an `auth: "plugin"` handler carries no scope at all — so the public
@@ -283,11 +274,8 @@ export default definePluginEntry({
       },
     });
 
-    // ── Session-id bridge ────────────────────────────────────────────────────
     // Dispatch ids belong to this harness (see sessions.js), so the core asks
-    // here instead of inventing a shape the gateway may not accept. Missing
-    // coordinates are refused rather than defaulted: the id labels a real
-    // transcript.
+    // here instead of inventing a shape the gateway may not accept.
     api.registerHttpRoute({
       path: SESSION_PATH,
       auth: "plugin",
@@ -311,7 +299,6 @@ export default definePluginEntry({
       },
     });
 
-    // ── Core process ─────────────────────────────────────────────────────────
     let child = null;
     let restartTimer = null;
     let stopping = false;

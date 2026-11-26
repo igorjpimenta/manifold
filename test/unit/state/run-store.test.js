@@ -1,11 +1,3 @@
-/**
- * Unit tests for state/run-store.js
- *
- * Covers: schema creation + v2 migration, insert, CAS write methods
- * (casSetRunning, casSetWaiting, casFinish, casSkip, casFail, cancelFlow),
- * stampCancelRequested, stampStateJson, updateStateJsonCAS,
- * get, list, listFor, and mapRow JSON parsing.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -13,7 +5,6 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { createRunStore, TERMINAL_STATUSES, TERMINAL_STATUS_SET } from "../../../state/run-store.js";
-
 
 function tmpDb() {
   return path.join(os.tmpdir(), `run-store-test-${randomUUID()}.sqlite`);
@@ -28,8 +19,6 @@ async function makeStore(overrides = {}) {
   return store;
 }
 
-// parent_invocation_id carries an FK; give the test invocation a real owning
-// run rather than weakening the constraint the suite is checking.
 async function seedInvocation(store, invocationId, ownerFlowId = null) {
   let flowId = ownerFlowId;
   if (flowId === null) {
@@ -59,8 +48,6 @@ function fakeFlow(overrides = {}) {
   };
 }
 
-// ── schema ────────────────────────────────────────────────────────────────────
-
 describe("createRunStore — schema", () => {
   test("opens DB and creates flow_runs table without throwing", async () => {
     const store = await makeStore();
@@ -86,8 +73,6 @@ describe("createRunStore — schema", () => {
     await s2.close();
   });
 });
-
-// ── insert ────────────────────────────────────────────────────────────────────
 
 describe("createRunStore — insert", () => {
   test("stores a flow and retrieves it via get()", async () => {
@@ -120,8 +105,6 @@ describe("createRunStore — insert", () => {
     store.close();
   });
 });
-
-// ── casSetRunning ─────────────────────────────────────────────────────────────
 
 describe("createRunStore — casSetRunning", () => {
   test("updates status to running, advances lastStep, clears wait_json", async () => {
@@ -167,8 +150,6 @@ describe("createRunStore — casSetRunning", () => {
   });
 });
 
-// ── casSetWaiting ─────────────────────────────────────────────────────────────
-
 describe("createRunStore — casSetWaiting", () => {
   test("sets status=blocked, lastStep=prior node, waitJson", async () => {
     const store = await makeStore();
@@ -199,8 +180,6 @@ describe("createRunStore — casSetWaiting", () => {
     store.close();
   });
 });
-
-// ── casSetQueued ──────────────────────────────────────────────────────────────
 
 describe("createRunStore — casSetQueued", () => {
   test("sets status=queued, lastStep=prior node, waitJson", async () => {
@@ -243,8 +222,6 @@ describe("createRunStore — casSetQueued", () => {
   });
 });
 
-// ── casFinish / casFail / casSkip ─────────────────────────────────────────────
-
 describe("createRunStore — casFinish / casFail / casSkip", () => {
   test("casFinish: status=succeeded, ended_at set", async () => {
     const store = await makeStore();
@@ -283,8 +260,6 @@ describe("createRunStore — casFinish / casFail / casSkip", () => {
     store.close();
   });
 
-  // The reason param must actually land in statusReason — a casSkipStmt
-  // that writes NULL there silently drops the node's own _skipped.reason.
   test("casSkip: reason param persists to statusReason", async () => {
     const store = await makeStore();
     const f = fakeFlow({ status: "running", revision: 0 });
@@ -310,8 +285,6 @@ describe("createRunStore — casFinish / casFail / casSkip", () => {
     store.close();
   });
 });
-
-// ── cancelFlow ────────────────────────────────────────────────────────────────
 
 describe("createRunStore — cancelFlow", () => {
   test("status=cancelled, ended_at set", async () => {
@@ -363,8 +336,6 @@ describe("createRunStore — cancelFlow", () => {
   });
 });
 
-// ── cancel path helpers ───────────────────────────────────────────────────────
-
 describe("createRunStore — cancel path helpers", () => {
   test("stampCancelRequested sets cancel_requested_at", async () => {
     const store = await makeStore();
@@ -372,7 +343,7 @@ describe("createRunStore — cancel path helpers", () => {
     await store.insert(f);
     const before = Date.now();
     await store.stampCancelRequested(f.flowId);
-    await store.flush(); // stampCancelRequested() defers through batch-writer
+    await store.flush();
     const got = await store.get(f.flowId);
     assert.ok(got.cancelRequestedAt >= before);
     store.close();
@@ -389,10 +360,6 @@ describe("createRunStore — cancel path helpers", () => {
     store.close();
   });
 });
-
-// ── cancelWithStateJson (atomic combination) ───────────────────────────────────
-// One db.batch() call covering both writes — a crash between two separate
-// writes would leave state_json updated with status still not 'cancelled'.
 
 describe("createRunStore — cancelWithStateJson", () => {
   test("commits both the stateJson stamp and the status flip together", async () => {
@@ -433,8 +400,6 @@ describe("createRunStore — cancelWithStateJson", () => {
   });
 });
 
-// ── updateStateJsonCAS ────────────────────────────────────────────────────────
-
 describe("createRunStore — updateStateJsonCAS", () => {
   test("applies when revision matches", async () => {
     const store = await makeStore();
@@ -458,8 +423,6 @@ describe("createRunStore — updateStateJsonCAS", () => {
   });
 });
 
-// ── list / listFor ────────────────────────────────────────────────────────────
-
 describe("createRunStore — list / listFor", () => {
   test("list returns every row (no per-tenant filter — sole manifold store)", async () => {
     const store = await makeStore();
@@ -476,12 +439,6 @@ describe("createRunStore — list / listFor", () => {
     store.close();
   });
 
-  // Every consumer of list() means
-  // "top-level pipeline runs" — a childFlows loop item (parentInvocationId
-  // set) must never surface as its own row, or it pollutes every
-  // list()-backed view (routes/pipelines.js's catalog, routes/runs.js's
-  // list + compare-to-peers, CLI commands) with one fake entry per branch
-  // item.
   test("list excludes childFlows children (parentInvocationId set), includes top-level rows only", async () => {
     const store = await makeStore();
     const invocationId = "inv-list-exclude-test";
@@ -515,8 +472,6 @@ describe("createRunStore — list / listFor", () => {
   });
 });
 
-// ── get ───────────────────────────────────────────────────────────────────────
-
 describe("createRunStore — get", () => {
   test("returns null for unknown flowId", async () => {
     const store = await makeStore();
@@ -524,8 +479,6 @@ describe("createRunStore — get", () => {
     store.close();
   });
 });
-
-// ── parent-invocation lookups ────────────────────────────────────────────────
 
 describe("createRunStore — getByParentInvocationId", () => {
   test("returns null when no child exists for the invocation", async () => {
@@ -575,8 +528,6 @@ describe("createRunStore — listForParentInvocations", () => {
   });
 });
 
-// ── listActive() ──────────────────────────────────────────────────────────────
-
 describe("createRunStore — listActive()", () => {
   test("returns only flows where ended_at IS NULL", async () => {
     const store = await makeStore();
@@ -586,7 +537,6 @@ describe("createRunStore — listActive()", () => {
     await store.insert(active);
     await store.insert(blocked);
     await store.insert(terminal);
-    // Drive terminal into succeeded so ended_at is stamped
     await store.casFinish(terminal.flowId, { expectedRevision: 0, stateJson: {} });
 
     const rows = await store.listActive();
@@ -607,14 +557,6 @@ describe("createRunStore — listActive()", () => {
   });
 });
 
-// ─── TERMINAL_STATUSES / TERMINAL_STATUS_SET ───────────────────────────────────
-//
-// Exported so callers deciding "is this flow cancellable / already done"
-// check against the real terminal set instead of hand-rolling their own
-// allowlist of active statuses. A `status !== "running" && status !==
-// "blocked"` check misses "queued" (a real, non-terminal admission-pool
-// wait) and wrongly refuses to cancel it, reporting it as "already
-// terminal".
 describe("TERMINAL_STATUSES / TERMINAL_STATUS_SET", () => {
   test("contains exactly the four real terminal statuses", () => {
     assert.deepEqual([...TERMINAL_STATUSES].sort(), ["cancelled", "failed", "skipped", "succeeded"]);

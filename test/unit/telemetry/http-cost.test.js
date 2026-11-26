@@ -7,7 +7,6 @@ import { randomUUID } from "node:crypto";
 import { registerCostRoutes } from "../../../telemetry/http-cost.js";
 import { UNATTRIBUTED_LABEL, UNATTRIBUTED_FILTER } from "../../../telemetry/labels.js";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 async function makeClient(rows = []) {
   const dbPath = join(tmpdir(), `http-cost-test-${randomUUID()}.sqlite`);
@@ -82,7 +81,6 @@ function makeReq(path) {
   return { method: "GET", url: `http://x${path}` };
 }
 
-// ── route registration ────────────────────────────────────────────────────────
 
 describe("registerCostRoutes registration", () => {
   it("registers all expected route paths", () => {
@@ -113,7 +111,6 @@ describe("registerCostRoutes registration", () => {
   });
 });
 
-// ── /cost/today ───────────────────────────────────────────────────────────────
 
 describe("/cost/today", () => {
   it("returns 503 when store is null", async () => {
@@ -143,7 +140,6 @@ describe("/cost/today", () => {
   });
 });
 
-// ── /cost/by-session ─────────────────────────────────────────────────────────
 
 describe("/cost/by-session", () => {
   it("returns 503 when flow_id or node_id missing", async () => {
@@ -173,7 +169,6 @@ describe("/cost/by-session", () => {
   });
 });
 
-// ── /cost/breakdown ───────────────────────────────────────────────────────────
 
 describe("/cost/breakdown", () => {
   it("returns 400 for unknown dim", async () => {
@@ -202,11 +197,6 @@ describe("/cost/breakdown", () => {
     assert.ok(Array.isArray(body.rows));
   });
 
-  // The breakdown must never emit a null label: clients decode
-  // `label` as a non-optional String, so a null label fails
-  // the whole decode and silently blanks the Budget card. NULL pipeline_id
-  // rows belong in a labeled sentinel bucket whose spend is counted — these
-  // assert the sentinel is a real string and the spend is actually present.
   it("surfaces NULL pipeline_id rows as a labeled bucket for dim=pipeline", async () => {
     const api = makeApi();
     const { json, bad, parseRange } = makeHelpers();
@@ -229,16 +219,10 @@ describe("/cost/breakdown", () => {
     assert.ok(unattributed, `expected an ${UNATTRIBUTED_LABEL} row, got ${JSON.stringify(body.rows.map((r) => r.label))}`);
     assert.equal(unattributed.calls, 1);
     assert.equal(unattributed.cost, 0.04);
-    // Outcome counters are meaningless without a flow_id and would otherwise
-    // read as a real ROI signal to a client ROI filter.
     assert.equal(unattributed.success_rate, undefined);
     assert.equal(unattributed.total_runs, undefined);
-    // total must reconcile with the rows, so the operator can account for
-    // every cent of the /cost/home top-line.
     assert.equal(body.total, 0.07);
 
-    // A real pipeline is unaffected: team prefix stripped, filter round-trips
-    // to the stored value.
     const named = body.rows.find((r) => r.label === "alpha-pipeline");
     assert.ok(named, "expected the attributed pipeline row to survive");
     assert.deepEqual(named.filter, { pipeline_id: "team_alpha-pipeline" });
@@ -255,9 +239,6 @@ describe("/cost/breakdown", () => {
     const def = api._routes.get("/manifold/telemetry/cost/breakdown");
 
     const res = makeRes();
-    // Exactly the filter the transform emits for the unattributed row. A
-    // literal `pipeline_id = '(unattributed)'` would match zero rows, since
-    // no row stores that string — the __null__ sentinel is what resolves.
     await def.handler(makeReq(`/manifold/telemetry/cost/breakdown?dim=pipeline&pipeline_id=${encodeURIComponent(UNATTRIBUTED_FILTER.pipeline_id)}`), res);
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res._body);

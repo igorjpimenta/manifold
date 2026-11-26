@@ -1,23 +1,9 @@
-// server/app.js — the manifold application, assembled outside any harness.
-//
-// createManifoldApp() builds every store, the executor, the pipelines watcher
-// and revival, the HTTP routes and the dashboard, and returns them as an
-// ordered service list. It takes one host object for the things only a
-// harness can supply:
-//
-//   logger          structured logger ({info,warn,error})
-//   runTurn         ({flowId,session,agentId,gateNodeId,modelOverride,itemId,
-//                    text,systemPrompt}) => {text,runId,usage?}
-//   sessions        { newDiscussSessionId(...) } — thread ids are minted by
-//                   the harness, never by core
-//   invokeElevated  (path, payload, opts) => {ok,status,body,error}; defaults
-//                   to the local elevation loopback in elevation.js
-//   getBroadcast    () => ((event, payload) => void) | null — the harness's
-//                   WS fan-out; core emits canonically either way
-//   recordSpawn     (entry) => void, optional lineage hook
-//
-// The app never touches a gateway API object, so the same code boots inside
-// the openclaw plugin today and as a standalone `manifold serve` process.
+// createManifoldApp() assembles the app outside any harness: stores,
+// executor, pipelines watcher, revival, HTTP routes, dashboard — returned as
+// an ordered service list. Host supplies what only a harness has: logger,
+// runTurn, sessions, invokeElevated (defaults to elevation.js loopback),
+// getBroadcast, recordSpawn. Core never touches a gateway API object, so the
+// same code boots inside the openclaw plugin and as a standalone `manifold serve`.
 
 import { createPipelinesLoader } from "../engine/loader.js";
 import { createStateStore } from "../state/state-store.js";
@@ -58,19 +44,15 @@ import { registerTelemetry } from "../telemetry/index.js";
 import { reviveOrphanFlows, reconcileStuckAdmissions } from "../boot/flow-revival.js";
 import { resolveStorePaths } from "../state/paths.js";
 
-// reviveOrphanFlows only runs once, at startup — a stuck-promotion leak
-// occurring hours into a long uptime would otherwise go undetected until the
-// next restart. 5 minutes matches this codebase's other steady-state probe
-// cadences (e.g. model-circuit-breaker's own recovery probe).
+// reviveOrphanFlows runs once at startup; a stuck-promotion leak hours into
+// uptime would otherwise wait for the next restart. 5 minutes matches this
+// codebase's other steady-state probe cadences.
 const STUCK_ADMISSION_RECONCILE_INTERVAL_MS = 5 * 60_000;
 
 export const DEFAULT_OWNER_SESSION_KEY = "agent:main:explicit:manifold-owner";
 export const DEFAULT_DASHBOARD_PORT = 44300;
 export const DEFAULT_DASHBOARD_HOST = "127.0.0.1";
 
-// An auxiliary listener that cannot bind — a port another process holds —
-// must not take the engine down: the API, pipelines and telemetry stay live,
-// and the caller learns the service is off from the warning.
 export async function startOrWarn(logger, { label, address, start, stop }) {
   try {
     await start();
@@ -109,10 +91,9 @@ export function createManifoldApp({ host, config = {} } = {}) {
   const admissionQueueStore = createAdmissionQueueStore({
     dbPath: runtimeDbPath, getLimit: getGlobalConcurrencyLimit,
   });
-  // resumeParentRef.resume is set to executor.resume once the executor
-  // exists below — store construction has to come before it, so the
-  // resume-trigger (state-store.js's finish/skip/fail/cancel) reads through
-  // this mutable box rather than a captured closure.
+  // Stores must be constructed before the executor exists, but the
+  // resume-trigger reads executor.resume through this mutable box rather
+  // than a captured closure.
   const resumeParentRef = { resume: null };
   const emitCanonical = createEmitter({ getBroadcast, logger }).emit;
   const failureStore = createFailureStore({ logger, dbPath: runtimeDbPath, nodeExecutionsStore, emit: emitCanonical });
@@ -120,15 +101,9 @@ export function createManifoldApp({ host, config = {} } = {}) {
   const store = createStateStore({ logger }, ownerSessionKey, {
     runStore, nodeExecutionsStore, resumeParentRef, pipelinesRef, failureStore, admissionQueueStore, logger,
   });
-  // Memoized single load (engine/loader.js's createPipelinesLoader) — every
-  // caller (the loader service, flow-revival, and executor.js's per-flow
-  // fallback) awaits this SAME promise instead of each independently
-  // checking `pipelinesRef.value.size > 0` and potentially kicking off its
-  // own redundant loadPipelines() pass.
   const ensurePipelinesLoaded = createPipelinesLoader(pipelinesDir, logger, pipelinesRef);
   // createNodeHealthStore is async (opens sqlite + runs migrations) but app
-  // construction must be synchronous. Same lazy Promise-proxy pattern as
-  // sessionIndex below.
+  // construction must be synchronous — lazy Promise-proxy, as with sessionIndex.
   const _nodeHealthPromise = createNodeHealthStore({ logger, dbPath: runtimeDbPath });
   const nodeHealthStore = {
     isBlocked(p, n) { return _nodeHealthPromise.then(s => s.isBlocked(p, n)); },
@@ -140,8 +115,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
   const discussStore = createDiscussStore({ logger, dbPath: runtimeDbPath });
   const _sessionIndexPromise = createSessionIndex({ logger, dbPath: runtimeDbPath });
   const sessionIndex = {
-    // Harness-owned session ids pass through verbatim — stored and read with
-    // no edge translation on either path.
+    // Harness-owned session ids pass through verbatim — no edge translation.
     record(data) { return _sessionIndexPromise.then((si) => si.record({ ...data })); },
     recordThread(data) { return _sessionIndexPromise.then((si) => si.recordThread({ ...data })); },
     findThread(flowId, gateNodeId, itemId) { return _sessionIndexPromise.then(si => si.findThread(flowId, gateNodeId, itemId)); },
@@ -169,11 +143,9 @@ export function createManifoldApp({ host, config = {} } = {}) {
     runStore,
     nodeExecutionsStore,
     admissionQueueStore,
-    // The harness owns the agent runtime: core receives a turn function,
-    // never the runtime object.
+    // The harness owns the agent runtime and the session namespace: core
+    // receives a turn function and asks for ids, never the runtime object.
     runTurn: host.runTurn,
-    // Same seam for ids: the harness adapter mints dispatch sessions
-    // (sessions.newNodeSessionId) because it owns the session namespace.
     sessions: host.sessions,
     emit: emitCanonical,
   });
@@ -187,9 +159,8 @@ export function createManifoldApp({ host, config = {} } = {}) {
     const pipelines = await ensurePipelinesLoaded();
     const ids = [...pipelines.keys()];
     logger.info(`manifold: ${pipelines.size} pipeline(s) loaded${ids.length ? `: ${ids.join(", ")}` : ""}`);
-    // First reconcile has to happen here, not from the watcher below — the
-    // watcher's own first tick deliberately primes its fingerprint without
-    // reloading (this boot-time load already happened).
+    // The watcher's first tick deliberately primes its fingerprint without
+    // reloading, so this boot-time load must do the first reconcile itself.
     await pipelineRegistryStore.reconcilePipelineVersions(pipelinesRef.value, { logger });
   });
 
@@ -200,18 +171,15 @@ export function createManifoldApp({ host, config = {} } = {}) {
   });
   service("manifold-pipelines-watcher", () => pipelinesWatcher.start(), () => pipelinesWatcher.stop());
 
-  // batch-writer defers and coalesces fire-and-forget DB writes behind an
-  // in-memory queue flushed on its interval timer or a size threshold —
-  // nothing to do at boot, but stop() must flush buffered writes before the
-  // process exits.
+  // Nothing to do at boot, but stop() must flush batch-writer's buffered
+  // fire-and-forget writes before the process exits.
   service("manifold-batch-writer", async () => {}, () => flushBatchWriter());
 
   let revivalTimer = null;
   service("manifold-flow-revival", async (ctx) => {
     const l = ctx?.logger ?? logger;
     l.info("manifold revival: start");
-    // Not awaited: revival dispatches agents, and a caller's start() must
-    // return before those dispatches can complete.
+    // Not awaited: start() must return before revival's dispatches complete.
     runBootRevival(l);
     revivalTimer = setInterval(() => {
       reconcileStuckAdmissions({ admissionQueueStore, runStore, executor, logger: l })
@@ -223,14 +191,12 @@ export function createManifoldApp({ host, config = {} } = {}) {
 
   async function runBootRevival(l) {
     try {
-      // Guarantee pipelines are in memory before reviving orphan flows;
-      // without this a race between the loader and revival makes the orphan
-      // filter pass every flow and fail them with "pipeline not loaded".
+      // Pipelines must be in memory before reviving: otherwise a race with
+      // the loader makes the orphan filter fail every flow with "pipeline
+      // not loaded". Read candidates from the SQL store, not store.list() —
+      // the in-process Map is empty at boot. includeChildren:true so a
+      // crashed child is revived like a crashed top-level flow.
       await ensurePipelinesLoaded();
-      // Read orphan candidates from the SQL store, not store.list() — the
-      // in-process Map is empty at boot. includeChildren:true — a crashed
-      // childFlows child must be revived exactly like a crashed top-level
-      // flow.
       const all = await runStore.list({ includeChildren: true });
       await reviveOrphanFlows({
         all,
@@ -245,9 +211,8 @@ export function createManifoldApp({ host, config = {} } = {}) {
         nodeExecutionsStore,
         sessionIndex,
         admissionQueueStore,
-        // gateResolver is declared further below in this same closure —
-        // safe to reference here since this callback only runs once startup
-        // actually reaches this point.
+        // gateResolver is declared later in this closure — safe here because
+        // this callback only runs once startup reaches that point.
         maybeResolveFlow: gateResolver.maybeResolveFlow,
       });
     } catch (err) {
@@ -256,18 +221,15 @@ export function createManifoldApp({ host, config = {} } = {}) {
   }
 
   const readStore = runStore;
-  // The route modules register their own services (budget/telemetry setup);
-  // they join the same ordered list the app starts and stops.
+  // Route modules register their own services; they join this ordered list.
   const routeHost = {
     logger,
     registerHttpRoute: host.registerHttpRoute,
     registerService: (svc) => services.push(svc),
-    // Harness lifecycle hooks (telemetry subscribes to agent/session events).
-    // A host that has no such events accepts the registration and never
-    // fires it; the hook adapters in host.on decide what reaches core.
+    // A host without these events accepts the registration and never fires it.
     on: (event, handler) => host.on?.(event, handler),
     // The gateway CLI lives with the harness; a standalone core is its own
-    // CLI (bin/manifold.js), so the registration is accepted and unused.
+    // CLI (bin/manifold.js), so this registration is accepted and unused.
     registerCli: (fn, meta) => host.registerCli?.(fn, meta),
     config: host.config ?? {},
     runtime: host.runtime ?? {},
@@ -290,7 +252,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
     discussStore,
     runStore,
     nodeExecutionsStore,
-    // Harness adapter: discuss thread ids come from here, never minted in core.
+    // Discuss thread ids come from the harness, never minted in core.
     sessions: host.sessions,
     sessionIndex,
   });
@@ -443,9 +405,6 @@ export function createManifoldApp({ host, config = {} } = {}) {
     });
     flowStateEmitter.on("change", _wsRunEventsListener);
 
-    // Gate lifecycle goes out with its full payload (items, waitJson,
-    // stateJson) so a consumer can render the gate without a re-fetch;
-    // gate.closed tells it to drop the surface.
     _gateOpenedListener = (payload) => {
       try { getBroadcast()?.("manifold.gate.opened", payload); } catch {}
     };
@@ -475,10 +434,6 @@ export function createManifoldApp({ host, config = {} } = {}) {
     started = [];
   }
 
-  // A blind manifold mints wrong gate decisions and drops pushes; refuse to
-  // boot on an unreadable primary instead. Checked after the stores have
-  // opened (a fresh home creates its files there), never as a missing-file
-  // false positive.
   const dbCheck = checkDatabases(storePaths, { logger });
   if (!dbCheck.ok) {
     const err = new Error(`unreadable database ${dbCheck.dbPath}: ${dbCheck.error}`);
@@ -508,9 +463,10 @@ export function createManifoldApp({ host, config = {} } = {}) {
   };
 }
 
-// checkDatabases — refuse to boot on an unreadable primary. A blind manifold
-// mints wrong gate decisions and drops pushes; fail loudly and name the file
-// instead. Synchronous probe: better-sqlite3 is already a dependency.
+// A blind manifold mints wrong gate decisions and drops pushes; refuse to
+// boot on an unreadable primary, naming the file. Called after the stores
+// have opened (a fresh home creates its files there), so a missing file is
+// never mistaken for corruption — see the skip below.
 export function checkDatabases(storePaths, { logger = console } = {}) {
   for (const dbPath of [storePaths.runtimeDb, storePaths.opsDb]) {
     const check = checkDb(dbPath);

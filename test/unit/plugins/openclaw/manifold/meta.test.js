@@ -1,5 +1,3 @@
-// meta.test.js — pure-function tests for the openclaw companion hook; runs
-// under `node --test plugins/` with no gateway runtime.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { isManifoldTool, buildManifoldMeta, registerManifoldMetaHook } from "../../../../../plugins/openclaw/manifold/meta.js";

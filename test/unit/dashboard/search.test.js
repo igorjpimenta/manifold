@@ -1,9 +1,3 @@
-/**
- * Unit tests for dashboard/search.js's error indexing: searchRuns indexes
- * errorEntries[] (sourced from flow_node_executions via an opts.errorsByFlow
- * Map). flow_node_executions unifies root and branch errors in one table,
- * so branch-level failures are searchable too.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { searchRuns } from "../../../dashboard/search.js";

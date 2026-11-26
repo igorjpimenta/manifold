@@ -1,11 +1,6 @@
-// routes/operator-resume.js — in-process resume for budget-gate approvals.
-//
-// resumeFlowFromGate is the single implementation behind two callers: POST
-// /manifold/resume-from-gate (thin validating wrapper) and the budget
-// decide route's in-process call. It re-requests the flow's own admission
-// (released the moment it blocked, state-store.js's setWaiting hook) and
-// resumes, leaving status:"queued" to the admission cycle when the pool is
-// full.
+// Single resume implementation behind POST /manifold/resume-from-gate and the
+// budget decide route's in-process call. Re-requests the flow's own admission
+// (released when it blocked) and resumes; a full pool leaves it "queued".
 import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
 export async function resumeFlowFromGate({

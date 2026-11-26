@@ -1,4 +1,3 @@
-// /manifold/telemetry/tree/expand — lazy-load one level of the genealogy cost tree.
 import { displayRootKind, displayRootLabel, stripTeamPrefix } from "./labels.js";
 import {
   peersForKind, ATTR_JOIN, ATTR_ROOT_KIND, ATTR_ROOT_LABEL,
@@ -46,9 +45,9 @@ export function registerTreeRoutes({ api, getStore, logger, json, bad, parseRang
             hasChildren: true,
             _multiKind: false,
           }));
-          // Merge nodes that translate to the same display label. First (highest
-          // cost, ORDER BY cost DESC) wins the key. "unknown" merges become
-          // non-expandable; named buckets keep hasChildren: true.
+          // Merge nodes that translate to the same display label; the
+          // highest-cost (first, ORDER BY cost DESC) wins the key. Merged
+          // "unknown" becomes non-expandable; named buckets stay expandable.
           const byTriggerLabel = new Map();
           for (const n of triggerNodes) {
             if (byTriggerLabel.has(n.label)) {
@@ -84,13 +83,10 @@ export function registerTreeRoutes({ api, getStore, logger, json, bad, parseRang
             calls: r.calls,
             _multiLabel: false,
           }));
-          // Merge instance rows that translate to the same display label
-          // (e.g. many distinct hand-typed --session-id values all reading
-          // as "Ad-hoc sessions" — see labels.js's UUID_RE) — same pattern
-          // the trigger level already uses above. A merged node can't be
-          // re-expanded through a single instance:<kind>:<rawLabel> key
-          // (there's no reverse mapping back to every raw label it absorbed,
-          // unlike peersForKind for trigger kinds), so it's non-expandable.
+          // Merge instance rows that share a display label (many hand-typed
+          // --session-id values all reading "Ad-hoc sessions"). A merged node
+          // has no reverse mapping to every raw label it absorbed, so it can't
+          // be re-expanded through one instance:<kind>:<rawLabel> key.
           const byInstanceLabel = new Map();
           for (const n of instanceNodes) {
             if (byInstanceLabel.has(n.label)) {
@@ -137,8 +133,8 @@ export function registerTreeRoutes({ api, getStore, logger, json, bad, parseRang
             ORDER BY cost DESC NULLS LAST
             LIMIT 100
           `, [...kinds, label, ...rangeArgs]);
-          // hasChildren: check whether each session actually has expandable children
-          // (triggered flows or direct cost rows) rather than hardcoding true.
+          // hasChildren comes from whether the session actually has expandable
+          // children, not a hardcoded true.
           const sessions = rows.map((r) => r.session_key);
           const expandable = new Set();
           if (sessions.length > 0) {
@@ -285,7 +281,6 @@ export function registerTreeRoutes({ api, getStore, logger, json, bad, parseRang
           }));
 
         } else if (parent.startsWith("agent:")) {
-          // Trigger-session: children are flow cards it triggered + a Direct leaf.
           const flowEdges = await execAll(client, `
             SELECT flow_id, child_session_key
             FROM session_lineage

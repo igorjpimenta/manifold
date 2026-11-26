@@ -1,10 +1,3 @@
-/**
- * Unit tests for graphql/schema.js
- *
- * Store-backed fields (failures, runs) run against stub stores (the
- * stores own their tests); raw-sql fields (approvals, gate, openGates) run
- * against real tmp sqlite files.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";

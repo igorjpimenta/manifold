@@ -1,11 +1,10 @@
-// stdio.js — stdio MCP server exposing the pipeline tools. stdout is the
-// JSON-RPC channel: every log line goes to stderr, and nothing else may be
-// written to stdout.
-//
-// Request `_meta` surfaces on the handler's second argument (`extra._meta`,
-// the original request's params._meta — see the SDK's RequestHandlerExtra).
-// `extra._meta.manifold` is the trusted companion-plugin channel; models
-// cannot forge it because the plugin overwrites it unconditionally.
+// Stdio MCP server exposing the pipeline tools. stdout is the JSON-RPC
+// channel: every log line goes to stderr, and nothing else may be written
+// to stdout. Request `_meta` surfaces on the handler's second argument
+// (`extra._meta` — the original request's params._meta, per the SDK's
+// RequestHandlerExtra); `extra._meta.manifold` is the trusted
+// companion-plugin channel, unforgeable because the plugin overwrites it
+// unconditionally.
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -51,7 +50,7 @@ export function toolErrorResult(err) {
 export async function startMcpServer({ ops, base, logger }) {
   // Identity is refused, never defaulted, at both layers: an undeclared
   // server will not start, and an unstamped, unusable, or mismatched call
-  // will not run. Harness comes from the ctor arg or MANIFOLD_HARNESS env.
+  // will not run.
   const declared = assertDeclaration(base ?? { harness: process.env.MANIFOLD_HARNESS, pipelinesDir: process.env.MANIFOLD_PIPELINES_DIR });
   const { handle } = createManifoldToolHandlers(ops);
   const server = new McpServer({ name: "manifold", version: "0.1.0" });

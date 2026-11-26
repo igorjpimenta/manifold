@@ -1,12 +1,5 @@
-// telemetry/index.js — lineage + cost attribution for manifold.
-// Exposes registerTelemetry(api), called inline by manifold's plugin entry.
-//
-// Responsibilities:
-//   - session_lineage + cost_by_call writes via before_agent_start /
-//     subagent_spawned / session_start / before_message_write hooks
-//   - /manifold/telemetry/* HTTP read-only endpoints (cost, tree, budget cap)
-//   - api.runtime.lineage.recordTrigger / recordSpawn cross-plugin API
-//   - `openclaw lineage` CLI subcommands
+// telemetry/index.js — session lineage + cost attribution: hook writes,
+// /manifold/telemetry/* routes, recordTrigger/recordSpawn, `openclaw lineage`.
 
 import { openStore, defaultDbPath } from "./store.js";
 import { makeResolver } from "./resolver.js";
@@ -17,21 +10,18 @@ import { registerHttpRoutes } from "./http.js";
 import { applyTelemetryEvent } from "./ingest.js";
 import { authorizeBearerRequest, sendUnauthorized } from "../routes/bearer-auth.js";
 import { createEmitter } from "../events/emit.js";
-// Hoisted to module-level so every call's hook closures share the same
-// store/resolver. The SDK can call register() repeatedly (config reload,
-// hot-reload); only the first service start actually opens the DB.
+// Module-level so repeated register() calls (config reload) share one
+// store/resolver; only the first service start opens the DB.
 let SHARED_STORE = null;
 let SHARED_RESOLVER = null;
 
-// Live accessor for manifold modules that need to resolve a session's
-// flow/item lineage without opening their own resolver instance. Returns
-// null until the lineage-service's start() hook has run.
+// Null until the lineage-service start() hook has run.
 export function getSharedResolver() {
   return SHARED_RESOLVER;
 }
 
-// Calls that arrive before the store is ready (gateway boot revival) are
-// buffered and flushed once the service starts.
+// Calls arriving before the store is ready (gateway boot revival) are buffered
+// and flushed once the service starts.
 let PENDING_CALLS = [];
 
 export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
@@ -39,15 +29,10 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
 
   const logger = api.logger;
 
-  // Canonical-kind fan-out for cost.record.added below: canonical wire
-  // name, envelope adds kind.
   const { emit } = createEmitter({ getBroadcast, logger });
 
-  // ── Budget-cap store service ────────────────────────────────────────────────
-  // Must load before checkBudget()/the /budget/cap HTTP routes see traffic —
-  // otherwise they'd read the DEFAULT_CAP_USD fallback instead of the
-  // operator-set value.
-
+  // Must load before checkBudget()/the /budget/cap routes see traffic, or they
+  // would read the DEFAULT_CAP_USD fallback instead of the operator's value.
   api.registerService({
     id: "budget-cap-store",
     start: async () => {
@@ -59,8 +44,6 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
       }
     },
   });
-
-  // ── Store service ──────────────────────────────────────────────────────────
 
   api.registerService({
     id: "lineage-service",
@@ -89,10 +72,8 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     },
   });
 
-  // ── Ingest ─────────────────────────────────────────────────────────────────
-  // Harnesses observe their own lifecycle; core decides what those
-  // observations mean. Adapters post semantic events (lineage.session,
-  // lineage.spawn, cost.usage) and ingest.js derives the rows.
+  // Adapters post semantic events (lineage.session, lineage.spawn,
+  // cost.usage); ingest.js derives the rows.
   const ingestToken = process.env.MANIFOLD_INGEST_TOKEN || "";
 
   api.registerHttpRoute({
@@ -130,11 +111,7 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
     },
   });
 
-  // ── HTTP routes ────────────────────────────────────────────────────────────
-
   registerHttpRoutes({ api, getStore: () => SHARED_STORE, logger, getBroadcast });
-
-  // ── Runtime API ────────────────────────────────────────────────────────────
 
   api.runtime = api.runtime ?? {};
   api.runtime.lineage = {
@@ -156,34 +133,15 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
               const r = chain[chain.length - 1];
               rootKey = r.key; rootKind = r.kind; rootLabel = r.rootLabel ?? r.key;
             }
-          } catch { /* fall through with self-root defaults */ }
+          } catch { /* self-root defaults */ }
         }
 
-        // An "explicit" root is a hand-typed/ad hoc session purpose string —
-        // it has no durable identity worth grouping by, and labels.js collapses
-        // it to "Ad-hoc sessions" once it's UUID-suffixed. The pipeline this
-        // trigger is dispatching is the far more useful attribution — same
-        // convention routes/operator.js already uses for its parent-less
-        // synthetic trigger path (rootKind: "explicit", rootLabel: pipelineId).
-        //
-        // "operator-trigger" hits the identical problem via a different route:
-        // routes/operator.js's synthetic `agent:operator:(cli|operator):
-        // <flowId>` key is never itself a stored child_session_key (only
-        // `flow:<id>` rows get upserted), so a subflow dispatched from an
-        // agent session whose chain reaches that key directly — rather than
-        // through the seeded flow:<topFlowId> row — gets classified fresh by
-        // grammar.js from the key shape alone, landing on resolver.js's
-        // generic "Operator run <shortid>" / "Operator runs" fallback (no
-        // pipelineId access there). Same fix applies: prefer the pipeline
-        // we're actually dispatching over an uninformative fallback label.
-        //
-        // pipelineId may be a composite child id (engine/loader.js's
-        // `<pipeline>::NODE[::NODE...]` shape for a subflow dispatch, e.g.
-        // `freelance_freelancer-proposal::PROPOSE::SUBMIT`) — every subflow of
-        // one manually-triggered run independently calls recordTrigger with
-        // its own composite id, but they must all collapse to the SAME root
-        // label so http-tree.js's GROUP BY root_label merges them into one
-        // instance instead of fragmenting one run into N rows, one per node.
+        // "explicit" and "operator-trigger" roots have no durable identity
+        // worth grouping by, so the pipeline being dispatched is the better
+        // label (same convention routes/operator.js uses). pipelineId may be a
+        // composite `<pipeline>::NODE[::NODE]` child id; splitting on "::" keeps
+        // every subflow of one run on the same root_label, so http-tree.js's
+        // GROUP BY merges them instead of fragmenting the run into N rows.
         if (pipelineId && (rootKind === "explicit" || rootKind === "operator-trigger")) {
           rootLabel = pipelineId.split("::")[0];
         }
@@ -220,14 +178,11 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
         }
         if (!childSession || !flowId) return { ok: false, reason: "missing_args" };
 
-        // Resolve the real root by walking the flow's own trigger edge
-        // (flow:<flowId>) instead of hardcoding "flow-node" — a flow-node
-        // subagent's cost should attribute to whatever triggered the flow
-        // (cron, operator, etc.), not to a made-up kind of its own. Falls
-        // back to `kind ?? "flow-node"` only if the resolver isn't ready or
-        // the trigger edge hasn't landed yet (race between flow start and
-        // recordTrigger) — the HTTP-layer ATTR_JOIN re-attribution still
-        // recovers those.
+        // Root comes from walking the flow's trigger edge, not a hardcoded
+        // "flow-node": a flow-node subagent's cost should attribute to whatever
+        // triggered the flow (cron, operator, …). `kind` is only the fallback
+        // when the trigger edge hasn't landed yet — the HTTP ATTR_JOIN
+        // re-attribution recovers those.
         const parentKey = `flow:${flowId}`;
         let rootKind = kind ?? "flow-node", rootLabel = null, rootSessionKey = childSession;
         if (resolver) {
@@ -262,8 +217,6 @@ export function registerTelemetry(api, { getBroadcast, _dbPath } = {}) {
       }
     },
   };
-
-  // ── CLI ────────────────────────────────────────────────────────────────────
 
   async function ensureStore() {
     if (SHARED_STORE) return SHARED_STORE;

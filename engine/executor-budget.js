@@ -5,10 +5,10 @@ export function createBudgetGate({ getApprovalQueue, logger, nodeCallStats: node
     const aq = getApprovalQueue?.();
     if (!aq || typeof aq.isGateLocked !== "function") return { proceed: true };
 
-    // isGateLocked() awaits its own store attachment in place (see
-    // budget/index.js) rather than throwing a special "not ready" error —
-    // any throw reaching here is a genuine failure and must propagate, not
-    // be silently treated as "not locked".
+    // isGateLocked() awaits its own store attachment in place rather than
+    // throwing a "not ready" error — a throw from here is a genuine
+    // failure and must propagate, never be swallowed as "not locked"
+    // (which would fail open past the gate).
     const locked = await aq.isGateLocked();
     if (!locked) return { proceed: true };
 
@@ -21,7 +21,6 @@ export function createBudgetGate({ getApprovalQueue, logger, nodeCallStats: node
       return { pause: true, blockedInfo: budgetGateBlockedInfo(nodeId, null) };
     }
 
-    // No item yet — create one and pause
     const estimate = await estimateNodeCost(nodeCallStatsFn, node, itemCount, pipelineId, nodeId);
     const itemLabel = formatNodeLabel(nodeId, node, itemCount);
     const brief = formatNodeBrief(node, items, itemCount);

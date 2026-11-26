@@ -1,16 +1,16 @@
 // state/migrate.js — better-sqlite3 migrate-on-open: schema DDL lives in
-// state/schema.js (runtime.sqlite) and
-// state/schema.ops.js (ops.sqlite); `npm run db:generate` snapshots them
-// into .migrations/*/<n>.sql; drizzle's migrate() applies pending snapshots.
+// state/schema.js (runtime.sqlite) and state/schema.ops.js (ops.sqlite);
+// `npm run db:generate` snapshots them into .migrations/*/<n>.sql;
+// drizzle's migrate() applies pending snapshots.
 //
-// Call sites run this BEFORE opening any libsql handle for the file, and it
-// runs at most once per file per process (migratedPaths): a second driver
-// writing under live handles is the one ordering that was observed to
+// Call sites run this BEFORE opening any libsql handle for the file, and
+// it runs at most once per file per process (migratedPaths): a second
+// driver writing under live handles is the one ordering observed to
 // poison them, so the first opener applies pending snapshots while no
-// handle exists yet and later opens find the journal current. Cross-process
-// safety comes from the drizzle journal transaction + busy_timeout.
+// handle exists yet. Cross-process safety comes from the drizzle journal
+// transaction + busy_timeout.
 //
-// Snapshots are the sole schema path. A snapshot that fails throws here,
+// Snapshots are the sole schema path; a failing snapshot throws here,
 // failing the open fast with the file named, instead of surfacing as
 // missing-column errors on first query later.
 //
@@ -49,15 +49,15 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
   const sqlite = new Database(dbPath);
   try {
     sqlite.exec("PRAGMA journal_mode = WAL;");
-    // Snapshot rebuilds copy rows that predate the constraints (SQLite cannot
-    // add an FK in place), and drizzle wraps every snapshot in one
-    // transaction — a PRAGMA inside it is a no-op, so the posture has to be
-    // set here, around the whole run. Enforcement resumes before the handle
-    // closes; opening a migrated file never re-validates existing rows.
+    // Snapshot rebuilds copy rows that predate the constraints (SQLite
+    // cannot add an FK in place), and drizzle wraps every snapshot in one
+    // transaction — a PRAGMA inside it is a no-op, so the posture has to
+    // be set here, around the whole run. Enforcement resumes before the
+    // handle closes; opening a migrated file never re-validates existing
+    // rows.
     sqlite.exec("PRAGMA foreign_keys = OFF;");
-    // 30000 to match state/db.js's busy posture — the contended moment is a
-    // second process mid-migration, and the read path elsewhere tolerates the
-    // longer wait.
+    // Matches state/db.js's busy posture — the contended moment is a
+    // second process mid-migration.
     sqlite.exec("PRAGMA busy_timeout = 30000;");
     migrate(drizzle(sqlite, { schema: SCHEMAS.get(migrationsFolder) ?? {} }), { migrationsFolder });
     sqlite.exec("PRAGMA foreign_keys = ON;");

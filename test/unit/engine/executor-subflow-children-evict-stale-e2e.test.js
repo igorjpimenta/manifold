@@ -1,16 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors freelance_workana-poll-listings'
- * EVICT_STALE (single kind:"code" sub-node, CANCEL → __end__), the
- * simplest topology of any migration so far: no gate, no fallback, one
- * sub-node. CANCEL is a trivial no-op stand-in — zero real HTTP calls to
- * /manifold/gate/resolve anywhere in this fixture.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForTerminal } from "../../helpers/wait-for-event.js";
@@ -25,8 +12,6 @@ import { createExecutor } from "../../../engine/executor.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),

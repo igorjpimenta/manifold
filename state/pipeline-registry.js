@@ -1,62 +1,5 @@
 // pipeline-registry.js — SCD Type 2 history of pipeline/node DEFINITIONS
-// (kind/agent/mode), not their execution history (node-executions.js
-// already covers that). Answers "what did node X look like at time T" —
-// pipelinesRef.value is a live, mutable, single-copy in-memory Map with
-// no history of its own, so once a node is renamed/removed or its whole
-// pipeline file is deleted, every past flow that dispatched under the
-// old shape loses the ability to render correctly, forever, with no
-// error — just a silent fallback to kind:null.
-//
-// Write path: reconcilePipelineVersions(pipelinesMap, {logger}) — called
-// once right after the boot-time pipeline load resolves, then again on
-// every pipelines-watcher reload tick. Diffs the given Map against the
-// currently-active (retired_at IS NULL) row per (pipeline_id[, node_name]):
-// content unchanged → no-op; changed or previously absent → retire the
-// old active row (if any) and insert a fresh one; a pipeline_id/node_name
-// that no longer appears in the Map at all → retire without inserting
-// (its last version stays queryable, just marked retired).
-//
-// Read path: getNodeVersionsBatch([{pipelineId, nodeName, atMs}, ...]) —
-// point-in-time lookup, batched to avoid one query per row: fetches every
-// version for each distinct (pipeline_id, node_name) pair in one query,
-// then matches each request's own atMs against those in memory. (The
-// `nodeId` request param is the node's CURRENT name, same convention as
-// every other caller in the codebase — see the node-identity note below
-// for why it's matched against the `node_name` column internally.)
-//
-// Explicit scope boundary: this store answers "what was true," never
-// "what should happen now." Anything deciding CURRENT behavior (mode
-// enforcement in engine/child-resume-trigger.js, dispatch/edge-routing in
-// engine/executor.js) keeps reading pipelinesRef directly, unchanged —
-// conflating "what did happen" with "what should happen now" would be a
-// real correctness bug (a long-running fan-out reacting to a stale mode
-// from whenever it first dispatched instead of the pipeline's current
-// logic), not a simplification.
-//
-// content_hash is sha256 over a canonicalized subset of fields only —
-// `run`/`edges`/`selector`/etc. are functions, not meaningfully hashable,
-// and nothing reads them historically. A reload tick where nothing
-// structurally meaningful changed is a no-op, not a new row.
-//
-// Node identity across a rename: `node_name` is a point-in-time DISPLAY
-// LABEL (e.g. "SUBMIT_SUMMARY" — same string as the wider codebase's
-// `nodeId`, flow_node_invocations.nodeId, pipeline.nodes' object keys;
-// nothing outside this file changes). `node_id` is the node's PERSISTENT
-// identity, independent of its current name. A pipeline author can
-// optionally declare it directly on a node: `nodes: { SUBMIT_SUMMARY: {
-// kind: "code", id: "<any stable string, author's choice>" } }` — when
-// present, that declared value IS the node_id, verbatim, every time.
-// Renaming a node is then just "change the object key, leave `id` alone"
-// — the identity travels with the node's own declaration, no separate
-// rename-link step. A node that never declares `id` still gets one
-// (minted the first time it's ever reconciled, reused as long as its name
-// doesn't change) so getNodeLineageBatch works uniformly either way — an
-// undeclared node just can't survive a FUTURE rename without the author
-// adding `id` at that point, same trade-off as any opt-in metadata.
-// Two (or more) node_names can legitimately share one declared `id` at
-// the same time — a genuine N:1 merge falls out for free, no special
-// case needed. See dashboard/stats.js's autoFunnelFromNodes for the
-// consumer.
+// (kind/agent/mode), answering "what did node X look like at time T".
 
 import { randomUUID, createHash } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -82,13 +25,9 @@ function nodeContentHash(node) {
     kind: node.kind,
     agent: node.kind === "agent" ? (node.agent ?? null) : null,
     mode: node.kind === "subflow" ? (node.mode ?? null) : null,
-    // Declaring (or changing) `id` on an otherwise-unchanged node must
-    // still trigger a retire+reinsert — without this, _reconcileOneNode's
-    // hash-match short-circuit would return before ever reading node.id,
-    // silently ignoring a newly-added declaration on any node whose
-    // kind/agent/mode didn't also change (the exact retroactive-backfill
-    // case: adding `id` to nodes that already exist and aren't otherwise
-    // being edited).
+    // `id` must stay in the hash: the hash-match short-circuit below
+    // returns before ever reading node.id, so dropping it would silently
+    // ignore a newly-declared id on an otherwise-unchanged node.
     id: node.id ?? null,
   });
 }
@@ -113,7 +52,6 @@ export function getPipelineRegistryStore(dbPath = defaultDbPath()) {
   return _singleton;
 }
 
-// Exported for tests: creates an independent store (bypasses the singleton).
 export function createPipelineRegistryStore(dbPath) {
   return _makeStoreProxy(_createStore(dbPath));
 }
@@ -125,9 +63,8 @@ async function _createStore(dbPath) {
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     ({ client } = await getSharedDb(dbPath));
   } catch {
-    // Purely additive/historical-rendering feature (see this file's own
-    // top comment) — if the DB can't open, degrade to a no-op store
-    // rather than take pipeline loading down with it.
+    // Historical-rendering feature only: if the DB can't open, degrade to
+    // a no-op store rather than take pipeline loading down with it.
     const noop = () => {};
     return {
       _db: null,
@@ -156,15 +93,11 @@ async function _createStore(dbPath) {
     return rows[0] ?? null;
   }
 
-  // Reads still happen immediately (against the pre-reconcile committed
-  // state — see reconcilePipelineVersions' own comment on why that's safe
-  // even with writes deferred). The retire+insert pair itself is pushed
-  // onto `queries` instead of executed here — reconcilePipelineVersions
-  // commits every pipeline's and every node's pair, plus the orphan-
-  // retirement pass, in ONE client.batch() call at the end. That makes the
-  // whole SCD2 rotation atomic — otherwise a crash mid-reconcile could
-  // leave a pipeline with zero active version rows (retired-with-no-
-  // replacement) — and collapses what was N individual round-trips into one.
+  // The retire+insert pair is pushed onto `queries` instead of executed
+  // here so reconcilePipelineVersions can commit every pair plus the
+  // orphan-retirement pass in ONE client.batch() — otherwise a crash
+  // mid-reconcile could leave a pipeline with zero active version rows
+  // (retired-with-no-replacement).
   async function _reconcileOnePipeline(pipelineId, pipeline, now, queries) {
     const hash = pipelineContentHash(pipeline);
     const active = await _activePipelineRow(pipelineId);
@@ -201,11 +134,6 @@ async function _createStore(dbPath) {
     return id;
   }
 
-  // Resolves the persistent node_id for a row about to be written.
-  // `activeRow` is this exact node_name's own currently-active row, if
-  // any (already fetched by the caller). `declaredId` is `node.id` read
-  // straight off the pipeline definition — author-declared, always wins
-  // when present, no lookup needed.
   async function _resolveNodeIdentity(pipelineId, nodeName, activeRow, declaredId) {
     if (declaredId) return declaredId;
     // Name unchanged (content just drifted) — same identity as before.
@@ -221,12 +149,11 @@ async function _createStore(dbPath) {
     return rows[0]?.node_id ?? randomUUID();
   }
 
-  // See _reconcileOnePipeline's comment — same deferred-write pattern.
   async function _reconcileOneNode(pipelineVersionId, pipelineId, nodeName, node, now, queries) {
     // The runtime node name is the attribution key the engine writes
     // (flow_node_invocations, node_health, lineage, telemetry), so it must
     // exist before the first turn runs — register it on every reconcile,
-    // including a content-green one.
+    // including a content-green one (hence before the hash check).
     queries.push({
       sql: `INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)`,
       args: [pipelineId, nodeName, now],
@@ -251,15 +178,11 @@ async function _createStore(dbPath) {
     });
   }
 
-  // Reads throughout this pass (_activePipelineRow/_activeNodeRow inside
-  // the per-pipeline/per-node loop, plus the two orphan-detection SELECTs
-  // below) all see the same pre-reconcile committed state, since every
-  // write is deferred into `queries` and only actually committed in the
-  // single client.batch() call at the very end — including the two
-  // orphan-detection SELECTs, which correctly still see an about-to-be-
-  // retired active row as "active" (retired_at IS NULL) and skip it via
-  // the seen-set check, same outcome as before, just simpler to reason
-  // about since nothing this pass writes is visible to its own reads.
+  // Every read in this pass sees the pre-reconcile committed state:
+  // writes are deferred into `queries` and committed only in the single
+  // client.batch() at the end, so nothing this pass writes is visible to
+  // its own reads — including the orphan-detection SELECTs, which still
+  // see an about-to-be-retired row as active and skip it via the seen-set.
   async function reconcilePipelineVersions(pipelinesMap, { logger } = {}) {
     if (!pipelinesMap || pipelinesMap.size === 0) return;
     const now = Date.now();
@@ -276,9 +199,8 @@ async function _createStore(dbPath) {
         }
       }
 
-      // Retire any active row whose pipeline/node no longer appears in
-      // the Map at all — a pipeline or node that's been removed. Its
-      // last version stays queryable, just marked retired.
+      // Removed pipeline/node: retire its active row — the last version
+      // stays queryable, just marked retired.
       const { rows: activePipelines } = await client.execute(
         `SELECT id, pipeline_id FROM pipeline_versions WHERE retired_at IS NULL`,
       );
@@ -312,12 +234,8 @@ async function _createStore(dbPath) {
     return results[0] ?? null;
   }
 
-  // Batched point-in-time lookup — one query per distinct (pipeline_id,
-  // node_name) pair, not one per request. Returns results in the SAME
-  // ORDER as `requests`; a pair with NO recorded
-  // version at all resolves to null — callers keep their existing
-  // kind:null fallback for that case. See resolveVersionAt below for how
-  // a timestamp older than any recorded version is handled (NOT null).
+  // Results come back in the SAME ORDER as `requests`; a pair with no
+  // recorded version at all resolves to null.
   async function getNodeVersionsBatch(requests) {
     if (!Array.isArray(requests) || requests.length === 0) return [];
     const pairKey = (p, n) => `${p} ${n}`;
@@ -345,21 +263,14 @@ async function _createStore(dbPath) {
   // already be sorted ascending by registeredAt.
   //
   // atMs predating the EARLIEST recorded version is expected, not an edge
-  // case: reconcile only starts recording from whenever this feature first
-  // shipped/booted -- every flow that dispatched before that point has
-  // real invocations with no real historical record to match. Retire-
-  // then-insert always uses one shared `now` for both timestamps (see
-  // reconcilePipelineVersions), so once the earliest version exists there
-  // are never gaps between versions -- only ever a gap BEFORE the first
-  // one. Falling back to that earliest version there (rather than null)
-  // is the best available answer, not a guess invented from nothing: the
-  // vast majority of nodes are never touched between "this flow ran" and
-  // "this feature started tracking pipelines," so the earliest known
-  // shape is usually the exact right one. Returning null here -- the
-  // naive SCD2 read -- would silently regress correct rendering for
-  // every already-existing flow the moment this feature ships, which is
-  // a worse outcome than an occasional wrong guess for the rare node
-  // that changed in that exact gap.
+  // case: recording only starts from when this feature first booted, and
+  // retire+insert shares one `now` for both timestamps, so gaps exist only
+  // BEFORE the first version, never between versions. Falling back to the
+  // earliest version there (rather than null) is deliberate: returning null
+  // — the naive SCD2 read — would silently regress correct rendering for
+  // every already-existing flow the moment this feature ships, a worse
+  // outcome than an occasional wrong guess for the rare node that changed
+  // in that gap.
   function findVersionRowAt(versions, atMs) {
     if (!versions?.length) return null;
     const exact = versions.find((v) => v.registeredAt <= atMs && (v.retiredAt == null || v.retiredAt > atMs));
@@ -371,12 +282,6 @@ async function _createStore(dbPath) {
     return match ? { kind: match.kind, agent: match.agent } : null;
   }
 
-  // Pipeline-level (not node-level) point-in-time lookup — e.g. "was this
-  // pipeline cascade-kind at time T" (routes/runs.js's cascadeAttemptFor).
-  // Single-row lookup, not batched: only one call site needs this today,
-  // one per child flow rather than per-node, so an N+1 concern doesn't
-  // apply the way it does for getNodeVersionsBatch. Same
-  // older-than-earliest-known-version fallback as findVersionRowAt above.
   async function getPipelineVersionAt({ pipelineId, atMs }) {
     const { rows } = await client.execute({
       sql: `SELECT kind, allow_concurrent, registered_at, retired_at FROM pipeline_versions
@@ -395,17 +300,10 @@ async function _createStore(dbPath) {
     return { kind: match.kind, allowConcurrent };
   }
 
-  // Resolves, for each of a pipeline's CURRENT node names, the full set of
-  // node_name strings that share its persistent node_id — i.e. every name
-  // this identity has ever been called, whether from an author-declared
-  // `id` or an auto-minted one. A node with no rename history resolves to
-  // a singleton set containing just itself. Two queries total (not one
-  // per requested name): first the active rows for the requested names to
-  // learn their node_ids, then one query for every row that shares any of
-  // those node_ids. Consumed by dashboard/stats.js's autoFunnelFromNodes
-  // so an older run's flow_node_invocations.nodeId (recorded under
-  // whatever name was live at the time) still counts toward the CURRENT
-  // node's funnel stage.
+  // For each of a pipeline's CURRENT node names, every node_name string
+  // that shares its persistent node_id — so invocations recorded under an
+  // older name still resolve to the current node. Two queries total, not
+  // one per requested name.
   async function getNodeLineageBatch(pipelineId, nodeIds) {
     if (!Array.isArray(nodeIds) || nodeIds.length === 0) return new Map();
     const { rows: active } = await client.execute({

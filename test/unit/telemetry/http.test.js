@@ -1,7 +1,3 @@
-// Unit tests for telemetry/http.js — the route-registration shim that mounts
-// cost/tree/budget handlers under /manifold/telemetry/*. The handlers
-// themselves are covered by http-cost/http-tree/http-budget suites; this file
-// pins the wiring and the shared json/bad/parseRange helpers.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

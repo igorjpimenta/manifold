@@ -1,26 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors freelance_workana-proposal's SCORE
- * (CACHE_CHECK → (hit ? __end__ : SCORE_LLM) → CACHE_SAVE → __end__), the
- * simplest topology of any migration so far: no human-gate node (so no
- * gate-resolver is needed at all — the loop runs to completion
- * unattended), no kind:"fallback" node. Every sub-node is a trivial
- * kind:"code" stand-in — zero real filesystem or agent dispatch I/O
- * anywhere in this fixture.
- *
- * The load-bearing assertion for THIS specific migration (unlike prior
- * cutovers, which were pure new-cutover E2Es): SCORE used a custom
- * groupId:"scored" under old branch-mode, which childFlows:true forbids
- * declaring at all — the group key becomes the node's own id "SCORE".
- * Test 3 below proves getAllSubflowGroups resolves under groups.SCORE, not
- * groups.scored — the exact rename freelance_workana-proposal's
- * PROPOSE.selector depends on live.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForTerminal, waitForAll } from "../../helpers/wait-for-event.js";
@@ -42,10 +19,6 @@ function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
 }
 
-// concurrency here is the boolean PARTICIPATION switch (child-fanout-
-// concurrency.js) — true/default participates in the single gateway-wide
-// budget, false opts this node out. The actual numeric limit is set
-// separately via resetChildFanoutCap(), not per-node.
 function makeScoreLikeNode(concurrency) {
   return {
     kind: "subflow",
@@ -144,7 +117,7 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
   afterEach(() => {
     harness?.runStore?.close();
     harness?.nodeExecutionsStore?.close();
-    resetChildFanoutCap(); // module-level singleton, shared process-wide state
+    resetChildFanoutCap();
   });
 
   test("cache hit — child reaches __end__ immediately, SCORE_LLM/CACHE_SAVE never dispatched", async () => {
@@ -239,16 +212,6 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
   });
 
-  // Under childFlows:true, node.concurrency is silently
-  // unenforced — an unthrottled wide SCORE fan-out
-  // creates real CPU/memory contention — so it collapsed to a
-  // single boolean-gated, shared-pool budget (state/admission-queue-store.js).
-  // This is the full-stack regression test — real executor, real state-store, real
-  // admission-queue-store + promotion wiring
-  // (resumeParentRef.resume = executor.resume, same as production) —
-  // proving the whole queue-then-auto-wake cycle actually completes, not
-  // just that dispatchSubflowChildren makes the right initial decision in
-  // isolation.
   test("multiple items, global cap set to 2: dispatch is capped, but every item still eventually succeeds via auto-wake on sibling completion", async () => {
     resetChildFanoutCap(2);
     harness = await makeHarness();
@@ -294,20 +257,11 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
     assert.equal((await runStore.get(record.flowId)).status, "succeeded");
   });
 
-  // The whole point of collapsing to ONE shared combined pool: a queued
-  // child from a COMPLETELY DIFFERENT pipeline gets woken once this
-  // pipeline's own child frees a slot — proven here via two independently
-  // registered pipelines sharing one executor/store/runStore, exactly the
-  // real-gateway shape (one process, every pipeline's flows sharing the
-  // same runtime.sqlite and the same admission-queue-store release/promote
-  // cycle on every setWaiting/terminal transition).
   test("global wake works across unrelated pipelines — a different pipeline's queued child is resumed once THIS pipeline's child finishes", async () => {
     resetChildFanoutCap(1);
     harness = await makeHarness();
     const { executor, runStore, nodeExecutionsStore, pipelinesRef } = harness;
 
-    // A second, independent pipeline sharing nothing with test_parent
-    // except the same gateway-wide child-fanout budget.
     const OTHER_NODE = makeScoreLikeNode();
     pipelinesRef.value.set("other_parent", {
       id: "other_parent", state: {},
@@ -319,11 +273,6 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
       nodes: OTHER_NODE.flow.nodes, edges: OTHER_NODE.flow.edges,
     });
 
-    // First flow's child takes the only slot (cap:1) — held here by seeding
-    // a cache-miss item, which takes a real (if trivial) extra hop through
-    // SCORE_LLM/CACHE_SAVE before finishing, giving the second flow's child
-    // a real window to be admitted as "queued" rather than racing to
-    // "running" itself.
     const recordA = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedFiltered(harness, recordA.flowId, [{ id: "job-a", precachedHit: false }]);
     await executor.runFlow(recordA.flowId);
@@ -335,9 +284,6 @@ describe("childFlows:true SCORE-shaped loop, full engine E2E", () => {
     const [childA] = await waitForChildFlowIds(nodeExecutionsStore, runStore, recordA.flowId, "SCORE", 1);
     const [childB] = await waitForChildFlowIds(nodeExecutionsStore, runStore, recordB.flowId, "SCORE", 1);
 
-    // Both children eventually succeed — the assertion that matters is that
-    // job-b's child, from an entirely unrelated pipeline, was NOT simply
-    // starved forever behind job-a's own slot.
     assert.equal((await waitForTerminalStatus(runStore, childA)).status, "succeeded");
     assert.equal((await waitForTerminalStatus(runStore, childB)).status, "succeeded", "a different pipeline's queued child must still get woken by the shared global hook, not just siblings of the same pipeline");
     assert.equal((await waitForTerminalStatus(runStore, recordA.flowId)).status, "succeeded");

@@ -1,5 +1,3 @@
-// Unit tests for utils/run-patch.js — pure RunSummary-shaped patch builders
-// for the flow-state WS events. No DB access: every input is already fetched.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

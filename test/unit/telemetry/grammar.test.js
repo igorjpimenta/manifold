@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { classify, agentIdOf } from "../../../telemetry/grammar.js";
 
-// ── classify ───────────────────────────────────────────────────────────────────
 
 describe("classify", () => {
   it("returns unknown for non-string input", () => {
@@ -27,8 +26,6 @@ describe("classify", () => {
   });
 
   it("leaves gateway-shaped subagent keys out of the flow walk", () => {
-    // No shape rule matches these; they degrade to the generic buckets
-    // instead of the flow walk — no crash, no lineage.
     assert.equal(classify("agent:cyrano:subagent:9f2c1a7b-propose").kind, "unknown");
     assert.equal(classify("agent:main:gf-discuss-a700a3ea-propose-x").kind, "explicit");
   });
@@ -100,8 +97,6 @@ describe("classify", () => {
   });
 
   it("does not flow-attribute harness-owned discuss ids — the ledger does", () => {
-    // No shape rule claims a discuss thread: the key degrades to the
-    // generic bucket, and the flow link comes from the stored row.
     const r = classify("agent:scout:discuss:a700a3ea-propose-some-item-slug");
     assert.equal(r.kind, "unknown");
     assert.equal(r.agentId, "scout", "the agent is peeled generically, the scope is not recognized");
@@ -127,7 +122,6 @@ describe("classify", () => {
   });
 });
 
-// ── agentIdOf ──────────────────────────────────────────────────────────────────
 
 describe("agentIdOf", () => {
   it("extracts agent id from well-formed key", () => {

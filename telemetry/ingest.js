@@ -1,12 +1,7 @@
-// ingest.js — telemetry event generation and reconciliation.
-//
-// Harnesses observe their own lifecycle; core owns what those observations
-// mean. A harness adapter posts semantic events here (lineage.session,
-// lineage.spawn, cost.usage) and this module derives the lineage/cost rows,
-// resolves ancestry and applies the budget check. No harness field names
-// appear below — the adapter's translation layer carries those.
-//
-// Events are best-effort: a malformed event is logged and dropped, never
+// ingest.js — telemetry events (lineage.session, lineage.spawn, cost.usage)
+// turned into lineage/cost rows, ancestry resolution and the budget check.
+// No harness field names here: the adapter's translation layer owns those.
+// Events are best-effort — a malformed one is logged and dropped, never
 // thrown back at the poster.
 
 import { resolveCost } from "./pricer.js";

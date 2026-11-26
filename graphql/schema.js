@@ -1,16 +1,8 @@
 // graphql/schema.js — client-agnostic query layer over manifold state.
-//
-// Any consumer (dashboard, CLI, harness client) picks the fields it needs;
-// the edge stays client-agnostic and never duplicates this.
-// Query-only by design: writes go through the POST routes, so reads
-// never emit domain events (single-writer).
-//
-// Leaf types inherit the database schema (columns.js builds fields from
-// the drizzle table defs — the same files migrations generate from), so
-// a renamed column breaks loudly instead of drifting. Reads come from
-// the domain stores where they exist (failureStore, runStore) and raw
-// sqlite where no store reader exists (queue_items, gate_state,
-// gate_records — same precedent as budget/index.js).
+// Query-only by design: writes go through the POST routes, so reads never
+// emit domain events (single-writer). Reads come from the domain stores
+// where they exist (failureStore, runStore) and raw sqlite where no store
+// reader does (queue_items, gate_state, gate_records).
 import {
   GraphQLSchema,
   GraphQLObjectType,
@@ -34,9 +26,6 @@ import { resolveDataDir, runtimeDbPath, opsDbPath } from "../state/paths.js";
 export const DEFAULT_RUNTIME_DB = () => runtimeDbPath(resolveDataDir());
 export const DEFAULT_OPS_DB = () => opsDbPath(resolveDataDir());
 
-// Public leaf subsets: one word to publish a new column, internals
-// (state_json, tokens, handles) stay out by default. Joined extras
-// declared with explicit types beside the table list.
 const Failure = objectType({
   name: "Failure",
   table: failureEvents,
@@ -197,13 +186,10 @@ export function createRootValue({
     }
   }
 
-  // Open gate items for triage surfaces, read from persisted gate_records
-  // (the engine writes requestPayload incl. layout at gate-block time;
-  // consumed records carry consumedAt). Pipeline context resolves per
-  // flow through the run store's indexed get — never a full flow_runs
-  // scan: on a multi-GB hot file, an unbounded scan races WAL growth
-  // and dies with SHORT_READ, while indexed point reads stay clear.
-  // Queue context merges from one bounded pending scan.
+  // Pipeline context resolves per flow through the run store's indexed get,
+  // never a full flow_runs scan: on a multi-GB hot file an unbounded scan
+  // races WAL growth and dies with SHORT_READ. Queue context merges from one
+  // bounded pending scan.
   async function queryOpenGates() {
     let gateRows = [];
     try {
@@ -284,9 +270,6 @@ export function createRootValue({
 }
 
 export const schema = new GraphQLSchema({
-  // No custom field resolvers: the root value's functions are invoked
-  // by the default resolver with (args), so the query layer stays a
-  // thin projection over createRootValue.
   query: new GraphQLObjectType({
     name: "Query",
     fields: {

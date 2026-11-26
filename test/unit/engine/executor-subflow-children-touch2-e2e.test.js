@@ -1,23 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors nyxen_linkedin-touch's TOUCH
- * (DRAFT_TOUCH → GATE → STAMP_APPROVED/STAMP_REJECTED → ROUTE_CHANNEL →
- * SEND_LINKEDIN_DM_CODE/(_AGENT)/SEND_EMAIL → STAMP_SENT). One
- * human-gate, no fallback node, no loop-back — the simplest topology in
- * this whole migration series in terms of engine novelty, but the
- * largest branch node COUNT (9), and the only one with a 3-way channel
- * fan-out after the gate. Named "touch2" to avoid colliding with the
- * existing executor-loop-children-touch-e2e.test.js, which covers the
- * unrelated freelance_workana-touch-cadence pipeline's own TOUCH loop.
- *
- * Every sub-node is a trivial no-op stand-in — zero real filesystem,
- * subprocess, or agent dispatch I/O anywhere in this fixture.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal, waitForStatus } from "../../helpers/wait-for-event.js";
@@ -32,8 +12,6 @@ import { createGateResolver } from "../../../gates/gate-resolver.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),

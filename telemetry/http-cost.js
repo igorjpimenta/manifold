@@ -1,4 +1,3 @@
-// /manifold/telemetry/cost/* routes — aggregate and drill-down cost views.
 import {
   displayRootLabel, displayRootKind, stripTeamPrefix,
   UNATTRIBUTED_LABEL, UNATTRIBUTED_FILTER,
@@ -45,7 +44,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     }
   };
 
-  // ─── /cost/today ───────────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET",
     path: "/manifold/telemetry/cost/today",
@@ -75,14 +73,12 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     },
   });
 
-  // ─── uniform group-by handlers ─────────────────────────────────────────────
   api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-root",    auth: "plugin", handler: makeGroupHandler("root_label", "root_label", ["root_kind"]) });
   api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-trigger", auth: "plugin", handler: makeGroupHandler("root_kind",  "root_kind") });
   api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-pipeline",auth: "plugin", handler: makeGroupHandler("pipeline_id","pipeline_id") });
   api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-flow",    auth: "plugin", handler: makeGroupHandler("flow_id",    "flow_id", ["pipeline_id"]) });
   api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-node",    auth: "plugin", handler: makeGroupHandler("node_id",    "node_id", ["flow_id"]) });
 
-  // ─── /cost/by-session ──────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/cost/by-session", auth: "plugin",
     handler: async (req, res) => {
@@ -113,7 +109,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     },
   });
 
-  // ─── /cost/runs ────────────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/cost/runs", auth: "plugin",
     handler: async (req, res) => {
@@ -164,7 +159,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
 
   api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-model",   auth: "plugin", handler: makeGroupHandler("model", "model", ["provider"]) });
 
-  // ─── /cost/by-cron-job ─────────────────────────────────────────────────────
   api.registerHttpRoute({ method: "GET", path: "/manifold/telemetry/cost/by-cron-job", auth: "plugin", handler: async (req, res) => {
     const store = getStore();
     if (!store) return bad(res, "lineage store not ready");
@@ -181,7 +175,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     } catch (err) { json(res, { error: String(err?.message ?? err) }, 500); }
   } });
 
-  // ─── /cost/by-day ──────────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/cost/by-day", auth: "plugin",
     handler: async (req, res) => {
@@ -220,7 +213,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     },
   });
 
-  // ─── /cost/by-hour ─────────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/cost/by-hour", auth: "plugin", match: "exact",
     handler: async (req, res) => {
@@ -293,7 +285,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     },
   });
 
-  // ─── /cost/top-calls ───────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/cost/top-calls", auth: "plugin",
     handler: async (req, res) => {
@@ -307,7 +298,7 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
         for (const col of filterCols) {
           const v = url.searchParams.get(col);
           if (v == null || v === "") continue;
-          // "__null__" sentinel = IS NULL filter (used for direct-pipeline leaf drill-down)
+          // "__null__" sentinel = IS NULL (direct-pipeline leaf drill-down).
           if (v === "__null__") { where.push(`${col} IS NULL`); }
           else                  { where.push(`${col} = ?`); args.push(v); }
         }
@@ -355,7 +346,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     },
   });
 
-  // ─── /cost/breakdown ───────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/cost/breakdown", auth: "plugin", match: "exact",
     handler: async (req, res) => {
@@ -369,10 +359,9 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
         for (const col of ["pipeline_id", "flow_id", "node_id", "root_kind", "root_label", "model", "provider"]) {
           const v = url.searchParams.get(col);
           if (v == null || v === "") continue;
-          // "__null__" sentinel = IS NULL, mirroring /cost/top-calls above.
-          // The pipeline dim's transform emits this for its (unattributed)
-          // row, so a drill-through on that row selects the NULL rows it was
-          // computed from instead of matching the synthetic label literally.
+          // "__null__" sentinel = IS NULL: the pipeline dim's transform emits
+          // it for the (unattributed) row, so drilling through selects the
+          // NULL rows rather than the synthetic label.
           if (v === "__null__") { where.push(`${col} IS NULL`); }
           else                  { where.push(`${col} = ?`); args.push(v); }
         }
@@ -418,17 +407,12 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
             }),
           },
           pipeline: {
-            // COALESCE rather than a `pipeline_id IS NOT NULL` filter. A
-            // cost_by_call row can legitimately have no pipeline_id: its
-            // lineage walk landed on a root that isn't a flow (cron-owned
-            // agent turns, operator ad-hoc sessions, spawned subagents,
-            // Telegram DMs). Filtering those out made them vanish from this
-            // breakdown while still counting toward /cost/home's
-            // unconditional SUM(cost_total) — so the top card showed a total
-            // that silently exceeded the sum of this list, and the operator
-            // had no way to account for the difference. Surfacing them as a
-            // labeled bucket keeps the two numbers reconcilable and makes any
-            // future unattributed spend self-diagnosing.
+            // COALESCE, not `pipeline_id IS NOT NULL`: rows whose lineage walk
+            // landed on a non-flow root legitimately have no pipeline_id.
+            // Filtering them out made them vanish here while /cost/home's
+            // unconditional SUM still counted them, so the home total silently
+            // exceeded this list with no way to reconcile. A labeled bucket
+            // keeps the two numbers consistent.
             sql: flowsAttached
               ? `SELECT COALESCE(c.pipeline_id, '${UNATTRIBUTED_LABEL}') AS raw_label,
                          COUNT(*) AS calls,
@@ -450,26 +434,19 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
                   WHERE 1=1 ${w}
                   GROUP BY 1 ORDER BY cost DESC NULLS LAST LIMIT ${limit}`,
             transform: (r) => {
-              // The COALESCE above synthesizes UNATTRIBUTED_LABEL for NULL
-              // pipeline_ids; stripTeamPrefix is a no-op on it (no underscore),
-              // so pass it through verbatim rather than deriving a label from
-              // a value that was never stored.
+              // The synthesized UNATTRIBUTED_LABEL has no underscore, so
+              // stripTeamPrefix would no-op — pass it through verbatim.
               const unattributed = r.raw_label === UNATTRIBUTED_LABEL;
               const out = {
                 label: unattributed ? UNATTRIBUTED_LABEL : stripTeamPrefix(r.raw_label),
                 kind: "Pipeline",
                 calls: r.calls, cost: r.cost,
-                // Not `{ pipeline_id: '(unattributed)' }` — no row stores that
-                // string, so it would select nothing. The __null__ sentinel is
-                // what actually resolves back to these rows, and the filter
-                // loop above translates it to `pipeline_id IS NULL`.
                 filter: unattributed ? { ...UNATTRIBUTED_FILTER } : { pipeline_id: r.raw_label },
               };
-              // Outcome counters are meaningless for the unattributed bucket:
-              // its rows carry no flow_id, so total_runs is 0 and the guard
-              // already excludes it. Stated explicitly so a future change that
-              // gives those rows a flow_id can't start emitting a success_rate
-                // a client ROI filter would read as a real pipeline signal.
+              // No outcome counters for the unattributed bucket: its rows carry
+              // no flow_id. Guarded so a future change that gives them one can't
+              // start emitting a success_rate a client ROI filter would read as
+              // a real pipeline signal.
               if (!unattributed && r.succeeded_runs != null && r.total_runs > 0) {
                 out.succeeded_runs = r.succeeded_runs;
                 out.failed_runs    = r.failed_runs;
@@ -494,8 +471,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
                   WHERE root_kind = 'cron-owner' AND root_label IS NOT NULL ${w}
                   GROUP BY 1 ORDER BY cost DESC NULLS LAST LIMIT ${limit}`,
             transform: (r) => ({
-              // raw_label is the cron job's own free-text name (opaque, no
-              // shape contract) — shown as-is, see labels.js's cron-owner case.
               label: r.raw_label,
               kind: "Cron",
               calls: r.calls, cost: r.cost,
@@ -543,7 +518,6 @@ export function registerCostRoutes({ api, getStore, logger, json, bad, parseRang
     },
   });
 
-  // ─── /cost/home ────────────────────────────────────────────────────────────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/cost/home", auth: "plugin", match: "exact",
     handler: async (req, res) => {

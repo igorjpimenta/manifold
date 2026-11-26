@@ -1,14 +1,5 @@
-// routes/bearer-auth.js — bearer guard for manifold HTTP routes.
-//
-// One shared secret, no pairing, no device tokens: `Authorization: Bearer
-// <MANIFOLD_BEARER>` — the same env the MCP HTTP server requires before it
-// starts. Timing-safe compare; TLS terminates in front (reverse proxy or
-// ingress). An unset/empty secret fails every check (fail-closed); the
-// first rejection logs once so a missing env is loud instead of mysterious.
-//
-// The harness declares itself per call with X-Manifold-Harness where
-// identity matters (MCP sessions); these operator routes authenticate the
-// caller, not the harness.
+// Bearer guard: `Authorization: Bearer <MANIFOLD_BEARER>`. An unset/empty
+// secret fails every check (fail-closed); TLS terminates in front.
 import { timingSafeEqual } from "node:crypto";
 
 let warnedNoSecret = false;
@@ -23,11 +14,6 @@ function tokensEqual(a, b) {
   return timingSafeEqual(ab, bb);
 }
 
-/**
- * Returns {ok: true} or {ok: false, reason}. Reasons: "no-bearer"
- * (missing/non-Bearer scheme), "empty-token", "no-secret" (MANIFOLD_BEARER
- * unset — fail-closed), "no-match".
- */
 export function authorizeBearerRequest(req, { logger = null, secret: secretOverride = null } = {}) {
   const raw = req?.headers?.authorization ?? "";
   if (typeof raw !== "string" || !raw.toLowerCase().startsWith("bearer ")) {
@@ -35,8 +21,6 @@ export function authorizeBearerRequest(req, { logger = null, secret: secretOverr
   }
   const token = raw.slice(7).trim();
   if (!token) return { ok: false, reason: "empty-token" };
-  // A caller may pin its own secret (the telemetry ingest token the core
-  // mints for its adapter) without touching the operator-wide bearer.
   const secret = secretOverride ?? process.env.MANIFOLD_BEARER ?? "";
   if (!secret) {
     if (!warnedNoSecret) {
@@ -49,7 +33,6 @@ export function authorizeBearerRequest(req, { logger = null, secret: secretOverr
   return { ok: true };
 }
 
-/** Standard 401 for a bearer-rejected request. */
 export function sendUnauthorized(res, reason) {
   res.statusCode = 401;
   res.setHeader("Content-Type", "application/json");

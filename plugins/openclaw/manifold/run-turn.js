@@ -1,11 +1,8 @@
-// run-turn.js — the openclaw side of an agent dispatch: one message→reply
-// round-trip against the gateway's agent runtime.
-//
-// Core owns the engine (nodes, edges, state, results); the harness owns the
-// agents. Everything harness-shaped lives here: the runtime call shape
-// (run/waitForRun/getSessionMessages), the gateway-readiness gate, and the
-// early exit against a delivered tool result. Core injects the resulting
-// function and only ever sees { text, runId, toolResult? }.
+// The openclaw side of an agent dispatch: one message→reply round-trip
+// against the gateway's agent runtime. Core injects the resulting function
+// and only ever sees { text, runId, toolResult? } — everything
+// harness-shaped (runtime call shape, readiness gate, tool-result early
+// exit) lives here.
 //
 // The readiness gate exists because the gateway refuses agent RPCs during
 // startup: for the first seconds after every start, agent.wait is refused
@@ -28,14 +25,10 @@ const WAIT_UNTIL_RUN_ENDS_MS = 2_147_483_647;
 
 const GATED_METHODS = ["run", "waitForRun", "getSessionMessages"];
 
-/**
- * Returns gate(rawRuntime) → a runtime whose run/waitForRun/getSessionMessages
- * wait for gateway readiness. Other members pass through to the raw runtime
- * unchanged; a missing runtime stays missing (null / undefined), so "no
- * runtime here" keeps its own handling downstream.
- */
+// Returns gate(rawRuntime) → a runtime whose run/waitForRun/getSessionMessages
+// wait for gateway readiness. Other members pass through unchanged; a missing
+// runtime stays missing so "no runtime here" keeps its own handling downstream.
 export function createGatewaySubagentGate({ whenGatewayReady } = {}) {
-  // One wrapper per raw runtime object, so repeated resolves don't allocate.
   const wrappers = new WeakMap();
 
   return function gate(raw) {
@@ -57,12 +50,9 @@ export function createGatewaySubagentGate({ whenGatewayReady } = {}) {
   };
 }
 
-/**
- * Builds the turn function core injects.
- *
- * `getRuntime` resolves the harness's agent runtime per call (it can
- * appear late — the gateway binds it during startup) and may return null.
- */
+// Builds the turn function core injects. getRuntime resolves the harness's
+// agent runtime per call (it can appear late — the gateway binds it during
+// startup) and may return null.
 export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = null } = {}) {
   const gate = createGatewaySubagentGate({ whenGatewayReady });
 
@@ -80,13 +70,11 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
     }
     // Race waitForRun against a tool-result poll (state/tool-handoff.js): an
     // MCP deliver_result call for this session lands a row the waiter picks
-    // up — so a turn whose structured result already arrived finishes early
-    // instead of waiting out the model's own natural end. The row is read
-    // through the shared store, so the delivering side and this waiter may
-    // live in different processes.
-    //
-    // There is deliberately no manifold-side deadline here: a dispatched
-    // run can sit silently in the gateway's own lane queue
+    // up, so a turn whose structured result already arrived finishes early
+    // instead of waiting out the model's natural end. The row is read through
+    // the shared store, so the delivering side and this waiter may live in
+    // different processes. No manifold-side deadline: a dispatched run can
+    // sit silently in the gateway's own lane queue
     // (agents.defaults.maxConcurrent) for arbitrarily long, and neither
     // silence nor wall-clock time there means the run is hung.
     const toolWait = waitForToolResult(session);
@@ -106,11 +94,9 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
       const errDetail = waitResult.error ?? (await fetchSessionError(session)) ?? "no error message";
       throw new Error(`agent turn ${waitResult.status}: ${errDetail}`);
     }
-    // Tool already delivered everything apply() needs (state/tool-handoff.js's
-    // session-keyed row, written by the MCP deliver_result call) — skip
-    // fetching the model's own wrap-up reply, which is often just a
-    // "submitted" confirmation with nothing useful in it. output.text is
-    // only ever a fallback for apply()s that find no tool result.
+    // Tool already delivered everything apply() needs — skip fetching the
+    // model's own wrap-up reply, often just a "submitted" confirmation.
+    // output.text is only ever a fallback for apply()s with no tool result.
     if (waitResult.toolFired) {
       const toolRow = waitResult.toolRow ?? null;
       return {

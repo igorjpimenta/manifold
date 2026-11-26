@@ -1,6 +1,3 @@
-// Unit tests for dashboard/views.js — pipeline-declared dashboard views
-// (funnel / metric / table) computed from a frontmatter directory. Real temp
-// files; no HTTP, no stores.
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";

@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { flowStateEmitter } from "../../events.js";
 import { EventEmitter } from "node:events";
 
-// ── identity ───────────────────────────────────────────────────────────────────
 
 describe("flowStateEmitter identity", () => {
   it("is an EventEmitter", () => {
@@ -20,7 +19,6 @@ describe("flowStateEmitter identity", () => {
   });
 });
 
-// ── emit / on roundtrip ────────────────────────────────────────────────────────
 
 describe("emit/on", () => {
   it("delivers an event to a listener", () => {
@@ -68,7 +66,6 @@ describe("emit/on", () => {
   });
 });
 
-// ── listener cap ──────────────────────────────────────────────────────────────
 
 describe("listener cap", () => {
   it("registers 20 listeners without emitting a MaxListenersExceeded warning", () => {
@@ -78,13 +75,11 @@ describe("listener cap", () => {
       flowStateEmitter.on(event, noop);
       return noop;
     });
-    // EventEmitter emits 'warning' when cap is exceeded; verify listenerCount stayed ≤ cap
     assert.ok(flowStateEmitter.listenerCount(event) <= 20);
     handlers.forEach(() => flowStateEmitter.off(event, noop));
   });
 });
 
-// ── failureEmitter ────────────────────────────────────────────────────────────
 
 import { failureEmitter } from "../../events.js";
 

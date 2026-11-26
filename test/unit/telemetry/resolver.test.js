@@ -1,7 +1,3 @@
-// Unit tests for telemetry/resolver.js — session → parent/root/breadcrumbs.
-// Three layers: lineage cache, session grammar, external joins (flow_runs
-// sqlite, cron jobs.json). The store is a fake with only the two members the
-// resolver touches; the external fixtures are real temp files.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

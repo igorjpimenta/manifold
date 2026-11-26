@@ -1,12 +1,9 @@
-// Attribution registries: item keys, node names and turn-run ids are written
-// by engine and telemetry frames, so no table of ours owns the key space.
-// These helpers materialize the key set — writers register what they are
-// about to attribute, in the same write; the migration backfills the union
-// so historical rows keep their attribution and the FKs are satisfiable.
-//
-// A writer that skips the guard fails its insert instead of writing an
-// untracked pointer. Rows are append-only: pruning a flow or a branch must
-// not erase the attribution that names it.
+// Attribution registries: item keys, node names and turn-run ids are
+// written by engine and telemetry frames, so no table of ours owns the
+// key space. These helpers materialize the key set — writers register
+// what they are about to attribute, in the same write; the migration
+// backfills the union. A writer that skips the guard fails its insert
+// instead of writing an untracked pointer.
 
 export const ENSURE_FLOW_ITEM_SQL =
   "INSERT OR IGNORE INTO flow_items (flow_id, item_key, first_seen_at) VALUES (?, ?, ?)";
@@ -15,9 +12,9 @@ export const ENSURE_TURN_RUN_SQL =
 export const ENSURE_PIPELINE_NODE_SQL =
   "INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)";
 
-// Composite keys are skipped whole when any part is null: a partial pointer
-// cannot be checked, and SQLite would treat the row as satisfying the FK
-// anyway — registering half of it would only create noise.
+// Composite keys are skipped whole when any part is null: a partial
+// pointer cannot be checked, and SQLite would treat the row as satisfying
+// the FK anyway — registering half of it would only create noise.
 function pairs(rows) {
   const seen = new Map();
   for (const [a, b] of rows) {
@@ -51,9 +48,9 @@ export async function ensurePipelineNodes(client, rows, now = Date.now()) {
   })), "write");
 }
 
-// Union backfill, one pass. Node names also come from the version registry
-// so a pipeline's declared nodes are known before their first turn. Each
-// batch item is one statement.
+// Union backfill, one pass. Node names also come from the version
+// registry so a pipeline's declared nodes are known before their first
+// turn.
 export const BACKFILL_FLOW_ITEMS_SQL = `
   INSERT OR IGNORE INTO flow_items (flow_id, item_key, first_seen_at)
   SELECT flow_id, item_key, ? FROM (

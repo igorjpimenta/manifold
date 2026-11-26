@@ -1,7 +1,3 @@
-// The sessions registry is what turns session-key pointers into FKs. These
-// tests cover both halves: writers must register a key before referencing
-// it, and the migration backfill must cover keys already in the file.
-
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -44,9 +40,7 @@ describe("sessions registry", () => {
 
   test("backfill registers every key already referenced by rows", async () => {
     const client = await freshDb();
-    // Rows referencing keys absent from the registry can exist while FK
-    // enforcement is off; insert them that way, then let the backfill fix
-    // the key set the way migrateDatabase does after applying snapshots.
+    // FK off so rows can reference keys not yet in the registry.
     await client.execute("PRAGMA foreign_keys = OFF");
     await client.execute({
       sql: `INSERT INTO session_lineage

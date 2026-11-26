@@ -1,4 +1,3 @@
-// /manifold/telemetry/budget/* routes — cap read/write + alert test.
 import {
   currentCapUSD, setCapAndPersist,
   currentLockThreshold, setLockThresholdAndPersist,
@@ -7,10 +6,7 @@ import {
 import { createEmitter } from "../events/emit.js";
 
 export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroadcast }) {
-  // Canonical-kind fan-out for the two cap emissions below: canonical
-  // wire name, envelope adds kind.
   const { emit } = createEmitter({ getBroadcast, logger });
-  // ─── /budget/cap — read / update the operator-set daily cap ───────────────
   api.registerHttpRoute({
     path: "/manifold/telemetry/budget/cap", auth: "plugin", match: "exact",
     handler: async (req, res) => {
@@ -27,9 +23,9 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
             return json(res, { error: "capUSD must be a positive number" }, 400);
           }
           await setCapAndPersist(capUSD);
-        // Companion views fetch cap/threshold via two independent
-        // requests (home tile + hourly chart) — without this broadcast the
-        // chart's cap line goes stale until the next unrelated reload.
+          // Companion views fetch cap via separate requests (home tile +
+          // hourly chart); without this broadcast the chart's cap line goes
+          // stale until an unrelated reload.
           try { await emit("budget.cap.changed", { capUSD }); } catch {}
           return json(res, { ok: true, capUSD });
         } catch (err) {
@@ -40,7 +36,6 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
     },
   });
 
-  // ─── /budget/gate-threshold — read / update the auto-lock threshold ───────
   api.registerHttpRoute({
     path: "/manifold/telemetry/budget/gate-threshold", auth: "plugin", match: "exact",
     handler: async (req, res) => {
@@ -67,7 +62,6 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
     },
   });
 
-  // ─── /budget/cap-history — SCD2 cap/threshold versions (oldest first) ──────
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/budget/cap-history", auth: "plugin", match: "exact",
     handler: async (req, res) => {
@@ -87,10 +81,8 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
     },
   });
 
-  // ─── /budget/alert-history — threshold-crossing events, newest first ──────
-  // Powers the cap-hit chart's tap-to-detail (which threshold, what time) —
-  // distinct from the debounce file, which only suppresses same-day re-fires;
-  // every threshold fire is durably logged here with its timestamp.
+  // Distinct from the debounce file: every fire is durably logged here, while
+  // the debounce only suppresses same-day re-fires.
   api.registerHttpRoute({
     method: "GET", path: "/manifold/telemetry/budget/alert-history", auth: "plugin", match: "exact",
     handler: async (req, res) => {
@@ -112,7 +104,6 @@ export function registerBudgetRoutes({ api, getStore, logger, json, bad, getBroa
     },
   });
 
-  // ─── /budget/test-alert — fire a test push without mutating persisted state
   api.registerHttpRoute({
     method: "POST", path: "/manifold/telemetry/budget/test-alert", auth: "plugin", match: "exact",
     handler: async (req, res) => {

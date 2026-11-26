@@ -1,10 +1,3 @@
-// Unit tests for state/node-executions.js —
-// getNodeExecutionsStore singleton, write(), listInvocationsForFlow(),
-// listExecutionsForInvocation(), no-op fallback, v2 rebuild-and-backfill
-// migration (id retype to UUID4, branch_item -> branch_key rename).
-// This store carries no error content at all — see state/failure-store.js
-// instead.
-
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -19,17 +12,12 @@ import {
 import { createRunStore } from "../../../state/run-store.js";
 import { resolveOrCreateChild } from "../../../engine/spawn-child.js";
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
-
 function tmpDb() {
   return path.join(os.tmpdir(), `gf-ne-${randomUUID()}.sqlite`);
 }
 
 const UUID4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-// createNodeExecutionsStore opens its own isolated DB — bypasses the singleton.
-// Exposes _db for raw SQL assertions. The parent run row exists in production
-// before any node executes, so seed it on the same DB.
 async function makeIsolatedStore() {
   const dbPath = tmpDb();
   const store = await createNodeExecutionsStore(dbPath);
@@ -57,10 +45,6 @@ async function makeIsolatedStore() {
   });
 }
 
-// Joins invocation+execution for raw-SQL test assertions that need columns
-// (pipeline_id, the execution's own id) no public store method exposes —
-// mirrors the store's own internal join shape (invocation/
-// execution split, see node-executions.js's header).
 async function rawExecutionRows(store, flowId) {
   const { rows } = await store._db.execute({
     sql: `SELECT e.id, i.flow_id, i.pipeline_id, i.node_id, i.subflow_key, e.entered_at, e.exited_at
@@ -71,10 +55,6 @@ async function rawExecutionRows(store, flowId) {
   return rows;
 }
 
-// ─── singleton behaviour ──────────────────────────────────────────────────────
-
-// Initialize the singleton with a temp path before any test touches the module
-// default, so the real ~/.openclaw dir is never written to.
 const SINGLETON_TEMP_PATH = path.join(os.tmpdir(), `gf-ne-singleton-${randomUUID()}.sqlite`);
 before(async () => { await getNodeExecutionsStore(SINGLETON_TEMP_PATH); });
 
@@ -104,8 +84,6 @@ describe("getNodeExecutionsStore — singleton", () => {
   });
 });
 
-// ─── singleton DB is writable ─────────────────────────────────────────────────
-
 describe("singleton DB", () => {
   test("singleton is writable — write + listInvocationsForFlow round-trip succeeds", async () => {
     const store = await getNodeExecutionsStore();
@@ -126,8 +104,6 @@ describe("singleton DB", () => {
   });
 });
 
-// ─── write() ─────────────────────────────────────────────────────────────────
-
 describe("write()", () => {
   test("inserts a row with all fields populated", async () => {
     const store = await makeIsolatedStore();
@@ -139,7 +115,7 @@ describe("write()", () => {
     const exitedAt  = 1_700_000_005_000;
 
     await store.write({ flowId, pipelineId, nodeId, subflowKey, enteredAt, exitedAt, kind: "fresh" });
-    await store.flush(); // write() defers through batch-writer — drain before reading back
+    await store.flush();
 
     const rows = await rawExecutionRows(store, flowId);
     assert.equal(rows.length, 1);
@@ -201,7 +177,6 @@ describe("write()", () => {
 
   test("write() errors are swallowed and do not throw to callers", async () => {
     const store = await makeIsolatedStore();
-    // Corrupt the store by closing the DB first; write() should still not throw.
     store.close();
     await assert.doesNotReject(
       () => store.write({ flowId: randomUUID(), nodeId: "X", enteredAt: 1, exitedAt: 2, kind: "fresh" }),
@@ -237,9 +212,6 @@ describe("write()", () => {
   });
 
   test("a row written with subflowKey populated round-trips (raw)", async () => {
-    // listInvocationsForFlow deliberately excludes subflow-item invocations
-    // (subflow_key set) — see its own describe block — so this round-trip
-    // is checked via rawExecutionRows instead.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     await store.write({ flowId, nodeId: "STAMP", subflowKey: "item-9", enteredAt: 1, exitedAt: 2, kind: "fresh" });
@@ -271,11 +243,6 @@ describe("write()", () => {
     assert.strictEqual(result, undefined);
   });
 });
-
-// ─── writeResult() ───────────────────────────────────────────────────────────
-// Additive resultJson write. No size cap (see node-executions.js's
-// own header comment): a result of any size is always stored in full,
-// resultTooLargeBytes always written null.
 
 describe("writeResult()", () => {
   test("writes resultJson + resultWrittenAt on a normal call", async () => {
@@ -314,10 +281,6 @@ describe("writeResult()", () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const { invocationId } = await store.write({ flowId, nodeId: "SCAN", enteredAt: 1, exitedAt: 2, kind: "fresh" });
-    // Same shape as the real SCAN node: tiny scalar fields (accessToken,
-    // bidderId) bundled flat alongside a large `listings` array — a partial
-    // write would lose the tiny fields a later node (SUBMIT_CODE) depends on.
-    // No size cap applies, so nothing is dropped.
     const big = {
       accessToken: "tok-abc123",
       bidderId: 987654,
@@ -414,11 +377,6 @@ describe("writeResult()", () => {
   });
 });
 
-// ─── writeGateRecord() / getGateRecord() ───────────────────────────────────
-// gate_records (MIGRATIONS v11) — one row per (flowId, nodeId), a point
-// identity no shared-key merge/replay can ever go stale against, unlike
-// state.gates riding along inside a node's own resultJson row.
-
 describe("writeGateRecord() / getGateRecord()", () => {
   test("getGateRecord returns null when the gate has never written a record", async () => {
     const store = await makeIsolatedStore();
@@ -468,10 +426,6 @@ describe("writeGateRecord() / getGateRecord()", () => {
   });
 });
 
-// ─── listGateRecordsForFlow() ───────────────────────────────────────────────
-// Batch sibling of getGateRecord — routes/runs.js needs "every gate this
-// flow has opened," not one specific node.
-
 describe("listGateRecordsForFlow()", () => {
   test("empty flow — no gates opened at all", async () => {
     const store = await makeIsolatedStore();
@@ -492,8 +446,6 @@ describe("listGateRecordsForFlow()", () => {
   test("each row is independently correct — no merge, no staleness, regardless of write order", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
-    // GATE_1 opens and resolves BEFORE GATE_2 even exists — the ordering a
-    // shallow-merge replay of these records would get wrong.
     await store.writeGateRecord(flowId, "GATE_1", { pending: [], consumedAt: 1000 });
     await store.writeGateRecord(flowId, "GATE_2", { pending: ["y"] });
     const all = await store.listGateRecordsForFlow(flowId);
@@ -517,9 +469,6 @@ describe("listGateRecordsForFlow()", () => {
   });
 });
 
-// ─── listResultsForFlow() ──────────────────────────────────────────────────
-// Feeds engine/executor-helpers.js's assembleState().
-
 describe("listResultsForFlow()", () => {
   test("empty flow — no invocations at all", async () => {
     const store = await makeIsolatedStore();
@@ -540,13 +489,7 @@ describe("listResultsForFlow()", () => {
     assert.equal(results[0].resultTooLargeBytes, null);
   });
 
-  // A dispatch with no resultJson written yet must be excluded from the SQL
-  // result entirely, not merely filtered by assembleState() after the
-  // fact — the per-node dedup below keeps only ONE row per node_id, so if
-  // that slot were occupied by an in-flight (unwritten) row, an EARLIER
-  // COMPLETED invocation for the same node (a real value a loop-back's own
-  // next dispatch needs to read) would be silently hidden entirely, not
-  // just marked not-ready. See listResultsForFlow's own comment.
+  // Unwritten rows must be excluded in SQL — else the per-node dedup slot hides an earlier completed row.
   test("a dispatch with no resultJson written yet is excluded entirely — not present with resultWrittenAt null", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
@@ -560,9 +503,6 @@ describe("listResultsForFlow()", () => {
     const flowId = randomUUID();
     const loop1 = await store.write({ flowId, nodeId: "LOOP", enteredAt: 1, exitedAt: 2, kind: "fresh" });
     await store.writeResult(loop1.invocationId, { LOOP: { count: 1 } });
-    // A genuine re-entry creates its OWN new invocation before it has
-    // anything to write — this is exactly the state a loop-back node's
-    // own dispatch reads state IN THE MIDDLE OF.
     await store.write({ flowId, nodeId: "LOOP", enteredAt: 3, exitedAt: 4, kind: "fresh" });
     const results = await store.listResultsForFlow(flowId);
     assert.equal(results.length, 1);
@@ -596,21 +536,16 @@ describe("listResultsForFlow()", () => {
   test("a genuine loop-back (new invocation, higher visit_seq) dedups to the LATEST row, repositioned to reflect when it actually happened", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
-    // DRAFT fires first (visit_seq 1)...
     const draft1 = await store.write({ flowId, nodeId: "DRAFT", enteredAt: 1, exitedAt: 2, kind: "fresh" });
     await store.writeResult(draft1.invocationId, { DRAFT: { pass: 1 } });
-    // ...then GATE runs...
     const gate = await store.write({ flowId, nodeId: "GATE", enteredAt: 3, exitedAt: 4, kind: "fresh" });
     await store.writeResult(gate.invocationId, { GATE: { decision: "retry" } });
-    // ...then a real loop-back re-enters DRAFT (visit_seq 2, a NEW row, not a retry-overwrite).
     const draft2 = await store.write({ flowId, nodeId: "DRAFT", enteredAt: 5, exitedAt: 6, kind: "fresh" });
     assert.equal(draft2.invocationId === draft1.invocationId, false, "a genuine loop-back must be a new invocation row, not the same one");
     await store.writeResult(draft2.invocationId, { DRAFT: { pass: 2 } });
 
     const results = await store.listResultsForFlow(flowId);
     assert.equal(results.length, 2, "DRAFT dedups to one row despite two invocations");
-    // DRAFT's SECOND pass happened chronologically AFTER GATE — its position
-    // in the replay order must reflect that, not its first occurrence.
     assert.deepEqual(results.map((r) => r.nodeId), ["GATE", "DRAFT"]);
     assert.deepEqual(JSON.parse(results.find((r) => r.nodeId === "DRAFT").resultJson), { DRAFT: { pass: 2 } });
   });
@@ -640,8 +575,6 @@ describe("listResultsForFlow()", () => {
   });
 });
 
-// ─── findCurrentStep() ─────────────────────────────────────────────────────
-
 describe("findCurrentStep()", () => {
   test("returns null when the flow has no invocations yet", async () => {
     const store = await makeIsolatedStore();
@@ -650,22 +583,10 @@ describe("findCurrentStep()", () => {
   });
 
   test("returns the node_id of the latest subflow_key IS NULL row, ignoring later item rows for the same node", async () => {
-    // Mirrors what a real subflow node dispatch produces: enter() creates
-    // the identity row (subflowKey: null, exactly what executor.js's own
-    // runFlow loop does), then per-item bookkeeping rows land under the
-    // same flow_id + node_id with a real subflow_key — always later in
-    // time, since item-row creation happens as part of processing that
-    // same dispatch. This proves the subflow_key IS NULL filter is what
-    // keeps findCurrentStep pointed at the node's own identity row instead
-    // of one of its items, even though today they'd carry the same
-    // node_id either way.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     await store.write({ flowId, pipelineId: "p", nodeId: "PROPOSE", subflowKey: null, enteredAt: 100, exitedAt: 200, kind: "fresh" });
     await store.write({ flowId, pipelineId: "p", nodeId: "PROPOSE", subflowKey: "listing-1", enteredAt: 300, exitedAt: 400, kind: "fresh" });
-    // Force the item row's invoked_at strictly later than the identity
-    // row's, deterministically rather than relying on Date.now() ticking
-    // between two sequential calls in the same test.
     await store._db.execute({
       sql: `UPDATE flow_node_invocations SET invoked_at = invoked_at + 1000 WHERE flow_id = ? AND subflow_key = 'listing-1'`,
       args: [flowId],
@@ -685,8 +606,6 @@ describe("findCurrentStep()", () => {
   });
 });
 
-// ─── no-op fallback when createClient fails to open ──────────────────────────
-
 describe("no-op store — DatabaseSync fails to open", () => {
   test("write() on no-op store does not throw", () => {
     const noop = () => {};
@@ -698,21 +617,17 @@ describe("no-op store — DatabaseSync fails to open", () => {
   });
 
   test("opening a DB at an invalid path produces a no-op-like store via error swallow", async () => {
-    // Write a regular file at what would be the parent dir path, so mkdirSync throws ENOTDIR.
     const blockingFile = path.join(os.tmpdir(), `gf-block-${randomUUID()}`);
     writeFileSync(blockingFile, "not a directory");
     const badPath = path.join(blockingFile, "node-executions.sqlite");
 
     const store = await createNodeExecutionsStore(badPath);
-    // The store should be a no-op (not throw on open, not throw on write).
     assert.doesNotThrow(() => {
       store.write({ flowId: "f", nodeId: "n", enteredAt: 1, exitedAt: 2, kind: "fresh" });
     });
     assert.deepEqual(await store.listInvocationsForFlow("f"), []);
   });
 });
-
-// ─── schema correctness ───────────────────────────────────────────────────────
 
 describe("schema", () => {
   test("flow_node_invocations table is created with all expected columns", async () => {
@@ -741,14 +656,6 @@ describe("schema", () => {
     store.close();
   });
 
-  // v13: freelance-filter-node.js's in-flight dedup query (workspace/.shared/
-  // common/lib/freelance-filter-node.js) filters flow_node_invocations by
-  // node_id and correlates on subflow_key, in both its own WHERE clause and
-  // a NOT EXISTS subquery — neither column was covered by an existing
-  // index. Without this index, SQLite falls back to a full scan of
-  // flow_runs (driving the join) plus a second per-row scan inside the
-  // correlated subquery; with it, the plan uses direct
-  // (node_id, subflow_key) index searches throughout.
   test("idx_invocations_node_subflow index exists on flow_node_invocations (node_id, subflow_key)", async () => {
     const store = await makeIsolatedStore();
     const { rows } = await store._db.execute({
@@ -772,8 +679,6 @@ describe("schema", () => {
   });
 });
 
-// ─── v2 migration: rebuild-and-backfill (id retype, branch_item rename) ──
-
 describe("getExecution()", () => {
   test("returns null for an unknown execution id", async () => {
     const store = await makeIsolatedStore();
@@ -795,8 +700,6 @@ describe("getExecution()", () => {
     store.close();
   });
 });
-
-// ─── findOrCreateInvocation() ─────────────────────────────────────────────────
 
 describe("findOrCreateInvocation()", () => {
   test("creates a new invocation and returns its id", async () => {
@@ -830,9 +733,6 @@ describe("findOrCreateInvocation()", () => {
   });
 
   test("two root-level calls (subflowKey null) for the same flow+node also collapse into one invocation", async () => {
-    // This is the exact case the COALESCE-based unique index exists to fix —
-    // a bare UNIQUE(flow_id,node_id,branch_key) would treat two NULL rows as
-    // distinct and silently create two invocations.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const id1 = await store.findOrCreateInvocation({ flowId, nodeId: "ROOT_NODE" });
@@ -851,10 +751,6 @@ describe("findOrCreateInvocation()", () => {
   });
 
   test("race safety: a losing concurrent insert re-selects and returns the winner's id, not a throw", async () => {
-    // Simulates two callers racing to create the same invocation: seed the
-    // row directly (as if another process's INSERT already committed), then
-    // confirm findOrCreateInvocation's insert-fails-then-reselect path
-    // recovers cleanly rather than throwing or creating a duplicate.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const winnerId = randomUUID();
@@ -878,8 +774,6 @@ describe("findOrCreateInvocation()", () => {
     assert.equal(Number(rows[0].n), 1);
     store.close();
   });
-
-  // ── forceNew / visit_seq ──────────────────────────────────────────────────
 
   test("forceNew:true creates a SECOND invocation (visit_seq=2) for the same identity tuple, not a reuse", async () => {
     const store = await makeIsolatedStore();
@@ -930,15 +824,7 @@ describe("findOrCreateInvocation()", () => {
     store.close();
   });
 
-  // ── guard (cross-flow atomic dedup) ────────────────────────────────────
-  //
-  // The per-flow
-  // unique index above only ever prevented the SAME flowId from double-
-  // dispatching an identity — it never had an opinion on two DIFFERENT
-  // parent flows (e.g. two overlapping scans)
-  // both deciding to dispatch the same (nodeId, subflowKey). `guard` closes
-  // that gap by running inside this call's own withSharedWrite turn, right
-  // before the insert — see the function's own header comment.
+  // Cross-flow guard: per-flow unique index can't stop two parent flows dispatching the same (nodeId, subflowKey).
   describe("guard", () => {
     test("guard returning false skips the insert and returns null — no row is created", async () => {
       const store = await makeIsolatedStore();
@@ -966,11 +852,6 @@ describe("findOrCreateInvocation()", () => {
     });
 
     test("a rejected guard call means a DIFFERENT flowId can never create a duplicate identity for the same cross-flow subject", async () => {
-      // Simulates the real race: flow A's dispatch commits first (no guard
-      // needed — its own identity is brand new); flow B's dispatch for the
-      // SAME subflowKey supplies a guard that checks whether ANY invocation
-      // already exists for this subflowKey across flows — the exact shape
-      // isListingInFlight provides in production.
       const store = await makeIsolatedStore();
       const flowA = randomUUID();
       const flowB = randomUUID();
@@ -1076,10 +957,6 @@ describe("getLatestInvocationForNode()", () => {
 });
 
 describe("getLatestInvocationInvokedAt()", () => {
-  // Used by companion live-bridge snapshots to backfill blockedAtMs for
-  // gate items opened before requestedAt existed on wait_json items — the
-  // exact moment the gate NODE was dispatched, independent of the flow's
-  // own createdAt (which reflects the whole flow, not this specific node).
   test("returns the invokedAt of the highest-visit_seq invocation", async () => {
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
@@ -1117,7 +994,6 @@ describe("listInvocationIdsForNode()", () => {
     const flowId = randomUUID();
     const id1 = await store.findOrCreateInvocation({ flowId, nodeId: "LOOP", subflowKey: "item-1" });
     const id2 = await store.findOrCreateInvocation({ flowId, nodeId: "LOOP", subflowKey: "item-2" });
-    // A different flow's invocation under the same-named node must not leak in.
     await store.findOrCreateInvocation({ flowId: randomUUID(), nodeId: "LOOP", subflowKey: "item-1" });
 
     const ids = (await store.listInvocationIdsForNode(flowId, "LOOP")).sort();
@@ -1126,15 +1002,11 @@ describe("listInvocationIdsForNode()", () => {
   });
 
   test("excludes an ordinary root-level invocation for the same node (subflowKey null)", async () => {
-    // branch_key IS NOT NULL is the sole "this is a loop-child invocation"
-    // signal post-group_id-drop (see node-executions.js's header comment on
-    // _listInvocationIdsForNodeStmt). A plain, non-loop dispatch of a node
-    // that happens to share the loop's own id (subflowKey null) must not be
-    // mistaken for one of its children.
+    // branch_key IS NOT NULL is the loop-child signal — a non-loop dispatch of the same nodeId must not match.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     const childSpawnId = await store.findOrCreateInvocation({ flowId, nodeId: "LOOP", subflowKey: "item-1" });
-    await store.findOrCreateInvocation({ flowId, nodeId: "LOOP" }); // subflowKey null — not a child
+    await store.findOrCreateInvocation({ flowId, nodeId: "LOOP" });
 
     const ids = await store.listInvocationIdsForNode(flowId, "LOOP");
     assert.deepEqual(ids, [childSpawnId]);
@@ -1154,7 +1026,6 @@ describe("listSubflowNodeIdsForFlow()", () => {
     const flowId = randomUUID();
     await store.findOrCreateInvocation({ flowId, nodeId: "LOOP_A", subflowKey: "item-1" });
     await store.findOrCreateInvocation({ flowId, nodeId: "LOOP_B", subflowKey: "item-1" });
-    // Root-level (subflowKey null) invocations must not appear.
     await store.findOrCreateInvocation({ flowId, nodeId: "ROOT_NODE" });
 
     const nodeIds = (await store.listSubflowNodeIdsForFlow(flowId)).sort();
@@ -1223,13 +1094,6 @@ describe("getLatestExecutionForNode()", () => {
   });
 });
 
-// summarizeChildrenByFlowIds buckets a flow's real flow_runs children by
-// status. flow_node_invocations and flow_runs live in
-// the same physical runtime.sqlite file, so these tests point a
-// createRunStore and a createNodeExecutionsStore at the SAME tmp path
-// (same pattern as engine/executor-loop-children.test.js's harness) and
-// wire real children via spawn-child.js's resolveOrCreateChild — the
-// exact path dispatchLoopChildren uses in production.
 describe("summarizeChildrenByFlowIds()", () => {
   async function makeDualStore() {
     const dbPath = tmpDb();
@@ -1319,11 +1183,6 @@ describe("summarizeChildrenByFlowIds()", () => {
   });
 });
 
-// ─── listInvocationsForFlow() / listExecutionsForInvocation() ─────────────────
-// Data source for the run-detail node tree (routes/runs.js's
-// GET /manifold/runs/:flowId/tree[/expand]) — invocation-granular rows with
-// a drill-in to full per-execution-attempt history.
-
 describe("listInvocationsForFlow()", () => {
   test("returns [] for a flow with no invocations", async () => {
     const store = await makeIsolatedStore();
@@ -1365,10 +1224,6 @@ describe("listInvocationsForFlow()", () => {
     store.close();
   });
 
-  // everRetriedOrRevived. `kind` above is the LATEST execution only; this
-  // field looks across the WHOLE history, so a retry/revival buried behind
-  // later "recheck" (the normal, structural re-entry every subflow node
-  // gets once its children finish) is still visible.
   describe("everRetriedOrRevived", () => {
     test("single fresh execution — false", async () => {
       const store = await makeIsolatedStore();
@@ -1417,14 +1272,7 @@ describe("listInvocationsForFlow()", () => {
   });
 
   test("multiple distinct nodes produce multiple rows, ordered by invoked_at (invocation-creation time, not enteredAt)", async () => {
-    // invoked_at is stamped Date.now() inside findOrCreateInvocation at
-    // write() time, independent of whatever enteredAt the caller passes —
-    // so ordering here must follow real call order, not a fabricated
-    // enteredAt value. This is also the semantically correct choice for the
-    // tree: a later RETRY of an already-invoked node keeps invoked_at
-    // pinned to its first attempt, so a retried node stays at its original
-    // position in the tree instead of jumping to wherever the retry
-    // happened (see listInvocationsForFlow's own comment).
+    // invoked_at is stamped at write() time, independent of enteredAt — order by real call order.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     await store.write({ flowId, nodeId: "FIRST", enteredAt: 100, exitedAt: 110, kind: "fresh" });
@@ -1437,13 +1285,7 @@ describe("listInvocationsForFlow()", () => {
   });
 
   test("excludes subflow-item invocations (subflow_key set) — those are branch-item spawn points, not root-level dispatches", async () => {
-    // A subflow-kind node's OWN dispatch (subflow_key=null) and each branch
-    // item's own spawn invocation (subflow_key=<item key>) share the same
-    // node_id but are semantically different things — the tree only wants
-    // the former at root level; the latter is resolved separately via
-    // listInvocationIdsForNode when a subflow row is expanded. Without this
-    // filter, a node that fanned out to N items
-    // surfaced as N separate root-level rows instead of one.
+    // Root level wants only the node's own dispatch (subflow_key=null), not per-item spawns.
     const store = await makeIsolatedStore();
     const flowId = randomUUID();
     await store.write({ flowId, nodeId: "PROPOSE", subflowKey: "listing-42", enteredAt: 100, exitedAt: 110, kind: "fresh" });
@@ -1564,9 +1406,6 @@ describe("listVisitedNodeIdsByFlow()", () => {
     await store.write({ flowId, nodeId: "PROPOSE", subflowKey: null, enteredAt: 1, exitedAt: 2, kind: "fresh" });
     await store.write({ flowId, nodeId: "PROPOSE", subflowKey: "listing-1", enteredAt: 3, exitedAt: 4, kind: "fresh" });
     const result = await store.listVisitedNodeIdsByFlow([flowId]);
-    // Both rows share nodeId "PROPOSE" here, so this alone wouldn't catch a
-    // missing filter — the point is documented intent, matching
-    // findCurrentStep/listInvocationsForFlow's same scoping.
     assert.deepEqual(result.get(flowId), new Set(["PROPOSE"]));
     store.close();
   });

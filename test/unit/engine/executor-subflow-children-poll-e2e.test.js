@@ -1,25 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors freelance_workana-poll-inbox's POLL
- * (PERSIST_UPDATE → (INVOKE_REPLY | __end__) → (STAMP_NOTIFIED | __end__)),
- * no gate, no fallback. Every sub-node is a trivial kind:"code" stand-in.
- *
- * THE LOAD-BEARING CASE this file exists to prove: INVOKE_REPLY is the
- * first migrated node in this whole effort that uses the engine's real
- * kind:"code" 2-arg contract, run(state, ctx) — ctx.invokePipeline fires a
- * real second flow. Tier 1's unit test only proves INVOKE_REPLY's own
- * logic against a HAND-BUILT STUB ctx; it cannot catch a regression in the
- * real dispatchLoopChildren → runFlow → nodeCtx wiring itself. So this
- * file's stand-in INVOKE_REPLY node calls the REAL ctx.invokePipeline
- * against a real, trivial no-op target pipeline registered directly in
- * this harness's own pipelinesRef Map — proving a genuine childFlows
- * child gets the exact same nodeCtx a root-level node would.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForTerminal } from "../../helpers/wait-for-event.js";
@@ -33,8 +11,6 @@ import { createStateStore } from "../../../state/state-store.js";
 import { createExecutor } from "../../../engine/executor.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -116,9 +92,6 @@ async function makeHarness() {
     nodes: POLL_NODE.flow.nodes,
     edges: POLL_NODE.flow.edges,
   };
-  // Real, trivial no-op target pipeline for ctx.invokePipeline to fire
-  // against — the whole point of this E2E is proving a childFlows child
-  // gets a REAL, working nodeCtx, not a stubbed one.
   const replyTargetPipeline = {
     id: "test_reply_target",
     state: {},
@@ -222,10 +195,6 @@ describe("childFlows:true POLL-shaped loop, full engine E2E", () => {
     assert.equal(childState.INVOKE_REPLY?.invoked, true);
     assert.equal(childState.STAMP_NOTIFIED?.stamped, true);
 
-    // The real proof: a second, independent flow_runs row exists for the
-    // target pipeline, spawned via the child's own real ctx.invokePipeline
-    // call — not a stub. This is only possible if a childFlows child gets
-    // the identical nodeCtx a root-level node would.
     const targetFlowId = childState.INVOKE_REPLY.flowId;
     assert.ok(targetFlowId, "INVOKE_REPLY must report the real spawned flowId");
     const targetFlow = await waitForRunRow(runStore, targetFlowId, (r) => r.status === "succeeded");

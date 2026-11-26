@@ -1,8 +1,3 @@
-// Unit tests for engine/result-replay.js — the pure merge shared by
-// assembleState() and subflow-state.js's per-child `data` field. It replays a
-// flow's own completed resultJson rows onto a base state object; nothing here
-// touches a store.
-
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { replayResults } from "../../../engine/result-replay.js";

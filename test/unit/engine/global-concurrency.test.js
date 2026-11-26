@@ -1,8 +1,3 @@
-// Unit tests for engine/global-concurrency.js — the single shared
-// concurrency ceiling state/admission-queue-store.js (kind:"child-dispatch"
-// and kind:"flow-start") reads on every admit(). See that module's own
-// header for why these share one ceiling.
-
 import { test, describe, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { configureGlobalConcurrency, getGlobalConcurrencyLimit, _resetForTests } from "../../../engine/global-concurrency.js";

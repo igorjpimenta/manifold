@@ -1,6 +1,3 @@
-// tools.test.js — manifold_deliver_result handler contract: the session
-// comes from the stamped caller identity (never from args), payload is
-// required, and the write goes through the injected deliverResult op.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createManifoldToolHandlers, TOOL_DEFS } from "../../../mcp/tools.js";

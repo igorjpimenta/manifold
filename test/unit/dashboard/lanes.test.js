@@ -1,8 +1,3 @@
-// lanes.test.js — attribution rules for the admission pool snapshot: a lane
-// held by a running flow is ok, one idle past the stale window is suspect, and
-// one whose flow is terminal/blocked/gone is an orphan (nothing will release
-// it). The dashboard renders exactly these three words, so a regression here
-// shows the operator the wrong story about why the pool is full.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildLanesSnapshot, SUSPECT_STALE_MS } from "../../../dashboard/lanes.js";

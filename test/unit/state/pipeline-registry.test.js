@@ -1,13 +1,3 @@
-/**
- * Unit tests for state/pipeline-registry.js
- *
- * Covers: schema creation; reconcilePipelineVersions' SCD2 diffing (new
- * pipeline registers, unchanged pipeline no-ops, changed node
- * retires-and-inserts, removed node/pipeline retires without inserting);
- * getNodeVersionAt/getNodeVersionsBatch/getPipelineVersionAt's
- * point-in-time correctness (returns the version active at a given
- * timestamp, not always the latest).
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -35,8 +25,6 @@ async function ensurePipeline(store, id) {
 function pipelinesMap(entries) {
   return new Map(entries.map((p) => [p.id, p]));
 }
-
-// ─── schema ─────────────────────────────────────────────────────────────────
 
 describe("createPipelineRegistryStore — schema", () => {
   test("creates both tables without throwing", async () => {
@@ -86,8 +74,6 @@ describe("createPipelineRegistryStore — schema", () => {
     store.close();
   });
 });
-
-// ─── reconcilePipelineVersions ────────────────────────────────────────────────
 
 describe("reconcilePipelineVersions", () => {
   test("a new pipeline registers a pipeline_versions row and one pipeline_node_versions row per node", async () => {
@@ -145,7 +131,7 @@ describe("reconcilePipelineVersions", () => {
       { id: "p1", nodes: { A: { kind: "code" }, B: { kind: "code" } } },
     ]));
     await store.reconcilePipelineVersions(pipelinesMap([
-      { id: "p1", nodes: { A: { kind: "code" } } }, // B removed
+      { id: "p1", nodes: { A: { kind: "code" } } },
     ]));
     const { rows } = await store._db.execute("SELECT retired_at FROM pipeline_node_versions WHERE pipeline_id = 'p1' AND node_name = 'B'");
     assert.equal(rows.length, 1, "B's last version stays queryable, just retired — never deleted");
@@ -160,7 +146,7 @@ describe("reconcilePipelineVersions", () => {
       { id: "p2", nodes: { X: { kind: "code" } } },
     ]));
     await store.reconcilePipelineVersions(pipelinesMap([
-      { id: "p2", nodes: { X: { kind: "code" } } }, // p1 gone entirely
+      { id: "p2", nodes: { X: { kind: "code" } } },
     ]));
     const { rows: pv } = await store._db.execute("SELECT retired_at FROM pipeline_versions WHERE pipeline_id = 'p1'");
     assert.notEqual(pv[0].retired_at, null);
@@ -181,12 +167,6 @@ describe("reconcilePipelineVersions", () => {
   });
 
   test("a mode change alone does not retire a node — mode isn't part of the content hash for live-behavior reasons, but IS still stored", async () => {
-    // Scope note (see pipeline-registry.js's own explicit scope-boundary
-    // comment): mode is captured for completeness but the live mode
-    // check (child-resume-trigger.js) never reads this table — this test
-    // only confirms the column is populated, not that changing mode alone
-    // triggers a new version (it does, since mode IS part of the node
-    // content hash — see nodeContentHash).
     const store = makeStore();
     await store.reconcilePipelineVersions(pipelinesMap([
       { id: "p1", nodes: { A: { kind: "subflow", mode: "any" } } },
@@ -205,8 +185,6 @@ describe("reconcilePipelineVersions", () => {
     store.close();
   });
 });
-
-// ─── point-in-time lookups ─────────────────────────────────────────────────
 
 describe("getNodeVersionAt / getNodeVersionsBatch — point-in-time correctness", () => {
   test("returns the version active AT the given timestamp, not the latest", async () => {
@@ -228,11 +206,6 @@ describe("getNodeVersionAt / getNodeVersionsBatch — point-in-time correctness"
     store.close();
   });
 
-  // Timestamps older than the earliest recorded version are expected, not
-  // an edge case — invocations can predate pipeline tracking entirely, and
-  // anything reconcile never saw still needs a version. Falls back to the
-  // earliest known version rather than null: returning null would lose
-  // correct rendering for those invocations.
   test("a timestamp before any version was ever registered falls back to the EARLIEST known version, not null", async () => {
     const store = makeStore();
     await store.reconcilePipelineVersions(pipelinesMap([{ id: "p1", nodes: { A: { kind: "code" } } }]));
@@ -257,7 +230,7 @@ describe("getNodeVersionAt / getNodeVersionsBatch — point-in-time correctness"
     const results = await store.getNodeVersionsBatch([
       { pipelineId: "p1", nodeName: "B", atMs: now },
       { pipelineId: "p1", nodeName: "A", atMs: now },
-      { pipelineId: "p1", nodeName: "A", atMs: now }, // duplicate pair, same request list
+      { pipelineId: "p1", nodeName: "A", atMs: now },
       { pipelineId: "unknown", nodeName: "Z", atMs: now },
     ]);
     assert.equal(results.length, 4);
@@ -274,8 +247,6 @@ describe("getNodeVersionAt / getNodeVersionsBatch — point-in-time correctness"
     store.close();
   });
 });
-
-// ─── node identity (node_id) across a rename ───────────────────────────────
 
 describe("node_id — persistent identity, author-declared or auto-minted", () => {
   test("a node with no declared id gets one auto-minted", async () => {
@@ -312,7 +283,7 @@ describe("node_id — persistent identity, author-declared or auto-minted", () =
       { id: "p1", nodes: { VERIFY_SUBMIT: { kind: "code", id: "submit-step" } } },
     ]));
     await store.reconcilePipelineVersions(pipelinesMap([
-      { id: "p1", nodes: { SUBMIT_SUMMARY: { kind: "code", id: "submit-step" } } }, // renamed key, same declared id
+      { id: "p1", nodes: { SUBMIT_SUMMARY: { kind: "code", id: "submit-step" } } },
     ]));
     const { rows } = await store._db.execute("SELECT node_name, node_id FROM pipeline_node_versions WHERE pipeline_id = 'p1' AND node_id = 'submit-step'");
     assert.deepEqual(rows.map((r) => r.node_name).sort(), ["SUBMIT_SUMMARY", "VERIFY_SUBMIT"], "both names share the one declared identity");
@@ -349,17 +320,11 @@ describe("node_id — persistent identity, author-declared or auto-minted", () =
     store.close();
   });
 
-  // nodeContentHash covers {kind, agent, mode, id} — without `id` in the
-  // hash, _reconcileOneNode's hash-match short-circuit swallows a
-  // retroactively added `id` on an already-existing, otherwise-unchanged
-  // node (the declared value never read). Retroactive-backfill declarations
-  // must actually apply.
   test("retroactively declaring id on an already-existing, otherwise-unchanged node DOES take effect (not swallowed by the hash-match short-circuit)", async () => {
     const store = makeStore();
     await store.reconcilePipelineVersions(pipelinesMap([{ id: "p1", nodes: { A: { kind: "code" } } }]));
     const { rows: before } = await store._db.execute("SELECT node_id FROM pipeline_node_versions WHERE pipeline_id = 'p1' AND node_name = 'A' AND retired_at IS NULL");
     const mintedId = before[0].node_id;
-    // Same kind, same node_name — only difference is the new declaration.
     await store.reconcilePipelineVersions(pipelinesMap([{ id: "p1", nodes: { A: { kind: "code", id: "hand-declared" } } }]));
     const { rows: after } = await store._db.execute("SELECT node_id, content_hash FROM pipeline_node_versions WHERE pipeline_id = 'p1' AND node_name = 'A' AND retired_at IS NULL");
     assert.equal(after[0].node_id, "hand-declared", "the declared id must actually be applied, not silently ignored");

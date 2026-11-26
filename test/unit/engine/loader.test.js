@@ -1,20 +1,3 @@
-/**
- * Unit tests for engine/loader.js
- *
- * Covers validatePipeline (via loadPipelines with real temp-fs pipeline dirs)
- * and resolveRelativeImports (indirectly via loadPipelines source rewriting).
- *
- * validatePipeline is not exported, so we drive it through loadPipelines:
- * write a real index.js in a temp directory, call loadPipelines, and assert
- * whether the pipeline loaded successfully or was skipped with the expected
- * error logged.
- *
- * resolveRelativeImports is tested via loadPipelines by verifying that a
- * pipeline whose index.js uses relative imports can be loaded when the
- * imported module exists at the resolved absolute path.
- *
- * No SQLite is required — loader.js only touches the filesystem.
- */
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -24,12 +7,6 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { loadPipelines, createPipelinesLoader } from "../../../engine/loader.js";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Create a fresh temp directory for one test run.
- * Returns { dir, pipelinesDir, cleanup }.
- */
 async function makeTempPipelinesDir() {
   const dir = path.join(os.tmpdir(), `gf-loader-test-${randomUUID()}`);
   await mkdir(dir, { recursive: true });
@@ -41,9 +18,6 @@ async function makeTempPipelinesDir() {
   };
 }
 
-/**
- * Write a pipeline folder `<pipelinesDir>/<name>/index.js` with the given source.
- */
 async function writePipeline(pipelinesDir, name, source) {
   const pDir = path.join(pipelinesDir, name);
   await mkdir(pDir, { recursive: true });
@@ -51,9 +25,6 @@ async function writePipeline(pipelinesDir, name, source) {
   return pDir;
 }
 
-/**
- * A logger that captures warn messages so tests can assert on them.
- */
 function makeLogger() {
   const warns = [];
   const infos = [];
@@ -69,9 +40,6 @@ function makeLogger() {
   };
 }
 
-/**
- * Minimal valid pipeline source — passes all validation.
- */
 const VALID_MINIMAL_PIPELINE = `
 export default {
   id: "test_minimal",
@@ -85,8 +53,6 @@ export default {
   },
 };
 `;
-
-// ── loadPipelines: missing / non-existent directory ──────────────────────────
 
 describe("loadPipelines — missing directory", () => {
   test("returns empty map when dir does not exist (ENOENT)", async () => {
@@ -104,8 +70,6 @@ describe("loadPipelines — missing directory", () => {
     );
   });
 });
-
-// ── loadPipelines: valid minimal pipeline ────────────────────────────────────
 
 describe("loadPipelines — valid minimal pipeline", () => {
   let dir, cleanup;
@@ -137,8 +101,6 @@ describe("loadPipelines — valid minimal pipeline", () => {
   });
 });
 
-// ── validatePipeline: top-level shape ────────────────────────────────────────
-
 describe("validatePipeline — top-level shape", () => {
   let dir, cleanup;
 
@@ -154,7 +116,6 @@ describe("validatePipeline — top-level shape", () => {
     await writeFile(path.join(pDir, "index.js"), source, "utf8");
     const { logger, warns } = makeLogger();
     const result = await loadPipelines(dir, logger);
-    // Should not have loaded this pipeline
     const loaded = [...result.values()].find((p) => p._dir === pDir);
     assert.equal(loaded, undefined, `pipeline "${name}" should not have loaded`);
     if (warnSnippet) {
@@ -231,9 +192,6 @@ describe("validatePipeline — top-level shape", () => {
   });
 
   test("does not throw when .nodes is an empty array (Array is typeof object — validator allows it)", async () => {
-    // The check is `!p.nodes || typeof p.nodes !== "object"`.
-    // An array [] is truthy and typeof === "object", so it slips through.
-    // This test documents the current behavior rather than asserting an exception.
     const name = "nodes_array";
     const pDir = path.join(dir, name);
     await mkdir(pDir, { recursive: true });
@@ -244,7 +202,6 @@ describe("validatePipeline — top-level shape", () => {
     );
     const { logger } = makeLogger();
     const result = await loadPipelines(dir, logger);
-    // Array has no own entries so Object.entries([]) = [] — loads fine with zero nodes
     const loaded = [...result.values()].find((p) => p._dir === pDir);
     assert.ok(loaded, "empty array nodes loads as zero-node pipeline");
   });
@@ -273,8 +230,6 @@ describe("validatePipeline — top-level shape", () => {
     );
   });
 });
-
-// ── validatePipeline: node kind checks ───────────────────────────────────────
 
 describe("validatePipeline — node kind", () => {
   let dir, cleanup;
@@ -356,8 +311,6 @@ describe("validatePipeline — node kind", () => {
     `);
   });
 });
-
-// ── validatePipeline: agent node ─────────────────────────────────────────────
 
 describe("validatePipeline — agent node", () => {
   let dir, cleanup;
@@ -456,8 +409,6 @@ describe("validatePipeline — agent node", () => {
   });
 });
 
-// ── validatePipeline: human-gate node ────────────────────────────────────────
-
 describe("validatePipeline — human-gate node", () => {
   let dir, cleanup;
   let counter = 0;
@@ -519,12 +470,6 @@ describe("validatePipeline — human-gate node", () => {
   });
 });
 
-// ── validatePipeline: loop node (branch mode) ────────────────────────────────
-
-// Stage 1.5 — .mode is required on every kind:"subflow" node, no default.
-// Doesn't reuse the sibling
-// describe blocks' tryLoad helpers below since those bake mode:"any" into
-// their template on purpose (they're testing unrelated validation paths).
 describe("validatePipeline — subflow node .mode (Stage 1.5)", () => {
   let dir, cleanup;
   let counter = 0;
@@ -650,13 +595,6 @@ describe("validatePipeline — loop node (branch mode)", () => {
     assert.ok(loaded, "branch-mode without groupId should load");
   });
 
-  // No custom-groupId collision coverage here: childFlows:true (mandatory
-  // on every loop node) forbids setting .groupId at all (see "throws when
-  // .childFlows is true and a custom .groupId is also set" in the childFlows
-  // describe block below), and an implicit-groupId collision between two
-  // loop nodes' own ids can't happen since node ids are already unique JS
-  // object keys.
-
   test("throws when branch sub-node has unknown kind", async () => {
     const loaded = await tryLoad(`
       flow: {
@@ -687,10 +625,6 @@ describe("validatePipeline — loop node (branch mode)", () => {
     assert.equal(loaded, undefined);
   });
 
-  // A branch sub-node human-gate under childFlows:true (mandatory on every
-  // loop node) DOES require .pendingSelector — covered by "validatePipeline
-  // — loop node childFlows"'s own "REQUIRES .pendingSelector" test below.
-
   test("branch sub-node human-gate: throws when .apply is present but not a function", async () => {
     const loaded = await tryLoad(`
       flow: {
@@ -713,14 +647,6 @@ describe("validatePipeline — loop node (branch mode)", () => {
 
 });
 
-// ── validatePipeline: loop node childFlows ─────────────────────────────────
-
-// validatePipeline does not read a childFlows field — every subflow
-// node's items become real child flows unconditionally — so this describe
-// block covers that contract: a .flow definition is required, groupId
-// is always the node's own id, human-gate sub-nodes require
-// .pendingSelector, and the subflow registers as an addressable child
-// pipeline.
 describe("validatePipeline — loop node (childFlows behavior, unconditional)", () => {
   let dir, cleanup;
   let counter = 0;
@@ -861,12 +787,6 @@ describe("validatePipeline — loop node (childFlows behavior, unconditional)", 
   });
 
   test("a pipeline with an invalid branch fails to load entirely — no partial/corrupt state", async () => {
-    // The pendingSelector requirement is checked identically during the
-    // parent's own branch-nodes validation and during the synthetic
-    // pipeline's validation (deliberately kept in lockstep), so an
-    // invalid branch is rejected at the parent's own load step, before
-    // synthesis ever runs — neither the parent nor a synthetic entry ends
-    // up registered.
     const { id, result, loaded } = await tryLoad(`
       flow: {
         nodes: { g: { kind: "human-gate", approvalRequestBuilder: (state, itemId) => ({}) } },
@@ -878,9 +798,6 @@ describe("validatePipeline — loop node (childFlows behavior, unconditional)", 
   });
 
   test("a second, independently-valid pipeline in the same directory still loads when another pipeline's branch is invalid", async () => {
-    // Confirms the per-directory try/catch in loadPipelines() isolates
-    // failures — one bad pipeline (or its branch) never takes down
-    // sibling pipelines in the same scan.
     const badId = nextId();
     await mkdir(path.join(dir, badId), { recursive: true });
     await writeFile(path.join(dir, badId, "index.js"), `
@@ -902,8 +819,6 @@ describe("validatePipeline — loop node (childFlows behavior, unconditional)", 
   });
 });
 
-// ── validatePipeline: groups ──────────────────────────────────────────────────
-
 describe("validatePipeline — .groups", () => {
   let dir, cleanup;
   let counter = 0;
@@ -918,7 +833,6 @@ describe("validatePipeline — .groups", () => {
 
   async function tryLoad(src) {
     const id = nextId();
-    // Inject unique id
     const withId = src.replace("__ID__", id);
     const pDir = path.join(dir, id);
     await mkdir(pDir, { recursive: true });
@@ -1003,9 +917,6 @@ describe("validatePipeline — .groups", () => {
   });
 
   test("throws when a group mixes branch-scoped members from different loop parents", async () => {
-    // Mixing members from two different branch parents triggers the scope check.
-    // The first branch member sets scopeParent = "loop1"; the second from "loop2"
-    // triggers memberScope !== scopeParent → throws.
     const loaded = await tryLoad(`
       export default {
         id: "__ID__",
@@ -1036,8 +947,6 @@ describe("validatePipeline — .groups", () => {
   });
 
   test("throws when a group has a branch-scoped member followed by a top-level member", async () => {
-    // branch-scoped first → sets scopeParent = "myloop"
-    // top-level second → memberScope = null, null !== "myloop" → throws
     const loaded = await tryLoad(`
       export default {
         id: "__ID__",
@@ -1128,8 +1037,6 @@ describe("validatePipeline — .groups", () => {
 
 });
 
-// ── resolveRelativeImports — tested indirectly via loadPipelines ──────────────
-
 describe("resolveRelativeImports — via loadPipelines", () => {
   let dir, cleanup;
 
@@ -1140,19 +1047,16 @@ describe("resolveRelativeImports — via loadPipelines", () => {
   after(async () => { await cleanup(); });
 
   test("rewrites static from './x' to absolute file:// URL so sibling modules load", async () => {
-    // Write a sibling helper module that the pipeline imports via relative path.
     const name = `rel_import_test_${Date.now()}`;
     const pDir = path.join(dir, name);
     await mkdir(pDir, { recursive: true });
 
-    // Write the helper
     await writeFile(
       path.join(pDir, "helpers.js"),
       `export const HELPER_VALUE = "hello-from-helper";`,
       "utf8"
     );
 
-    // Write the pipeline that imports from './helpers'
     await writeFile(
       path.join(pDir, "index.js"),
       `
@@ -1207,9 +1111,6 @@ export default {
   });
 
   test("leaves bare specifiers (non-relative) unchanged — they fail naturally (not a rewrite bug)", async () => {
-    // A bare specifier that doesn't exist should fail with an import error,
-    // not a rewrite error. This tests that resolveRelativeImports doesn't
-    // accidentally mangle bare specifiers.
     const name = `bare_specifier_test_${Date.now()}`;
     const pDir = path.join(dir, name);
     await mkdir(pDir, { recursive: true });
@@ -1236,8 +1137,6 @@ export default {
     assert.ok(loaded, `bare node: specifier should load fine (warns: ${JSON.stringify(warns)})`);
   });
 });
-
-// ── loadPipelines: duplicate pipeline id ─────────────────────────────────────
 
 describe("loadPipelines — duplicate pipeline id", () => {
   let dir, cleanup;
@@ -1266,12 +1165,9 @@ describe("loadPipelines — duplicate pipeline id", () => {
       warns.some((w) => w.includes("duplicate")),
       `expected duplicate warn, got: ${JSON.stringify(warns)}`
     );
-    // Only one entry with this id
     assert.equal(result.size, 1);
   });
 });
-
-// ── loadPipelines: skips .js flat files and hidden dirs ───────────────────────
 
 describe("loadPipelines — filesystem edge cases", () => {
   let dir, cleanup;
@@ -1304,19 +1200,6 @@ describe("loadPipelines — filesystem edge cases", () => {
   });
 });
 
-// ── validatePipeline — "needs:" (SUBFLOW_PARENT_STATE_ACCESS.
-// design.md's "needs: v3") ──────────────────────────────────────────────────
-//
-// Keyed by local variable name — { varName: {hops, nodeId} } — not an
-// array, since ctx.needs(varName) resolves by that key, not by nodeId.
-//
-// A needs: violation anywhere in the tree — top-level or nested arbitrarily
-// deep inside node.flow.nodes — fails the WHOLE pipeline's load, because
-// validateFlowSubNodes/validateSubflowNode's recursion all happens inside
-// the ONE validatePipeline(pipeline, ...) call loadPipelines makes before
-// registerSubflowChildren ever runs (loadPipelines.js:110) — there is no
-// partial-tree degradation for a structural validation error, same as the
-// existing .mode tests above.
 describe('validatePipeline — "needs:"', () => {
   let dir, cleanup;
   let counter = 0;
@@ -1815,15 +1698,7 @@ describe('validatePipeline — "needs:"', () => {
   });
 });
 
-// registerSubflowChildren's synthetic child pipelines only copy
-// {id, kind, state, nodes, edges} off node.flow — a root-level field like
-// proposalMeta (declared once on the parent's own index.js, e.g.
-// freelance_freelancer-proposal's requiredDeliveryField opt-in) lives
-// nowhere on node.flow. Without explicitly threading it through, a tool
-// that resolves its own pipelineId to a per-item subflow's compound id
-// (e.g. "freelance_freelancer-proposal::PROPOSE" — exactly what
-// session_lineage records for a DRAFT-node dispatch) and looks it up via
-// pipelinesRef.value.get(pipelineId) silently misses the parent's config.
+// Synthetic children only copy {id,kind,state,nodes,edges} from node.flow — without threading, tools resolving the compound id silently miss parent-level fields like proposalMeta.
 describe("registerSubflowChildren — proposalMeta propagation to synthetic children", () => {
   let dir, cleanup;
 
@@ -1928,8 +1803,6 @@ describe("createPipelinesLoader — memoized single load", () => {
     const pipelinesRef = { value: new Map() };
     const ensurePipelinesLoaded = createPipelinesLoader("/fake/dir", null, pipelinesRef, { load });
 
-    // Mirrors manifold-loader and manifold-flow-revival both calling
-    // ensurePipelinesLoaded() before the underlying load has resolved.
     const p1 = ensurePipelinesLoaded();
     const p2 = ensurePipelinesLoaded();
     assert.equal(calls, 1, "load() must only be invoked once even with concurrent callers");

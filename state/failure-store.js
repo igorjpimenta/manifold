@@ -1,40 +1,5 @@
-// failure-store.js — durable record of flow / branch failures, for
-// operator triage via a consumer's Failures surface + deep links.
-//
-// Storage: the store home's runtime.sqlite (see defaultDbPath()).
-//
-// Why a separate db file rather than another table in registry.sqlite:
-// schema isolation. failure_events is queried independently from
-// flow_runs (the dashboard's /api/failures route doesn't need flow state,
-// just the snapshot we stamp here). One file = one writer story; no
-// cross-table transactions to coordinate.
-//
-// Schema: this table is deliberately thin — id, flow_id, failed_at,
-// failure_summary, invocation_id, execution_id, error_type. Everything else
-// a caller might want (pipeline_id, branch_item_id, failure_node,
-// recovery_hint, whether it's currently resolved) is reconstructed at READ
-// time via deriveFailureContext, joining through invocation_id/execution_id
-// to flow_node_invocations/flow_node_executions — the engine's own
-// node-dispatch identity system, which this table deliberately does NOT
-// duplicate in parallel.
-//
-// Identity: execution_id is the real conflict target now (partial UNIQUE,
-// WHERE execution_id IS NOT NULL) — a flow whose retry path re-enters and
-// re-fails the same node updates the existing row instead of piling up
-// duplicates. The handful of structurally-unknown-dispatch failures (no
-// execution_id at all — pipeline never loaded, dead edge, unknown next-node
-// id) fall back to a manual dedup-by-flow_id (see upsertFailureRow) —
-// SQLite's NULL != NULL unique-index semantics mean the DB-level conflict
-// target can't cover this case on its own.
-//
-// error_type — the sole classification axis now. A node's own thrown
-// NodeFailure carries one of: never_attempted | confirmed_absent |
-// inconclusive | infra_unavailable | blocked. A subflow node whose exit
-// mode wasn't satisfied gets "subflow-mode-not-satisfied" instead — not a
-// thrown error at all, a policy verdict computed by
-// engine/child-resume-trigger.js once every spawned child has gone
-// terminal. null means an ordinary engine-caught throw with no further
-// node-level classification (the common case — still safe to retry).
+// failure-store.js — durable flow/branch failure records (runtime.sqlite),
+// for operator triage via the Failures surface + deep links.
 
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
@@ -51,24 +16,11 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// Maps a failure's (error_type, summary) to the operator action offered for it
-// Inbox should surface for this row:
+// Maps (error_type, summary) to the operator action the Inbox offers:
 //   retry-step  — system-recoverable; one-tap retry the failed step
 //   skip-only   — work is moot (already done, listing closed); skip removes
-//   investigate — unknown / engineer-level, or a policy-level verdict with
-//                 no single thrown error to point at; operator looks
-//                 before acting
-//
-// error_type is null for the common case — an ordinary engine-caught throw
-// with no further node-level classification — which is still a plain
-// "just retry it" situation. "blocked" is the one error_type whose summary
-// text actually distinguishes a genuinely different case (a listing
-// already closed/awarded — "workana-forbidden" — vs. an unrecognized
-// block, which stays investigate rather than guessing). "redraft"/"wait"
-// aren't reachable today: nothing currently sets an error_type/summary
-// combination that would justify either — see git history if a producer
-// for either ever comes back.
-//
+//   investigate — unknown / engineer-level, or a policy verdict with no
+//                 single thrown error to point at
 // Computed fresh at read time (see deriveFailureContext) — not stored.
 function classifyRecoveryHint(errorType, summary) {
   if (errorType == null) return "retry-step";
@@ -77,9 +29,8 @@ function classifyRecoveryHint(errorType, summary) {
     const s = String(summary ?? "").toLowerCase();
     return s.includes("workana-forbidden") ? "skip-only" : "investigate";
   }
-  // confirmed_absent, inconclusive, never_attempted, subflow-mode-not-
-  // satisfied, and any future error_type this hasn't been taught yet —
-  // safer to over-surface as "needs a look" than to silently misroute.
+  // Unknown/untaught error_type — over-surface as "needs a look" rather
+  // than silently misroute.
   return "investigate";
 }
 
@@ -88,8 +39,6 @@ function summarize(s, maxLen = 280) {
   s = s.replace(/\s+/g, " ").trim();
   return s.length > maxLen ? s.slice(0, maxLen - 1) + "…" : s;
 }
-
-// ─── Public API ─────────────────────────────────────────────────────────
 
 export function createFailureStore(opts = {}) {
   const _p = _createFailureStoreImpl(opts);
@@ -104,32 +53,21 @@ export function createFailureStore(opts = {}) {
 }
 
 async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeExecutionsStore, emit } = {}) {
-  // Injectable for tests (defaults to the real singleton in production) —
-  // same DI pattern as engine/executor.js.
   const nodeExecutions = nodeExecutionsStore ?? await getNodeExecutionsStore();
   mkdirSync(path.dirname(dbPath), { recursive: true });
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
 
-  // ── Write-side identity ────────────────────────────────────────────
-  // execution_id is the real conflict target (partial UNIQUE index,
-  // v12). When there's no execution_id to anchor to (a handful of
-  // structurally-unknown-dispatch engine failures — pipeline never
-  // loaded, dead edge, unknown next-node id — or a soft-marker whose
-  // best-effort execution lookup came up empty), fall back to a manual
-  // dedup by flow_id: SQLite's NULL != NULL unique-index semantics mean
-  // the DB-level conflict target can't cover a null execution_id on its
-  // own.
-  // Returns the row's id on a successful write, null on no-op — the id lets
-  // callers re-fetch the fully-derived row (pipeline_id/branch_item_id/
-  // failure_node/recovery_hint) before emitting "failure.created", instead
-  // of emitting the bare write-time fields the push/WS consumers don't
-  // understand.
-  // Wrapped in withSharedWrite (state/db.js) — every other writer sharing
-  // this same runtime.sqlite connection (run-store.js, admission-queue-
-  // store.js) already routes through it, and a bare client.execute() here
-  // can throw SQLITE_BUSY into a CONCURRENT writer's own transaction rather
-  // than just itself.
+  // execution_id is the conflict target (partial UNIQUE, WHERE
+  // execution_id IS NOT NULL): a retry re-entering the same node updates
+  // the existing row instead of piling up duplicates. Failures with no
+  // execution_id (pipeline never loaded, dead edge, unknown next-node id)
+  // fall back to a manual dedup by flow_id — SQLite's NULL != NULL
+  // unique-index semantics can't cover a null execution_id.
+  //
+  // Wrapped in withSharedWrite: a bare client.execute() here can throw
+  // SQLITE_BUSY into a CONCURRENT writer's own transaction on this shared
+  // connection, not just into itself.
   async function upsertFailureRow({ flowId, failedAt, failureSummary, invocationId, executionId, errorType = null }) {
     return withSharedWrite(dbPath, async () => {
       if (executionId) {
@@ -170,12 +108,6 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     });
   }
 
-  // ── Read-side derivation ────────────────────────────────────────────
-  // Reconstructs everything NOT stored directly on the row:
-  // pipeline_id (via flow_id -> flow_runs, always available), branch_item_id
-  // / failure_node (via invocation_id -> flow_node_invocations, only when a
-  // real dispatch happened), recovery_hint (pure function, computed fresh),
-  // and whether this failure currently reads as resolved.
   async function deriveFailureContext(row) {
     let pipelineId = null;
     try {
@@ -189,11 +121,8 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
       if (inv) failureNode = inv.nodeId ?? null;
     }
 
-    // branchItemId ("which item, if this failure happened inside a
-    // subflow's spawned child") almost never lives on `inv` directly —
-    // see resolveItemInvocation's own comment for why — so it's derived
-    // via the same parent-invocation walk, purely for display
-    // (computeResolvedAt does not use item identity for resolution).
+    // branch_item_id is display-only — derived here, never used for
+    // resolution.
     const itemInv = await resolveItemInvocation(row, inv);
     const branchItemId = itemInv?.subflowKey ?? null;
 
@@ -216,22 +145,13 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     };
   }
 
-  // Resolves the "item identity" (pipelineId/nodeId/subflowKey of the
-  // subflow dispatch this failure's flow was spawned FOR) used by both
-  // deriveFailureContext's branch_item_id display field and
-  // computeResolvedAt's cross-flow supersession check below.
-  //
-  // Almost never on the failing node's OWN invocation: engine/executor.js's
-  // ordinary dispatch loop always writes subflowKey:null (every real
-  // failure site — SUBMIT_CODE, SCORE_LLM, a subflow's own inner nodes —
-  // runs INSIDE a subflow's spawned child flow, not as the subflow node
-  // itself). The tag lives on the PARENT's own invocation of the subflow
-  // node that spawned this failure's flow, reachable via this flow's own
-  // flow_runs.parent_invocation_id — the exact lookup child-resume-
-  // trigger.js's maybeResumeParent already does to find its own parent.
-  // `inv` (the failing node's own invocation) is checked first only for
-  // the (currently theoretical) case of a node whose own invocation
-  // somehow already carries a subflowKey directly.
+  // The item identity (subflowKey) almost never lives on the failing
+  // node's own invocation — the engine's dispatch loop always writes
+  // subflowKey:null there, because real failure sites run INSIDE a
+  // subflow's spawned child flow. The tag lives on the PARENT's
+  // invocation of the subflow node that spawned this flow, reachable via
+  // flow_runs.parent_invocation_id. `inv` is checked first only for a
+  // node whose own invocation somehow carries a subflowKey directly.
   async function resolveItemInvocation(row, inv) {
     if (inv?.subflowKey) return inv;
     try {
@@ -246,22 +166,16 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
   }
 
   // A failure resolves only via same-flow completion: this exact flow_id
-  // reached a clean terminal status (succeeded/skipped) despite this
-  // failure. Applies identically to root and subflow-child flows — no
-  // special-cased mechanism for children. Returns a timestamp (ms) when
-  // resolved, null when still open — not just a boolean, since the Done
-  // section sorts by "most recently resolved" and windows it to the
-  // last 7 days.
+  // reached succeeded/skipped. Returns a timestamp (ms), not a boolean —
+  // the Done view sorts by most-recently-resolved and windows to 7 days.
   //
-  // Do not extend resolution to cross-flow supersession — matching a
-  // LATER invocation of the same (pipeline_id, node_id, subflow_key)
-  // tuple in ANY flow:
-  // subflow_key isn't always a real per-item identity — single-item
-  // retry-cascade nodes use a constant literal key for every dispatch —
-  // so tuple matching collapses distinct items and can falsely mark one
-  // job's failure resolved because a different job's dispatch of the same
-  // node succeeded later. Every flow's own failure stays open until that
-  // exact flow_id itself resolves.
+  // Do NOT extend resolution to cross-flow supersession (matching a later
+  // invocation of the same (pipeline_id, node_id, subflow_key) tuple in
+  // any flow): subflow_key isn't always a real per-item identity —
+  // single-item retry-cascade nodes use a constant literal key for every
+  // dispatch — so tuple matching collapses distinct items and can falsely
+  // mark one job's failure resolved because a different job's dispatch of
+  // the same node succeeded later.
   async function computeResolvedAt(row) {
     try {
       const flowRows = await db.select({ status: flowRuns.status, updatedAt: flowRuns.updatedAt }).from(flowRuns).where(eq(flowRuns.flowId, row.flow_id)).limit(1);
@@ -271,26 +185,10 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     return null;
   }
 
-  // Failures persist to failure_events directly from the engine's
-  // throw-catch paths (recordEngineFailure); no terminal-state soft-marker
-  // scan feeds this table.
-
-  // ── Reads ──────────────────────────────────────────────────────────
-  // `resolved` is computed at read time now (see deriveFailureContext),
-  // not a stored column — filtering happens in JS after derivation, not
-  // in the SQL WHERE clause. At current table scale (low thousands, no
-  // pagination anywhere else on this table either) this is an acceptable
-  // tradeoff for the correctness win of not duplicating derivable state;
-  // revisit if this table's row count grows enough for per-row derivation
-  // cost to matter.
-  //   undefined / false → only open failures (the default "Recover" view)
-  //   true              → only resolved failures (the "Done" view)
-  //   null              → both
-  // `flowId` — the cascade-retry walk (routes/operator-retry.js) needs
-  // "this specific flow's own open failure, with its real id/error_type" —
-  // queryErrorsByFlow returns neither (ErrorEntry shape, for display/
-  // errorNodes membership only), so this is the reuse point rather than a
-  // bespoke third read method.
+  // Reads: `resolved` is computed at read time (deriveFailureContext),
+  // not a stored column — filtering happens in JS after derivation.
+  // undefined/false → open failures (default "Recover" view);
+  // true → resolved ("Done"); null → both.
   async function list({ resolved, limit = 50, since, flowId } = {}) {
     const where = [];
     const args = [];
@@ -315,8 +213,6 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     return row ? await deriveFailureContext(row) : null;
   }
 
-  // Maps a joined failure_events+flow_node_invocations row to the
-  // canonical ErrorEntry shape shared across every consumer.
   function _toErrorEntry(row) {
     return {
       nodeId: row.node_id ?? null,
@@ -329,10 +225,6 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     };
   }
 
-  // flow_node_executions stores no error content, so "which errors
-  // happened on this flow" can only be answered from failure_events.
-  // Same ErrorEntry shape, same "every error for the flow, caller
-  // filters by subflowKey if it wants root-level only" contract.
   async function queryErrorsByFlow(flowId) {
     const { rows } = await client.execute({
       sql: `SELECT f.failed_at, f.failure_summary, f.error_type, f.execution_id, f.invocation_id, i.node_id, i.subflow_key
@@ -362,26 +254,12 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     return out;
   }
 
-  // ── Mutations ──────────────────────────────────────────────────────
-  // recordRetry/markIgnored/markUnignored/resolveOpenForBranch and the
-  // Skip action they supported don't exist here. retry_count/
-  // last_retried_at are derivable (COUNT/MAX over flow_node_executions
-  // WHERE kind='retry' for the invocation) but not wanted in the UI, so
-  // no replacement is computed here either. Ignore state lives in
-  // client-side device-local storage.
-
-  // Engine-failed recorder — called both when a flow definitively fails
-  // (node threw with no cascade left to try, edge resolved to nothing,
-  // unknown next-node id, pipeline-not-loaded) AND immediately on every
-  // cascade-leg throw regardless of whether the cascade goes on to
-  // retry/escalate/succeed — every throw gets a
-  // permanent row here, no exceptions. errorType, when known, is the
-  // node's own domain-specific reason (never_attempted|confirmed_absent|
-  // inconclusive|infra_unavailable|blocked), or "subflow-mode-not-
-  // satisfied" for the one non-throw producer (engine/child-resume-
-  // trigger.js). null means an ordinary engine-caught throw with no
-  // further classification — still safe to retry. computeResolvedAt
-  // answers "did this ultimately resolve" separately, at read time.
+  // Called when a flow definitively fails (node threw with no cascade
+  // left, edge resolved to nothing, unknown next-node id, pipeline-not-
+  // loaded) AND immediately on every cascade-leg throw regardless of
+  // whether the cascade later retries/escalates/succeeds — every throw
+  // gets a permanent row. errorType, when known, is the node's own
+  // domain-specific reason; null means an ordinary engine-caught throw.
   async function recordEngineFailure({ flowId, pipelineId, failureNode, message, state, invocationId = null, executionId = null, errorType = null }) {
     if (!flowId || !pipelineId) return { recorded: 0 };
     const now = Date.now();

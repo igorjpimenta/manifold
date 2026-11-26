@@ -1,21 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors nyxen_linkedin-prospect's CONNECT
- * (DEDUP_CHECK → DRAFT_NOTE → GATE → STAMP_APPROVED/STAMP_REJECTED →
- * SEND_CR_CODE → STAMP_SENT), but with every "code"/"agent" sub-node
- * replaced by a trivial no-op stand-in — zero real filesystem, subprocess,
- * or agent dispatch I/O anywhere in this fixture. This proves the
- * loop → real children → gate-blocks-the-child → resume-the-parent
- * plumbing works for CONNECT's exact edge shape BEFORE any real send
- * script or agent is ever involved (that fidelity is covered by the real
- * node functions' own mocked-I/O unit tests under workspace/.pipelines/
- * test/unit/nyxen_linkedin-prospect/nodes/connect/).
- *
- * Isolated-sandbox discipline:
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal, waitForStatus } from "../../helpers/wait-for-event.js";
@@ -31,8 +13,6 @@ import { createGateResolver } from "../../../gates/gate-resolver.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -45,9 +25,6 @@ function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
 }
 
-// CONNECT's exact edge topology, sub-nodes replaced by no-op stand-ins.
-// GATE's edge reads state.approvedIds/rejectedIds, same as the real
-// nodes/connect/index.js.
 function makeConnectLikeNode({ sendMode = "ok" } = {}) {
   return {
     kind: "subflow",
@@ -165,11 +142,7 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
     assert.equal(parent.status, "blocked");
     assert.equal(parent.waitJson.kind, "children-pending");
 
-    // The child's own runFlow is fire-and-forget dispatched via setImmediate
-    // from dispatchLoopChildren — poll until it reaches its own GATE. A
-    // fixed flush() flakes under full-suite CI load (the assertion fires
-    // while the child is still running); the state store already announces
-    // the transition, so wait for the condition that matters.
+// Child runFlow is fire-and-forget via setImmediate — poll for the condition; a fixed flush flakes under CI load.
     const kids = await waitForChildFlowIds(nodeExecutionsStore, runStore, record.flowId, "CONNECT", 1);
     assert.equal(kids.length, 1);
     const child = await waitForStatus(runStore, kids[0], (r) => r.status === "blocked");
@@ -272,10 +245,6 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedShortlist(harness, record.flowId, [{ "linkedin-id": "abc" }]);
-    // The child's runFlow is dispatched fire-and-forget, so a fixed sleep
-    // can't tell whether it reached its gate — wait for
-    // gate.opened on any flow other than the
-    // parent instead, which is exactly the condition being waited for.
     const childAtGate = waitForGateOpen((q) => q.flowId !== record.flowId);
     await executor.runFlow(record.flowId);
     await childAtGate;
@@ -290,10 +259,7 @@ describe("childFlows:true CONNECT-shaped loop, full engine E2E", () => {
   });
 });
 
-// Seeds shortlist onto the just-created parent flow's stateJson before
-// driving it — executor.start()'s args merge under initialState.args, not
-// top-level state, so this writes directly via store.setRunning to land
-// state.shortlist where CONNECT's selector reads it.
+// start() args merge under initialState.args, not top-level state — write state.shortlist directly via setRunning.
 async function store_seedShortlist(harness, flowId, shortlist) {
   const flow = await harness.store.get(flowId);
   await harness.store.setRunning({

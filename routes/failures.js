@@ -1,12 +1,8 @@
-// failures.js — companion-facing HTTP surface over failure-store.js.
-//
-// Ignore is a pure client device-local annotation with no server round trip
-// at all, so it has no route here. Only GET (list) and POST .../retry
-// (implemented in routes/operator-retry.js) remain.
+// HTTP surface over failure-store: GET list + POST .../retry. "Ignore" is
+// client-local only and has no route here by design.
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
 export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
-  // ── GET /manifold/failures ─────────────────────────────────────────────
   api.registerHttpRoute({
     path: "/manifold/failures",
     auth: "plugin",
@@ -46,7 +42,6 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
     },
   });
 
-  // ── POST /manifold/failures/<id>/retry ──────────────────────────────────
   api.registerHttpRoute({
     path: "/manifold/failures/",
     auth: "plugin",

@@ -1,25 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors freelance_workana-reply's REPLY
- * (FETCH_THREAD → DRAFT_REPLY → GATE → SEND_REPLY → VERIFY_SEND /
- * STAMP_REJECT), the largest branch topology migrated so far — one
- * human-gate, and a node (ENSURE_INFRA) reached via a normal EDGE-LEVEL
- * LOOP-BACK (SEND_REPLY → ENSURE_INFRA → SEND_REPLY). Every sub-node is
- * a trivial no-op stand-in — zero real filesystem, subprocess, or
- * agent dispatch I/O anywhere in this fixture.
- *
- * ENSURE_INFRA was a real kind:"fallback" node here until an earlier
- * rewrite retired that mechanism entirely — now a plain "code" stand-in
- * like every other node in this fixture; the real cascade-migration
- * coverage lives in
- * workspace/.pipelines/test/unit/freelance_workana-reply/nodes/reply/
- * ensure-infra.test.js.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal, waitForStatus } from "../../helpers/wait-for-event.js";
@@ -36,8 +14,6 @@ import { assembleState } from "../../../engine/executor-helpers.js";
 
 const SEND_INFRA_MAX_RETRIES = 5;
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -116,7 +92,7 @@ function makeReplyLikeNode({ sendFailsInfraPersistently = false } = {}) {
           }
           return "VERIFY_SEND";
         },
-        ENSURE_INFRA: () => "SEND_REPLY", // the loop-back under test
+        ENSURE_INFRA: () => "SEND_REPLY",
         VERIFY_SEND: () => "__end__",
         STAMP_REJECT: () => "__end__",
       },
@@ -179,10 +155,6 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// Raised above the sibling e2e files' default — REPLY's branch has
-// one more hop before GATE (FETCH_THREAD → DRAFT_REPLY → GATE) than
-// TOUCH's template, and a full-suite concurrent run showed this margin
-// mattered under load.
 function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -280,12 +252,7 @@ describe("childFlows:true REPLY-shaped loop, full engine E2E", () => {
 
     const settled = await runStore.get(childFlowId);
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
-    // The cap only stops the ENSURE_INFRA loop-back — a returned _error
-    // field is a failure-surface marker (read by the dashboard/failures
-    // queue via flow_node_executions), not something the engine itself
-    // interprets to fail the flow. Reaching a real terminal status here
-    // (not still "running"/"blocked") is the actual proof the loop
-    // terminates instead of retrying forever.
+// _error is a failure-surface marker, not engine-interpreted — reaching a terminal status proves the loop stopped retrying.
     assert.equal(settledState.SEND_REPLY?._infraRetries, SEND_INFRA_MAX_RETRIES);
     assert.match(settledState.SEND_REPLY?._error ?? "", /gave up after/);
     assert.equal(settled.status, "succeeded", "the cap must stop the ENSURE_INFRA loop-back and let the edge fall through to VERIFY_SEND — not hang");

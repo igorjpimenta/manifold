@@ -1,12 +1,3 @@
-/**
- * Unit tests for events/catalog.js
- *
- * Verifies:
- *   - One reload fans out to gateway WS (canonical kind) and dashboard bus
- *     with identical content.
- *   - Missing dashboard sink degrades to WS-only without throwing.
- *   - Missing emitter degrades to dashboard-only without throwing.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createCatalogPublisher } from "../../../events/catalog.js";
@@ -21,7 +12,6 @@ function makeEmit() {
   return emit;
 }
 
-// ── fan-out ──────────────────────────────────────────────────────────────────
 
 describe("publishCatalogChanged — fan-out", () => {
   test("gateway WS gets canonical kind, dashboard gets kind + content", async () => {

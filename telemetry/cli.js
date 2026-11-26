@@ -40,19 +40,11 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       const store = await getStore(); const resolver = await getResolver();
       if (!store || !resolver) { console.error("lineage service not ready"); process.exitCode = 1; return; }
       const client = store._client;
-      // Resolve the target. Accept any of:
-      //   • session (starts with agent: / flow:)
-      //   • flowId (UUID) — looked up via session_lineage.flow_id
-      //   • cost_by_call.msg_id — for "I have this LLM call's id from a log
-      //     line, show me the whole tree it lived in"
-      //   • cost_by_call.session_id (rare — usually identical to a session)
-      //   • sessionId via cost_by_call.session_id (hook-written rows)
       let key = await resolveTreeTarget(target, client, opts.kind);
       if (!key) {
         console.error(`could not resolve ${target} via --kind ${opts.kind}`);
         process.exitCode = 1; return;
       }
-      // Root at the chain root unless --from-here
       if (!opts.fromHere) {
         const row = await execGet(client, `SELECT root_session_key FROM session_lineage WHERE child_session_key = ?`, [key]);
         if (row?.root_session_key) key = row.root_session_key;
@@ -60,14 +52,11 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       const maxDepth = Math.max(1, Number(opts.depth) || 12);
       const showZero = Boolean(opts.showZero);
       const withCalls = Boolean(opts.withCalls);
-      // Pull the parent_session_key-linked descendant subtree in one recursive
-      // CTE. The recursion also follows the flow_id side-link: when a row in
-      // the frontier is a synthetic `flow:<id>` trigger edge, every session
-      // sharing that flow_id (the actual subagent fan-out under manifold-
-      // owner) is pulled in as a virtual child. Without this the tree from
-      // a cron only reaches the trigger edge and stops — the scorer/content-
-      // writer subagents would be missing because their parent_session_key
-      // points sideways at the owner session, outside the cron's chain.
+      // The recursion follows the flow_id side-link as well as
+      // parent_session_key: a synthetic `flow:<id>` trigger edge pulls in
+      // every session sharing that flow_id. Without it a cron's tree would
+      // stop at the edge — subagents parented sideways at the owner session
+      // would be missing.
       const rows = await execAll(client, `
         WITH RECURSIVE descendants(child_session_key, depth) AS (
           SELECT child_session_key, 0 FROM session_lineage WHERE child_session_key = ?
@@ -92,9 +81,6 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
          ORDER BY sl.first_seen_at ASC
       `, [key, maxDepth]);
       if (!rows.length) { console.log(`(no lineage row for ${key})`); return; }
-      // Build parent → children map. For sessions whose parent_session_key
-      // points outside the visible subtree (e.g. flow children pointing at
-      // the owner session), reparent them under the flow:<id> trigger edge.
       const childrenOf = new Map();
       const byKey = new Map();
       for (const r of rows) byKey.set(r.child_session_key, r);
@@ -105,9 +91,8 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       for (const r of rows) {
         if (r.child_session_key === key) continue;
         let pk = r.parent_session_key;
-        // Reparent: if the recorded parent isn't in our subtree but this
-        // session belongs to a flow whose trigger edge IS, hang it off the
-        // trigger edge.
+        // Recorded parent outside this subtree: hang the session off its
+        // flow's trigger edge instead.
         if ((!pk || !byKey.has(pk)) && r.flow_id && flowEdgesByFlowId.has(r.flow_id)) {
           pk = flowEdgesByFlowId.get(r.flow_id);
         }
@@ -115,7 +100,6 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
         if (!childrenOf.has(pk)) childrenOf.set(pk, []);
         childrenOf.get(pk).push(r);
       }
-      // Subtree cost rollup (memoized so we can collapse zero subtrees).
       const subtreeCostMemo = new Map();
       function subtreeCost(k) {
         if (subtreeCostMemo.has(k)) return subtreeCostMemo.get(k);
@@ -127,9 +111,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       }
       const total = subtreeCost(key);
       function fmt$(v) { return v >= 0.01 ? `$${v.toFixed(2)}` : v > 0 ? `$${v.toFixed(4)}` : "$0"; }
-      // Optional per-session LLM-call leaves — model + tokens + $ per row.
-      // Fetched up front (one IN-list query) so the recursive render below
-      // stays fully synchronous instead of threading async through it.
+      // Fetched up front so the recursive render stays synchronous.
       const callsBySession = new Map();
       if (withCalls) {
         const ph = rows.map(() => "?").join(",");
@@ -166,7 +148,6 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       function renderNode(node, prefix, isLast) {
         const tree$ = subtreeCost(node.child_session_key);
         if (!showZero && tree$ === 0 && (childrenOf.get(node.child_session_key)?.length ?? 0) === 0) {
-          // Leaf with no cost — render compactly
         }
         const self$ = node.cost;
         const costStr =
@@ -183,9 +164,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
           .filter((c) => showZero || subtreeCost(c.child_session_key) > 0 || (childrenOf.get(c.child_session_key)?.length ?? 0) === 0);
         const newPrefix = prefix + (isLast ? "    " : "│   ");
         kids.forEach((c, i) => renderNode(c, newPrefix, i === kids.length - 1));
-        // Drop LLM call leaves after children (calls are tied to THIS session,
-        // not to a child session). Calls render under a different connector
-        // since they're leaves, not subtree continuations.
+        // Calls belong to THIS session, not to a child session.
         if (withCalls && self$ > 0) renderCalls(node.child_session_key, newPrefix);
       }
       const root = byKey.get(key);
@@ -193,9 +172,6 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       const kids = (childrenOf.get(key) ?? [])
         .filter((c) => showZero || subtreeCost(c.child_session_key) > 0 || (childrenOf.get(c.child_session_key)?.length ?? 0) === 0);
       kids.forEach((c, i) => renderNode(c, "", i === kids.length - 1));
-      // Root-level LLM calls (rare — usually the root is an aggregator, not a
-      // call site — but cron-owner / explicit roots that directly issue LLMs
-      // get their calls rendered too).
       if (withCalls && (root.cost ?? 0) > 0) renderCalls(root.child_session_key, "");
       console.log(`\n${rows.length} session(s) in subtree, ${fmt$(total)} total cost`);
     });
@@ -242,7 +218,7 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
       const where = []; const args = [];
       if (opts.since) { where.push("ts >= ?"); args.push(Date.parse(opts.since)); }
       if (opts.until) { where.push("ts <= ?"); args.push(Date.parse(opts.until)); }
-      // Column filters — mirror the HTTP makeGroupHandler pass-through
+      // Column filters — mirror the HTTP makeGroupHandler pass-through.
       const colFilters = [
         ["flow_id",     opts.flowId],
         ["pipeline_id", opts.pipelineId],
@@ -276,8 +252,6 @@ export function registerCliCommands({ program, logger, getStore, getResolver, db
     });
 }
 
-// Look up a harness sessionId via the hook-written cost_by_call rows, which
-// carry both the harness session_id and the manifold session. Best-effort.
 async function sessionIdToSession(client, sessionId) {
   const hit = await execGet(client,
     `SELECT session_key FROM cost_by_call WHERE session_id = ? AND session_key IS NOT NULL ORDER BY ts DESC LIMIT 1`,
@@ -285,9 +259,8 @@ async function sessionIdToSession(client, sessionId) {
   return hit?.session_key ?? null;
 }
 
-// Resolve `lineage tree <target>` into a session via an explicit --kind.
-// No shape-sniffing — the caller has to declare what they're handing in.
-// Predictable, no ambiguous matches across the table.
+// Explicit --kind rather than shape-sniffing: predictable lookups, no
+// ambiguous matches across the table.
 async function resolveTreeTarget(target, client, kind) {
   if (!target || typeof target !== "string") return null;
   const t = target.trim();
@@ -309,18 +282,17 @@ async function resolveTreeTarget(target, client, kind) {
       return any?.child_session_key ?? null;
     },
     "pipeline": async () => {
-      // Most recent flow of this pipeline; user wants the latest tree.
+      // Most recent flow of this pipeline.
       const any = await execGet(client, `SELECT child_session_key FROM session_lineage WHERE pipeline_id = ? AND child_session_key LIKE 'flow:%' ORDER BY first_seen_at DESC LIMIT 1`, [t]);
       return any?.child_session_key ?? null;
     },
     "cron": async () => {
-      // Cron-owner row keyed by root_label (the cron name, e.g. freelance-workana-proposal).
+      // root_label holds the cron name for cron-owner rows.
       const r = await execGet(client, `SELECT child_session_key FROM session_lineage WHERE root_kind = 'cron-owner' AND root_label = ? LIMIT 1`, [t]);
       return r?.child_session_key ?? null;
     },
     "run": async () => {
-      // manifold runId (session_lineage.run_id column). Returns the flow
-      // trigger edge that owns this runId.
+      // The flow trigger edge that owns this runId.
       const r = await execGet(client, `SELECT child_session_key FROM session_lineage WHERE run_id = ? AND child_session_key LIKE 'flow:%' LIMIT 1`, [t]);
       return r?.child_session_key ?? null;
     },

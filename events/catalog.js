@@ -1,9 +1,7 @@
-// events/catalog.js — single producer for pipeline-catalog changes.
-//
-// One watcher reload feeds both sinks with identical content: the gateway
-// WS stream (canonical pipeline.catalog.updated) and the dashboard bus
-// (pipelines_changed type, canonical kind stamped). Separate sinks
-// stay separate; only the content decisions merge here.
+// Single producer for pipeline-catalog changes: one watcher reload feeds both
+// sinks with identical content — the gateway WS stream
+// (pipeline.catalog.updated) and the dashboard bus (canonical kind stamped).
+// Separate sinks stay separate; only content decisions merge here.
 export function createCatalogPublisher({ emit, getDashboardBroadcast }) {
   return async function publishCatalogChanged(info) {
     const now = Date.now();

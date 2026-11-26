@@ -1,13 +1,6 @@
-// resolver — given a session, return its parent + root + breadcrumbs.
-//
-// Three resolution layers tried in order:
-//   1. lineage table (fastest; populated by hooks)
-//   2. session grammar (parses scope kind out of the session string)
-//   3. external joins (flow_runs sqlite, cron jobs.json)
-//
-// `resolve(key)` returns a fully-populated row ready for `store.upsertLineage`,
-// even for sessions never seen before. `walk(key)` returns the full chain
-// from leaf to root.
+// resolver — session → parent + root + breadcrumbs, via three layers tried in
+// order: the lineage table, the session grammar, then external joins
+// (flow_runs, cron jobs.json).
 
 import path from "node:path";
 import { getSharedDb } from "../state/db.js";
@@ -17,31 +10,26 @@ import { resolveDataDir, runtimeDbPath } from "../state/paths.js";
 import { classify, agentIdOf } from "./grammar.js";
 import { execAll } from "./http-helpers.js";
 
-// runtime.sqlite, the store everywhere else in manifold — flow_runs lives
-// there with the same table shape. The cron path is the harness's own
-// jobs.json (an external join, not a manifold store).
+// The cron path is the harness's own jobs.json — an external join, not a
+// manifold store.
 const FLOWS_DB_PATH = runtimeDbPath(resolveDataDir());
 const CRON_JSON_PATH = path.join(os.homedir(), ".openclaw", "cron", "jobs.json");
 
-// ─── External joins (lazy-loaded, cached per resolver instance) ──────────────
-
 export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath = CRON_JSON_PATH } = {}) {
-  let flowsByPrefix = null;     // flow8 → [{ flow_id, owner_key, pipeline_id, status, created_at }]
-  let cronJobs = null;          // cronId → { name, sessionKey, agentId, ... }
+  let flowsByPrefix = null;
+  let cronJobs = null;
   let lastFlowsLoadTs = 0;
   let lastCronLoadTs = 0;
-  const FLOWS_TTL_MS = 30_000;  // poll fresh data every 30s; flow_runs grows quickly
+  const FLOWS_TTL_MS = 30_000;  // flow_runs grows quickly
   const CRON_TTL_MS = 60_000;
 
   async function loadFlows() {
     if (flowsByPrefix && Date.now() - lastFlowsLoadTs < FLOWS_TTL_MS) return;
     if (!fs.existsSync(flowsDbPath)) { flowsByPrefix = new Map(); return; }
     const { client } = await getSharedDb(flowsDbPath, { readonly: true });
-    // flow_runs carries pipeline_id as a direct column (the SELECT below
-    // depends on that shape); there is no controller_id column. Failures
-    // here are swallowed by the try/catch in every hook that calls
-    // resolver.walk/resolve, so a schema surprise shows up as missing
-    // lineage rather than a throw.
+    // flow_runs has pipeline_id as a direct column and no controller_id.
+    // Callers swallow resolver errors, so a schema surprise surfaces as
+    // missing lineage rather than a throw.
     const rows = await execAll(client,
       `SELECT flow_id, owner_key, pipeline_id, status, created_at FROM flow_runs`
     );
@@ -63,30 +51,24 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
       const doc = JSON.parse(fs.readFileSync(cronJsonPath, "utf8"));
       for (const j of (doc?.jobs || [])) if (j?.id) cronJobs.set(j.id, j);
       lastCronLoadTs = Date.now();
-    } catch { /* corrupted/missing — treat as empty */ }
+    } catch { /* treat as empty */ }
   }
 
-  /** Look up flow record by 8-char prefix. May return null if pruned. */
   async function flowFor(flow8) {
     await loadFlows();
     const bucket = flowsByPrefix.get(flow8) || [];
-    // If multiple matches (very rare hash collision), prefer most-recent
+    // Prefix-hash collision: prefer the most recent.
     return bucket.length ? bucket.reduce((a, b) => (a.created_at >= b.created_at ? a : b)) : null;
   }
 
-  /** Look up cron job by id. May return null if cron was deleted. */
   function cronFor(cronId) { loadCron(); return cronJobs.get(cronId) || null; }
 
-  // ─── Single-step resolution: given a key, who is its parent? ───────────────
-
   async function classifyWithExternal(session, opts = {}) {
-    // `flow:<uuid>` is a synthetic key minted by THIS resolver (below) as the
-    // parent node for all flow subagents. The grammar only knows `agent:*`
-    // keys so classify() returns "unknown" for it. Short-circuit here: read
-    // the trigger-edge row from session_lineage (written by recordTrigger).
-    // If the row is there, return its root directly and stop walking. If not
-    // yet written, emit a "flow-triggered" placeholder so the walk stops
-    // gracefully instead of returning "unknown".
+    // `flow:<uuid>` is synthetic, minted here as the parent of all flow
+    // subagents; the grammar only knows `agent:*` keys. Read the trigger-edge
+    // row (written by recordTrigger) and return its root, stopping the walk.
+    // If the edge isn't written yet, emit a "flow-triggered" placeholder so
+    // the walk stops instead of returning "unknown".
     if (typeof session === "string" && session.startsWith("flow:") && store) {
       const flowId = session.slice("flow:".length);
       const edge = await store.getLineage(session);
@@ -98,14 +80,14 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
           pipelineId: edge.pipeline_id ?? opts.pipelineId ?? null,
           nodeId: null,
           itemKey: null,
-          parentKey: null,           // treat the trigger-edge as root; stop walking
+          parentKey: null,
           rootKey:   edge.root_session_key ?? null,
           rootKind:  edge.root_kind  ?? null,
           rootLabel: edge.root_label ?? null,
         };
       }
-      // Trigger edge not yet written (race between flow start and recordTrigger).
-      // Use the pipeline name from flow_runs as a best-effort label.
+      // Race: trigger edge not written yet — best-effort pipeline name from
+      // flow_runs.
       const fr = await flowFor(flowId.slice(0, 8));
       return {
         kind: "flow-triggered",
@@ -122,9 +104,8 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
     }
 
     const g = classify(session);
-    // Forward every scope-specific field from the grammar (cronName,
-    // telegramChatId, explicitPurpose, memorySynthRun, etc.) so downstream
-    // rootLabelOf can produce a human label without re-parsing.
+    // Forward scope-specific fields (cronName, telegramChatId, …) so
+    // rootLabelOf can label without re-parsing.
     const out = {
       ...g,
       pipelineId: opts.pipelineId ?? null,
@@ -135,24 +116,21 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
     };
     delete out.parentHint;
 
-    if (!g.parentHint) return out;             // already-root scopes
+    if (!g.parentHint) return out;
 
     if (g.parentHint.kind === "flow") {
       const fr = await flowFor(g.parentHint.flowShort);
       if (fr) {
-        // Link the child to the flow's TRIGGER EDGE (synthetic `flow:<id>`
-        // row in session_lineage), not the flow's owner_key. The trigger
-        // edge carries the genuine root (cron-tick / operator-trigger /
-        // etc.); owner_key names the owner session, not the trigger —
-        // using it would mis-attribute discuss sessions and gate-spawned
-        // subagents to the owner's instance.
+        // Parent is the flow's trigger edge (`flow:<id>`), not owner_key: the
+        // edge carries the genuine root (cron-tick / operator-trigger), while
+        // owner_key names the owner session and would mis-attribute discuss
+        // sessions and gate-spawned subagents.
         out.parentKey = `flow:${fr.flow_id}`;
         out.flowId = fr.flow_id;
         out.pipelineId = fr.pipeline_id;
       } else if (store) {
         // Flow pruned from flow_runs — probe session_lineage for the trigger
-        // edge directly. The edge key is 'flow:<full-uuid>' but we only have
-        // the 8-char prefix, so use a LIKE prefix match.
+        // edge, matched by the 8-char prefix (that's all we hold).
         const edge = await execAll(store._client,
           `SELECT child_session_key FROM session_lineage
            WHERE child_session_key LIKE ?
@@ -174,18 +152,14 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
       return out;
     }
     if (g.parentHint.kind === "memory-synth") {
-      // memory-synth chunks belong to a synth-run; treat the synth-run as root.
-      // There's no on-disk session for the run itself; the chunk IS the leaf.
+      // No on-disk session for the synth run itself — the chunk IS the leaf.
       return out;
     }
     return out;
   }
 
-  /**
-   * Walk up from `session` to the root. Returns an array of frames
-   * (leaf-to-root). Stops on cycle or depth limit. Uses the lineage table
-   * as a short-circuit cache.
-   */
+  /** Leaf-to-root frames, stopping on cycle or depth limit; the lineage table
+   *  short-circuits the walk. */
   async function walk(session, { maxDepth = 16, useCache = true } = {}) {
     const chain = [];
     const seen = new Set();
@@ -194,15 +168,12 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
       if (seen.has(cur)) { chain.push({ key: cur, kind: "cycle" }); break; }
       seen.add(cur);
 
-      // Try cache first
       if (useCache && store) {
         const cached = await store.getLineage(cur);
         if (cached) {
-          // Stale-miss detection: if root_kind was cached as "unknown" and the
-          // root_session_key is a synthetic flow:* key, the trigger edge hadn't
-          // landed yet when this row was first written. Don't propagate the stale
-          // root — leave rootKey/rootKind/rootLabel undefined so the annotation
-          // re-derives them from the live walk that follows.
+          // Stale miss: root_kind "unknown" + a synthetic flow:* root means the
+          // trigger edge landed after this row was written — don't propagate
+          // the stale root; the live walk re-derives it.
           const staleFlowRoot = cached.root_kind === "unknown" &&
             typeof cached.root_session_key === "string" &&
             cached.root_session_key.startsWith("flow:");
@@ -224,14 +195,12 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
         }
       }
 
-      // Live resolve — push the whole classifier output so rootLabelOf has
-      // access to scope-specific fields (cronName, telegramChatId, etc.).
+      // Push the whole classifier output so rootLabelOf sees its scope fields.
       const c = await classifyWithExternal(cur);
       chain.push({ ...c, key: cur });
       if (!c.parentKey || c.parentKey === cur) break;
       cur = c.parentKey;
     }
-    // Annotate root onto every frame
     const last = chain[chain.length - 1];
     if (last) {
       const rootKey = last.rootKey ?? last.key;
@@ -246,23 +215,13 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
     return chain;
   }
 
-  /**
-   * Compute the storeable row for a single session (full lineage stamp).
-   * Used by the hooks.
-   */
   async function resolve(session, opts = {}) {
     const chain = await walk(session, opts);
     if (!chain.length) return null;
     const leaf = chain[0], root = chain[chain.length - 1];
-    // Inherit pipeline/flow/node/item from the nearest ancestor that
-    // carries them. The leaf's own key may be a bare-subagent UUID
-    // (proposal-sender, content-writer side-spawns) or any session
-    // whose shape doesn't encode flow context — but its parent
-    // (a discuss-gate session, a flow-node subagent, the flow trigger
-    // edge itself) almost always does. Without this propagation the
-    // cost row written for each LLM call stays NULL on flow_id and
-    // node_id, and the cost tree buckets it under "Direct (no
-    // pipeline)" instead of under its real flow + node + item.
+    // Inherit pipeline/flow/node/item from the nearest ancestor carrying them:
+    // a leaf's key often doesn't encode flow context, and without propagation
+    // the cost row lands under "Direct (no pipeline)" instead of its flow+node.
     let pipelineId = leaf.pipelineId, flowId = leaf.flowId;
     let nodeId = leaf.nodeId, itemKey = leaf.itemKey;
     for (const frame of chain) {
@@ -292,19 +251,16 @@ export function makeResolver({ store, flowsDbPath = FLOWS_DB_PATH, cronJsonPath 
   return { resolve, walk, classifyWithExternal, flowFor, cronFor };
 }
 
-/** Human-readable label for a root session (cron name, telegram chat id, etc.). */
 export function rootLabelOf(frame) {
   if (!frame) return null;
   switch (frame.kind) {
     case "cron-owner":         return frame.cronName || frame.key;
     case "telegram-dm":        return frame.telegramChatId || frame.key;
     case "explicit":           return frame.explicitPurpose || frame.key;
-    // The operator-trigger session key (agent:operator:(cli|operator):<flowId-uuid>)
-    // carries no pipelineId — routes/operator.js's recordTrigger call stamps
-    // the real pipelineId onto the flow/node cost rows directly (see
-    // labels.js's displayRootLabel case "operator-trigger"), so this fallback
-    // only fires for cost attributed to the bare operator session itself.
-    // Distinguish by flow at least, rather than collapsing every run together.
+    // The operator-trigger key carries no pipelineId: routes/operator.js's
+    // recordTrigger stamps the real pipelineId on the flow/node cost rows
+    // directly, so this fallback only labels cost attributed to the bare
+    // operator session — at least split by flow.
     case "operator-trigger":   return frame.triggerFlowId ? `Operator run ${frame.triggerFlowId.slice(0, 8)}` : "Operator runs";
     case "agent-default":      return `agent:${frame.agentId}`;
     case "memory-synth-chunk": return `memory-synth:${frame.memorySynthRun || ""}`;

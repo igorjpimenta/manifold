@@ -1,10 +1,3 @@
-/**
- * Unit tests for state/db-guard.js + state/db-health.js
- *
- * Fail-closed corruption handling: corrupt-class errors count toward a
- * short-window trip (alert + exit); transient errors never count;
- * nothing here throws to callers.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";

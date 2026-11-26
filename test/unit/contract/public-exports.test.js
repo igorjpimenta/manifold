@@ -1,15 +1,3 @@
-// Unit tests for the public export surface declared in package.json.
-//
-// Consumers install `@igorjpimenta/manifold` from GitHub Packages and import
-// ONLY through the subpaths below — deep file paths are not a contract. This suite pins the
-// map itself: the exact subpath set, each target file's existence, and that
-// every subpath still imports through the package's own bare specifier
-// (Node package self-reference) yielding the symbols consumers were written
-// against.
-//
-// `openclaw/plugin-sdk/*` resolves only inside an installed openclaw
-// runtime, so the import pass registers the test-only resolve hooks that
-// redirect those specifiers to test/helpers/openclaw-plugin-sdk-stub.js.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -23,9 +11,6 @@ const PKG_NAME = "@igorjpimenta/manifold";
 const pkg = JSON.parse(readFileSync(new URL("../../../package.json", import.meta.url), "utf8"));
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
-// The consumer contract. Hardcoded so removing a subpath, renaming a target
-// file, or dropping an export consumers rely on fails here rather than in a
-// consumer's build.
 const PUBLIC_API = {
   ".": { file: "./index.js", exports: ["default"] },
   "./errors": {
@@ -73,9 +58,6 @@ const PUBLIC_API = {
     file: "./state/batch-writer.js",
     exports: ["enqueue", "enqueueRaw", "flush", "flushAll"],
   },
-  // The manifest itself is reachable by name so a consumer can locate assets
-  // beside it (the adapter resolves the CLI entry it spawns this way). It
-  // exports no symbols; the import pass below skips it.
   "./package.json": { file: "./package.json" },
   "./state/schema": {
     file: "./state/schema.js",
@@ -96,7 +78,6 @@ function specifierFor(subpath) {
   return subpath === "." ? PKG_NAME : `${PKG_NAME}/${subpath.slice(2)}`;
 }
 
-// ── the exports map ───────────────────────────────────────────────────────────
 
 describe("package.json exports — declared public surface", () => {
   it("declares exactly the consumer subpaths — no removal, no extras", () => {
@@ -114,7 +95,6 @@ describe("package.json exports — declared public surface", () => {
   });
 });
 
-// ── bare-specifier imports ────────────────────────────────────────────────────
 
 describe("public subpaths — import by bare specifier, expected symbols present", () => {
   registerHooks(openclawSdkHooks);

@@ -14,7 +14,6 @@ export function registerRunRoutes({
   discussStore,
   failureStore,
   sessionIndex,
-  // discuss handlers — destructured from registerDiscussHandlers() return value
   handleDiscuss,
   handleDiscussHistory,
   handleDiscussApplyDraft,
@@ -22,8 +21,6 @@ export function registerRunRoutes({
   handleDiscussAudioGet,
   handleDiscussAudioRetry,
 }) {
-
-  // ── GET /manifold/cost ─────────────────────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/cost",
@@ -69,8 +66,6 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET /manifold/runs ─────────────────────────────────────────────────
-
   api.registerHttpRoute({
     path: "/manifold/runs",
     auth: "plugin",
@@ -92,17 +87,12 @@ export function registerRunRoutes({
         ? parseInt(url.searchParams.get("before_ms"), 10) : null;
       const beforeId = url.searchParams.get("before_id") ?? null;
       try {
-        // "waiting" is never actually written anywhere (confirmed repo-wide)
-        // — gate pauses are always persisted as "blocked" — so no special-
-        // case expansion is needed for that filter value.
         const statusParam = url.searchParams.get("status");
-        // Two targeted queries: GROUP BY for tab counts (unfiltered), and a
-        // paginated fetch for the current page (sorted + cursor in SQL).
         const statusCounts = await readStore.listStatusCounts({ pipelineId: pipelineIdFilter });
         const totalKnown = statusParam
           ? (statusCounts[statusParam] ?? 0)
           : Object.values(statusCounts).reduce((s, n) => s + n, 0);
-        // Fetch limit+1 so hasMore detection needs no extra COUNT query.
+        // limit+1 so hasMore detection needs no extra COUNT query.
         const page = await readStore.listRunsPage({
           pipelineId: pipelineIdFilter,
           status: statusParam,
@@ -114,13 +104,8 @@ export function registerRunRoutes({
         if (hasMore) page.pop();
         const last = page[page.length - 1];
         const discussSummaries = await discussStore.getBulkSummaries(page.map((r) => r.flowId));
-        // Prefer the childFlows summary; a flow with no real children (the
-        // common case: hasn't reached a subflow node yet) reports
-        // EMPTY_SUBFLOWS.
         const childSummaryMap = await getNodeExecutionsStore().summarizeChildrenByFlowIds(page.map((r) => r.flowId));
         const EMPTY_SUBFLOWS = { total: 0, pending: 0, failed: 0, skipped: 0, succeeded: 0 };
-        // listRunsPage already delivers final field names and extracted
-        // display fields — route only merges in the secondary-service data.
         const runs = page.map((r) => {
           const discuss = discussSummaries[r.flowId] ?? null;
           const subflows = childSummaryMap.get(r.flowId) ?? EMPTY_SUBFLOWS;
@@ -153,11 +138,6 @@ export function registerRunRoutes({
       return true;
     },
   });
-
-  // ── GET /manifold/errors?flowIds=id1,id2,... ──────────────────────────
-  // Returns error entries for the given flow IDs.
-  // Used by the dashboard to enrich its run lists and stats without direct
-  // DB access. flowIds is a comma-separated list; max 500 entries.
 
   api.registerHttpRoute({
     path: "/manifold/errors",
@@ -198,8 +178,6 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET /manifold/queue ────────────────────────────────────────────────
-
   api.registerHttpRoute({
     path: "/manifold/queue",
     auth: "plugin",
@@ -214,10 +192,8 @@ export function registerRunRoutes({
       const authz = authorizeBearerRequest(req, { logger: api.logger });
       if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       try {
-        // Lean, purpose-built mapper — deliberately not the /runs list's
-        // .map() above, which pulls in bulk discuss/subflow-summary fetches
-        // that mean nothing for a queued item's glance view and would slow
-        // this endpoint down for no benefit.
+        // Deliberately lean — no bulk discuss/subflow-summary fetches (those
+        // mean nothing for a queued item's glance view).
         const items = (await readStore.listQueued()).map((r) => ({
           flowId: r.flowId,
           pipelineId: r.pipelineId,
@@ -244,14 +220,10 @@ export function registerRunRoutes({
     },
   });
 
-  // ── GET /manifold/tree-summary?flowIds=id1,id2,... ──────────────────────
-  // Batched "which top-level nodes did each of these flows visit" —
-  // backing the dashboard auto-funnel's per-node visit check without one
-  // round-trip per run. Same shape/convention as /manifold/errors above
-  // (comma-separated flowIds, capped at 500, sibling top-level resource
-  // rather than nested under /manifold/runs/ — that path is a
-  // prefix-matched route below and this avoids any ambiguity with it).
-
+  // Batched "which top-level nodes did each flow visit" for the dashboard
+  // auto-funnel, without one round-trip per run. Same shape as /manifold/errors
+  // (comma-separated flowIds, capped 500); top-level rather than nested under
+  // /manifold/runs/ because that prefix route below would swallow it.
   api.registerHttpRoute({
     path: "/manifold/tree-summary",
     auth: "plugin",
@@ -290,8 +262,6 @@ export function registerRunRoutes({
       return true;
     },
   });
-
-  // ── GET+POST /manifold/runs/<flowId>/... ────────────────────────────────
 
   api.registerHttpRoute({
     path: "/manifold/runs/",
@@ -391,37 +361,29 @@ export function registerRunRoutes({
     },
   });
 
-  // ── sendFullRun ───────────────────────────────────────────────────────────
-
   async function sendFullRun(res, flow) {
     const nodeExecutionsStore = getNodeExecutionsStore();
-    // Enriched via assembleState() (each node's own resultJson replayed on
-    // top of the still-live stateJson) instead of trusting the raw
-    // stateJson blob directly, matching how the engine's own dispatch
-    // loop and routes/discuss.js already read state.
+    // assembleState (resultJson replayed over live stateJson), matching how
+    // the engine's dispatch loop and routes/discuss.js read state — the raw
+    // stateJson blob alone is not enriched.
     const enrichedState = await assembleState(flow.flowId, {
       runStore, nodeExecutionsStore, baseState: flow.stateJson ?? {},
     });
-    // .gates must NEVER come from assembleState()'s own generic per-key
-    // merge — every human-gate node writes a FULL SNAPSHOT of state.gates
-    // into its own resultJson (executor-nodes.js: `gates: {
-    // ...(state.gates ?? {}), [nodeId]: record }`), so replaying rows in
-    // invokedAt order can resolve to a stale snapshot if a later gate opens
-    // out of the order assembleState() assumes. gate_records (a dedicated
-    // per-flow accessor, one row per gate, no merge) is the staleness-safe
-    // source.
+    // .gates must NEVER come from assembleState()'s per-key merge: every
+    // human-gate node writes a FULL SNAPSHOT of state.gates into its own
+    // resultJson, so replaying rows in invokedAt order can resolve to a stale
+    // snapshot if a later gate opens out of order. gate_records (one row per
+    // gate, no merge) is the staleness-safe source.
     const gates = await nodeExecutionsStore.listGateRecordsForFlow(flow.flowId);
-    // Strip `loop` from the stateJson payload — subflow data is served via
-    // GET /manifold/runs/:flowId/subflows. Strip `errors` too: failure_events
-    // is the sole store for error history — errorEntries below is the
-    // normalized replacement — and errors[] never rides the wire.
+    // Strip `loop` (served via GET .../subflows) and `errors`
+    // (failure_events/errorEntries is the sole error-history store — errors[]
+    // never rides the wire).
     const { loop: _loop, errors: _errors, gates: _staleGates, ...stateWithoutLegacy } = enrichedState;
     // A subflow child is a flow_runs row with parent_invocation_id set —
-    // resolve it back to the parent's flowId/nodeId/subflowKey so clients can
-    // render a "Parent run" link. Also resolves this child's REAL top-level
-    // pipelineId (its own stateJson.pipelineId is the synthetic
-    // "parent::NODE_ID" form loader.js registers subflow nodes under) —
-    // same fix listQueued() already applies for the Queues feature.
+    // resolve it back to the parent's flowId/nodeId/subflowKey for a "Parent
+    // run" link, plus the child's REAL top-level pipelineId (its own
+    // stateJson.pipelineId is the synthetic "parent::NODE_ID" form loader.js
+    // registers subflow nodes under).
     let parentFlowId = null, parentNodeId = null, parentSubflowKey = null;
     let resolvedPipelineId = flow.stateJson?.pipelineId ?? null;
     if (flow.parentInvocationId) {
@@ -445,9 +407,8 @@ export function registerRunRoutes({
       statusReason: flow.statusReason ?? null,
       stateJson: { ...stateWithoutLegacy, gates },
       waitJson: flow.waitJson ?? null,
-      // Normalized error history sourced from failure_events — sibling to
-      // stateJson (not nested inside it) so flow-level and subflow-level
-      // shapes stay symmetric.
+      // Normalized error history from failure_events — sibling to stateJson
+      // (not nested) so flow-level and subflow-level shapes stay symmetric.
       errorEntries: await failureStore.queryErrorsByFlow(flow.flowId),
       createdAtMs: flow.createdAt ?? null,
       updatedAtMs: flow.updatedAt ?? null,
@@ -461,8 +422,6 @@ export function registerRunRoutes({
     res.end(JSON.stringify(payload));
     return true;
   }
-
-  // ── sendArtifactsList ─────────────────────────────────────────────────────
 
   async function sendArtifactsList(res, flow) {
     const { readdir, stat } = await import("node:fs/promises");
@@ -507,8 +466,6 @@ export function registerRunRoutes({
     }
     return true;
   }
-
-  // ── sendArtifactFile ──────────────────────────────────────────────────────
 
   async function sendArtifactFile(res, flow, name) {
     const { readFile, stat } = await import("node:fs/promises");
@@ -577,8 +534,6 @@ export function registerRunRoutes({
     return true;
   }
 
-  // ── sendSubflowsList ─────────────────────────────────────────────────────
-
   async function sendSubflowsList(res, flow) {
     const grouped = await getAllSubflowGroups({
       flowId: flow.flowId, runStore, nodeExecutionsStore: getNodeExecutionsStore(),
@@ -590,65 +545,38 @@ export function registerRunRoutes({
     return true;
   }
 
-  // ── node tree ─────────────────────────────────────────────────────────────
-  //
-  // Unifies this flow's own node timeline (its Steps) and the child-flow
-  // fan-out (Subflows) into one recursively-expandable tree.
-  // Two row shapes, one recursive expand operation:
-  //   type:"node" — one row per invocation (not per execution attempt — see
-  //     buildTreeNodeRows) for a single flow's own dispatches. Expandable
-  //     only when kind==="subflow" and it has spawned at least one child.
-  //   type:"flow" — one row per child flow_runs spawned from a subflow-kind
-  //     node's invocation. Expandable once it has dispatched at least one
-  //     node of its own.
-  // Expanding a "node" row returns "flow" children; expanding a "flow" row
-  // returns that flow's own "node" list (same shape /tree itself returns).
-
-  // Builds this flow's own top-level node list — the payload for both the
-  // /tree root call and a /tree/expand?type=flow call (a descendant flow's
-  // own dispatches use the exact same shape as the root).
+  // Node tree: unifies this flow's own node timeline (Steps) with the
+  // child-flow fan-out (Subflows) into one recursively-expandable tree.
+  // type:"node" — one row per invocation (not per attempt); expandable only
+  //   when kind==="subflow" with at least one child.
+  // type:"flow" — one row per child flow spawned from a subflow-kind node;
+  //   expandable once it has dispatched a node of its own.
+  // Expanding a "node" returns "flow" children; expanding a "flow" returns
+  // that flow's own "node" list (same shape /tree itself returns).
   async function buildTreeNodeRows(flow) {
     const pipelineId = flow.stateJson?.pipelineId;
     const nodeExecutionsStore = getNodeExecutionsStore();
     const invocations = await nodeExecutionsStore.listInvocationsForFlow(flow.flowId);
     // A node's own status can only be told apart from a failed one by
-    // cross-referencing failure_events (flow_node_executions carries no
-    // error content). Every failure this flow ever recorded,
-    // not just root-level ones, but only executionId matters here, and a
-    // subflow item's own errors live under ITS OWN flow_id, not this one's —
-    // so this set naturally only ever matches root-level invocations.
+    // cross-referencing failure_events (flow_node_executions carries no error
+    // content). A subflow item's own errors live under ITS OWN flow_id, not
+    // this one's, so this set naturally only matches root-level invocations.
     const failedExecutionIds = new Set(
       (await failureStore.queryErrorsByFlow(flow.flowId)).map((e) => e.executionId).filter(Boolean)
     );
 
-    // Point-in-time kind/agent per invocation — replaces reading
-    // pipelinesRef.value directly. A node whose pipeline definition has
-    // since changed, or whose whole pipeline was deleted, still renders its
-    // ORIGINAL kind/agent, keyed by this invocation's own invokedAt rather
-    // than whatever the live, single-copy definition currently says (or no
-    // longer has at all).
-    // Batched in one call, not one query per invocation.
+    // Point-in-time kind/agent per invocation: a node whose pipeline
+    // definition has since changed — or been deleted — still renders its
+    // ORIGINAL kind/agent, keyed by invokedAt rather than the live single-copy
+    // definition. Batched in one call, not one per invocation.
     const versionRequests = invocations.map((inv) => ({ pipelineId, nodeName: inv.nodeId, atMs: inv.invokedAt }));
     const versions = await pipelineRegistryStore.getNodeVersionsBatch(versionRequests);
     const versionByInvocationId = new Map(invocations.map((inv, i) => [inv.invocationId, versions[i]]));
 
     // A subflow-kind row's OWN invocation (subflow_key=null) is never a
     // child's parent_invocation_id — each branch item gets its OWN separate
-    // invocation, keyed by the item's own subflow_key (see
-    // listInvocationsForFlow's doc comment). Resolve those per-nodeId via
-    // listInvocationIdsForNode first, batched once per distinct nodeId
-    // rather than per row.
-    //
-    // Known limitation: if the same nodeId is visited more than once (a
-    // loop revisits it — confirmed to happen, e.g. PROPOSE), there is no
-    // schema-level way to partition which items belong to which visit —
-    // listInvocationIdsForNode returns every item ever spawned under that
-    // (flowId, nodeId) pair, full stop (a real item invocation's own
-    // visit_seq/forceNew is never set — see engine/spawn-child.js). All
-    // rows sharing that nodeId therefore see the SAME cumulative child
-    // list. Rare in practice (most subflow nodes dispatch once per flow);
-    // not solved here — would need a schema change (tying an item
-    // invocation to its spawning visit) to fix properly.
+    // invocation keyed by the item's own subflow_key. Resolve those per-nodeId
+    // via listInvocationIdsForNode, batched once per distinct nodeId.
     const subflowNodeIds = [
       ...new Set(invocations.filter((inv) => versionByInvocationId.get(inv.invocationId)?.kind === "subflow").map((inv) => inv.nodeId)),
     ];
@@ -675,25 +603,18 @@ export function registerRunRoutes({
       const kind = version?.kind ?? null;
       const isSubflowNode = kind === "subflow";
       const kids = isSubflowNode ? (childrenByNodeId.get(inv.nodeId) ?? []) : [];
-      // A node's own execution row carries no success/failure signal at all
-      // (flow_node_executions is a pure identity/timing ledger;
-      // failedExecutionIds above is the only way to know a given attempt
-      // failed). Absent that, the only way to recover status is by
-      // cross-referencing the FLOW's own status — which only ever applies
-      // to the LAST invocation in this list (a flow can't be mid-dispatch
-      // or have skipped/blocked at an earlier, already-superseded node).
-      // invocations is already ordered ascending by invoked_at
-      // (listInvocationsForFlow), so idx === lastIdx already and only ever
-      // means "the most recently invoked node for this flow" — no extra
-      // currentStep/isTerminal gate: comparing a dropped field is always
-      // false, and gating on !isTerminal would drop a terminal flow's real
-      // status from its own last node whenever that node's execution
-      // recorded no error, defaulting a failed flow to "succeeded".
+      // A node's execution row carries no success/failure signal; absent a
+      // failedExecutionId, recover status only from the FLOW's status — which
+      // applies solely to the LAST invocation (invocations ascend by
+      // invoked_at; an earlier node can't be mid-dispatch or skipped). No
+      // isTerminal gate: gating would drop a terminal flow's real status from
+      // its own last node whenever that execution recorded no error,
+      // defaulting a failed flow to "succeeded".
       let status;
       if (inv.latestExecutionId && failedExecutionIds.has(inv.latestExecutionId)) {
         status = "failed";
       } else if (idx === lastIdx) {
-        status = flow.status; // live: "running" | "blocked" | "queued"; terminal: whatever flow.status is
+        status = flow.status;
       } else {
         status = "succeeded";
       }
@@ -708,10 +629,9 @@ export function registerRunRoutes({
         exitedAt: inv.exitedAt,
         execKind: inv.kind,
         executionCount: inv.executionCount,
-        // execKind above is the LATEST execution only, which for any
-        // subflow node with finished children is always "recheck" — masking
-        // a real "retry"/"revival" earlier in the same invocation's
-        // history. Independent signal, not a replacement for execKind.
+        // execKind is the LATEST execution only — for a subflow node with
+        // finished children that's always "recheck", masking an earlier
+        // retry/revival. Independent signal, not a replacement for execKind.
         everRetriedOrRevived: inv.everRetriedOrRevived,
         hasChildren: isSubflowNode && kids.length > 0,
       };
@@ -734,15 +654,12 @@ export function registerRunRoutes({
     return rollup;
   }
 
-  // The human-readable "why" behind a non-succeeded child flow, for the
-  // node tree's attention banner. A human-gate wait carries a real,
-  // pipeline-authored title in
-  // waitJson.items[0].requestPayload.title (e.g. "Cyrano needs 2 things
-  // to draft <listing>") — confirmed against live data, far more useful
-  // than the generic statusReason ("awaiting 1 approval at GAP_GATE")
-  // sitting next to it. Every other wait kind, and failures, fall back to
-  // statusReason, which the executor already writes as a short human
-  // summary (shortSummary() calls throughout executor.js).
+  // The human-readable "why" behind a non-succeeded child flow: a human-gate
+  // wait carries a pipeline-authored title in
+  // waitJson.items[0].requestPayload.title — far more useful than the generic
+  // statusReason ("awaiting 1 approval at GAP_GATE") next to it. Every other
+  // wait kind, and failures, fall back to statusReason (the executor's own
+  // short human summary).
   function extractAttentionReason(child) {
     if (child.waitJson?.kind === "human-gate") {
       const title = child.waitJson.items?.[0]?.requestPayload?.title;
@@ -768,22 +685,16 @@ export function registerRunRoutes({
       reason: child.status === "succeeded" ? null : extractAttentionReason(child),
       hasChildren: withInvocations.has(child.flowId),
       cascadeAttempt: derived[idx].cascadeAttempt,
-      // A spawned child flow can independently retry at its own dispatch
-      // level without the SUBFLOW NODE that spawned it (buildTreeNodeRows'
-      // own row, above) ever retrying — different table (flow_runs, not
-      // flow_node_invocations), no execKind at that level at all.
-      // Deliberately per-child, not rolled up onto the parent's own row —
-      // matches this file's "shallow, immediate-children only" rollup rule.
+      // Deliberately per-child, not rolled onto the parent's row: a spawned
+      // child can retry at its own dispatch level without the subflow node
+      // that spawned it ever retrying (different table, no execKind there).
       everRetriedOrRevived: derived[idx].everRetriedOrRevived,
     }));
   }
 
-  // One query per child (nodeExecutionsStore.listInvocationsForFlow),
-  // shared by both derived fields below rather than each querying
-  // independently — cascadeAttempt only used it when pipeline.kind ===
-  // "cascade" (short-circuiting otherwise), everRetriedOrRevived needs it
-  // unconditionally, so combining costs nothing extra for cascade children
-  // and adds exactly the one necessary query for non-cascade ones.
+  // One listInvocationsForFlow per child, shared by both derived fields —
+  // cascadeAttempt only needs it for cascade children (short-circuiting
+  // otherwise), everRetriedOrRevived needs it unconditionally.
   async function perChildDerivedFields(child, nodeExecutionsStore) {
     const invocations = await nodeExecutionsStore.listInvocationsForFlow(child.flowId);
     return {
@@ -792,19 +703,12 @@ export function registerRunRoutes({
     };
   }
 
-  // A cascade-kind pipeline (docs/pipelines.md's "retry-on-failure as a flow
-  // characteristic") tries its own root nodes in sequence, one throw at a
-  // time, until one succeeds or all are exhausted — every attempt still
-  // gets its own ordinary flow_node_invocations row (see
-  // buildTreeNodeRows), so "how many root nodes did this child flow
-  // dispatch" is a direct, non-heuristic count of those rows. > 1 means
-  // the first node did NOT resolve it — something worth flagging, even on
-  // an eventual success. Non-cascade pipelines always return null here;
-  // ordinary sequential nodes look identical in shape and would false-
-  // positive if this weren't gated on the pipeline's own declared kind.
-  //
-  // Point-in-time (state/pipeline-registry.js) — keyed by this child
-  // flow's own createdAt, not the live pipelinesRef.value.
+  // A cascade-kind pipeline retries its root nodes in sequence until one
+  // succeeds; each attempt gets its own invocation row, so >1 rows means the
+  // first node did NOT resolve it — worth flagging even on eventual success.
+  // Non-cascade pipelines return null: ordinary sequential nodes would
+  // false-positive if this weren't gated on the declared kind. Point-in-time
+  // (pipeline registry keyed by the child's createdAt, not live definitions).
   async function cascadeAttemptFor(child, invocations) {
     const version = await pipelineRegistryStore.getPipelineVersionAt({
       pipelineId: child.stateJson?.pipelineId, atMs: child.createdAt,
@@ -839,10 +743,9 @@ export function registerRunRoutes({
         res.end(JSON.stringify({ ok: false, error: "invocation not found on this flow" }));
         return true;
       }
-      // invocationId here is the subflow-kind node's OWN dispatch (subflow_
-      // key=null) — never a child's parent_invocation_id, same reasoning as
-      // buildTreeNodeRows. Resolve the real per-item invocations for this
-      // nodeId first (same known multi-visit limitation documented there).
+      // invocationId here is the subflow-kind node's OWN dispatch
+      // (subflow_key=null), never a child's parent_invocation_id — resolve
+      // the real per-item invocations for this nodeId first.
       const itemInvocationIds = await getNodeExecutionsStore().listInvocationIdsForNode(flow.flowId, invocation.nodeId);
       const children = await runStore.listForParentInvocations(itemInvocationIds);
       res.statusCode = 200;
@@ -876,8 +779,8 @@ export function registerRunRoutes({
     return true;
   }
 
-  // Full execution-attempt history for one invocation — the tree's
-  // per-node drill-in (a row with executionCount > 1 links here).
+  // Full execution-attempt history for one invocation (rows with
+  // executionCount > 1 link here).
   async function sendInvocationDetail(res, flow, invocationId) {
     const invocation = await getNodeExecutionsStore().getInvocation(invocationId);
     if (!invocation || invocation.flowId !== flow.flowId) {
@@ -886,17 +789,12 @@ export function registerRunRoutes({
       res.end(JSON.stringify({ ok: false, error: "invocation not found on this flow" }));
       return true;
     }
-    // Point-in-time (state/pipeline-registry.js) — same reasoning as
-    // buildTreeNodeRows, keyed by this invocation's own invokedAt rather
-    // than the live pipelinesRef.value.
     const version = await pipelineRegistryStore.getNodeVersionAt({
       pipelineId: flow.stateJson?.pipelineId, nodeName: invocation.nodeId, atMs: invocation.invokedAt,
     });
     const rawExecutions = await getNodeExecutionsStore().listExecutionsForInvocation(invocationId);
-    // Per-attempt error content lives in failure_events — cross-reference
-    // by executionId. A given execution_id gets at most one failure row
-    // (upsertFailureRow's conflict target), so this is a clean 1:1 lookup,
-    // not a dedup problem.
+    // Per-attempt error content lives in failure_events — at most one row per
+    // execution_id (upsert conflict target), so this is a clean 1:1 lookup.
     const messageByExecutionId = new Map(
       (await failureStore.queryErrorsByFlow(flow.flowId))
         .filter((e) => e.invocationId === invocationId)
@@ -917,32 +815,23 @@ export function registerRunRoutes({
     return true;
   }
 
-  // ── sendTranscriptsList ───────────────────────────────────────────────────
-
-  // Transcripts read manifold's own stores only. Discuss threads come from
-  // discuss-store (both directions of every dialog-door turn, keyed by
-  // (flowId, itemId)); dispatch agent turns come from node-executions
-  // resultJson (a single assistant turn when the stored result carries
-  // reply text, metadata-only otherwise — content is never invented).
-  // Attribution uses stored columns (flow_sessions node/branch columns,
-  // discuss itemId); the session passes through opaquely and is never
-  // parsed here.
-
-  // lite=1  → return turnCount only, no turn text (for list views)
-  // session=X → return a single transcript with full turns (for transcript drill-in)
+  // Transcripts read manifold's own stores only: discuss threads from
+  // discuss-store, dispatch agent turns from node-executions resultJson
+  // (a single assistant turn when the result carries reply text — content
+  // is never invented). Attribution uses stored columns; the session id
+  // passes through opaquely and is never parsed.
+  // lite=1 → turnCount only (list views); session=X → one full transcript.
   async function sendTranscriptsList(res, flow, url) {
     const lite       = url.searchParams.get("lite") === "1";
     const singleSession = url.searchParams.get("session") ?? null;
 
-    // Session roster for this flow: one row per dispatch attempt plus one
-    // per discuss thread, each carrying its stored node/item attribution.
     const sessionRows = await Promise.resolve(sessionIndex?.listForFlow?.(flow.flowId)).catch(() => []) ?? [];
     const discussThreads = await Promise.resolve(discussStore?.listForFlow?.(flow.flowId)).catch(() => []) ?? [];
     const nodeExecutionsStore = getNodeExecutionsStore();
     const results = await Promise.resolve(nodeExecutionsStore.listResultsForFlow(flow.flowId)).catch(() => []);
     const resultByNode = new Map((results ?? []).map((r) => [r?.nodeId, r]));
-    // Agent display name resolves from the loaded pipeline's own node def;
-    // null when the pipeline is not loaded — never guessed from key shape.
+    // Agent display name from the loaded pipeline's node def; null when the
+    // pipeline is not loaded — never guessed from key shape.
     const pipelineNodes = pipelinesRef?.value?.get?.(flow.stateJson?.pipelineId)?.nodes ?? {};
 
     const transcripts = [];
@@ -1001,9 +890,9 @@ export function registerRunRoutes({
     return turns;
   }
 
-  // The only dispatch content manifold observes durably is the node's own
-  // resultJson: a bare string, or an object carrying reply text in `text`.
-  // Anything else yields no turn — the entry lists with metadata only.
+  // The only dispatch content observed durably is resultJson: a bare string,
+  // or an object carrying reply text in `text`. Anything else yields no turn
+  // — the entry lists with metadata only.
   function dispatchTurns(result) {
     const text = dispatchTurnText(result?.resultJson);
     if (text == null) return [];
@@ -1032,8 +921,6 @@ export function registerRunRoutes({
     if (text.length <= cap) return { text, truncated: false };
     return { text: text.slice(0, cap), truncated: true };
   }
-
-  // ── sendCompareToPeers ────────────────────────────────────────────────────
 
   async function sendCompareToPeers(res, flow) {
     const pipelineId = flow.stateJson?.pipelineId ?? "";
@@ -1072,8 +959,6 @@ export function registerRunRoutes({
       revisionRatio: medianRev != null && medianRev > 0 ? (run.revision ?? 0) / medianRev : null,
     };
   }
-
-  // ── handleRerun ───────────────────────────────────────────────────────────
 
   async function handleRerun(req, res, sourceFlow) {
     let raw = "";

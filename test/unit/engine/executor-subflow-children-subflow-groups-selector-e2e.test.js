@@ -1,32 +1,4 @@
-/**
- * Regression E2E for a real bug found while building
- * freelance_upwork-proposal: a `kind:"subflow"` node's own `selector(state)`
- * can legitimately need a PRIOR loop node's aggregated per-branch results
- * (the exact shape of freelance_workana-proposal's and
- * freelance_upwork-proposal's PROPOSE, whose selector reads
- * `state._subflowGroups.SCORE[id]` to resolve each shortlisted listing's
- * score data). `dispatchCodeEntry` (executor-nodes.js) has always called
- * `enrichWithSubflows(state, ...)` before invoking a "code" node's `run()`
- * — but `executeSubflowNode` (executor.js) never did the same before calling
- * `node.selector(state)`, so ANY loop node whose selector reads
- * `state._subflowGroups` always saw it as `undefined`, resolved to zero
- * items, and silently no-op'd regardless of how many upstream branches
- * actually succeeded. Traced live: subflow dispatch never enriched state,
- * and no existing test chains two real loop nodes through the executor with
- * the second one's
- * selector reading the first one's `_subflowGroups` — every existing
- * `executor-loop-children-*-e2e.test.js` file defines exactly one loop
- * node. This file closes that gap.
- *
- * Topology: SCORE (childFlows:true, rates each candidate) → SELECT_NEXT
- * (childFlows:true, selector reads state._subflowGroups.SCORE to build its
- * own item list, mirroring PROPOSE's exact selector shape) → __end__.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
+// Guards a real bug: executeSubflowNode never enriched state before node.selector(state), so selectors reading state._subflowGroups saw undefined and silently no-op'd.
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -39,8 +11,6 @@ import { createExecutor } from "../../../engine/executor.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -77,8 +47,6 @@ function makeScoreLikeNode() {
   };
 }
 
-// Mirrors PROPOSE's exact selector shape: derive this loop's own item list
-// from a PRIOR loop node's per-branch results via state._subflowGroups.
 function makeSelectNextLikeNode() {
   return {
     kind: "subflow",
@@ -164,8 +132,6 @@ async function childFlowIds(harness, parentFlowId, nodeId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// Raised above the sibling e2e files' tighter default — a full-suite
-// concurrent run showed the tighter margin flakes under load.
 function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -188,9 +154,9 @@ describe("childFlows:true loop selector reading a prior loop node's state._subfl
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedCandidates(harness, record.flowId, [
-      { id: "job-1", value: 1 },  // RATE.score = 2  — below threshold (5), should NOT reach SELECT_NEXT
-      { id: "job-2", value: 4 },  // RATE.score = 8  — above threshold, SHOULD reach SELECT_NEXT
-      { id: "job-3", value: 6 },  // RATE.score = 12 — above threshold, SHOULD reach SELECT_NEXT
+      { id: "job-1", value: 1 },  // RATE.score = 2, below threshold (5)
+      { id: "job-2", value: 4 },  // RATE.score = 8
+      { id: "job-3", value: 6 },  // RATE.score = 12
     ]);
     await executor.runFlow(record.flowId);
     // Two loop stages, each needs its own flush for children to run + parent to auto-resume.
@@ -202,9 +168,6 @@ describe("childFlows:true loop selector reading a prior loop node's state._subfl
     assert.equal(scoreChildIds.length, 3, "all 3 candidates spawn a SCORE child");
     for (const id of scoreChildIds) assert.equal((await runStore.get(id)).status, "succeeded");
 
-    // The actual regression assertion: if executeSubflowNode didn't enrich
-    // state before calling SELECT_NEXT.selector, this would be 0 regardless
-    // of SCORE's outcome.
     const selectChildIds = await childFlowIds(harness, record.flowId, "SELECT_NEXT");
     assert.equal(selectChildIds.length, 2, "SELECT_NEXT's selector correctly read state._subflowGroups.SCORE and picked the 2 qualifying ids");
     const pickedScores = (await Promise.all(selectChildIds.map(async (id) => {
@@ -218,9 +181,6 @@ describe("childFlows:true loop selector reading a prior loop node's state._subfl
   });
 
   test("one SCORE branch failing does not suppress the others from reaching SELECT_NEXT", async () => {
-    // A candidate flagged shouldFail makes RATE throw — the closest
-    // in-fixture analog to the real subagent timeout that failed one of ten
-    // real SCORE branches in the live incident this test guards against.
     const throwingScoreNode = {
       kind: "subflow",
       childFlows: true,
@@ -245,9 +205,9 @@ describe("childFlows:true loop selector reading a prior loop node's state._subfl
 
     const record = await executor.start("test_parent", {}, { kind: "test" });
     await store_seedCandidates(harness, record.flowId, [
-      { id: "job-a", value: 10, shouldFail: false }, // score 20 — qualifies
-      { id: "job-b", value: 10, shouldFail: true },  // throws — should not suppress job-a/job-c
-      { id: "job-c", value: 10, shouldFail: false }, // score 20 — qualifies
+      { id: "job-a", value: 10, shouldFail: false }, // score 20
+      { id: "job-b", value: 10, shouldFail: true },  // score 20, throws
+      { id: "job-c", value: 10, shouldFail: false }, // score 20
     ]);
     await executor.runFlow(record.flowId);
     await flush();

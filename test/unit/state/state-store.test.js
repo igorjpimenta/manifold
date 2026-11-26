@@ -1,11 +1,3 @@
-/**
- * Unit tests for state/state-store.js: finish/skip/fail/cancel must call
- * maybeResumeParent when a terminal child completes the last non-terminal
- * sibling under its loop node, and must stay a safe no-op when
- * nodeExecutionsStore/resumeParentRef aren't wired in (the real index.js
- * call sites always wire them, but every other test harness in this repo
- * constructs createStateStore without them, so that path must never throw).
- */
 import { test, describe, afterEach, after } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -33,9 +25,6 @@ async function makeHarness({ withResumeHook = true } = {}) {
   return { runStore, nodeExecutionsStore, store, resumed };
 }
 
-// process.nextTick-flushing helper — maybeResumeParent runs as a fire-and-
-// forget promise inside triggerParentResume, so tests need one microtask
-// turn before asserting on its side effects.
 function flush() {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -44,11 +33,6 @@ describe("createStateStore — create() pipelineId integrity", () => {
   let runStore;
   afterEach(() => { runStore?.close(); });
 
-  // create() must let its own pipelineId argument win over initialState's
-  // pipelineId: the child-spawn path builds initialState from a deep clone
-  // of the parent's own state, which already carries the parent's
-  // pipelineId — the reverse spread order would silently redirect the new
-  // flow onto the WRONG pipeline.
   test("the intended pipelineId always wins, even when initialState carries its own (different) pipelineId field", async () => {
     runStore = await createRunStore({ dbPath: tmpPath("create-pid-runs") });
     const store = createStateStore({}, "test-owner", { runStore });
@@ -72,11 +56,6 @@ describe("createStateStore — resume-trigger wiring", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
-  // A real flow_runs row, blocked (as dispatchLoopChildren would leave it)
-  // — maybeResumeParent's flipToRunningAndResume needs a genuine row to
-  // flip back to 'running' before calling resume() (resume() is just
-  // runFlow(), whose own first check returns immediately for a flow still
-  // in status='blocked').
   async function makeBlockedParent(store) {
     const parent = await store.create({ pipelineId: "p", initialState: {} });
     await store.setWaiting({
@@ -161,7 +140,6 @@ describe("createStateStore — resume-trigger wiring", () => {
   });
 
   test("stays a safe no-op when nodeExecutionsStore/resumeParentRef aren't wired in", async () => {
-    // harness NOT used here — we deliberately omit nodeExecutionsStore/resumeParentRef
     const runStore = await createRunStore({ dbPath: tmpPath("state-store-bare-runs") });
     try {
       const store = createStateStore({}, "test-owner", { runStore });
@@ -174,21 +152,10 @@ describe("createStateStore — resume-trigger wiring", () => {
   });
 });
 
-// ── triggerAdmissionRelease — promotion wake routing ──────────────────────────
-//
-// wakePromotedRelease (engine/admission-promotion-resume.js) only drives
-// promotions of a kind the engine admits (flow-start/child-dispatch). These
-// tests exercise that routing through the real public API (store.finish),
-// not by calling the private triggerAdmissionRelease directly.
 describe("createStateStore — triggerAdmissionRelease promotion routing", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); });
 
-  // A fake admissionQueueStore whose releaseByFlow reports a caller-supplied
-  // promotion only for kind:"child-dispatch" (triggerAdmissionRelease's own
-  // Promise.all releases both "flow-start" and "child-dispatch" for the
-  // finishing flow, and picks whichever result carries a promotion — arbitrary
-  // which of the two we attach it to for these tests).
   function makeFakeAdmissionQueueStore(promoted) {
     return {
       async releaseByFlow({ kind }) {
@@ -226,9 +193,6 @@ describe("createStateStore — triggerAdmissionRelease promotion routing", () =>
   test("a child-dispatch promotion pointing at a real blocked flow IS routed through and resumes it", async () => {
     const runStore = await createRunStore({ dbPath: tmpPath("state-store-routing-runs") });
     harness = { runStore };
-    // Seed the promotion TARGET first, via its own admission-free store —
-    // this flow must already exist and be blocked before the store-under-
-    // test's admissionQueueStore starts reporting it as promoted.
     const seedStore = createStateStore({}, "test-owner", { runStore });
     const target = await seedStore.create({ pipelineId: "p2", initialState: {} });
     await seedStore.setWaiting({
@@ -267,8 +231,6 @@ describe("createStateStore — triggerAdmissionRelease promotion routing", () =>
     assert.match(warnings[0], /did not resume: parent_not_found/);
   });
 });
-
-// ── Structured emitter wiring ─────────────────────────────────────────────────
 
 describe("createStateStore — structured emitters", () => {
   let runStore;

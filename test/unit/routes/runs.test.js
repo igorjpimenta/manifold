@@ -1,17 +1,7 @@
-/**
- * Unit tests for routes/runs.js
- *
- * Verifies:
- *   - registerRunRoutes registers 4 routes at the right paths/auth/match.
- *   - Method guards on cost + list + queue routes.
- *   - Cost, list, and queue handlers return expected shapes.
- */
 import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js);
-// the authReq helper below sends it, matching the "Bearer x" test token.
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = "x";
 after(() => {
@@ -19,20 +9,10 @@ after(() => {
   else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
-// sendFullRun calls failureStore.queryErrorsByFlow(...) and
-// getNodeExecutionsStore().getInvocation(...) (parent-link resolution), and
-// the runs list handler calls .summarizeChildrenByFlowIds(...) (branch
-// summary) — all mocked so tests are deterministic regardless of the real
-// (or singleton-cached) DB.
 let queryErrorsByFlowImpl = () => [];
 let queryErrorsByFlowIdsImpl = () => new Map();
 let summarizeChildrenByFlowIdsImpl = () => new Map();
 let getInvocationImpl = () => null;
-// sendFullRun enriches via assembleState(), which reads
-// listResultsForFlow/listSubflowNodeIdsForFlow through optional chaining
-// (safe when absent from this mock — resolves to []), and separately
-// overrides .gates via listGateRecordsForFlow (called directly, not
-// optional-chained — must be mocked or every sendFullRun test throws).
 let listGateRecordsForFlowImpl = () => ({});
 let listResultsForFlowImpl = () => [];
 const nodeExecutionsUrl = new URL("../../../state/node-executions.js", import.meta.url).href;
@@ -77,8 +57,6 @@ function makeDeps(api, overrides = {}) {
     ...overrides,
   };
 }
-
-// ── registration ──────────────────────────────────────────────────────────────
 
 describe("registerRunRoutes — registration", () => {
   test("registers exactly 6 routes", () => {
@@ -146,8 +124,6 @@ describe("registerRunRoutes — registration", () => {
   });
 });
 
-// ── method guards ─────────────────────────────────────────────────────────────
-
 describe("registerRunRoutes — method guards", () => {
   test("cost route: POST → 405", async () => {
     const { api, routes } = createMockApi();
@@ -176,8 +152,6 @@ describe("registerRunRoutes — method guards", () => {
     assert.equal(res.statusCode, 405);
   });
 });
-
-// ── handler behaviour ─────────────────────────────────────────────────────────
 
 describe("registerRunRoutes — cost handler", () => {
   test("returns {sinceMs, untilMs, total, pipelines}", async () => {
@@ -345,8 +319,6 @@ describe("registerRunRoutes — runs list handler", () => {
   });
 });
 
-// ── sendFullRun (GET /manifold/runs/:flowId) — errorEntries ─────────────────
-
 describe("registerRunRoutes — sendFullRun errorEntries", () => {
   test("includes a top-level errorEntries array sourced from failureStore.queryErrorsByFlow", async () => {
     queryErrorsByFlowImpl = (flowId) => {
@@ -366,10 +338,6 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     assert.equal(res.statusCode, 200);
     const body = JSON.parse(res.body);
     assert.deepEqual(body.errorEntries, [{ nodeId: "SUBMIT", subflowKey: null, message: "boom", at: 1 }]);
-    // stateJson otherwise ships unchanged — only `loop`/`errors` are
-    // stripped, neither present on this fixture. `gates` is always present
-    // (sourced from listGateRecordsForFlow, not the raw stateJson blob)
-    // — {} here since this fixture's flow never opened a gate.
     assert.deepEqual(body.stateJson, { pipelineId: "team_pipe", gates: {} });
   });
 
@@ -394,8 +362,6 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     const { api, routes } = createMockApi();
     const fakeRun = {
       flowId: "flow-legacy", status: "failed",
-      // Fixture's stored stateJson carries a baked-in errors[] the handler
-      // must strip.
       stateJson: { pipelineId: "team_pipe", errors: [{ node: "SUBMIT", message: "boom", at: 1 }] },
       lastStep: "SUBMIT",
       createdAt: 1000, updatedAt: 2000,
@@ -409,8 +375,6 @@ describe("registerRunRoutes — sendFullRun errorEntries", () => {
     assert.deepEqual(body.errorEntries, [{ nodeId: "SUBMIT", subflowKey: null, message: "boom", at: 1 }]);
   });
 });
-
-// ── sendFullRun — parent-run link resolution ───────────────────────────────
 
 describe("registerRunRoutes — sendFullRun parent-link resolution", () => {
   test("top-level flow (no parentInvocationId): parentFlowId/nodeId/subflowKey are null, pipelineId unchanged", async () => {
@@ -443,7 +407,7 @@ describe("registerRunRoutes — sendFullRun parent-link resolution", () => {
     const { api, routes } = createMockApi();
     const fakeChild = {
       flowId: "flow-child", status: "queued",
-      stateJson: { pipelineId: "nyxen_linkedin-prospect::FETCH_PROFILES" }, // synthetic — must NOT be what's returned
+      stateJson: { pipelineId: "nyxen_linkedin-prospect::FETCH_PROFILES" },
       lastStep: "__start__",
       createdAt: 1000, updatedAt: 2000,
       parentInvocationId: "inv-1",
@@ -490,18 +454,9 @@ describe("registerRunRoutes — sendFullRun parent-link resolution", () => {
   });
 });
 
-// ── sendFullRun — assembleState() + gate_records ────────────────────────────
-// stateJson comes from assembleState() (baseState + each node's own
-// resultJson replayed on top), and .gates is always overridden from
-// listGateRecordsForFlow — never assembleState()'s
-// own generic per-key merge, which is unsafe specifically for .gates (see
-// routes/runs.js's own comment on the staleness class this avoids).
-
 describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () => {
   test("stateJson.gates comes from listGateRecordsForFlow, not the raw stateJson blob's own .gates", async () => {
     queryErrorsByFlowImpl = () => [];
-    // A deliberately stale/wrong value baked into the raw stateJson blob —
-    // proves the response never trusts it.
     listGateRecordsForFlowImpl = (flowId) => {
       assert.equal(flowId, "flow-gated");
       return { GATE_A: { decision: "approved", at: 5 } };
@@ -530,8 +485,6 @@ describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () =>
     const { api, routes } = createMockApi();
     const fakeRun = {
       flowId: "flow-resultjson", status: "succeeded",
-      // SCAN's own key is absent from the raw stateJson blob — only
-      // assembleState()'s resultJson replay produces it.
       stateJson: { pipelineId: "team_pipe" },
       lastStep: "SCAN",
       createdAt: 1000, updatedAt: 2000,
@@ -546,8 +499,6 @@ describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () =>
     assert.deepEqual(body.stateJson.SCAN, { listings: ["a", "b"] }, "resultJson replay merges the node's own output in");
   });
 });
-
-// ── rerun handler: stamped identity forwarding ──────────────────────────────
 
 describe("registerRunRoutes — rerun handler", () => {
   test("forwards stamped caller identity to _elev/rerun", async () => {

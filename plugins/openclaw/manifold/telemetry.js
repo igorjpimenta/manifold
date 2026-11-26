@@ -1,10 +1,8 @@
-// telemetry.js — the adapter's half of telemetry: translate openclaw's
-// lifecycle hooks into manifold's semantic events.
-//
-// Core owns what the events mean (lineage rows, cost rows, ancestry,
-// budget); this module owns only the harness's field names. Posts are
-// fire-and-forget: a missed event costs one row, a blocked hook costs the
-// harness.
+// The adapter's half of telemetry: translate openclaw's lifecycle hooks into
+// manifold's semantic events. Core owns what the events mean (lineage, cost,
+// ancestry, budget); this module owns only the harness's field names. Posts
+// are fire-and-forget: a missed event costs one row, a blocked hook costs
+// the harness.
 
 export function translateHook(hook, event, ctx) {
   if (hook === "before_agent_start" || hook === "session_start") {

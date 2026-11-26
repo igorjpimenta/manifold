@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { displayRootLabel, displayRootKind, stripTeamPrefix } from "../../../telemetry/labels.js";
 
-// ── stripTeamPrefix ────────────────────────────────────────────────────────────
 
 describe("stripTeamPrefix", () => {
   it("strips the leading <team>_ segment for any team, not just one hardcoded name", () => {
@@ -21,7 +20,6 @@ describe("stripTeamPrefix", () => {
   });
 });
 
-// ── displayRootLabel ───────────────────────────────────────────────────────────
 
 describe("displayRootLabel", () => {
   it("returns null when label is falsy", () => {
@@ -85,7 +83,6 @@ describe("displayRootLabel", () => {
   });
 });
 
-// ── displayRootKind ────────────────────────────────────────────────────────────
 
 describe("displayRootKind", () => {
   it("maps cron-owner and cron-tick to Cron", () => {

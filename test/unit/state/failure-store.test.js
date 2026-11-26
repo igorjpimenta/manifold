@@ -1,17 +1,3 @@
-/**
- * Unit tests for state/failure-store.js
- *
- * Covers: createFailureStore — schema creation + idempotent open;
- * summarize (raw-stored, checked via SQL, reachable via
- * recordEngineFailure); classifyRecoveryHint (computed, checked via get()
- * against raw-seeded error_type/summary pairs); upsertFailureRow's two
- * identity paths (execution_id conflict, null-execution_id fallback
- * dedup); deriveFailureContext (pipeline_id via flow_runs,
- * branch_item_id/failure_node via invocation); computeResolvedAt's two
- * mechanisms (same-flow completion, cross-flow supersession); list()/get();
- * recordEngineFailure(); queryErrorsByFlow()/queryErrorsByFlowIds().
- */
-
 import { test, describe, before, after, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -21,16 +7,11 @@ import { createClient } from "@libsql/client";
 import { createFailureStore } from "../../../state/failure-store.js";
 import { failureEmitter } from "../../../events.js";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
-
 function tmpDb() {
   return path.join(os.tmpdir(), `gf-test-${randomUUID()}.sqlite`);
 }
 
 async function makeStore(overrides = {}) {
-  // Always inject a noop nodeExecutionsStore so the real
-  // getNodeExecutionsStore() singleton — which opens and migrates the
-  // default DB path — is never triggered in tests.
   const store = createFailureStore({
     dbPath: tmpDb(),
     nodeExecutionsStore: makeFakeNodeExecutions(),
@@ -56,12 +37,6 @@ async function makeStore(overrides = {}) {
   });
 }
 
-// failure-store.js's nodeExecutionsStore is injectable specifically so
-// tests don't fall through to the real getNodeExecutionsStore() singleton.
-// The fake exposes only the three accessors failure-store.js actually
-// calls. getLatestExecutionOutcomeForItem's real shape is
-// {executionId, exitedAt} (no `error`) — "did it succeed" is answered by
-// computeResolvedAt asking failure_events directly for that execution_id.
 function makeFakeNodeExecutions({
   invocations = {},
   latestExecutionForNode = () => null,
@@ -74,10 +49,7 @@ function makeFakeNodeExecutions({
   };
 }
 
-// flow_runs isn't created by failure-store.js's own migrator — it belongs
-// to run-store.js. deriveFailureContext/computeResolvedAt read it directly
-// via drizzle, so tests exercising pipeline_id derivation or same-flow
-// resolution need to hand-create it against the same DB file.
+// flow_runs lives in run-store's migrator, not failure-store's — hand-create for direct reads.
 async function seedFlowRun(store, { flowId, pipelineId = "pipe", status = "running", updatedAt = Date.now() }) {
   await store._db.execute(`
     CREATE TABLE IF NOT EXISTS flow_runs (
@@ -99,8 +71,6 @@ async function seedFlowRun(store, { flowId, pipelineId = "pipe", status = "runni
   });
 }
 
-// Raw insert matching the stored shape — used where a test needs to seed
-// a row directly rather than go through recordEngineFailure.
 async function seedExecutionChain(store, { flowId, invocationId = null, executionId = null, at = Date.now() } = {}) {
   let invId = invocationId;
   if (invId) {
@@ -155,8 +125,6 @@ async function insertRawRow(store, { id = randomUUID(), flowId = "f1", failedAt 
   return id;
 }
 
-// ─── createFailureStore — schema + migration ─────────────────────────────────
-
 describe("createFailureStore — DB setup", () => {
   test("creates DB, table, and indexes without throwing", async () => {
     const store = await makeStore();
@@ -174,12 +142,6 @@ describe("createFailureStore — DB setup", () => {
     await s2.close();
   });
 });
-
-
-// ─── summarize — still a raw-stored column ────────────────────────────────────
-//
-// summarize remains live — recordEngineFailure still calls it — and the
-// coverage below exercises it through that path.
 
 describe("summarize — via failure_summary (still a raw column)", () => {
   test("stores long string truncated to 280 chars with ellipsis", async () => {
@@ -213,11 +175,6 @@ describe("summarize — via failure_summary (still a raw column)", () => {
     store.close();
   });
 });
-
-// ─── classifyRecoveryHint — computed, checked via get() ───────────────────────
-// Exercised directly against a raw-seeded (error_type, summary) pair —
-// classifyRecoveryHint is a pure function of the STORED error_type/summary
-// and doesn't care how they got there.
 
 describe("classifyRecoveryHint — via get() (computed at read time)", () => {
   async function hintFor({ errorType = null, summary = "" } = {}) {
@@ -276,8 +233,6 @@ describe("classifyRecoveryHint — via get() (computed at read time)", () => {
   });
 });
 
-// ─── deriveFailureContext — pipeline_id / branch_item_id / failure_node ──────
-
 describe("deriveFailureContext — via get()", () => {
   test("pipeline_id derives from flow_runs via flow_id, even with no invocation_id", async () => {
     const store = await makeStore();
@@ -321,11 +276,7 @@ describe("deriveFailureContext — via get()", () => {
   });
 });
 
-// ─── computeResolvedAt — the two resolution mechanisms ───────────────────────
-
 describe("computeResolvedAt — via get()", () => {
-  // Every failure_events row is guaranteed to trace to a real throw by
-  // construction, so this mechanism is unconditional on flow status alone.
   test("same-flow completion resolves unconditionally once the flow reaches succeeded/skipped", async () => {
     const flowId = randomUUID();
     const store = await makeStore();
@@ -356,16 +307,6 @@ describe("computeResolvedAt — via get()", () => {
     store.close();
   });
 
-  // Cross-flow supersession — matching a LATER invocation of the same
-  // (pipeline_id, node_id, subflow_key) tuple, in ANY flow, as resolving
-  // THIS failure — must stay false: subflow_key isn't always a real
-  // per-item identity (single-item retry-cascade nodes like SUBMIT
-  // dispatch every item under the same constant literal key), so tuple
-  // matching would falsely resolve one job's failure because an unrelated
-  // job's later dispatch of the same node succeeded. These tests prove a
-  // later, unrelated dispatch of the identical tuple does NOT resolve
-  // this failure, root or subflow-child alike — resolution is
-  // same-flow-completion only.
   async function seedChildOutcome(store, { pipelineId = "pipe", nodeId = "SUBMIT", subflowKey = "job-1", invokedAt = Date.now(), childStatus = "succeeded", childUpdatedAt = Date.now() }) {
     await ensureInvocationsTable(store);
     const parentFlowId = randomUUID();
@@ -429,27 +370,16 @@ describe("computeResolvedAt — via get()", () => {
     });
     const store = await makeStore({ nodeExecutionsStore });
     const id = await insertRawRow(store, { invocationId, failedAt: 1000 });
-    await seedChildOutcome(store, { invokedAt: 200, childStatus: "succeeded", childUpdatedAt: 500 }); // before failedAt
+    await seedChildOutcome(store, { invokedAt: 200, childStatus: "succeeded", childUpdatedAt: 500 });
     const row = await store.get(id);
     assert.equal(row.resolved_at, null);
     store.close();
   });
 
   test("branch_item_id still derives via the parent_invocation_id fallback, but resolved_at stays null regardless of a later cross-flow success", async () => {
-    // Mirrors what actually happens in production: the failing node
-    // (e.g. SUBMIT_CODE) is dispatched INSIDE a subflow's spawned child
-    // flow, so its own invocation carries subflowKey:null — the tag only
-    // lives on the PARENT's own invocation of the subflow node, reachable
-    // via this failure's flow's own flow_runs.parent_invocation_id. This
-    // display-only derivation (branch_item_id) is unaffected by removing
-    // cross-flow supersession — only resolution semantics changed.
     const failingInvocationId = randomUUID();
     const failingFlowId = randomUUID();
     const parentInvocationId = randomUUID();
-    // getInvocation() is a pure lookup against nodeExecutionsStore (the
-    // mock here), NOT a raw-SQL join like the "later dispatch" query
-    // below — so the parent invocation only needs to exist in the mock,
-    // not as a real flow_node_invocations row.
     const nodeExecutionsStore = makeFakeNodeExecutions({
       invocations: {
         [failingInvocationId]: { pipelineId: "pipe::SUBMIT", nodeId: "SUBMIT_CODE", subflowKey: null },
@@ -457,9 +387,6 @@ describe("computeResolvedAt — via get()", () => {
       },
     });
     const store = await makeStore({ nodeExecutionsStore });
-    // This failure's own flow is itself a subflow child — seed its
-    // flow_runs row with a parent_invocation_id pointing at the parent's
-    // per-item dispatch of "SUBMIT" with subflowKey "job-1".
     await seedFlowRun(store, { flowId: failingFlowId, status: "failed" });
     const parentFlowId = randomUUID();
     await seedFlowRun(store, { flowId: parentFlowId, status: "running" });
@@ -473,8 +400,6 @@ describe("computeResolvedAt — via get()", () => {
       args: [parentInvocationId, failingFlowId],
     });
     const id = await insertRawRow(store, { flowId: failingFlowId, invocationId: failingInvocationId, failedAt: 1000 });
-    // A LATER dispatch of the same "pipe"/"SUBMIT"/"job-1" item spawned a
-    // child that succeeded — this must not resolve the failure.
     await seedChildOutcome(store, { pipelineId: "pipe", nodeId: "SUBMIT", subflowKey: "job-1", invokedAt: 6000, childStatus: "succeeded", childUpdatedAt: 5000 });
     const row = await store.get(id);
     assert.equal(row.branch_item_id, "job-1", "branch_item_id should still derive via the parent_invocation_id fallback");
@@ -491,14 +416,11 @@ describe("computeResolvedAt — via get()", () => {
   });
 });
 
-// ─── upsertFailureRow — identity ──────────────────────────────────────────────
-
 describe("upsertFailureRow (via recordEngineFailure) — identity", () => {
   test("execution_id conflict updates the existing row instead of duplicating", async () => {
     const store = await makeStore();
     const executionId = randomUUID();
     await insertRawRow(store, { flowId: "f1", executionId, failedAt: 1000, failureSummary: "first" });
-    // recordEngineFailure with the SAME executionId should update in place.
     await store.recordEngineFailure({ flowId: "f1", pipelineId: "pipe", failureNode: "N", message: "second", state: {}, executionId });
     const { rows } = await store._db.execute({ sql: "SELECT * FROM failure_events WHERE execution_id = ?", args: [executionId] });
     assert.equal(rows.length, 1, "must not duplicate on execution_id conflict");
@@ -526,8 +448,6 @@ describe("upsertFailureRow (via recordEngineFailure) — identity", () => {
     store.close();
   });
 });
-
-// ─── list() ──────────────────────────────────────────────────────────────────
 
 describe("list()", () => {
   test("no args returns only unresolved rows", async () => {
@@ -602,8 +522,6 @@ describe("list()", () => {
   });
 });
 
-// ─── get() ───────────────────────────────────────────────────────────────────
-
 describe("get()", () => {
   test("returns full derived row by id", async () => {
     const store = await makeStore();
@@ -622,11 +540,6 @@ describe("get()", () => {
     store.close();
   });
 });
-
-// failureEmitter coverage lives in recordEngineFailure()'s describe below
-// — same emit call, same payload shape.
-
-// ─── recordEngineFailure() ────────────────────────────────────────────────────
 
 describe("recordEngineFailure()", () => {
   test("emits failure.recorded with failureId + flowId when emit is injected", async () => {
@@ -657,11 +570,6 @@ describe("recordEngineFailure()", () => {
     store.close();
   });
 
-  // child-resume-trigger.js's maybeResumeParent calls this with
-  // errorType:"subflow-mode-not-satisfied" for a mode-not-satisfied
-  // failure — not a real engine-caught throw, a policy verdict (see this
-  // function's own doc comment). Default (previous test) stays null —
-  // every other existing caller unaffected.
   test("explicit errorType param is stored as passed", async () => {
     const store = await makeStore();
     const flowId = randomUUID();
@@ -748,8 +656,6 @@ describe("recordEngineFailure()", () => {
       flowId, pipelineId: "test_pipe", failureNode: "NODE_X", message: "something broke", state: {},
     });
     assert.ok(emitted !== null, "failureEmitter fired");
-    // Same shape as get()/list() — this is what a consumer's failure-event
-    // projector actually reads.
     assert.equal(emitted.flow_id, flowId);
     assert.equal(emitted.error_type, null);
     assert.equal(emitted.failure_summary, "something broke");
@@ -767,13 +673,7 @@ describe("recordEngineFailure()", () => {
   });
 });
 
-// ─── queryErrorsByFlow() / queryErrorsByFlowIds() ─────────────────────────────
-// queryErrorsByFlow()/queryErrorsByFlowIds() run against failure_events LEFT
-// JOIN flow_node_invocations, returning ErrorEntry-shaped rows.
-// flow_node_invocations belongs to node-executions.js's own
-// migrator, not failure-store.js's — these isolated test DBs need it
-// hand-created, same pattern seedFlowRun already uses for flow_runs.
-
+// flow_node_invocations lives in node-executions' migrator — hand-create here.
 async function ensureInvocationsTable(store) {
   await store._db.execute(`
     CREATE TABLE IF NOT EXISTS flow_node_invocations (

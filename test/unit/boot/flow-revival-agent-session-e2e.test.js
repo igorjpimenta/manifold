@@ -1,25 +1,3 @@
-/**
- * E2E: boot/flow-revival.js's agent-vs-fresh-dispatch classification, driven
- * against a real executor + real state-store + real session-index (all
- * tmp-sqlite, no mocks beyond the subagent runtime boundary itself). Proves
- * the two paths discussed while designing this — a flow genuinely
- * interrupted mid-turn gets revived with the continuation prompt (REVIVAL_MSG,
- * same session), a flow that was only ever queued waiting for a dispatch
- * slot and never actually started gets a fresh dispatch (its own
- * promptBuilder output, regardless of the target node being agent-kind) —
- * against the real state_json / flow_sessions / flow_node_invocations
- * schema, not a hand-rolled mock of the classification logic.
- *
- * The one mock is the agent runtime itself (`runTurn`) — same
- * convention as executor.test.js's fallback-circuit-breaker suite — since
- * we're proving flow-revival's classification and executor's dispatch
- * wiring, not exercising a real LLM call.
- *
- * Isolated-sandbox discipline:
- * independent tmp-sqlite run-store/node-executions/session-index/state-store
- * instances, never ~/.openclaw/runtime.sqlite; fixture pipeline registered
- * directly in an in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -41,9 +19,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior
-// (covered by admission-queue-store.test.js) — just the always-admits fake is needed.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -52,9 +27,6 @@ function makeAdmissionQueueStore(overrides = {}) {
   };
 }
 
-// Fixture pipeline: a single agent-kind node. promptBuilder's output is
-// distinguishable from REVIVAL_MSG so a test can tell which one the fake
-// subagent actually received.
 function makeFixturePipeline() {
   return {
     id: "test_agent_fixture",
@@ -124,10 +96,6 @@ describe("flow-revival + session-index — agent-node revival classification (fi
     let releaseHang = null;
     const runTurn = async ({ session, message }) => {
       messagesReceived.push({ session, message });
-      // Hang here — simulating the gateway process dying mid-turn, after
-      // sessionIndex.record() already fired (confirmed ordering: record()
-      // happens before this await, at the top of dispatchAgentWithRetry)
-      // but before the turn ever resolves.
       await new Promise((resolve) => { releaseHang = resolve; });
       return { text: "done", runId: "run-1" };
     };
@@ -135,10 +103,8 @@ describe("flow-revival + session-index — agent-node revival classification (fi
     const { executor, runStore, sessionIndex } = harness;
 
     const record = await executor.start("test_agent_fixture", {}, { kind: "test" });
-    executor.runFlow(record.flowId, "fresh").catch(() => {}); // never awaited to completion — simulates the crash
+    executor.runFlow(record.flowId, "fresh").catch(() => {});
 
-    // Wait for the dispatch to actually reach the (now-hanging) subagent
-    // call — proves sessionIndex.record() has already fired by this point.
     const deadline = Date.now() + 2000;
     while (messagesReceived.length === 0 && Date.now() < deadline) await sleep(10);
     assert.equal(messagesReceived.length, 1, "the fresh dispatch must have reached the subagent boundary");
@@ -148,9 +114,6 @@ describe("flow-revival + session-index — agent-node revival classification (fi
     assert.equal(flowRow.status, "running", "still 'running' — the node dispatch never resolved");
     assert.equal(await sessionIndex.hasSessionForNode(record.flowId, "AGENT_STEP"), true, "session record exists — dispatch genuinely started");
 
-    // Now drive the real revival pass against this "orphan" (never actually
-    // crashed the process — but from the DB's point of view, indistinguishable
-    // from a real crash: status='running', session recorded, node never resolved).
     const result = await reviveOrphanFlows({
       all: [flowRow],
       pipelines: harness.pipelinesRef.value,
@@ -165,9 +128,6 @@ describe("flow-revival + session-index — agent-node revival classification (fi
     assert.equal(result.revivedAgent, 1, "classified as a genuine in-flight interruption");
     assert.equal(result.revived, 1);
 
-    // The revival's OWN dispatch attempt (reviveAgentKindOrphan) reaches the
-    // subagent again, this time hanging on messagesReceived[1] — confirms it
-    // sent REVIVAL_MSG to the SAME session as the original attempt.
     const deadline2 = Date.now() + 2000;
     while (messagesReceived.length < 2 && Date.now() < deadline2) await sleep(10);
     assert.equal(messagesReceived.length, 2);
@@ -186,11 +146,6 @@ describe("flow-revival + session-index — agent-node revival classification (fi
     harness = await makeHarness({ runTurn });
     const { store, runStore, sessionIndex, executor } = harness;
 
-    // Never went through executor.start()/runFlow() at all — the queued row
-    // is written directly, a flow queued on an in-node resource wait before
-    // AGENT_STEP ran. No dispatch was ever attempted, so no session record
-    // exists. lastStep stays "__start__"; the pending target node is
-    // carried by waitJson.nodeId, not lastStep.
     const flow = await store.create({ pipelineId: "test_agent_fixture", initialState: {} });
     await store.setQueued({
       flowId: flow.flowId, expectedRevision: flow.revision, lastStep: flow.lastStep,

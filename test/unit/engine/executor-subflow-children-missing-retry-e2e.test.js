@@ -1,26 +1,3 @@
-/**
- * Full-engine E2E for a subflow node's synthetic child pipeline
- * (id `${parentId}::${nodeId}`,
- * minted by loader.js's registerSubflowChildren) going transiently missing
- * from pipelinesRef.value. Every spawned child fails immediately at
- * pipeline resolution with "pipeline not loaded: ..." — before any node
- * ever dispatched, so its failure_events row has no invocation_id/
- * execution_id/error_type. The parent auto-fails with
- * subflow-mode-not-satisfied, and tapping Retry on the parent
- * cascade-redirects to the real child failure(s).
- *
- * The test drives this through the REAL loader
- * (real on-disk pipeline, real registerSubflowChildren-minted synthetic
- * id), the REAL executor/state-store/child-resume-trigger stack, and the
- * REAL retryFailureBranch — then proves retrying the parent's failure
- * recovers the run.
- *
- * Isolated-sandbox discipline:
- * independent
- * tmp-sqlite run-store/node-executions/failure-store instances, never
- * ~/.openclaw/runtime.sqlite; a real temp pipelines directory, never
- * touching workspace/.pipelines/.
- */
 import { test, describe, afterEach, mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdir, writeFile, rm } from "node:fs/promises";
@@ -28,20 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { randomUUID } from "node:crypto";
 
-// routes/operator-retry.js's cascade-redirect (findRealFailuresBeneath) calls
-// the module-level getNodeExecutionsStore() SINGLETON directly rather than
-// any injected instance — by design in production (one process, one real
-// DB), but that means a naive test harness's own isolated nodeExecutions
-// instance would never be seen by it. Redirect the singleton to this
-// harness's real instance (set once makeHarness() creates it below) —
-// spreading the real module's other exports through unchanged so
-// createNodeExecutionsStore (used directly by this harness) keeps working.
-//
-// Every other module under test (loader.js, executor.js, ...) is imported
-// dynamically AFTER this mock registers, not via static top-level imports —
-// static imports are hoisted above any top-level await, which would link
-// them against the real, unmocked node-executions.js before the mock ever
-// takes effect.
+// operator-retry reads the getNodeExecutionsStore() singleton, and static imports hoist above mock.module — redirect the singleton and import everything after the mock registers.
 const realNodeExecutions = await import("../../../state/node-executions.js");
 let sharedNodeExecutionsStore = null;
 await mock.module("../../../state/node-executions.js", {
@@ -57,8 +21,6 @@ const { createExecutor } = await import("../../../engine/executor.js");
 const { createRetryFailure } = await import("../../../routes/operator-retry.js");
 const { assembleState } = await import("../../../engine/executor-helpers.js");
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -98,9 +60,6 @@ async function makeHarness() {
   await writeFile(path.join(pipelinesDir, "test_incident_parent", "index.js"), INCIDENT_PARENT_PIPELINE, "utf8");
 
   const logger = { info: () => {}, warn: () => {}, error: () => {} };
-  // Real loadPipelines — this is what actually mints the synthetic
-  // "test_incident_parent::SCORE" entry via registerSubflowChildren,
-  // exactly like production boot does.
   const loaded = await loadPipelines(pipelinesDir, logger);
   assert.ok(loaded.has("test_incident_parent::SCORE"), "sanity: loader minted the synthetic child pipeline");
   const pipelinesRef = { value: loaded };
@@ -167,9 +126,6 @@ describe("subflow child pipeline transiently missing, then Retry on the parent",
     harness = await makeHarness();
     const { executor, runStore, failureStore, pipelinesRef } = harness;
 
-    // Simulate the synthetic child pipeline entry going transiently
-    // missing — see engine/pipelines-watcher.test.js for the merge-loop
-    // behavior itself.
     const savedChildPipeline = pipelinesRef.value.get("test_incident_parent::SCORE");
     pipelinesRef.value.delete("test_incident_parent::SCORE");
 
@@ -195,9 +151,6 @@ describe("subflow child pipeline transiently missing, then Retry on the parent",
     assert.equal(parentFailures.length, 1);
     assert.equal(parentFailures[0].error_type, "subflow-mode-not-satisfied");
 
-    // Restore for the next test in this describe block's own harness —
-    // not required here (afterEach tears the whole harness down), kept
-    // only to make the "what recovery requires" step explicit.
     pipelinesRef.value.set("test_incident_parent::SCORE", savedChildPipeline);
   });
 
@@ -215,11 +168,6 @@ describe("subflow child pipeline transiently missing, then Retry on the parent",
 
     assert.equal((await runStore.get(record.flowId)).status, "failed", "sanity: parent failed same as the previous test");
 
-    // The transient window closes — the pipeline becomes resolvable again
-    // (in production pipelines-watcher.js either keeps the
-    // entry alive throughout, or its next successful reload repopulates
-    // it; either way, by the time a human taps Retry, the pipeline is
-    // loadable again).
     pipelinesRef.value.set("test_incident_parent::SCORE", savedChildPipeline);
 
     const [parentFailure] = await failureStore.list({ flowId: record.flowId });
@@ -237,9 +185,6 @@ describe("subflow child pipeline transiently missing, then Retry on the parent",
     const [childFlowId] = await childFlowIds(harness, record.flowId);
     const child = await runStore.get(childFlowId);
     assert.equal(child.status, "succeeded", "child actually ran this time — the pipeline resolved");
-    // state_json is entry-only —
-    // INNER's own output never lands there directly, only via resultJson,
-    // reconstructed through assembleState().
     const childState = await assembleState(childFlowId, { runStore, nodeExecutionsStore: harness.nodeExecutionsStore });
     assert.equal(childState?.INNER?.ok, true);
 

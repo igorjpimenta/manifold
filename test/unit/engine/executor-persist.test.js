@@ -56,8 +56,6 @@ function makeFlow(overrides = {}) {
   };
 }
 
-// ── persistRunningRetrying ────────────────────────────────────────────────────
-
 describe("persistRunningRetrying", () => {
   it("applies setRunning on first try", async () => {
     const flow = makeFlow();
@@ -71,7 +69,6 @@ describe("persistRunningRetrying", () => {
   it("retries on revision_conflict and succeeds", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
-    // Simulate an external revision bump
     store.setRunning({ expectedRevision: 1, lastStep: "EXTERNAL", stateJson: { pipelineId: "x" } });
     const { persistRunningRetrying } = createPersist({ store, failureStore: null, notifyFlowEnteredWaiting: null, logger });
     const result = await persistRunningRetrying({ flowId: flow.flowId, revision: 1, lastStep: "NODE_B", state: { pipelineId: "x" } });
@@ -81,7 +78,6 @@ describe("persistRunningRetrying", () => {
   it("returns retry_exhausted after REVISION_RETRY_LIMIT conflicts", async () => {
     const flow = makeFlow();
     const store = makeStore(flow, { alwaysConflict: true });
-    // Override setRunning to always conflict
     store.setRunning = () => ({ applied: false, code: "revision_conflict" });
     const { persistRunningRetrying } = createPersist({ store, failureStore: null, notifyFlowEnteredWaiting: null, logger });
     const result = await persistRunningRetrying({ flowId: flow.flowId, revision: 1, lastStep: "NODE_B", state: {} });
@@ -89,8 +85,6 @@ describe("persistRunningRetrying", () => {
     assert.equal(result.code, "retry_exhausted");
   });
 });
-
-// ── persistWaitingRetrying ────────────────────────────────────────────────────
 
 describe("persistWaitingRetrying", () => {
   it("applies setWaiting and calls notifyFlowEnteredWaiting", async () => {
@@ -123,8 +117,6 @@ describe("persistWaitingRetrying", () => {
     assert.equal(result.applied, true);
   });
 });
-
-// ── persistQueuedRetrying ─────────────────────────────────────────────────────
 
 describe("persistQueuedRetrying", () => {
   it("applies setQueued on first try", async () => {
@@ -177,8 +169,6 @@ describe("persistQueuedRetrying", () => {
   });
 });
 
-// ── persistSkipRetrying ───────────────────────────────────────────────────────
-
 describe("persistSkipRetrying", () => {
   it("applies skip on first try", async () => {
     const flow = makeFlow();
@@ -189,8 +179,6 @@ describe("persistSkipRetrying", () => {
   });
 });
 
-// ── persistFinishRetrying ─────────────────────────────────────────────────────
-
 describe("persistFinishRetrying", () => {
   it("applies finish on first try", async () => {
     const flow = makeFlow();
@@ -200,8 +188,6 @@ describe("persistFinishRetrying", () => {
     assert.equal(result.applied, true);
   });
 });
-
-// ── persistFailRetrying ───────────────────────────────────────────────────────
 
 describe("persistFailRetrying", () => {
   it("applies fail and calls recordEngineFailure", async () => {
@@ -271,12 +257,7 @@ describe("persistFailRetrying", () => {
     assert.equal(result.applied, true);
   });
 
-  // recordEngineFailure is a real async function — a synchronous mock throw
-  // (the test above) is caught by try/catch regardless of whether the call
-  // site awaits it, since the throw happens before any Promise is involved.
-  // It does NOT exercise the case this test covers: an unawaited async call
-  // rejects via an unhandled promise rejection that the try/catch can never
-  // see.
+  // A sync throw is caught by try/catch even unawaited; only an async rejection exposes a missing await.
   it("does not throw (and settles before returning) when recordEngineFailure REJECTS asynchronously", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);

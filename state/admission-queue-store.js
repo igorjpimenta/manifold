@@ -1,35 +1,19 @@
 // admission-queue-store.js — the single durable admission table for flow
-// RUNS: starting a flow (kind:"flow-start") and dispatching a subflow child
-// (kind:"child-dispatch"). One row per run; nothing inside a running flow
-// (agent nodes included) takes a slot of its own — a run executes one node
-// at a time, so the run cap already bounds everything it does.
+// RUNS (kind:"flow-start" for a start, "child-dispatch" for a subflow
+// child): one row per run; a run executes one node at a time, so the run
+// cap already bounds everything it does.
 //
-// ONE combined pool, not one per kind — deliberately. Both kinds compete
-// for the same shared count (no `kind` filter on the admitted-count query
-// or the promotion query below). This only works because admission tracks
-// flow_runs.status, not just start/end: a flow-run's own admission entry
-// (whichever kind spawned it) is held only while it's genuinely "running" —
-// the moment it goes "blocked" (a human-gate wait, or its own
-// children-pending wait while a subflow fans out), state-store.js's
-// setWaiting releases that entry via releaseByFlow(), so it stops occupying
-// a shared slot for however long it's actually idle. Without that, a parent
-// would hold its slot for its ENTIRE lifetime while its children ALSO need
-// slots — one fan-out could alone exhaust the whole pool.
+// ONE combined pool, not one per kind — both kinds compete for the same
+// shared count. This works because admission tracks flow_runs.status: a
+// flow's entry is held only while genuinely "running" — the moment it
+// leaves running, state-store's hooks release it via releaseByFlow(), so a
+// parent never holds a slot for its entire lifetime while its children
+// also need slots (one fan-out could otherwise exhaust the whole pool).
 //
-// child-dispatch releases on blocked/terminal but deliberately
-// does NOT re-request admission when a blocked child later resumes — the
-// mechanism it replaced never re-checked the cap at resume time either
-// (the cap only ever governed fan-out DISPATCH, not a continuously-
-// enforced running ceiling), so this is exact behavioral parity, not a new
-// gap. Whether flow-start (a whole run's own admission, not yet wired)
-// needs real re-admission-on-resume is still open — later stage's call.
-//
-// Atomicity: every decision (count admitted, then claim admitted-or-queued)
-// runs inside one client.transaction("write") — BEGIN IMMEDIATE, acquiring
-// SQLite's writer lock before the SELECT even runs. A bare
-// `await count-query` then, much later, a separate write is two non-atomic
-// steps, racy across concurrent callers; this is the primitive that closes
-// the window.
+// Atomicity: every decision (count admitted, then claim) runs inside one
+// client.transaction("write") — BEGIN IMMEDIATE acquires SQLite's writer
+// lock before the SELECT; a separate count-then-write would be racy across
+// concurrent callers.
 
 import path from "node:path";
 import os from "node:os";
@@ -42,9 +26,6 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// Same Proxy-wrapped async-ready factory idiom as run-store.js/state-
-// store.js — every method call transparently awaits store construction
-// (migration included) before running.
 export function createAdmissionQueueStore(opts = {}) {
   const _p = _createImpl(opts);
   return new Proxy({}, {
@@ -68,40 +49,18 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
   const { client } = await getSharedDb(dbPath);
 
   // Runs `fn(tx)` inside one BEGIN IMMEDIATE transaction, committing on
-  // success and always closing (which rolls back if not committed) — the
-  // exact try/finally shape @libsql/client's own docs specify as required.
-  // Serialized and retried on SQLITE_BUSY via state/db.js's
-  // withSharedWrite(), keyed by dbPath: @libsql/client's local sqlite3
-  // backend does NOT safely support multiple Transaction objects in flight
-  // concurrently on one shared connection — commit() itself fails with
-  // "cannot commit transaction - SQL statements in
-  // progress", consistent with concurrent Transaction objects interleaving
-  // execute() calls over the same underlying native connection and
-  // corrupting each other's in-flight statement state; a client-library
-  // limitation, not a SQLite-level one — BEGIN IMMEDIATE itself would have
-  // serialized this correctly at the file-lock level. Corroborated by this
-  // store's own test suite, which drives 30 genuinely concurrent admit()
-  // callers through it.
-  //
-  // Because withSharedWrite's queue is keyed by dbPath rather than private
-  // to this store, every OTHER writer sharing this same connection via
-  // db.js's getSharedDb (run-store.js's CAS writes, batch-writer.js's
-  // flushes for node-executions.js/node-health-store.js) serializes against
-  // this store's transactions too, once it also calls withSharedWrite for
-  // the same dbPath — closing the corruption/stall path this store's own
-  // private serializer could not (see test/unit/
-  // state/admission-queue-cross-module-contention.test.js): a plain
-  // client.execute()/db.update()/db.batch() issued on the same connection
-  // while a transaction() is open can fail instantly, bypassing the
-  // busy_timeout PRAGMA entirely, and can corrupt the transaction holder's
-  // own commit. Until every writer on this connection routes through the
-  // same primitive, that gap remains open for whichever writers haven't
-  // adopted it yet.
+  // success and always closing (rollback if not committed) — the
+  // try/finally shape @libsql/client requires. Serialized and retried on
+  // SQLITE_BUSY via withSharedWrite(), keyed by dbPath: libsql's local
+  // sqlite3 backend does NOT safely support multiple Transaction objects
+  // in flight on one shared connection (commit fails with "cannot commit
+  // transaction - SQL statements in progress"), and a plain execute() on
+  // the same connection while a transaction is open can corrupt the
+  // holder's commit — a client-library limitation, not a SQLite-level one.
   //
   // Safe to retry the whole fn(tx) on a fresh transaction: an uncommitted
-  // transaction has zero durable effect (SQLite's own atomicity), so
-  // re-running every one of fn's statements against a new tx is not a
-  // partial-redo risk.
+  // transaction has zero durable effect, so re-running every statement is
+  // not a partial-redo risk.
   async function withWriteTx(fn) {
     return withSharedWrite(dbPath, async () => {
       const tx = await client.transaction("write");
@@ -115,11 +74,9 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
     });
   }
 
-  // Shared by release(id) and releaseByFlow() — deletes the row and, if it
-  // was occupying an admitted slot, promotes the oldest queued entry across
-  // the whole combined pool. Must run inside the caller's own withWriteTx
-  // callback (not its own transaction) so both release paths stay a single
-  // atomic decision.
+  // Shared by release(id) and releaseByFlow(). Must run inside the
+  // caller's own withWriteTx callback (not its own transaction) so both
+  // release paths stay a single atomic decision.
   async function releaseRowById(tx, id) {
     const { rows: selfRows } = await tx.execute({
       sql: `SELECT status FROM flow_admission_queue WHERE id = ?`,
@@ -151,22 +108,15 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
   }
 
   return {
-    // Decides admitted-vs-queued for one new entry, atomically against the
-    // CURRENT combined count of admitted rows (all kinds pooled — see this
-    // file's header). Returns { id, status }. Never throws on contention —
+    // Idempotent per (kind, flowId, nodeId): a live row for this exact
+    // tuple is returned instead of inserting a second one — otherwise a
+    // re-entrant request (e.g. a resume racing a revival) would
+    // permanently shrink the shared pool by one slot per occurrence.
     // "queued" is a normal, expected outcome, not an error.
-    //
-    // Idempotent per (kind, flowId, nodeId): if a live (admitted or queued)
-    // row already exists for this exact tuple, returns THAT row instead of
-    // inserting a second one. Without this, any caller that re-enters the
-    // same logical request (e.g. a resume racing a revival for the same
-    // flow) creates a genuine duplicate row, permanently shrinking the
-    // shared pool by one slot per occurrence.
     //
     // A queued caller is never woken in-process: when a slot frees,
     // release() promotes the row and the releasing call site drives the
-    // flow forward through wakePromotedRelease (engine/admission-promotion-
-    // resume.js) — flip to 'running', then resume.
+    // flow forward through wakePromotedRelease.
     async admit({ kind, flowId, nodeId = null }) {
       if (!kind) throw new TypeError("admission-queue-store.admit: kind is required");
       if (!flowId) throw new TypeError("admission-queue-store.admit: flowId is required");
@@ -200,32 +150,19 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
       });
     },
 
-    // Releases one entry by id. If it was occupying an admitted slot,
-    // atomically promotes the oldest queued entry — FIFO across the WHOLE
-    // combined pool, not scoped to the releasing entry's own kind, matching
-    // the one-pool design. Returns { released, promoted }; promoted is
-    // either null or { id, flowId, nodeId, kind } for the caller to wake
-    // via wakePromotedRelease. A release() for an id that no longer exists
-    // (already released, or never existed) is a safe no-op —
-    // { released: false, promoted: null } — never throws, since a caller
-    // racing its own cleanup against a process restart shouldn't have to
-    // special-case "already gone".
+    // Promotes FIFO across the WHOLE combined pool, not just the
+    // releasing entry's kind. An id that no longer exists is a safe
+    // no-op — never throws, so a caller racing its own cleanup against a
+    // process restart needn't special-case "already gone".
     async release(id) {
       if (!id) throw new TypeError("admission-queue-store.release: id is required");
       return withWriteTx(async (tx) => releaseRowById(tx, id));
     },
 
-    // Releases the CURRENT (admitted or queued) entry for a given
-    // (flowId, kind) pair, without the caller needing to carry its own
-    // admission id around — the shape a status-store hook wants: state-
-    // store.js's setWaiting/finish/skip/fail/cancel know the flowId that
-    // just left "running" (or went terminal), not any admission id, since
-    // the flow could have crashed and been revived by a different process
-    // between admit() and now. Same promotion/notify semantics as
-    // release(id); a no-op ({ released: false, promoted: null }) when this
-    // flow never held a live entry for this kind (true for every ordinary
-    // flow that never participated in this kind's admission at all — the
-    // common case, deliberately cheap: one indexed SELECT).
+    // Releases the CURRENT entry for a (flowId, kind) without the caller
+    // carrying an admission id — the flow could have crashed and been
+    // revived by a different process between admit() and now. No-op when
+    // this flow never held a live entry for this kind.
     async releaseByFlow({ flowId, kind }) {
       if (!flowId) throw new TypeError("admission-queue-store.releaseByFlow: flowId is required");
       if (!kind) throw new TypeError("admission-queue-store.releaseByFlow: kind is required");
@@ -242,14 +179,11 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
       });
     },
 
-    // Promotes oldest queued rows into any free capacity, until the pool is
-    // full or nothing is queued. Returns the promoted entries ({ id, kind,
-    // flowId, nodeId }) for the caller to wake via wakePromotedRelease.
     // Normal operation never needs this — every release promotes exactly
-    // one row into the slot it frees — but a pool that loses admitted rows
-    // without a release (a migration deleting a whole kind, a crash between
-    // a delete and its promotion) would otherwise sit below its limit with
-    // work still queued, until enough unrelated releases happened.
+    // one row — but a pool that loses admitted rows without a release
+    // (a migration deleting a whole kind, a crash between a delete and
+    // its promotion) would otherwise sit below its limit with work still
+    // queued, until enough unrelated releases happened.
     async fillFreeSlots() {
       const limit = getLimit();
       return withWriteTx(async (tx) => {
@@ -277,15 +211,10 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
       });
     },
 
-    // Pool size in force right now — getLimit is re-read on every call so a
-    // reconfigured limit reports the new number without a restart, matching
-    // admit()'s own read.
     async limit() {
       return getLimit();
     },
 
-    // Observability / test hook — counts across the whole combined pool,
-    // not scoped to one kind (matching admit()/release()'s own scope).
     async _stats() {
       const { rows } = await client.execute(
         `SELECT status, COUNT(*) AS n FROM flow_admission_queue GROUP BY status`
@@ -295,10 +224,6 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
       return out;
     },
 
-    // Lists queued entries oldest-first — general observability / test hook.
-    // Not currently called from any boot-revival or dispatch path (see
-    // boot/flow-revival.js's own skip-direct-dispatch comment for how
-    // queued orphans are actually handled today).
     async listByStatus(status) {
       const { rows } = await client.execute({
         sql: `SELECT id, kind, flow_id, node_id, created_at, admitted_at
@@ -312,8 +237,6 @@ async function _createImpl({ dbPath = defaultDbPath(), getLimit } = {}) {
       }));
     },
 
-    // Fetches one entry by id — callers releasing/inspecting their own
-    // admission handle without going through listByStatus's full scan.
     async get(id) {
       const { rows } = await client.execute({
         sql: `SELECT id, kind, flow_id, node_id, status, created_at, admitted_at

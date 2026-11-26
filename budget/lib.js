@@ -1,5 +1,4 @@
-// Pure logic extracted from budget/index.js for unit testing.
-// No openclaw SDK or SQLite imports — safe to require in Node --test.
+// Pure logic from budget/index.js — no SDK or SQLite imports, safe in node:test.
 
 export function deserialize(row) {
   return {

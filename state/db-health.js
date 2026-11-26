@@ -1,10 +1,7 @@
-// db-health.js — synchronous per-file reachability probes.
-//
-// Used by the boot gate (refuse to finish loading on an unreadable
-// primary) and the health endpoint (honest per-file status instead of a
-// blanket ok). Synchronous better-sqlite3 on purpose: register() must
-// stay synchronous, and a probe is one indexed read, not a workload.
-// A missing file reports missing WITHOUT creating it (better-sqlite3
+// db-health.js — synchronous per-file reachability probes for the boot
+// gate and health endpoint. Synchronous better-sqlite3 on purpose:
+// register() must stay synchronous, and a probe is one indexed read. A
+// missing file reports missing WITHOUT creating it (better-sqlite3
 // creates on open — a probe must never materialize databases).
 import { existsSync } from "node:fs";
 import Database from "better-sqlite3";

@@ -1,5 +1,3 @@
-// The adapter's telemetry half: openclaw hook payloads in, semantic events
-// out. Core decides what the events mean.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";

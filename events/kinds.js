@@ -1,17 +1,14 @@
-// events/kinds.js — canonical event-kind registry.
-//
-// Core emits bare kinds (dots only, no `plugin.` prefix); the gateway
-// boundary adds the prefix. There are no legacy names: a breaking change
-// mints a new kind. Every payload contract here is the minimum a consumer
-// can rely on — producers may attach more fields, never fewer.
+// Canonical event-kind registry. Core emits bare kinds (dots only, no
+// `plugin.` prefix); the gateway boundary adds the prefix. No legacy names:
+// a breaking change mints a new kind. Every payload contract here is the
+// minimum a consumer can rely on — producers may attach more fields, never
+// fewer.
 
-// Every kind with a producer. Frozen: adding a kind is a
-// deliberate registry change, never an inline string at a call site.
-// Evolution rule (CloudEvents primer §versioning): additive payload
-// changes keep the kind; a breaking change mints a NEW kind and dual-
-// produces old and new until consumers cut over. There is deliberately no
-// integer version field — an unread version versions nothing; the kind
-// name is the version.
+// Every kind with a producer. Frozen: adding a kind is a deliberate
+// registry change, never an inline string at a call site. Evolution rule:
+// additive payload changes keep the kind; a breaking change mints a NEW kind
+// and dual-produces old and new until consumers cut over. No integer version
+// field — an unread version versions nothing; the kind name is the version.
 export const WIRE_KINDS = Object.freeze([
   "run.created",
   "run.started",
@@ -34,8 +31,6 @@ export const WIRE_KINDS = Object.freeze([
   "approval.requested",
 ]);
 
-// Named but producer-less: emitting one is a typo or a leak from a
-// producer outside this registry.
 export const RESERVED_KINDS = Object.freeze([
   "gate.dissolved",
 ]);
@@ -66,9 +61,6 @@ const REQUIRED_FIELDS = {
 
 export const SESSION_SCOPES = Object.freeze(["node", "discuss"]);
 
-// Gateway WS carries every wire kind except run.created (dashboard-only;
-// the WS sink skips it).
-
 // Dashboard-only kinds (served over the dashboard bus/SSE, never gateway
 // WS) — read by the catalog publisher, nothing else should.
 const DASHBOARD_ONLY = Object.freeze(["run.created"]);
@@ -81,8 +73,6 @@ export function isReservedKind(kind) {
   return RESERVED_KINDS.includes(kind);
 }
 
-// Throws on unknown/reserved kinds and missing fields. Returns the
-// payload untouched — validation only, no normalization.
 export function assertPayload(kind, payload) {
   if (isReservedKind(kind)) {
     throw new Error(`event kind reserved (no producer registered): ${kind}`);
@@ -111,8 +101,6 @@ export function assertPayload(kind, payload) {
   return payload;
 }
 
-// True for kinds served over the dashboard bus/SSE only — the gateway WS
-// sink skips them. Unknown kinds throw — never route an unmapped name.
 export function isDashboardOnly(kind) {
   if (!isWireKind(kind)) throw new Error(`unknown event kind: ${kind}`);
   return DASHBOARD_ONLY.includes(kind);

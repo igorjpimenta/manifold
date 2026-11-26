@@ -1,17 +1,16 @@
 // db-guard.js — fail-closed corruption handling.
 //
 // Transient storage hiccups (BUSY/locked/timeout) keep existing retry and
-// degrade paths. Corruption-class failures (CORRUPT/IOERR/NOTADB/MALFORMED)
-// are different: running blind mints wrong gate decisions, drops pushes,
-// and loses failure records. So they count, and a short burst trips the
-// breaker: corruption alert on disk, loud log, process exit. Launchd
-// respawns into the boot probe, which refuses until the files are
-// healthy — a down gateway with an alert beats a blind one taking
-// operator decisions.
+// degrade paths. Corruption-class failures (CORRUPT/IOERR/NOTADB/
+// MALFORMED) are different: running blind mints wrong gate decisions,
+// drops pushes, and loses failure records — so a short burst trips the
+// breaker: corruption alert on disk, loud log, process exit; the boot
+// probe then refuses until the files are healthy. A down gateway with an
+// alert beats a blind one taking operator decisions.
 //
 // The counter is process-wide across all callers; a single blip never
-// trips it. Tunables live here (not config) because flapping the
-// breaker open from config would defeat it.
+// trips it. Tunables live here (not config) because flapping the breaker
+// open from config would defeat it.
 import fs from "node:fs";
 import path from "node:path";
 import { resolveDataDir } from "./paths.js";

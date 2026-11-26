@@ -1,10 +1,3 @@
-/**
- * Unit tests for engine/executor-subflow-children.js — its
- * childFlows:true real-child dispatch. Uses real sqlite-backed
- * run-store.js/node-executions.js/state-store.js instances (tmp files),
- * matching the pattern in spawn-child.test.js/child-resume-trigger.test.js,
- * since the logic under test is a real join across both tables' schemas.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -25,18 +18,11 @@ async function makeHarness() {
   const dbPath = tmpPath("loop-children");
   const runStore = await createRunStore({ dbPath });
   const nodeExecutionsStore = await createNodeExecutionsStore(dbPath);
-  // Real admissionQueueStore, same shared getGlobalConcurrencyLimit()
-  // singleton every test here already drives via resetChildFanoutCap(n) —
-  // dispatchSubflowChildren has a hard dependency on a real store now, not
-  // a fake, since these tests exercise the actual admit/queue/promote cycle
-  // end to end (same rationale as admission-queue-store.test.js's own
-  // "real tmp-sqlite, not mocks" convention).
   const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: getGlobalConcurrencyLimit });
   const store = createStateStore({}, "test-owner", { runStore, admissionQueueStore });
   return { runStore, nodeExecutionsStore, store, admissionQueueStore };
 }
 
-// The parent run row exists in production before its node fans out.
 async function dispatch(args) {
   await args.runStore.insert({ flowId: args.flowId, status: "running" });
   return dispatchSubflowChildren(args);
@@ -46,8 +32,6 @@ function allowAllBudgetGate() {
   return { skip: false, pause: false };
 }
 
-// Collects every childFlowId passed to a fake runFlow, without actually
-// driving it — dispatchSubflowChildren only needs to fire-and-forget it.
 function makeRunFlowSpy() {
   const calls = [];
   const runFlow = async (flowId) => { calls.push(flowId); };
@@ -59,8 +43,6 @@ function makeLogger() {
   return { warns, logger: { info: () => {}, warn: (m) => warns.push(m) } };
 }
 
-// setImmediate-flushing helper — dispatchSubflowChildren fires runFlow via
-// setImmediate, not inline.
 function flush() {
   return new Promise((resolve) => setImmediate(resolve));
 }
@@ -108,7 +90,6 @@ describe("dispatchSubflowChildren", () => {
     await flush();
     assert.equal(calls.length, 2, "runFlow should be fire-and-forget dispatched for each newly created child");
 
-    // Real children actually exist, parented correctly.
     for (const childFlowId of result.waitJson.childFlowIds) {
       const child = await runStore.get(childFlowId);
       assert.ok(child, "child flow_runs row should exist");
@@ -118,11 +99,6 @@ describe("dispatchSubflowChildren", () => {
     }
   });
 
-  // buildChildInitialState does not clone the parent's state; a
-  // child's initialState is exactly item/itemIndex/parentItem. Anything
-  // else an inner node needs from an ancestor flow goes through the
-  // explicit needs: mechanism (engine/needs-resolver.js) rather than
-  // riding along in the spawn-time state.
   test("child initialState carries ONLY item/itemIndex/parentItem — no parent state rides along", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -142,29 +118,17 @@ describe("dispatchSubflowChildren", () => {
     assert.equal(child.stateJson.itemIndex, 0);
     assert.equal(child.stateJson.parentItem, undefined, "state.item was absent on the parent, so parentItem is too");
     assert.equal(child.stateJson.shortlist, undefined, "parent's shortlist must not ride along");
-    // pipelineId IS present — but it's the CHILD's own synthetic id (set by
-    // spawn-child.js, not buildChildInitialState), never the parent's.
     assert.equal(child.stateJson.pipelineId, "p::LOOP");
     assert.equal(child.stateJson._subflowGroups, undefined);
     assert.deepEqual(Object.keys(child.stateJson).sort(), ["item", "itemIndex", "pipelineId"], "no parent-cloned field survives the spawn beyond what spawn-child.js itself sets");
   });
 
-  // A single-item retry-cascade node
-  // (selector: () => [{id:"only"}], structuring a code -> infra-
-  // recovery -> agent-fallback chain, not a real per-item fan-out): the
-  // child's state.item is this node's own placeholder, so parentItem
-  // preserves the parent branch's real item (e.g. a listing/candidate/
-  // conversation, as SUBMIT_CODE bidding on
-  // https://www.workana.com/messages/bid/<id> does) specifically so a
-  // single-item cascade's own inner nodes can still reach it.
   test("parentItem carries the PARENT branch's real item, even when this node's own selector returns a placeholder — the single-item retry-cascade case", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
     const { runFlow } = makeRunFlowSpy();
     const { logger } = makeLogger();
     const flowId = randomUUID();
-    // The parent branch's own real item — e.g. PROPOSE's per-listing item,
-    // already resolved before SUBMIT (a single-item cascade) is dispatched.
     const realListing = { id: "desenvolvimento-de-sistema-real", url: "https://example.com/job", score: 91 };
     const node = { selector: () => [{ id: "only" }] };
     const state = { pipelineId: "p", item: realListing };
@@ -186,7 +150,7 @@ describe("dispatchSubflowChildren", () => {
     const { logger } = makeLogger();
     const flowId = randomUUID();
     const node = { selector: () => [{ id: "listing-a" }, { id: "listing-b" }] };
-    const state = { pipelineId: "p" }; // no .item — this IS the top-level fan-out
+    const state = { pipelineId: "p" };
 
     const result = await dispatch({
       node, nodeId: "PROPOSE", flowId, state,
@@ -199,14 +163,7 @@ describe("dispatchSubflowChildren", () => {
     }
   });
 
-  // The parent's own state already carries its own
-  // `pipelineId` field (every flow's stateJson does). Cloning that whole
-  // state into the child's initialState — without stripping pipelineId —
-  // would let it override the intended child pipeline id once merged in
-  // state-store.js's create(), making the child re-resolve and re-run the
-  // PARENT pipeline from __start__ instead of its own `.branch` — an
-  // unbounded recursive fan-out (each "child" spawning more children of the
-  // whole parent pipeline again). This test pins the call site.
+// A parent pipelineId surviving into the child would re-run the parent pipeline from __start__ — unbounded recursive fan-out.
   test("child's stateJson.pipelineId is the CHILD pipeline id, never the parent's own", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -214,8 +171,6 @@ describe("dispatchSubflowChildren", () => {
     const { logger } = makeLogger();
     const flowId = randomUUID();
     const node = { selector: () => [{ id: "item-1" }] };
-    // The parent's own state — like every real flow's stateJson — already
-    // carries its own pipelineId.
     const state = { pipelineId: "parent_pipeline" };
 
     const result = await dispatch({
@@ -264,7 +219,6 @@ describe("dispatchSubflowChildren", () => {
       store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
     });
     await store.finish({ flowId: first.waitJson.childFlowIds[0], expectedRevision: 0, stateJson: {} });
-    // second child left "running"
     await flush();
     calls.length = 0;
 
@@ -375,11 +329,6 @@ describe("dispatchSubflowChildren", () => {
     assert.equal(warns.length, 1);
   });
 
-  // node.concurrency: participation in the shared
-  // combined admission pool (state/admission-queue-store.js), NOT scoped to
-  // any one pipeline or subflow node — a boolean PARTICIPATION switch, not a
-  // per-node number. Every test here resets the module-level singleton
-  // limit first (_resetForTests), since it's shared process-wide state.
   describe("node.concurrency — single gateway-wide cap", () => {
     afterEach(() => { resetChildFanoutCap(); });
 
@@ -397,7 +346,6 @@ describe("dispatchSubflowChildren", () => {
         store, runStore, nodeExecutionsStore, maybeBudgetGate: allowAllBudgetGate, runFlow, logger, admissionQueueStore,
       });
 
-      // All 4 children get real rows — the cap governs dispatch, not creation.
       assert.equal(result.waitJson.childFlowIds.length, 4);
       await flush();
       assert.equal(calls.length, 2, "only 2 of the 4 children should have been handed to runFlow");
@@ -454,9 +402,6 @@ describe("dispatchSubflowChildren", () => {
       assert.equal(rows.filter((r) => r.status === "queued").length, 1, "the field being absent must behave identically to concurrency:true, not concurrency:false");
     });
 
-    // The entire point of collapsing to a single global cap: two totally
-    // unrelated subflow nodes — different pipelines, different nodeIds —
-    // draw from the exact same shared budget.
     test("the budget is shared across different pipelines and different subflow nodes, not scoped per pipeline or per node", async () => {
       harness = await makeHarness();
       const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -486,14 +431,6 @@ describe("dispatchSubflowChildren", () => {
       assert.equal(bRow.status, "queued", "a completely different pipeline's child still competes for the SAME global budget, already exhausted by pipeline-a");
     });
 
-    // A child "blocked" on its own human gate consumes zero ongoing
-    // resources — must not occupy a concurrency slot, or a gated sibling
-    // could starve the cap for however long it sits waiting on an
-    // operator's Telegram tap. Deliberately different from executor.js's
-    // root-level start() check, which DOES count "blocked" — that's
-    // guarding logical exclusivity (don't start a 2nd pipeline run while
-    // the 1st is paused), not resource contention, so the same 3-status
-    // filter doesn't transfer here.
     test("a sibling blocked on its own human gate does not occupy a slot — a new child still dispatches immediately", async () => {
       harness = await makeHarness();
       const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -511,7 +448,6 @@ describe("dispatchSubflowChildren", () => {
       await flush();
       assert.equal((await runStore.get(item1FlowId)).status, "running");
 
-      // Simulate item-1 reaching an internal GATE inside its own child flow.
       const item1 = await store.get(item1FlowId);
       await store.setWaiting({
         flowId: item1FlowId, expectedRevision: item1.revision, lastStep: "GATE",
@@ -604,14 +540,6 @@ describe("dispatchSubflowChildren", () => {
     assert.equal(invocation.nodeId, "LOOP");
   });
 
-  // A cascade-shape subflow (flow.kind:
-  // "cascade" — ENSURE_LOGIN/SUBMIT/SEND_REPLY's code-then-agent-fallback
-  // shape) must never be gated at its own subflow-entry — that would hold
-  // the whole flow for approval before its free code leg even gets a
-  // chance to resolve the item without spending anything. Real spend stays
-  // covered by dispatchAgentEntry's independent gate on the agent leg, if
-  // the cascade ever reaches it — out of scope for dispatchSubflowChildren
-  // itself, so not exercised here.
   test("cascade-shape node (flow.kind:'cascade') skips the subflow-entry budget gate entirely", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -629,8 +557,6 @@ describe("dispatchSubflowChildren", () => {
       store, runStore, nodeExecutionsStore, maybeBudgetGate: failIfCalled, runFlow, logger, admissionQueueStore,
     });
 
-    // The gate was skipped entirely, so the free code leg still dispatches
-    // — a real child is created, same as the ungated path.
     assert.equal(result.waitJson.childFlowIds.length, 1);
     await flush();
     assert.equal(calls.length, 1);
@@ -638,10 +564,6 @@ describe("dispatchSubflowChildren", () => {
     assert.ok(child, "child flow should still be created even though the gate was skipped");
   });
 
-  // Companion regression guard: a real multi-item childFlows fan-out (no
-  // flow.kind at all — SCORE's shape) must be COMPLETELY unaffected by the
-  // cascade guard above; it keeps gating at its own subflow entry exactly
-  // as before.
   test("non-cascade node (no flow.kind, e.g. SCORE's real fan-out shape) still gates at subflow entry", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store, admissionQueueStore } = harness;
@@ -666,13 +588,6 @@ describe("dispatchSubflowChildren", () => {
     assert.equal(calls.length, 0, "no children should spawn once the subflow-entry gate pauses");
   });
 
-  // node.dispatchGuard — the atomic cross-flow recheck (state/node-
-  // executions.js's `guard` param, threaded through spawn-child.js).
-  // Two parent
-  // flow-start runs whose FILTER scans overlapped both decided to dispatch
-  // PROPOSE for the same listings before either had committed anything —
-  // node.selector's own bulk decision can't see a sibling parent's
-  // uncommitted work, so the guard has to run right at commit time instead.
   describe("node.dispatchGuard", () => {
     test("a rejected item is excluded from children-pending, never admitted, never runFlow'd", async () => {
       harness = await makeHarness();

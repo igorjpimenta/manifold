@@ -1,4 +1,3 @@
-// Unit tests for agent/fleet.js — loadFleet, parseFleetYaml.
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +7,6 @@ import os from "node:os";
 import { randomUUID } from "node:crypto";
 import { loadFleet } from "../../../agent/fleet.js";
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
 
 async function makeTempDir() {
   const dir = path.join(os.tmpdir(), `gf-fleet-test-${randomUUID()}`);
@@ -24,7 +22,6 @@ async function makeTempDir() {
   };
 }
 
-// ─── parseFleetYaml (via loadFleet with real temp YAML files) ────────────────
 
 describe("parseFleetYaml — empty input", () => {
   let tmp;
@@ -243,19 +240,15 @@ describe("parseFleetYaml — full realistic fleet.yaml", () => {
     await tmp.writeFleet(yaml);
     const fleet = await loadFleet(tmp.dir);
 
-    // pipeline-level
     assert.deepEqual(fleet.tools, ["Bash", "Read"]);
 
-    // context-level
     assert.deepEqual(fleet.discuss.tools, ["Read", "Edit"]);
 
-    // agent level
     assert.deepEqual(fleet.discuss["content-writer"].tools, ["Read", "Edit", "Write"]);
     assert.deepEqual(fleet.discuss["reviewer"].tools, ["Read"]);
   });
 });
 
-// ─── loadFleet — filesystem edge cases ───────────────────────────────────────
 
 describe("loadFleet — absent file (ENOENT)", () => {
   test("returns null when fleet.yaml does not exist", async () => {
@@ -276,8 +269,6 @@ describe("loadFleet — absent file (ENOENT)", () => {
 
 describe("loadFleet — non-ENOENT filesystem errors", () => {
   test("rethrows error when readFile fails with a non-ENOENT code", async () => {
-    // Create a directory where fleet.yaml is expected but make a subdirectory
-    // named fleet.yaml so reading it as a file fails with EISDIR.
     const tmp = await makeTempDir();
     try {
       await mkdir(path.join(tmp.dir, "fleet.yaml"), { recursive: true });

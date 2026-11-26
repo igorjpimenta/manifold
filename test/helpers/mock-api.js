@@ -1,9 +1,4 @@
-// Shared test helpers for manifold route unit tests.
 
-/**
- * Returns a mock `api` that records every registerHttpRoute / registerGatewayMethod /
- * api.on call so unit tests can assert on registration behaviour without a real gateway.
- */
 export function createMockApi() {
   const routes = [];
   const gatewayMethods = [];
@@ -19,9 +14,6 @@ export function createMockApi() {
   return { api, routes, gatewayMethods, events };
 }
 
-/**
- * Minimal writable response object. Tracks statusCode, headers, and body chunks.
- */
 export function createMockRes() {
   const chunks = [];
   const headers = {};
@@ -40,9 +32,6 @@ export function createMockRes() {
   };
 }
 
-/**
- * Minimal readable request object.
- */
 export function createMockReq(method = "GET", path = "/", extraHeaders = {}) {
   return {
     method,

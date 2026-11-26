@@ -1,6 +1,3 @@
-// Unit tests for state/node-cost.js — nodeCallStats: null guards, DB unavailability,
-// minSamples threshold, sinceDays cutoff, p25/p50/p75 correctness, sampleSize,
-// statement throws, and percentile linear-interpolation edge cases.
 
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
@@ -11,18 +8,11 @@ import { mkdirSync } from "node:fs";
 import { createClient } from "@libsql/client";
 import { createNodeCostReader } from "../../../state/node-cost.js";
 
-// ─── test DB setup ────────────────────────────────────────────────────────────
-// Each test suite gets its own reader pointed at a temp DB path.
-// The DB file is NOT created until getTestDb() is called, so the
-// "DB unavailability" tests can verify behavior before the file exists.
-
 const TEST_DB_DIR = path.join(os.tmpdir(), `gf-node-cost-${randomUUID()}`);
 const TEST_DB_PATH = path.join(TEST_DB_DIR, "lineage.sqlite");
 mkdirSync(TEST_DB_DIR, { recursive: true });
 
 const { nodeCallStats } = createNodeCostReader({ dbPath: TEST_DB_PATH });
-
-// ─── schema matching cost_by_call ────────────────────────────────────────────
 
 const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS cost_by_call (
@@ -35,8 +25,6 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_cbc_pipe_node_ts
     ON cost_by_call (pipeline_id, node_id, ts)`,
 ];
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
 
 let _testClient = null;
 
@@ -60,9 +48,6 @@ async function insertRows(pipelineId, nodeId, costs, { daysAgo = 1 } = {}) {
     });
   }
 }
-
-// ─── null argument guards ─────────────────────────────────────────────────────
-// DB does not yet exist → but these guards fire before getClient() is called.
 
 describe("null argument guards (short-circuit before DB)", () => {
   test("returns null when pipelineId is undefined", async () => {
@@ -94,9 +79,6 @@ describe("null argument guards (short-circuit before DB)", () => {
   });
 });
 
-// ─── DB unavailability ────────────────────────────────────────────────────────
-// A missing/empty DB has no cost_by_call table → query fails → returns null.
-
 describe("DB unavailability", () => {
   test("returns null when lineage.sqlite is missing", async () => {
     const missing = path.join(os.tmpdir(), `gf-missing-${randomUUID()}.sqlite`);
@@ -106,15 +88,9 @@ describe("DB unavailability", () => {
   });
 });
 
-// ─── bootstrap the real DB ───────────────────────────────────────────────────
-// From here on all tests need a real DB. Creating the file lets getClient()
-// succeed on the next call; the singleton within the reader then stays set.
-
 before(async () => {
-  await getTestClient(); // creates the file + schema
+  await getTestClient();
 });
-
-// ─── minSamples threshold ─────────────────────────────────────────────────────
 
 describe("minSamples threshold", () => {
   test("returns null when row count is below default minSamples (3)", async () => {
@@ -164,15 +140,9 @@ describe("minSamples threshold", () => {
   });
 });
 
-// ─── odd-length dataset — p25/p50/p75 ─────────────────────────────────────────
-// Dataset: [1, 2, 3, 4, 5] (inserted unordered, module sorts)
-// p25 → idx=0.25*4=1.0 (exact) → sorted[1]=2
-// p50 → idx=0.50*4=2.0 (exact) → sorted[2]=3
-// p75 → idx=0.75*4=3.0 (exact) → sorted[3]=4
-
 describe("percentile calculations — odd-length dataset (5 values)", () => {
   before(async () => {
-    await insertRows("pipe_odd", "NODE_ODD5", [3, 1, 5, 2, 4]); // unordered
+    await insertRows("pipe_odd", "NODE_ODD5", [3, 1, 5, 2, 4]);
   });
 
   test("p25 = 2 (exact integer index)", async () => {
@@ -192,15 +162,9 @@ describe("percentile calculations — odd-length dataset (5 values)", () => {
   });
 });
 
-// ─── even-length dataset — linear interpolation ───────────────────────────────
-// Dataset: [10, 20, 30, 40]
-// p25 → idx=0.25*3=0.75 → 10+(20-10)*0.75 = 17.5
-// p50 → idx=0.50*3=1.5  → 20+(30-20)*0.5  = 25
-// p75 → idx=0.75*3=2.25 → 30+(40-30)*0.25 = 32.5
-
 describe("percentile calculations — even-length dataset (4 values)", () => {
   before(async () => {
-    await insertRows("pipe_even", "NODE_EVEN4", [40, 10, 30, 20]); // unordered
+    await insertRows("pipe_even", "NODE_EVEN4", [40, 10, 30, 20]);
   });
 
   test("p25 interpolates → 17.5", async () => {
@@ -220,12 +184,6 @@ describe("percentile calculations — even-length dataset (4 values)", () => {
   });
 });
 
-// ─── percentile at exact integer index — no interpolation ────────────────────
-// Dataset: [0, 50, 100]
-// p50 → idx=0.5*2=1.0 (exact) → sorted[1]=50 (no lerp)
-// p25 → idx=0.25*2=0.5 → lo=0,hi=1 → 0+(50-0)*0.5 = 25
-// p75 → idx=0.75*2=1.5 → lo=1,hi=2 → 50+(100-50)*0.5 = 75
-
 describe("percentile — exact integer index returns value without interpolation", () => {
   before(async () => {
     await insertRows("pipe_exact", "NODE_EXACT", [0, 50, 100]);
@@ -243,8 +201,6 @@ describe("percentile — exact integer index returns value without interpolation
     assert.equal((await nodeCallStats("pipe_exact", "NODE_EXACT")).p75, 75);
   });
 });
-
-// ─── sinceDays cutoff ─────────────────────────────────────────────────────────
 
 describe("sinceDays cutoff", () => {
   test("default sinceDays=30 includes rows from 29 days ago", async () => {
@@ -281,8 +237,6 @@ describe("sinceDays cutoff", () => {
   });
 });
 
-// ─── sampleSize reflects actual row count ─────────────────────────────────────
-
 describe("sampleSize reflects actual row count", () => {
   test("sampleSize = 10 for 10 rows", async () => {
     await insertRows("pipe_sz", "NODE_10", [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
@@ -296,8 +250,6 @@ describe("sampleSize reflects actual row count", () => {
     assert.equal(r.sampleSize, 3);
   });
 });
-
-// ─── result shape ─────────────────────────────────────────────────────────────
 
 describe("result shape", () => {
   test("result has exactly p25, p50, p75, sampleSize keys", async () => {
@@ -322,8 +274,6 @@ describe("result shape", () => {
     assert.ok(r.p50 <= r.p75, "p50 must be <= p75");
   });
 });
-
-// ─── pipeline_id / node_id isolation ─────────────────────────────────────────
 
 describe("pipeline_id and node_id isolation", () => {
   test("rows for pipe_a are not visible when querying pipe_b", async () => {

@@ -1,19 +1,7 @@
 // discuss-store.js — authoritative server-side state for every discuss
-// conversation. Wraps a SQLite db so the discuss view can be rebuilt
-// from a single GET after any reconnect, restart, or missed SSE event.
-//
-// Each (flowId, itemId) pair gets one row that tracks:
-//   messages_json    — full ordered message history (operator + agent)
-//   turn_status      — idle | running | error (drives the "thinking" row)
-//   active_turn_id   — in-flight turnId; lets clients reconcile live events
-//   pending_json     — the proposal waiting on the operator: { text,
-//                      fields, draftId, updatedAt }
-//   components_json  — tool-seeded components keyed by kind; one entry
-//                      per kind, last-write-wins. Cleared on gate resolve.
-//
-// Session/component events update clients in real-time.
-// This store makes correctness independent of event delivery: clients reload
-// full state on open/reconnect/foreground.
+// conversation: one row per (flowId, itemId) in SQLite, so a client can
+// rebuild full state from a single GET after any reconnect, restart, or
+// missed SSE event. Correctness does not depend on event delivery.
 
 import { randomUUID } from "node:crypto";
 import { eq, and, inArray, isNotNull } from "drizzle-orm";
@@ -60,10 +48,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     return rows[0] ?? null;
   }
 
-  // ── Read ────────────────────────────────────────────────────────────────
-
-  // Returns { messages, turnStatus, activeTurnId, pending } or null if
-  // no row exists yet for this (flowId, itemId).
   async function getState(flowId, itemId) {
     const row = await getRow(flowId, itemId);
     if (!row) return null;
@@ -77,12 +61,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     };
   }
 
-  // ── Messages ────────────────────────────────────────────────────────────
-
-  // Append one message to the conversation. `msg` shape:
-  //   { id?, turnId?, role, text?, audioKey?, proposedDraft?,
-  //     proposedMeta?, error?, ts? }
-  // role must be "operator" or "agent".
   async function appendMessage(flowId, itemId, msg) {
     await ensureRow(flowId, itemId);
     const row = await getRow(flowId, itemId);
@@ -105,9 +83,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     );
   }
 
-  // Stamp an error string onto the last operator message for `turnId`
-  // (or the last operator message if turnId is null). Used when the
-  // agent turn fails before producing a reply.
   async function stampMessageError(flowId, itemId, turnId, errorText) {
     await ensureRow(flowId, itemId);
     const row = await getRow(flowId, itemId);
@@ -128,10 +103,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     }
   }
 
-  // ── Turn status ─────────────────────────────────────────────────────────
-
-  // status: "idle" | "running" | "error"
-  // activeTurnId: string when running, null when idle/error
   async function setTurnStatus(flowId, itemId, status, activeTurnId = null) {
     await ensureRow(flowId, itemId);
     await withSharedWrite(dbPath, () =>
@@ -141,17 +112,11 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     );
   }
 
-  // ── Pending proposal ────────────────────────────────────────────────────
-  //
-  // One blob per (flowId, itemId) in pending_json:
-  //   { text?, fields?, draftId?, updatedAt }
-  //
-  // updatedAt is the proposal's own timestamp — the row's updated_at also
-  // moves on every message append, so it cannot stand in for it.
-
-  // Normalizes the stored blob into the shape callers read. Blobs written
-  // before the blob carried its own timestamp fall back to the row's last
-  // activity, which is the earliest moment the proposal can have existed.
+  // pending_json's own updatedAt is the proposal's timestamp — the row's
+  // updated_at also moves on every message append, so it cannot stand in
+  // for it. Blobs written before the blob carried its own timestamp fall
+  // back to the row's last activity, the earliest moment the proposal
+  // could have existed.
   function normalizePending(blob, rowUpdatedAt) {
     if (!blob || typeof blob !== "object" || Array.isArray(blob)) return null;
     const out = {
@@ -163,7 +128,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     return out;
   }
 
-  // The proposal waiting on the operator for this thread, or null.
   async function readPending(flowId, itemId) {
     if (!flowId || !itemId) return null;
     const row = await getRow(flowId, itemId);
@@ -171,10 +135,10 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     return normalizePending(tryParse(row.pendingJson, null), row.updatedAt);
   }
 
-  // Write or overwrite the pending draft text. Merges with any existing
-  // fields so a later text write doesn't wipe earlier field writes, and
-  // keeps the prior draft slot when the caller names none — the slot picks
-  // which draft apply-draft commits on multi-draft gates.
+  // Merges with any existing fields so a later text write doesn't wipe
+  // earlier field writes, and keeps the prior draft slot when the caller
+  // names none — the slot picks which draft apply-draft commits on
+  // multi-draft gates.
   async function setPending(flowId, itemId, text, draftId = null) {
     await ensureRow(flowId, itemId);
     const row = await getRow(flowId, itemId);
@@ -192,8 +156,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     );
   }
 
-  // Shallow-merge `fields` into the pending proposal's fields object.
-  // Lets repeated field writes accumulate without resetting earlier ones.
   async function mergePendingFields(flowId, itemId, fields) {
     await ensureRow(flowId, itemId);
     const row = await getRow(flowId, itemId);
@@ -210,8 +172,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     );
   }
 
-  // Clear pending proposal — called after the agent reply lands and
-  // the proposal has been migrated onto the agent message.
   async function clearPending(flowId, itemId) {
     await withSharedWrite(dbPath, () =>
       db.update(discussState)
@@ -220,10 +180,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     );
   }
 
-  // ── Components ──────────────────────────────────────────────────────────
-
-  // Upsert a component by kind. Later calls with the same kind replace
-  // earlier ones — one component per kind per (flowId, itemId).
   async function setComponent(flowId, itemId, component) {
     if (!component?.kind) return;
     await ensureRow(flowId, itemId);
@@ -240,17 +196,11 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     );
   }
 
-  // Return all seeded components for this (flowId, itemId).
   async function getComponents(flowId, itemId) {
     const row = await getRow(flowId, itemId);
     return tryParse(row?.componentsJson, []);
   }
 
-  // One-shot bulk fetch: for a list of flowIds returns a map of
-  // flowId → { pendingItemIds: string[] } for any flow that has at
-  // least one discuss row with a non-null pending_json. The item_id
-  // values map 1-to-1 with subflow keys so the client can mark
-  // individual subflow peek rows without a second round-trip.
   async function getBulkSummaries(flowIds) {
     if (!flowIds || flowIds.length === 0) return {};
     const rows = await db.select({ flowId: discussState.flowId, itemId: discussState.itemId })
@@ -264,7 +214,6 @@ async function _createDiscussStoreImpl({ dbPath = defaultDbPath(), logger } = {}
     return result;
   }
 
-  // Every discuss thread for one flow, oldest activity first.
   // Transcript listing builds its discuss entries from these rows so both
   // directions of every dialog-door turn come from this store, keyed by
   // (flowId, itemId) — never from harness session files.

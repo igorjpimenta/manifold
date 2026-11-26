@@ -1,7 +1,3 @@
-// Unit tests for telemetry/store.js — openStore, upsertLineage/getLineage
-// (unchanged, stays immediate), and insertCost's deferred-through-batch-
-// writer behavior. No prior coverage existed for this file before this
-// suite.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

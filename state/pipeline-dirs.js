@@ -2,15 +2,15 @@
 //
 // Resolution order (resolvePipelinesDir): table[harness] →
 // MANIFOLD_PIPELINES_DIR env → adapter config `pipelinesDir` →
-// <dataDir>/pipelines default. Table wins so an operator can
-// relocate one harness without touching env or config; env wins over config
-// so a one-shot override doesn't need a config edit.
+// <dataDir>/pipelines default. Table wins so an operator can relocate
+// one harness without touching env or config; env wins over config so a
+// one-shot override doesn't need a config edit.
 //
-// Sync better-sqlite3 open-per-operation (same posture as migrate.js's own
-// open/close): no persistent handle, so the gateway and one-shot CLI
-// processes never share lock state — WAL + busy_timeout carry the
-// cross-process safety. Every op runs pending migrations first, so a fresh
-// file self-creates the table.
+// Sync better-sqlite3 open-per-operation (same posture as migrate.js):
+// no persistent handle, so the gateway and one-shot CLI processes never
+// share lock state — WAL + busy_timeout carry the cross-process safety.
+// Every op runs pending migrations first, so a fresh file self-creates
+// the table.
 
 import path from "node:path";
 import { existsSync, mkdirSync, statSync } from "node:fs";
@@ -31,8 +31,8 @@ export function createPipelineDirsStore({ dbPath, logger = null } = {}) {
     }
   }
 
-  // Upsert. Throws when the directory does not exist — a registered path
-  // that isn't there is always an operator typo, never a valid override.
+  // Throws when the directory does not exist — a registered path that
+  // isn't there is always an operator typo, never a valid override.
   function register({ harness, dirPath } = {}) {
     const harnessName = String(harness ?? "").trim();
     if (!harnessName) throw new Error("pipeline-dirs: register needs a non-empty harness");
@@ -81,8 +81,8 @@ export function createPipelineDirsStore({ dbPath, logger = null } = {}) {
     }
   }
 
-  // Pure precedence over an explicit lookup + env + config + default — the
-  // store method below delegates here so tests pin the order without a DB.
+  // Pure precedence over an explicit lookup + env + config + default; the
+  // store method delegates here so tests pin the order without a DB.
   function resolve({ harness = null, env = process.env, dataDir = null, configDir = null, lookup = null } = {}) {
     const fromTable = typeof lookup === "function" ? lookup(harness) : null;
     if (fromTable?.path) return { dir: fromTable.path, source: "table" };

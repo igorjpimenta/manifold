@@ -1,16 +1,10 @@
-// local-request.js — refuse a request whose Host/Origin does not name this
-// machine, checked before any bearer comparison.
-//
-// DNS rebinding: an attacker page resolves its own hostname to 127.0.0.1 and
-// posts to this loopback listener. The browser sends the attacker's Host (and
-// Origin), so the bearer is the only thing standing between the page and the
-// operator routes — and a bearer the page never possesses still leaves the
-// listener answering questions about itself. Refusing non-local Host/Origin
-// up front means a rebinding attempt cannot reach the route table at all.
-//
-// IP literals and an explicit LAN bind stay allowed, so a deliberate
-// `MANIFOLD_API_HOST=0.0.0.0` deployment keeps working. `localhost`,
-// `*.localhost` and `127.0.0.1`/`::1` always pass.
+// Refuse a request whose Host/Origin does not name this machine, checked
+// before any bearer comparison. DNS rebinding: an attacker page resolves its
+// own hostname to 127.0.0.1 and posts to this loopback listener — the browser
+// sends the attacker's Host/Origin, so refusing non-local Host/Origin up
+// front means the rebinding attempt never reaches the route table. IP literals
+// and an explicit LAN bind stay allowed (`MANIFOLD_API_HOST=0.0.0.0`);
+// `localhost`, `*.localhost` and `127.0.0.1`/`::1` always pass.
 import net from "node:net";
 
 function headerHostname(raw) {

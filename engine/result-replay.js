@@ -1,15 +1,10 @@
 // result-replay.js — the pure merge step shared by assembleState()
 // (executor-helpers.js) and subflow-state.js's per-child `data` field.
-//
-// Split out on its own specifically to avoid a circular import:
-// executor-helpers.js's assembleState() already imports getAllSubflowGroups
-// from subflow-state.js, so subflow-state.js can't import assembleState()
-// back — but it DOES need this exact same "replay a flow's own completed
-// resultJson rows onto a base object" logic for its own `data` field
-// (state/subflow-state.js's normalizeChildAsSubflowRow).
-// No _subflowGroups nesting happens here — a child's OWN nested subflow
-// groups aren't part of "this child's own top-level output"; a caller
-// that needs those calls assembleState() on that child's flowId directly.
+// Split into its own module to avoid a circular import: assembleState
+// already imports getAllSubflowGroups from subflow-state.js, so
+// subflow-state.js can't import assembleState back. No _subflowGroups
+// nesting happens here — callers needing a child's own nested groups call
+// assembleState() on that child's flowId.
 export function replayResults(baseState, results) {
   let state = { ...baseState };
   for (const r of results ?? []) {

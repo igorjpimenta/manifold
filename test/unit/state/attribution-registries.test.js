@@ -1,7 +1,3 @@
-// Attribution keys — item, node name, harness turn run — are materialized in
-// three registries so the columns that name them can carry FKs. Tests cover
-// the rejection, the writer guard, and the migration backfill.
-
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";

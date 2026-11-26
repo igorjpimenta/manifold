@@ -1,11 +1,7 @@
-// session-index.js — durable flowId→session index. Sessions are the
-// ids the dispatch used — stored and read verbatim, with no assumed
-// shape.
-//
-// Storage: the store home's runtime.sqlite (resolveStorePaths().runtimeDb).
-//
-// INSERT OR IGNORE via UNIQUE(flow_id, session_key) — recording the same
-// session twice (e.g. on error-retry with the same session) is a no-op.
+// session-index.js — durable flowId→session index (runtime.sqlite).
+// Sessions are the ids the dispatch used — stored and read verbatim,
+// with no assumed shape. INSERT OR IGNORE via UNIQUE(flow_id,
+// session_key): recording the same session twice is a no-op.
 
 import { mkdirSync } from "node:fs";
 import { eq, and } from "drizzle-orm";
@@ -30,7 +26,7 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     ({ db, client } = await getSharedDb(dbPath));
   } catch (err) {
     logger?.warn?.(`manifold session-index: failed to open DB: ${err?.message ?? err}`);
-    // Return a no-op shim so callers don't need to null-check.
+    // No-op shim so callers don't need to null-check.
     return { async record() {}, async hasSessionForNode() { return false; }, async flowIdForSessionKey() { return null; }, async listForFlow() { return []; }, async recordThread() {}, async findThread() { return null; }, close() {} };
   }
 
@@ -51,14 +47,11 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Was an agent dispatch ever actually ATTEMPTED for this (flowId, nodeId)?
-  // record() (above) is called at the top of dispatchAgentWithRetry, always
-  // before the turn is run. This answers "did dispatch
-  // start" independent of whether it finished, blocked, or is still in
-  // flight. Used by boot/flow-revival.js to distinguish a flow that crashed
-  // mid-turn (revive via continuation prompt) from one that was merely queued
-  // waiting for a slot and never actually started (revive via a fresh
-  // dispatch instead).
+  // record() runs at the top of dispatchAgentWithRetry, always before the
+  // turn runs — so a row here means "dispatch was ATTEMPTED", independent
+  // of whether it finished, blocked, or is still in flight. Callers use
+  // that to tell a mid-turn crash (revive via continuation) from a flow
+  // that was merely queued and never started (revive via fresh dispatch).
   async function hasSessionForNode(flowId, nodeId) {
     if (!flowId || !nodeId) return false;
     try {
@@ -72,9 +65,6 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Reverse of the above: given a session alone (no flowId in hand —
-  // e.g. a session observed on the event queue with no flow attached),
-  // find which flow it belongs to.
   async function flowIdForSessionKey(session) {
     if (!session) return null;
     try {
@@ -88,10 +78,9 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Every session ever recorded for one flow, in spawn order.
-  // Transcript listing joins these rows to per-node results (dispatches)
-  // and discuss threads (branchItemId = itemId) so attribution comes from
-  // stored columns, never from parsing the session itself.
+  // Transcript listing joins these rows to per-node results and discuss
+  // threads so attribution comes from stored columns, never from parsing
+  // the session itself.
   async function listForFlow(flowId) {
     if (!flowId) return [];
     try {
@@ -115,9 +104,6 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Gate discuss thread identity: one row per (flow, gate, item), upserted
-  // on first turn. The roster is the thread map — the harness owns the id.
-  // Latest write wins on conflict.
   async function recordThread({ flowId, gateNodeId, itemId, agentId = null, session } = {}) {
     if (!flowId || !gateNodeId || !itemId || !session) return;
     try {
@@ -140,7 +126,6 @@ export async function createSessionIndex({ dbPath = defaultDbPath(), logger } = 
     }
   }
 
-  // Thread stamp for (flow, gate, item), or null when no turn ran yet.
   async function findThread(flowId, gateNodeId, itemId) {
     if (!flowId || !gateNodeId || !itemId) return null;
     try {

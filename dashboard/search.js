@@ -1,31 +1,14 @@
-// In-memory substring search across the dashboard's flow_runs view.
+// In-memory substring search over the dashboard's flow_runs view.
 //
-// Why in-memory and not SQLite FTS5: manifold's dashboard opens
-// registry.sqlite read-only (see sql-store.js) and is not the schema
-// owner. Adding an FTS5 mirror table requires writes + triggers managed
-// by whoever owns the schema, which the dashboard explicitly does not.
-// An in-memory walk avoids the cross-process coordination problem
-// entirely. Upgrade to FTS5 if (a) row count grows past ~10k or
-// (b) query latency on `top-level state stringify` becomes a problem —
-// both checkable on the search endpoint's response.
+// Not FTS5: the dashboard opens registry.sqlite read-only and does not own
+// the schema, so an FTS mirror would need writes + triggers owned by someone
+// else; the in-memory walk sidesteps that coordination. Revisit past ~10k
+// rows or once query latency shows on the endpoint.
 //
-// Scope (v1):
-//   ✓ Structured fields: flowId, pipelineId, status,
-//     lastStep, statusReason, waitJson.hint, waitJson.reason
-//   ✓ errorEntries[*].{nodeId,message} — sourced from flow_node_executions,
-//     which unifies root-level and subflow-level errors in one table, so
-//     subflow failures are searchable too.
-//   ✗ Top-level state keys — not searchable: dashboard/server.js's
-//     fetchAllRuns() goes through the gateway's /manifold/runs LIST
-//     route, which never selects the raw state_json column (only
-//     flowId/pipelineId/status/lastStep/statusReason/timestamps +
-//     _display-derived fields); adaptRun() synthesizes stateJson as
-//     {pipelineId} for every row. Reintroducing per-node output search
-//     would mean a dedicated gateway-side route backed by assembleState()
-//     (mirroring routes/runs.js's single-run detail path), not a loop
-//     over a field this route never populates.
-//   ✗ Transcripts — would require walking session JSONL files per
-//     query × per run. Deferred to v2 with an offline indexer.
+// Scope: structured fields plus errorEntries (flow_node_executions unifies
+// root and subflow errors). Top-level state keys are NOT searchable — the
+// runs LIST route never selects state_json — and transcripts are deferred
+// (walking session JSONLs per query).
 
 const DEFAULT_LIMIT = 50;
 const DEFAULT_CONTEXT_CHARS = 40;
@@ -33,21 +16,15 @@ const DEFAULT_CONTEXT_CHARS = 40;
 export function searchRuns(runs, query, opts = {}) {
   const limit = opts.limit ?? DEFAULT_LIMIT;
   const contextChars = opts.contextChars ?? DEFAULT_CONTEXT_CHARS;
-  // Map<flowId, ErrorEntry[]> — caller fetches once via the gateway's
-  // GET /manifold/errors (failureStore.queryErrorsByFlowIds)
-  // so this stays a pure function, DB-free.
   const errorsByFlow = opts.errorsByFlow ?? new Map();
-  // Structured status filter applied BEFORE the free-text match —
-  // unlike the textual `q=… succeeded` shape, this is exact-equality
-  // against `r.status` and won't false-positive on the string "failed"
-  // appearing in an error message. The StatStrip sub-count links use
-  // this so "click fail = show failed runs" reads strictly.
+  // Exact-equality status filter, applied before the free-text match, so
+  // "failed" inside an error message can't false-positive; the StatStrip
+  // sub-count links rely on this reading strictly.
   const statusFilter = typeof opts.status === "string" ? opts.status.trim().toLowerCase() : "";
   if (statusFilter) runs = runs.filter((r) => (r.status ?? "").toLowerCase() === statusFilter);
   const trimmed = String(query ?? "").trim();
   if (!trimmed) {
-    // status-only mode: return every status-filtered run as a hit with
-    // no per-field snippets. Hit shape stays compatible (matches: []).
+    // status-only: every filtered run as a hit with no snippets (matches: []).
     if (statusFilter) {
       const hits = runs.slice(0, limit).map((r) => ({
         flowId: r.flowId,
@@ -69,9 +46,8 @@ export function searchRuns(runs, query, opts = {}) {
     return { query: "", totalHits: 0, hits: [], truncated: false };
   }
 
-  // Multi-token: all whitespace-separated tokens must appear (AND). Quoted
-  // phrases are not supported — matching a quoted phrase would mean a real
-  // tokenizer.
+  // All whitespace-separated tokens must appear (AND). Quoted phrases are
+  // unsupported — that would need a real tokenizer.
   const tokens = trimmed.toLowerCase().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return { query: trimmed, totalHits: 0, hits: [], truncated: false };
 
@@ -90,7 +66,6 @@ export function searchRuns(runs, query, opts = {}) {
     });
   }
 
-  // Most-recent first — same as the runs table ordering.
   hits.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
 
   return {
@@ -104,8 +79,7 @@ export function searchRuns(runs, query, opts = {}) {
 function matchesForRun(r, tokens, contextChars, runErrors = []) {
   const fields = [];
 
-  // Structured fields. Order matters for snippet presentation — we want
-  // the most identity-bearing ones first.
+  // Field order drives snippet presentation: identity-bearing fields first.
   pushField(fields, "flowId",         r.flowId);
   pushField(fields, "pipelineId",     r.pipelineId ?? r.stateJson?.pipelineId);
   pushField(fields, "status",         r.status);
@@ -114,24 +88,14 @@ function matchesForRun(r, tokens, contextChars, runErrors = []) {
   pushField(fields, "waitJson.reason", r.waitJson?.reason);
   pushField(fields, "waitJson.hint",   r.waitJson?.hint);
 
-  // errorEntries — iterate so we get a precise field path back. Covers
-  // both root-level and subflow-level errors (unified in flow_node_executions).
   runErrors.forEach((err, i) => {
     pushField(fields, `errorEntries[${i}].nodeId`,   err?.nodeId);
     pushField(fields, `errorEntries[${i}].message`, err?.message);
   });
 
-  // AND across fields: a run matches when EVERY token appears in at
-  // least one of its fields (the token doesn't have to land in the
-  // same field as the others). Earlier behavior required every token
-  // in the SAME field's text, which broke combinations like
-  // `<pipelineId> failed` — pipelineId text and status text are
-  // disjoint, so the conjunction always returned zero.
-  //
-  // We compute, per token, the set of fields it touches. A run is a
-  // hit when every token has at least one such field. The returned
-  // matches[] surfaces only fields that contained at least one
-  // token, so the snippets remain meaningful.
+  // A run matches when EVERY token appears in at least one field — tokens may
+  // land in different fields. Requiring all of them in the same field broke
+  // combinations like `<pipelineId> failed`, whose texts are disjoint.
   const tokenFieldHits = tokens.map((t) => {
     const hitsForToken = [];
     for (const f of fields) {
@@ -143,8 +107,7 @@ function matchesForRun(r, tokens, contextChars, runErrors = []) {
   });
   if (tokenFieldHits.some((arr) => arr.length === 0)) return [];
 
-  // Dedupe field → first hit so we don't emit one match entry per
-  // (token, field) pair when several tokens land in the same field.
+  // One match entry per field, keeping each field's earliest hit.
   const byField = new Map();
   for (const arr of tokenFieldHits) {
     for (const h of arr) {
@@ -175,7 +138,6 @@ function snippetAround(text, pos, matchLen, contextChars) {
   const end   = Math.min(text.length, pos + matchLen + contextChars);
   const prefix = start > 0 ? "…" : "";
   const suffix = end < text.length ? "…" : "";
-  // Collapse newlines/tabs so the snippet stays one line.
   const body = text.slice(start, end).replace(/\s+/g, " ");
   return `${prefix}${body}${suffix}`;
 }

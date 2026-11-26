@@ -2,13 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { persistRevisedDraft, persistRevisedMeta } from "../../../routes/discuss-draft.js";
 
-// The real `store` (state/state-store.js) has every method declared `async`.
-// A synchronous mock can't catch a missing await (a plain return value and an
-// unawaited Promise are both "not null" to a caller that doesn't read a field
-// off either), so every mock below is async to exercise the real await path.
-
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 function makeFlow(overrides = {}) {
   return {
     flowId: "12345678-0000-0000-0000-000000000001",
@@ -46,8 +39,6 @@ function makeStore(flow) {
     },
   };
 }
-
-// ── persistRevisedDraft ───────────────────────────────────────────────────────
 
 describe("persistRevisedDraft", () => {
   it("returns flow_not_found when flow does not exist", async () => {
@@ -95,7 +86,6 @@ describe("persistRevisedDraft", () => {
   it("rejects meta narration", async () => {
     const flow = makeFlow();
     const store = makeStore(flow);
-    // Short text triggers looksLikeMetaNarration
     const r = await persistRevisedDraft({
       flowId: flow.flowId, itemId: "item-1", newDraft: "Short",
       store, logger: null,
@@ -104,9 +94,6 @@ describe("persistRevisedDraft", () => {
     assert.equal(r.code, "rejected_meta_narration");
   });
 });
-
-
-// ── persistRevisedMeta ────────────────────────────────────────────────────────
 
 describe("persistRevisedMeta", () => {
   it("returns empty_fields for null fields", async () => {
@@ -143,7 +130,6 @@ describe("persistRevisedMeta", () => {
       flowId: flow.flowId, itemId: "item-1", fields: { budget: "750" }, store, logger: null,
     });
     assert.equal(r.applied, true);
-    // Verify the store received an update with the patched field
     const updated = await store.get(flow.flowId);
     const updatedItem = updated.waitJson.items[0];
     assert.equal(updatedItem.requestPayload.editableMeta?.budget, "750");
@@ -160,11 +146,6 @@ describe("persistRevisedMeta", () => {
     assert.equal(updated.waitJson.items[0].requestPayload.editableMeta?.newField, "hello");
   });
 
-  // Every current gate-layout.js (freelance_workana-proposal etc.) declares
-  // requestPayload.layout directly (executor-helpers.js enforces this).
-  // gate-projector.js serves `layout` verbatim to clients, so a field-group
-  // edit has to land there or the chip never updates, regardless of
-  // editableMeta being patched correctly.
   it("patches a field-group entry inside requestPayload.layout", async () => {
     const flow = makeFlow({
       waitJson: {
@@ -191,7 +172,6 @@ describe("persistRevisedMeta", () => {
       },
     });
     const store = makeStore(flow);
-    // timeframe is not numerically-typed, so a plain string is valid here.
     const r = await persistRevisedMeta({
       flowId: flow.flowId, itemId: "item-1", fields: { timeframe: "2 semanas" }, store, logger: null,
     });
@@ -200,7 +180,6 @@ describe("persistRevisedMeta", () => {
     const layout = updated.waitJson.items[0].requestPayload.layout;
     const group = layout.find((entry) => entry.kind === "field-group");
     assert.equal(group.fields.find((f) => f.id === "timeframe")?.value, "2 semanas");
-    // Untouched fields in the same group must survive the patch.
     assert.equal(group.fields.find((f) => f.id === "budget")?.value, "500");
   });
 
@@ -230,11 +209,6 @@ describe("persistRevisedMeta", () => {
     assert.equal(layout.find((entry) => entry.id === "timeframe")?.value, "2 semanas");
   });
 
-  // propose_draft_meta (the agent tool Cyrano calls during a discuss
-  // session) stores budget/period as JS numbers, not strings — the
-  // layout patch requires a real number for any field the pipeline
-  // declares type: "money"/"number", so this is the only shape that
-  // succeeds for such a field.
   it("patches a field-group entry when the proposed value is a number", async () => {
     const flow = makeFlow({
       waitJson: {
@@ -292,10 +266,6 @@ describe("persistRevisedMeta", () => {
     assert.equal(layout.find((entry) => entry.id === "period")?.value, "21");
   });
 
-  // A field the pipeline declares numeric MUST arrive as a real JS number.
-  // A numeric-looking string is rejected outright, not silently coerced —
-  // matches the strict shape propose_draft_meta already enforces at the
-  // tool-call boundary, rather than re-permitting a lenient string here.
   it("rejects a string value for a field-group entry declared type: \"money\"", async () => {
     const flow = makeFlow({
       waitJson: {
@@ -324,7 +294,6 @@ describe("persistRevisedMeta", () => {
     assert.equal(r.applied, false);
     assert.equal(r.code, "invalid_field_type");
     assert.equal(r.field, "budget");
-    // Rejected outright — the field-group entry must be untouched.
     const updated = await store.get(flow.flowId);
     const group = updated.waitJson.items[0].requestPayload.layout.find((entry) => entry.kind === "field-group");
     assert.equal(group.fields.find((f) => f.id === "budget")?.value, "500");

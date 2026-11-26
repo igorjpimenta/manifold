@@ -1,12 +1,3 @@
-/**
- * Unit tests for events/emit.js
- *
- * Verifies (mirroring test/unit/telemetry/broadcast.test.js conventions):
- *   - WS delivery uses the plugin. prefix + kind as the wire name.
- *   - Envelope stamped (kind, emittedAtMs); stray `type` dropped.
- *   - Negative guards: getter undefined/null/throws → never rejects.
- *   - Validation faults reject (unknown kind, missing fields).
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createEmitter } from "../../../events/emit.js";
@@ -18,7 +9,6 @@ function makeBroadcast() {
   return fn;
 }
 
-// ── WS delivery ──────────────────────────────────────────────────────────────
 
 describe("emit — gateway WS", () => {
   test("broadcasts plugin. + kind with stamped envelope", async () => {
@@ -63,9 +53,7 @@ describe("emit — gateway WS", () => {
   });
 });
 
-// ── negative guards ──────────────────────────────────────────────────────────
 
-// ── negative guards ──────────────────────────────────────────────────────────
 
 describe("emit — negative guards", () => {
   test("missing getter never rejects", async () => {
@@ -94,7 +82,6 @@ describe("emit — negative guards", () => {
   });
 });
 
-// ── validation faults ────────────────────────────────────────────────────────
 
 describe("emit — validation", () => {
   test("unknown and reserved kinds reject", async () => {

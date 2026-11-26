@@ -1,13 +1,7 @@
-/**
- * Unit tests for the batched tree-summary endpoint:
- *   GET /manifold/tree-summary?flowIds=id1,id2,...
- */
 import { test, describe, mock, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js);
-// the authReq helper below sends it, matching the "Bearer x" test token.
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = "x";
 after(() => {

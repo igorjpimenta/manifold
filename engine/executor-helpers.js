@@ -3,17 +3,15 @@
 import { getAllSubflowGroups } from "../state/subflow-state.js";
 import { replayResults } from "./result-replay.js";
 
-// Edge functions come in two modes, dispatched by declared arity (same
-// technique this file's own usesNamedParams() uses elsewhere):
+// Edge functions come in two modes, dispatched by declared arity:
 //   - direct edge (1 param):  (state) => nextNodeId | null.
 //   - edge function (2 params): (state, error) => nextNodeId | null — opts
-//     into receiving the node's thrown error (a {message, errorType}
-//     object, or null if the node succeeded / hasn't run) as its 2nd arg.
-//     Lets a cascade's edge decide retry-vs-fallback-vs-give-up from the
-//     REAL thrown error instead of a soft-returned state field.
-//   CAVEAT: a default value on the 2nd param (`(state, error = null) =>`)
-//   or a rest param collapses fn.length back down and silently falls back
-//   to direct-edge mode — no error ever passed. Don't do that.
+//     into receiving the node's thrown error ({message, errorType}, or null
+//     if it succeeded / hasn't run), so a cascade's edge can decide
+//     retry-vs-fallback-vs-give-up from the REAL error.
+//   CAVEAT: a default on the 2nd param (`(state, error = null) =>`) or a
+//   rest param collapses fn.length and silently falls back to direct-edge
+//   mode — no error ever passed. Don't do that.
 export function resolveEdge(edges, fromNode, state, ctx = null) {
   const edge = edges[fromNode];
   if (typeof edge === "string") return edge;
@@ -34,43 +32,32 @@ export function isTerminal(status) {
 
 export function isBlocked(status) {
   // Despite its name, setWaiting() always writes status='blocked' — it
-  // never actually writes "waiting" (confirmed repo-wide), so that's the
-  // only value checked here.
+  // never writes "waiting", so that's the only value checked here.
   return status === "blocked";
 }
 
-// A flow waiting on an internal resource (a shared admission-pool slot —
-// child-dispatch, flow-start — or a cross-process lock)
-// rather than an operator decision. Distinct from
-// isBlocked so callers that mean "waiting on a human" don't accidentally
-// also match resource-queued flows, and vice versa.
+// Waiting on an internal resource (admission-pool slot, cross-process
+// lock), not an operator decision — kept distinct from isBlocked so
+// "waiting on a human" callers don't also match resource-queued flows.
 export function isQueued(status) {
   return status === "queued";
 }
 
-// Determines whether entering `nodeId` is a genuinely fresh pass through
-// this node, or a continuation of the SAME dispatch (a retry, a reentrant
-// loop-wait re-check) — feeds node-executions.js's
-// write()/findOrCreateInvocation()'s forceNew param.
-// `lastNodeId` must come from nodeExecutions.findCurrentStep(flowId)
-// called BEFORE this node's own dispatch decision was made — never a
-// value re-read after execution starts, since a concurrent mutation there
-// would reflect something unrelated to what led to THIS dispatch.
-// findCurrentStep always reflects the PREVIOUSLY entered node (this
-// node's own row is only created once the dispatch decision below is
-// made) — if it matches nodeId itself, we're re-entering the exact node
-// we just came from (continuation, e.g. an operator retry that rewinds
-// lastStep but never creates a new invocation for the failed node, or a
-// reentrant loop-wait re-check); anything else, including no prior
-// invocation at all (lastNodeId === null), is a fresh pass (a real
-// loop-back edge, or the first-ever entry).
+// Whether entering `nodeId` is a fresh pass or a continuation of the SAME
+// dispatch (retry, reentrant loop-wait re-check) — feeds write()'s
+// forceNew param. `lastNodeId` must come from findCurrentStep(flowId)
+// called BEFORE this dispatch decision, never re-read after execution
+// starts: a concurrent mutation there would reflect something unrelated to
+// what led to THIS dispatch. findCurrentStep reflects the node entered
+// before this one (this node's row is created only once the decision is
+// made) — a match means re-entering the exact node we just came from
+// (e.g. an operator retry that rewinds lastStep without a new invocation);
+// anything else, including null, is a fresh pass.
 export function isFreshNodeEntry(lastNodeId, nodeId) {
   return lastNodeId !== nodeId;
 }
 
 export function mergeForConflict(fresh, mine) {
-  // Cheap merge: prefer "my" values, but keep any slot-keyed objects that
-  // fresh already has and I don't. Good enough for slot-per-item parallel writes.
   if (!fresh || typeof fresh !== "object") return mine;
   const out = { ...fresh, ...mine };
   for (const [k, v] of Object.entries(fresh)) {
@@ -107,14 +94,9 @@ export function deepClone(v) {
 }
 
 // Fallback reason for a blocked node whose result is a plain returned
-// waitJson (no blockedInfo/throw — see executor.js's own waitJson-persist
-// branch). node.renderForOperator is checked first; since no pipeline in
-// this codebase implements it, this kind-aware synthesis is what actually
-// fires in practice. Every OTHER wait kind (resource-lock,
-// needs-gateway-handoff, pipeline-load-pending, budget-gate-approval)
-// already carries a real reason by construction and never reaches this —
-// only human-gate and children-pending route through the generic waitJson
-// path, so those are the two kinds worth a specific message here.
+// waitJson (no blockedInfo/throw). Only human-gate and children-pending
+// route through this generic path — every other wait kind carries a real
+// reason by construction.
 export function describeWaitFallback(waitJson, nodeId) {
   switch (waitJson?.kind) {
     case "human-gate": {
@@ -130,20 +112,12 @@ export function describeWaitFallback(waitJson, nodeId) {
   }
 }
 
-// Fail-fast check for one waitJson batch's items — called right before any
-// waitJson (root-level human-gate, branch-internal loop aggregate, or a
-// node's own `_blocked.items`) gets persisted. Every gate must declare its
-// own `requestPayload.layout` array — there is no auto-synthesis from
-// editableFields/editableText/chatThread/references fields,
-// so an author who forgets `layout` gets a loud error here instead of an
-// empty gate on any client. A `layout` containing kind:"deck" must have that as
-// its ONLY entry (mixing a deck with other components is ambiguous —
-// GateDeckView pages the WHOLE gate, there's nowhere for sibling
-// components to render), and each deck question must be a well-formed
-// {question, hint?} pair. Throws rather than degrading silently — both of
-// these are always pipeline-author bugs, never legitimate runtime data
-// shapes, so they should fail the node loudly at the source instead of
-// shipping broken content to the client.
+// Fail-fast before persisting any waitJson batch: every gate declares its
+// own requestPayload.layout (no auto-synthesis from editableFields/
+// editableText/etc.), and a kind:"deck" must be the layout's ONLY entry —
+// GateDeckView pages the whole gate, leaving nowhere for sibling
+// components. Both are always pipeline-author bugs, so throw loudly at the
+// source instead of shipping broken content to the client.
 export function validateGateLayout(items) {
   if (!Array.isArray(items)) return;
   for (const item of items) {
@@ -180,9 +154,6 @@ export function detectBlockedSentinel(result) {
   return null;
 }
 
-// Returns true when an `apply` function was written with a single destructured
-// parameter — `apply({ state, item, output }) => ...` — rather than positional args.
-// Detected by checking that the first char after `(` is `{`.
 export function usesNamedParams(fn) {
   if (typeof fn !== "function" || fn.length !== 1) return false;
   const src = fn.toString();
@@ -197,49 +168,27 @@ export function detectSkippedSentinel(result) {
   return null;
 }
 
-// Reconstructs the working `state` a node would see, by replaying
-// flow_node_invocations' resultJson rows ON TOP OF `baseState` (the flow's
-// own current stateJson), instead of relying purely on the persisted
-// accumulated blob.
+// Reconstructs the working `state` a node would see by replaying
+// flow_node_invocations' resultJson rows ON TOP of `baseState` (the flow's
+// current stateJson).
 //
-// `baseState` matters: state_json carries a fixed list of entry/bookkeeping
-// fields (pipelineId, args, runId, startedAt, cost, _display, approvedIds/
-// rejectedIds/editedTexts/approvalPending/approvalResults, _cascadeError,
-// triggeredBy) that NO node's own stateUpdate ever produces, so resultJson
-// replay alone can never reproduce them. Every real call site needs these
-// (e.g. dispatchSubflowChildren reads state.pipelineId to build
-// childPipelineId, and clones the whole state into every spawned child) —
-// passing baseState:{} (kept for the existing validation script/tests)
-// silently drops them, which is fine for comparing node-output keys in
-// isolation but would break real dispatch.
+// `baseState` is required: state_json carries entry/bookkeeping fields
+// (pipelineId, args, runId, cost, approvedIds, _cascadeError, …) that no
+// node's stateUpdate ever produces, so replay alone can never reproduce
+// them — passing baseState:{} silently drops them (fine for comparing
+// node-output keys in isolation, fatal for real dispatch).
 //
-// The overlay is additive, not a behaviour change: every node-output key
-// resultJson can contribute is already present in state_json, verified
-// byte-for-byte against a real flow. So nothing here depends on the replay
-// to fix a wrong value today — it isolates node contributions, and the
-// reconstructed state currently matches the blob it was derived from.
+// Overlay is additive: every node-output key resultJson can contribute is
+// already present in state_json. Each row replays in chronological order
+// via the same shallow-merge the live engine uses ({...state, ...update})
+// — a merge, not a per-node-key lookup, because a node's resultJson is
+// whatever run()/apply() returned (conventionally {[nodeId]: …}, not
+// guaranteed).
 //
-// Replays each top-level node's own contributed stateUpdate in
-// chronological order via the exact same shallow-merge applyUpdate already
-// does today (`{...state, ...update}`) — it replays the run's own node
-// contributions in order, not a lookup of "the value of state[nodeId]": a
-// node's resultJson is
-// whatever object it returned from run()/apply(), which by convention is
-// almost always `{[itsOwnNodeId]: {...}}` but isn't a guaranteed shape, so
-// this merges it exactly the way the live engine already merges it rather
-// than assuming a per-node key.
-//
-// Two things this deliberately does NOT do:
-//   - It does not try to synthesize a merged/aggregate value for a
-//     subflow-kind node's own state[nodeId]. dispatchSubflowChildren
-//     (executor-subflow-children.js) always returns stateUpdate: {} —
-//     there is no such value today, so assembly doesn't fabricate one.
-//   - Subflow results are read exclusively through _subflowGroups,
-//     computed by the same getAllSubflowGroups call this function already
-//     makes — folded into this one function instead of a second call site.
-//
-// writeResult() (state/node-executions.js) does not cap results (see its
-// own header comment) — a node's real value is always what lands here.
+// Deliberately NOT done: no synthesized aggregate for a subflow-kind node's
+// own state[nodeId] (dispatchSubflowChildren always returns stateUpdate:{}
+// — there is no such value to fabricate); subflow results come only
+// through _subflowGroups, folded into the same getAllSubflowGroups call.
 export async function assembleState(flowId, { runStore, nodeExecutionsStore, baseState = {} } = {}) {
   const results = (await nodeExecutionsStore?.listResultsForFlow?.(flowId)) ?? [];
   let state = replayResults(baseState, results);

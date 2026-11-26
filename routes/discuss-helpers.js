@@ -1,5 +1,3 @@
-// Pure helpers for discuss handlers — no I/O, no closure deps, fully unit-testable.
-
 export const DRAFT_META_PREFIXES = [
   /^draft\b.{0,80}(written|saved|done|updated|complete)/i,
   /^here'?s\s+/i,
