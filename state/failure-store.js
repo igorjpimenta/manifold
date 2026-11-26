@@ -16,35 +16,19 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// Maps (error_type, summary) to the operator action the Inbox offers:
-//   retry-step  — ordinary throw (no errorType) or infra_unavailable;
-//                 system-recoverable, one-tap retry of the failed step
-//   skip-only   — "blocked" whose summary carries a declared benign marker;
-//                 the work is moot, skip removes it
+// Maps error_type to the operator action the Inbox offers:
+//   retry-step  — ordinary throw (no errorType); system-recoverable,
+//                 one-tap retry of the failed step
 //   investigate — everything else: a pipeline-authored error_type or an
 //                 engine policy verdict, neither of which core routes
 //                 automatically
-//
-// Markers come from MANIFOLD_BENIGN_REFUSAL_MARKERS (comma-separated), so a
-// pipeline's own refusal wording is configuration, not a core string.
 // Computed fresh at read time (see deriveFailureContext) — not stored.
-function classifyRecoveryHint(errorType, summary) {
+function classifyRecoveryHint(errorType) {
   if (errorType == null) return "retry-step";
-  if (errorType === "infra_unavailable") return "retry-step";
-  if (errorType === "blocked") {
-    const s = String(summary ?? "").toLowerCase();
-    return BENIGN_REFUSAL_MARKERS().some((marker) => s.includes(marker)) ? "skip-only" : "investigate";
-  }
   // A pipeline-authored error_type is not auto-routed — over-surface
   // as "needs a look" rather than silently misroute.
   return "investigate";
 }
-
-const BENIGN_REFUSAL_MARKERS = () =>
-  String(process.env.MANIFOLD_BENIGN_REFUSAL_MARKERS ?? "benign-refusal")
-    .split(",")
-    .map((m) => m.trim().toLowerCase())
-    .filter(Boolean);
 
 function summarize(s, maxLen = 280) {
   if (typeof s !== "string") s = String(s ?? "");
@@ -138,7 +122,7 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     const itemInv = await resolveItemInvocation(row, inv);
     const branchItemId = itemInv?.subflowKey ?? null;
 
-    const recoveryHint = classifyRecoveryHint(row.error_type, row.failure_summary);
+    const recoveryHint = classifyRecoveryHint(row.error_type);
     const resolvedAt = await computeResolvedAt(row);
 
     return {

@@ -42,14 +42,14 @@ describe("resolveEdge", () => {
     let receivedArgCount = "not called";
     // Plain `function`, not arrow: `arguments` must be this function's own binding.
     const edges = { step: function (s) { receivedArgCount = arguments.length; return "next"; } };
-    resolveEdge(edges, "step", {}, { error: { message: "boom", errorType: "infra_unavailable" } });
+    resolveEdge(edges, "step", {}, { error: { message: "boom", errorType: "provider-5xx" } });
     assert.equal(receivedArgCount, 1);
   });
 
   it("a 2-param edge receives ctx.error as its 2nd argument", () => {
     let receivedError;
     const edges = { step: (s, error) => { receivedError = error; return "next"; } };
-    const err = { message: "boom", errorType: "infra_unavailable" };
+    const err = { message: "boom", errorType: "provider-5xx" };
     resolveEdge(edges, "step", {}, { error: err });
     assert.deepEqual(receivedError, err);
   });
@@ -71,7 +71,7 @@ describe("resolveEdge", () => {
   it("FOOTGUN: a default value on the 2nd param collapses fn.length back to 1 — no error ever passed", () => {
     let receivedError = "not called";
     const edges = { step: (s, error = "default") => { receivedError = error; return "next"; } };
-    resolveEdge(edges, "step", {}, { error: { message: "boom", errorType: "infra_unavailable" } });
+    resolveEdge(edges, "step", {}, { error: { message: "boom", errorType: "provider-5xx" } });
     assert.equal(receivedError, "default");
   });
 });

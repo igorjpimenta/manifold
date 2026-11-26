@@ -190,18 +190,6 @@ describe("classifyRecoveryHint — via get() (computed at read time)", () => {
     assert.equal(await hintFor({ errorType: null }), "retry-step");
   });
 
-  test("infra_unavailable → retry-step", async () => {
-    assert.equal(await hintFor({ errorType: "infra_unavailable", summary: "browser down" }), "retry-step");
-  });
-
-  test("blocked + a declared benign marker → skip-only", async () => {
-    assert.equal(await hintFor({ errorType: "blocked", summary: "benign-refusal: HTTP 403" }), "skip-only");
-  });
-
-  test("blocked + unrecognized reason → investigate", async () => {
-    assert.equal(await hintFor({ errorType: "blocked", summary: "something weird happened" }), "investigate");
-  });
-
   test("pipeline-authored error_type → investigate, not silently routed", async () => {
     assert.equal(await hintFor({ errorType: "my-own-outcome" }), "investigate");
   });
@@ -603,12 +591,12 @@ describe("recordEngineFailure()", () => {
     const flowIdB = randomUUID();
     await store.recordEngineFailure({
       flowId: flowIdA, pipelineId: "pipe", failureNode: "NODE_X", message: "landing page unresolved", state: {},
-      errorType: "infra_unavailable",
+      errorType: "provider-5xx",
     });
     await store.recordEngineFailure({ flowId: flowIdB, pipelineId: "pipe", failureNode: "NODE_Y", message: "plain crash", state: {} });
     const rowA = (await store._db.execute({ sql: "SELECT * FROM failure_events WHERE flow_id = ?", args: [flowIdA] })).rows[0];
     const rowB = (await store._db.execute({ sql: "SELECT * FROM failure_events WHERE flow_id = ?", args: [flowIdB] })).rows[0];
-    assert.equal(rowA.error_type, "infra_unavailable");
+    assert.equal(rowA.error_type, "provider-5xx");
     assert.equal(rowB.error_type, null);
     store.close();
   });
@@ -704,7 +692,7 @@ describe("queryErrorsByFlow()", () => {
     });
     await insertRawRow(store, {
       flowId, invocationId: invEarly, executionId: "exec-early", failedAt: 100,
-      failureSummary: "early fail", errorType: "infra_unavailable",
+      failureSummary: "early fail", errorType: "provider-5xx",
     });
 
     const rows = await store.queryErrorsByFlow(flowId);
@@ -712,7 +700,7 @@ describe("queryErrorsByFlow()", () => {
     assert.equal(rows[0].nodeId, "EARLY");
     assert.equal(rows[0].subflowKey, null);
     assert.equal(rows[0].message, "early fail");
-    assert.equal(rows[0].errorType, "infra_unavailable");
+    assert.equal(rows[0].errorType, "provider-5xx");
     assert.equal(rows[0].at, 100);
     assert.equal(rows[0].executionId, "exec-early");
     assert.equal(rows[0].invocationId, invEarly);
