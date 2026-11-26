@@ -95,7 +95,7 @@ describe("session-id bridge", () => {
 
   it("mints this harness's id shape for a dispatch", () => {
     const minted = sessionIdFor({ agentId: "scorer", flowId: "abcdef01-0000-0000-0000-000000000000", nodeId: "SCORE_LLM" });
-    assert.equal(minted.session, "agent:scorer:manifold:abcdef01-SCORE_LLM");
+    assert.equal(minted.session, "agent:scorer:manifold:abcdef01-score_llm");
   });
 
   it("refuses missing coordinates instead of defaulting them", () => {

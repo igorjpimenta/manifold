@@ -56,7 +56,11 @@ export function isProviderCooldown(agentId, provider) {
 // One transcript file per session, named after the id, so every segment
 // that reaches the filesystem is sanitized and bounded.
 function safe(s) {
-  return String(s ?? "").replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "_";
+  // Lowercase: the gateway normalizes session keys to lowercase, so an id with
+  // an uppercase segment (node ids are SCREAMING_CASE) reaches tools in a
+  // different case than the dispatch recorded it, and every hand-off write
+  // then misses the row the engine is waiting on.
+  return String(s ?? "").toLowerCase().replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "_";
 }
 
 export function newDiscussSessionId({ agentId, flowId, gateNodeId, itemId }) {
