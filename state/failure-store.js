@@ -16,21 +16,17 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// Maps (error_type, summary) to the operator action the Inbox offers:
-//   retry-step  — system-recoverable; one-tap retry the failed step
-//   skip-only   — work is moot (already done, listing closed); skip removes
-//   investigate — unknown / engineer-level, or a policy verdict with no
-//                 single thrown error to point at
+// Maps error_type to the operator action the Inbox offers:
+//   retry-step  — ordinary throw (no errorType); system-recoverable,
+//                 one-tap retry of the failed step
+//   investigate — everything else: a pipeline-authored error_type or an
+//                 engine policy verdict, neither of which core routes
+//                 automatically
 // Computed fresh at read time (see deriveFailureContext) — not stored.
-function classifyRecoveryHint(errorType, summary) {
+function classifyRecoveryHint(errorType) {
   if (errorType == null) return "retry-step";
-  if (errorType === "infra_unavailable") return "retry-step";
-  if (errorType === "blocked") {
-    const s = String(summary ?? "").toLowerCase();
-    return s.includes("workana-forbidden") ? "skip-only" : "investigate";
-  }
-  // Unknown/untaught error_type — over-surface as "needs a look" rather
-  // than silently misroute.
+  // A pipeline-authored error_type is not auto-routed — over-surface
+  // as "needs a look" rather than silently misroute.
   return "investigate";
 }
 
@@ -126,7 +122,7 @@ async function _createFailureStoreImpl({ dbPath = defaultDbPath(), logger, nodeE
     const itemInv = await resolveItemInvocation(row, inv);
     const branchItemId = itemInv?.subflowKey ?? null;
 
-    const recoveryHint = classifyRecoveryHint(row.error_type, row.failure_summary);
+    const recoveryHint = classifyRecoveryHint(row.error_type);
     const resolvedAt = await computeResolvedAt(row);
 
     return {

@@ -109,13 +109,11 @@ functions — nothing bespoke is needed since `state/node-executions.js`'s
 attempts on this flow if it needs more than presence/absence in `state`.
 
 **`NodeFailure` and 2-arg edge functions** (`engine/executor-errors.js`,
-`engine/executor-helpers.js`'s `resolveEdge` — "Eradicate soft errors"):
-a cascade node's own `run()`/`apply()`
-throws `NodeFailure(message, { errorType })` instead of soft-returning
-`{ok: false, error_type}` on failure — `errorType` reuses the existing
-vocabulary (`never_attempted | confirmed_absent | inconclusive |
-infra_unavailable | blocked`, or `null` for classification-less failures).
-Any plain `Error` works too; `errorType` is just `null` in that case.
+`engine/executor-helpers.js`'s `resolveEdge`): a cascade node's own
+`run()`/`apply()` throws `NodeFailure(message, { errorType })` —
+`errorType` is an opaque string the flow's own edges define and route
+on (`null` for classification-less failures). Any plain `Error` works
+too; `errorType` is just `null` in that case.
 
 An edge function may opt into receiving that thrown error as a **second
 parameter** — `resolveEdge` dispatches on `fn.length`: a 2-arg edge
@@ -125,14 +123,14 @@ default and still the overwhelming majority of edges in this codebase.
 This is purely additive — no existing edge needed to change.
 
 ```js
-// CODE's own edge routes on the REAL thrown error, not a soft field —
-// give up immediately on a genuine confirmed-absent/inconclusive outcome,
-// fall through to an agent-fallback leg for anything else.
+// CODE's own edge routes on the REAL thrown error — the outcome strings
+// are the pipeline's own: give up when the record simply doesn't exist,
+// ensure infra when the dependency is down, agent-fallback otherwise.
 edges: {
   CODE: (state, error) => {
     if (state.CODE?.ok) return "__end__";
-    if (error?.errorType === "inconclusive") return null;
-    if (error?.errorType === "infra_unavailable") return "ENSURE_INFRA";
+    if (error?.errorType === "no-such-record") return null;
+    if (error?.errorType === "infra-down") return "ENSURE_INFRA";
     return "AGENT_FALLBACK";
   },
 },
@@ -149,8 +147,8 @@ accessor, and `assembleState()` never adds one to `state`). A
 `NodeFailure` throw also never merges `state[nodeId]`, so a self-tracked
 counter on the throwing node's own output can't survive a failing attempt
 either — the same "no room for an arbitrary counter" problem this section
-already calls out. An `infra_unavailable` failure ends a cascade
-directly, same as any other failure class, and the operator retries
+already calls out. A failed attempt ends a cascade
+directly, and the operator retries
 manually via the flow's own Retry action once infra is actually healthy.
 If a pipeline genuinely needs a bounded automatic retry count, the only
 sound pattern is a sibling `code` node in the same cascade that never
@@ -168,8 +166,8 @@ opt-out. Any `retry: {...}` left on a node definition is ignored.
 
 **Presence-check pattern for a single-outcome leg**: when a leg either
 throws or returns real payload data with no need to classify *why* it
-failed (an agent-fallback entry whose own `apply()` throws rather than
-soft-returning an error field, say), its edge collapses to a presence
+failed (an agent-fallback entry whose own `apply()` throws, say), its
+edge collapses to a presence
 check: `(state) => (state.AGENT_ID !== undefined ? "__end__" : null)` — a
 throw never merges `state[nodeId]`, so presence alone (any shape) is the
 success signal.
@@ -191,7 +189,7 @@ recoveryActions: {
     tint: "danger",                     // info | warning | danger | neutral
     destructive: true,                  // optional; UI may confirm before firing
     requiresBranch: true,               // optional; hides on flow-level failures
-    appliesTo: ["skip-only", "redraft", "investigate"],  // recovery_hint filter
+    appliesTo: ["retry-step", "investigate"],  // recovery_hint filter
     handler: async ({ failure, body, api, logger }) => {
       // failure : the failure_events row (see internals.md#sqlite-shape-for-direct-queries--surgery)
       // body    : parsed JSON POST body (e.g. { via?, reason? })

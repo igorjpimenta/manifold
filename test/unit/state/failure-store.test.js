@@ -190,28 +190,8 @@ describe("classifyRecoveryHint — via get() (computed at read time)", () => {
     assert.equal(await hintFor({ errorType: null }), "retry-step");
   });
 
-  test("infra_unavailable → retry-step", async () => {
-    assert.equal(await hintFor({ errorType: "infra_unavailable", summary: "browser down" }), "retry-step");
-  });
-
-  test("blocked + workana-forbidden → skip-only", async () => {
-    assert.equal(await hintFor({ errorType: "blocked", summary: "workana-forbidden: HTTP 403" }), "skip-only");
-  });
-
-  test("blocked + unrecognized reason → investigate", async () => {
-    assert.equal(await hintFor({ errorType: "blocked", summary: "something weird happened" }), "investigate");
-  });
-
-  test("confirmed_absent → investigate", async () => {
-    assert.equal(await hintFor({ errorType: "confirmed_absent" }), "investigate");
-  });
-
-  test("inconclusive → investigate", async () => {
-    assert.equal(await hintFor({ errorType: "inconclusive" }), "investigate");
-  });
-
-  test("never_attempted → investigate", async () => {
-    assert.equal(await hintFor({ errorType: "never_attempted" }), "investigate");
+  test("pipeline-authored error_type → investigate, not silently routed", async () => {
+    assert.equal(await hintFor({ errorType: "my-own-outcome" }), "investigate");
   });
 
   test("subflow-mode-not-satisfied → investigate", async () => {

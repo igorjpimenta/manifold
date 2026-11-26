@@ -133,10 +133,10 @@ export const failureEvents = sqliteTable('failure_events', {
   invocationId:   text('invocation_id').references(() => flowNodeInvocations.id, { onDelete: 'set null' }),
   executionId:    text('execution_id').references(() => flowNodeExecutions.id, { onDelete: 'set null' }),
   // Error content lives here, not in flow_node_executions, so it is not
-  // derivable via a join. error_type vocabulary: never_attempted|
-  // confirmed_absent|inconclusive|infra_unavailable|blocked, plus
-  // "subflow-mode-not-satisfied" (a policy verdict, not a thrown
-  // NodeFailure), or null for an ordinary engine-caught throw.
+  // derivable via a join. error_type carries the thrown NodeFailure's
+  // errorType verbatim (pipeline-authored string) or null for an ordinary
+  // engine-caught throw; "subflow-mode-not-satisfied" is written directly
+  // by the engine (a policy verdict, not a thrown NodeFailure).
   errorType:      text('error_type'),
 }, (table) => [
   index('idx_failures_flow').on(table.flowId),

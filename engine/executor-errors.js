@@ -26,12 +26,11 @@ export class GatewayHandoffNeeded extends Error {
   }
 }
 
-// Thrown by a cascade leg to signal failure. `errorType` uses a fixed
-// vocabulary (no new strings): "never_attempted" | "confirmed_absent" |
-// "inconclusive" | "infra_unavailable" | "blocked". The cascade catch in
-// executor.js reads it off the error (duck-typed, not instanceof — see
-// that site) and threads it to the next edge call as its 2nd argument; any
-// other throw reaches the edge with errorType: null.
+// Thrown by a cascade leg to signal failure. `errorType` is an opaque,
+// pipeline-authored string the flow's own edges may route on; the cascade
+// catch in executor.js reads it off the error (duck-typed, not instanceof
+// — see that site) and threads it to the next edge call as its 2nd
+// argument; any other throw reaches the edge with errorType: null.
 export class NodeFailure extends Error {
   constructor(message, { errorType = null } = {}) {
     super(message);
