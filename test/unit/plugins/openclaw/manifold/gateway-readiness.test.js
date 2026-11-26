@@ -1,13 +1,9 @@
-// Unit tests for engine/gateway-readiness.js — registerGatewayReadiness: gateway process marking, gateway_start, shared state.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { registerGatewayReadiness, createReadinessState } from "../../../../../plugins/openclaw/manifold/gateway-readiness.js";
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
 
-// A plugin api stand-in: records hook registrations so tests can fire
-// gateway_start, and records any subagent call so tests can assert none is made.
 function makeApi() {
   const hooks = {};
   const calls = [];
@@ -28,7 +24,6 @@ async function settled(promise) {
   return done;
 }
 
-// ─── not the gateway process ─────────────────────────────────────────────────
 
 describe("a process where manifold's services never start (the CLI)", () => {
   test("whenReady resolves at once", async () => {
@@ -39,7 +34,6 @@ describe("a process where manifold's services never start (the CLI)", () => {
   });
 });
 
-// ─── gateway startup ─────────────────────────────────────────────────────────
 
 describe("gateway startup — services start, then gateway_start", () => {
   test("marking the process never awaits and makes no RPC — it runs inside a service start()", async () => {
@@ -69,7 +63,6 @@ describe("gateway startup — services start, then gateway_start", () => {
   });
 });
 
-// ─── shared state ────────────────────────────────────────────────────────────
 
 describe("shared state — registrations after readiness (reloads, second module instance)", () => {
   test("are ready immediately, without registering for gateway_start", async () => {

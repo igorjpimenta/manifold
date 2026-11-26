@@ -1,23 +1,3 @@
-/**
- * Option B "needs:" — engine-mechanics E2E, matching this suite's own
- * established convention: a real createExecutor() driving a real dispatch loop
- * against isolated tmp-sqlite stores, proving lazy needs: resolution (via
- * ctx.needs(varName), NOT a bulk pre-fetch) actually works through the
- * live engine — not just the mocked-store unit coverage in
- * test/unit/engine/needs-resolver.test.js.
- *
- * Scenario: a root pipeline's SCAN (code) node runs, then PROPOSE (a
- * childFlows:true subflow) spawns a child whose own DRAFT node declares
- * needs: {scan: {hops: 1, nodeId: "SCAN"}} and calls
- * `await ctx.needs("scan")` to read SCAN's real output from its parent
- * (the root flow) without it being cloned into the child's initial state
- * at spawn — and without the engine ever pre-resolving it before run().
- *
- * Isolated-sandbox discipline:
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForTerminal, waitForStatus } from "../../helpers/wait-for-event.js";
@@ -30,8 +10,6 @@ import { createStateStore } from "../../../state/state-store.js";
 import { createExecutor } from "../../../engine/executor.js";
 import { createGateResolver } from "../../../gates/gate-resolver.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -44,12 +22,7 @@ function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
 }
 
-/**
- * Poll until the node has at least one invocation row, then return them.
- *
- * The invocation row is written by the dispatch that runs after the parent's
- * own step resolves, so reading it right after runFlow() can race that write.
- */
+// The invocation row is written after the parent's step resolves — reading it right after runFlow() can race that write.
 async function waitForInvocationIds(nodeExecutionsStore, flowId, nodeId, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
   while (true) {
@@ -104,7 +77,7 @@ function buildPipelines() {
           kind: "code",
           needs: { scan: { hops: 1, nodeId: "SCAN" } },
           run: async (state, ctx) => {
-            const scan = await ctx.needs("scan"); // throws NodeBlocked if not ready — push only happens once resolved
+            const scan = await ctx.needs("scan");
             draftCalls.push(scan);
             return { DRAFT: { text: `drafted from ${JSON.stringify(scan)}` } };
           },
@@ -118,13 +91,6 @@ function buildPipelines() {
       id: "test_needs_parent",
       state: {},
       nodes: {
-        // B4: shortlist must come from a real node's own
-        // stateUpdate, not a raw store.setRunning() injection — a
-        // manually-seeded, non-node-output field is exactly what
-        // state_json narrowing now correctly stops carrying
-        // forward. This mirrors how a real pipeline would actually shape
-        // it: whatever node runs before a childFlows subflow returns the
-        // selector's input as part of its own output.
         SCAN: { kind: "code", run: () => ({ SCAN: { listings: ["a", "b"] }, shortlist: [{ id: "x" }] }) },
         PROPOSE: PROPOSE_NODE,
       },
@@ -139,7 +105,7 @@ function buildPipelines() {
   };
 }
 
-describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read', () => {
+describe('"needs:" — real dispatch loop, cross-boundary hops:1 read', () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
@@ -150,8 +116,6 @@ describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read',
     const record = await executor.start("test_needs_parent", {}, { kind: "test" });
     await executor.runFlow(record.flowId, "fresh");
 
-    // Wait for the parent to reach a terminal state instead of sleeping a
-    // fixed interval (too short on a loaded CI runner, too long elsewhere).
     const parent = await waitForStatus(runStore, record.flowId, (r) => r.status === "succeeded" || r.status === "failed");
     assert.equal(parent.status, "succeeded", "SCAN already complete by the time PROPOSE dispatches — nothing should ever block");
 
@@ -163,25 +127,11 @@ describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read',
     harness = await makeHarness(buildPipelines());
     const { executor, runStore, store, nodeExecutionsStore } = harness;
 
-    // Manufacture "SCAN dispatched, not yet complete" directly — the normal
-    // edge graph always finishes SCAN before PROPOSE can spawn a child, so
-    // this is the deterministic way to exercise the not-ready branch
-    // end-to-end through DRAFT's own real dispatch rather than only via
-    // needs-resolver.test.js's mocked-store coverage.
     const record = await executor.start("test_needs_parent", {}, { kind: "test" });
     const enterResult = await nodeExecutionsStore.enter({ flowId: record.flowId, pipelineId: "test_needs_parent", nodeId: "SCAN", subflowKey: null, kind: "fresh" });
     const seed = await store.get(record.flowId);
-    // Route straight to PROPOSE without ever running SCAN's own dispatch —
-    // its invocation row above exists (resultWrittenAt still null) but no
-    // resultJson was ever written, matching a real "dispatched, still
-    // running" node.
     await store.setRunning({ flowId: record.flowId, expectedRevision: seed.revision, lastStep: "SCAN", stateJson: { ...seed.stateJson, shortlist: [{ id: "x" }] } });
     await executor.runFlow(record.flowId, "retry");
-    // "retry" kind + lastStep:"SCAN" makes the loop resolve SCAN's OWN edge
-    // next, not re-enter SCAN — redirect by asserting the parent's own
-    // dispatch reached PROPOSE and spawned a genuinely blocked child.
-    // The parent never reaches a terminal state here (its child blocks), so
-    // wait for the child's blocked state rather than the parent's.
     const invocationIds = await waitForInvocationIds(nodeExecutionsStore, record.flowId, "PROPOSE");
     assert.ok(invocationIds.length >= 1, "PROPOSE must have spawned its one child despite SCAN not being complete — needs: blocking is DRAFT's problem, not PROPOSE's");
     const children = await runStore.listForParentInvocations(invocationIds);
@@ -194,12 +144,6 @@ describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read',
     assert.equal(child.waitJson.needed[0], "SCAN");
     assert.equal(draftCalls.length, 0, "DRAFT's run() must NEVER have been called while its declared need was pending");
 
-    // Now complete SCAN for real and resume the child — DRAFT must re-check
-    // and succeed with the now-real value. resume()/runFlow() is a no-op on
-    // a still-'blocked' flow by design (see child-resume-trigger.js's own
-    // comment on flipToRunningAndResume) — every real caller flips status
-    // to 'running' via the store first; mirror that here rather than
-    // calling resume() directly.
     await nodeExecutionsStore.writeResult(enterResult.invocationId, { SCAN: { listings: ["late"] } });
     const blockedChild = await store.get(childFlowId);
     await store.setRunning({ flowId: childFlowId, expectedRevision: blockedChild.revision, lastStep: blockedChild.lastStep, stateJson: blockedChild.stateJson });
@@ -210,11 +154,6 @@ describe('Option B "needs:" — real dispatch loop, cross-boundary hops:1 read',
     assert.deepEqual(draftCalls[0], { listings: ["late"] });
   });
 });
-
-// ── entry-based needs: reaching an ancestor's own entry/bookkeeping field
-// (runId), not a node output — real pipeline shape: PROPOSE spawns SUBMIT
-// as a NESTED subflow (mirrors freelance_upwork-proposal's own
-// PROPOSE > SUBMIT nesting), so SUBMIT's own node is 2 hops from the root.
 
 let submitCalls;
 function buildNestedPipelines() {
@@ -229,9 +168,6 @@ function buildNestedPipelines() {
       nodes: {
         SUBMIT_CODE: {
           kind: "code",
-          // hops:2 from SUBMIT_CODE's own flow: 1 hop reaches PROPOSE's own
-          // flow (its immediate parent), 2 hops reaches the true root —
-          // exactly the shape submit-code.js's real state.runId read has.
           needs: { runId: { hops: 2, entry: "runId" } },
           run: async (state, ctx) => {
             const runId = await ctx.needs("runId");
@@ -276,7 +212,7 @@ function buildNestedPipelines() {
   };
 }
 
-describe('Option B "needs:" — entry-based hops:2 read (root\'s own runId, real PROPOSE>SUBMIT nesting shape)', () => {
+describe('"needs:" — entry-based hops:2 read (root\'s own runId, real PROPOSE>SUBMIT nesting shape)', () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
@@ -292,25 +228,12 @@ describe('Option B "needs:" — entry-based hops:2 read (root\'s own runId, real
     const seed = await store.get(record.flowId);
     await store.setRunning({ flowId: record.flowId, expectedRevision: seed.revision, lastStep: seed.lastStep, stateJson: { ...seed.stateJson, shortlist: [{ id: "x" }] } });
     await executor.runFlow(record.flowId, "fresh");
-    // Two levels of fire-and-forget child dispatch to settle: wait for the
-    // parent to reach a terminal state instead of sleeping a fixed interval
-    // (a sleep is too short on a loaded CI runner and too long elsewhere).
     const parent = await waitForStatus(runStore, record.flowId, (r) => r.status === "succeeded" || r.status === "failed");
     assert.equal(parent.status, "succeeded");
     assert.equal(submitCalls.length, 1, "SUBMIT_CODE's run() must have been called exactly once");
     assert.equal(submitCalls[0], realRunId, "resolved value must be the TRUE ROOT's runId, reached by walking 2 hops from the doubly-nested SUBMIT_CODE");
   });
 });
-
-// ── hops:0 (same-flow). Two
-// shapes: nodeId-based (a sibling's own resultJson, no walk at all) and
-// config-based (pipeline-declared static `state:`, read live off the
-// pipeline definition, never off stateJson). The config case reproduces
-// the actual system_memory-synthesis regression: a pipeline-declared field
-// (sourceFilter) that is NOT a node output and NOT in ENTRY_FIELDS, so it's
-// dropped from stateJson the moment the flow persists past its first node
-// — confirmed here by asserting the persisted row really doesn't carry it,
-// while ctx.needs() still resolves it correctly regardless.
 
 let sameFlowCalls;
 function buildSameFlowPipeline() {
@@ -320,13 +243,6 @@ function buildSameFlowPipeline() {
       id: "test_needs_hop0",
       state: { sourceFilter: { includeAgentSelfRediscovery: true } },
       nodes: {
-        // nodeId-based needs always unwraps via parsed[nodeId]
-        // (needs-resolver.js:135) — a node must wrap its own return as
-        // {[ownNodeId]: value} to be readable that way, regardless of
-        // hops. WALK does that here; EXTRACT does not (system_memory-
-        // synthesis's real WALK returns flat fields instead, which is
-        // exactly why its own EXTRACT migration left `sessions` on a
-        // plain state.sessions read rather than nodeId-based needs).
         WALK: { kind: "code", run: () => ({ WALK: { sessions: ["s1", "s2"] } }) },
         EXTRACT: {
           kind: "code",
@@ -346,7 +262,7 @@ function buildSameFlowPipeline() {
   };
 }
 
-describe('Option B "needs:" — hops:0 (same-flow), both nodeId and config shapes', () => {
+describe('"needs:" — hops:0 (same-flow), both nodeId and config shapes', () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
@@ -363,11 +279,6 @@ describe('Option B "needs:" — hops:0 (same-flow), both nodeId and config shape
     assert.deepEqual(sameFlowCalls[0].sessions, ["s1", "s2"], "resolved WALK's own resultJson via nodeId-based needs at hops:0, no walk");
     assert.deepEqual(sameFlowCalls[0].sourceFilter, { includeAgentSelfRediscovery: true }, "resolved the pipeline-declared config live off the definition, not off stateJson");
 
-    // Regression guard: confirm sourceFilter genuinely is NOT in the
-    // persisted stateJson by the time EXTRACT dispatches — proving
-    // ctx.needs() is doing real work here, not just reading a field that
-    // happened to survive anyway (which is exactly how the original bug
-    // went unnoticed for the implicit `state.sourceFilter` read it replaced).
     assert.equal(flow.stateJson?.sourceFilter, undefined, "sourceFilter must be absent from persisted stateJson — the whole point of routing this through config-type needs() instead");
   });
 });

@@ -1,5 +1,3 @@
-// ws-frame.test.js — shared WS framing: the RFC 6455 accept vector,
-// frame length tiers, path matching, per-socket filtering, and close.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";

@@ -1,8 +1,3 @@
-// paths.test.js — env store paths are taken verbatim, except that a value
-// which arrived wrapped in matching quotes is refused instead of used. The
-// quotes would become part of the filename, so the process would open (and
-// create) a second store whose name only looks like the configured one, and
-// every other reader of the real path would see an empty history.
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { resolveStorePaths, resolveDataDir } from "../../../state/paths.js";

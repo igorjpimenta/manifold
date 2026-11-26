@@ -1,7 +1,3 @@
-// Unit tests for dashboard/cost.js — costForRun, costForPipeline, costForAllPipelines:
-// token aggregation, byModel/byNode/bySession fan-out, time-window filtering,
-// pipeline identification, byDay grouping, p50/p95 percentiles, active-in-window
-// gate, succeededToday/failedToday/costToday, and null/empty-input edge cases.
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -11,17 +7,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { createClient } from "@libsql/client";
 
-// ─── redirect OPS_DB away from ~/.openclaw ────────────────────────────────────
-// cost.js computes the path at load-time via os.homedir(), so we must mock
-// node:os BEFORE importing the module. We then pass _dbPath directly to each
-// function so the mock is only needed to prevent accidental real-DB access.
 
 const TEST_HOME = path.join(os.tmpdir(), `gf-cost-${randomUUID()}`);
 const TEST_OPS_DIR = path.join(TEST_HOME, ".openclaw");
 const LINEAGE_DB_PATH = path.join(TEST_OPS_DIR, "ops.sqlite");
 
-// Create the directory but NOT the .sqlite file yet — the first describe block
-// verifies that the functions degrade gracefully when the file is absent.
 mkdirSync(TEST_OPS_DIR, { recursive: true });
 
 import { mock } from "node:test";
@@ -38,7 +28,6 @@ await mock.module("node:os", {
 const { costForRun, costForPipeline, costForAllPipelines } =
   await import("../../../dashboard/cost.js");
 
-// ─── DB absent — must run before before() creates the file ───────────────────
 
 describe("DB absent — graceful empty returns", () => {
   test("costForRun returns zero-total struct when DB file is missing", async () => {
@@ -58,7 +47,6 @@ describe("DB absent — graceful empty returns", () => {
   test("costForPipeline returns empty when DB file is missing", async () => {
     const flowId = randomUUID();
     const runs = [makeRunRaw({ flowId, pipelineId: "x" })];
-    // Point to a nonexistent path to exercise the absent-DB branch.
     const r = await costForPipeline(runs, "x", { _dbPath: "/nonexistent/path/ops.sqlite" });
     assert.equal(r.total, 0);
     assert.deepEqual(r.byRun, []);
@@ -70,7 +58,6 @@ describe("DB absent — graceful empty returns", () => {
     const flowId = randomUUID();
     const runs = [makeRunRaw({ flowId, pipelineId: "all_absent" })];
     const r = await costForAllPipelines(runs);
-    // sinceMs=null → all runs included regardless of DB; pipeline entry exists but total=0
     const p = r.pipelines.find((x) => x.pipelineId === "all_absent");
     assert.ok(p, "pipeline entry should exist even when DB is absent");
     assert.equal(p.total, 0);
@@ -78,7 +65,6 @@ describe("DB absent — graceful empty returns", () => {
   });
 });
 
-// ─── schema ──────────────────────────────────────────────────────────────────
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS cost_by_call (
@@ -108,7 +94,6 @@ function getClient() {
   return _client;
 }
 
-// Bootstrap DB (schema only) for all subsequent tests.
 before(async () => {
   const c = getClient();
   await c.execute(SCHEMA);
@@ -119,7 +104,6 @@ after(() => {
   _client = null;
 });
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
 
 async function insertRow({
   flowId = randomUUID(),
@@ -169,12 +153,8 @@ function makeRunRaw({
   };
 }
 
-// Helper: pass _dbPath so tests use the test DB, not ~/.openclaw/ops.sqlite
 const DB = { _dbPath: LINEAGE_DB_PATH };
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// costForRun
-// ═══════════════════════════════════════════════════════════════════════════════
 
 describe("costForRun — basic aggregation", () => {
   test("sums cost_total across multiple rows for a flowId", async () => {
@@ -325,8 +305,8 @@ describe("costForRun — bySession fan-out", () => {
 describe("costForRun — time-window filtering", () => {
   test("sinceMs excludes rows before the cutoff", async () => {
     const flowId = randomUUID();
-    await insertRow({ flowId, costTotal: 1.0, tsOffset:      -500 }); // in window
-    await insertRow({ flowId, costTotal: 9.0, tsOffset: -200_000 }); // before cutoff
+    await insertRow({ flowId, costTotal: 1.0, tsOffset:      -500 });
+    await insertRow({ flowId, costTotal: 9.0, tsOffset: -200_000 });
     const sinceMs = Date.now() - 10_000;
     const r = await costForRun(flowId, { sinceMs, _dbPath: LINEAGE_DB_PATH });
     assert.ok(r.total < 2, `expected ~1.0, got ${r.total}`);
@@ -335,8 +315,8 @@ describe("costForRun — time-window filtering", () => {
   test("untilMs excludes rows after the cutoff", async () => {
     const flowId = randomUUID();
     const now = Date.now();
-    await insertRow({ flowId, costTotal: 1.0, tsOffset:  -2_000 }); // after cutoff → excluded
-    await insertRow({ flowId, costTotal: 2.0, tsOffset: -20_000 }); // before cutoff → included
+    await insertRow({ flowId, costTotal: 1.0, tsOffset:  -2_000 });
+    await insertRow({ flowId, costTotal: 2.0, tsOffset: -20_000 });
     const sinceMs  = now - 30_000;
     const untilMs  = now - 10_000;
     const r = await costForRun(flowId, { sinceMs, untilMs, _dbPath: LINEAGE_DB_PATH });
@@ -345,22 +325,12 @@ describe("costForRun — time-window filtering", () => {
 
   test("sinceMs with no untilMs defaults effectiveUntil to now", async () => {
     const flowId = randomUUID();
-    await insertRow({ flowId, costTotal: 3.0, tsOffset: -1_000 }); // in window
+    await insertRow({ flowId, costTotal: 3.0, tsOffset: -1_000 });
     const r = await costForRun(flowId, { sinceMs: Date.now() - 10_000, _dbPath: LINEAGE_DB_PATH });
     assert.ok(Math.abs(r.total - 3.0) < 1e-9);
   });
-
-  test("_sessionIndex param is accepted and ignored", async () => {
-    const flowId = randomUUID();
-    await insertRow({ flowId, costTotal: 0.5 });
-    const r = await costForRun(flowId, DB, { some: "legacy", data: true });
-    assert.ok(r.total > 0);
-  });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// costForPipeline
-// ═══════════════════════════════════════════════════════════════════════════════
 
 describe("costForPipeline — empty / no match", () => {
   test("returns empty struct when runs is []", async () => {
@@ -450,7 +420,7 @@ describe("costForPipeline — byRun shape", () => {
       makeRunRaw({ flowId: fC, pipelineId: "pipe_sort", createdAt: now - 2_000 }),
     ];
     const r = await costForPipeline(runs, "pipe_sort", DB);
-    assert.equal(r.byRun[0].flowId, fA); // newest first
+    assert.equal(r.byRun[0].flowId, fA);
     assert.equal(r.byRun[1].flowId, fC);
     assert.equal(r.byRun[2].flowId, fB);
   });
@@ -479,7 +449,6 @@ describe("costForPipeline — percentiles (p50 / p95)", () => {
       runs.push(makeRunRaw({ flowId, pipelineId: pid }));
     }
     const r = await costForPipeline(runs, pid, DB);
-    // sorted [1,2,3,4,5]: idx = ceil(0.5*5)-1 = 2 → 3
     assert.equal(r.p50, 3);
   });
 
@@ -492,7 +461,6 @@ describe("costForPipeline — percentiles (p50 / p95)", () => {
       runs.push(makeRunRaw({ flowId, pipelineId: pid }));
     }
     const r = await costForPipeline(runs, pid, DB);
-    // sorted [1..10]: idx = ceil(0.95*10)-1 = 9 → 10
     assert.equal(r.p95, 10);
   });
 
@@ -506,8 +474,8 @@ describe("costForPipeline — percentiles (p50 / p95)", () => {
 describe("costForPipeline — time-window filtering", () => {
   test("sinceMs excludes rows timestamped before the cutoff", async () => {
     const flowId = randomUUID();
-    await insertRow({ flowId, costTotal: 1.0, tsOffset:       -500 }); // in window
-    await insertRow({ flowId, costTotal: 9.0, tsOffset: -1_000_000 }); // before cutoff
+    await insertRow({ flowId, costTotal: 1.0, tsOffset:       -500 });
+    await insertRow({ flowId, costTotal: 9.0, tsOffset: -1_000_000 });
     const sinceMs = Date.now() - 10_000;
     const r = await costForPipeline([makeRunRaw({ flowId, pipelineId: "pipe_win" })], "pipe_win", { sinceMs, _dbPath: LINEAGE_DB_PATH });
     assert.ok(r.total < 2, `expected ~1.0, got ${r.total}`);
@@ -515,8 +483,8 @@ describe("costForPipeline — time-window filtering", () => {
 
   test("sinceDays converts to sinceMs and filters correctly", async () => {
     const flowId = randomUUID();
-    await insertRow({ flowId, costTotal: 3.0, tsOffset: -2 * 86_400_000 }); // 2 days ago → in window
-    await insertRow({ flowId, costTotal: 9.0, tsOffset: -8 * 86_400_000 }); // 8 days ago → excluded
+    await insertRow({ flowId, costTotal: 3.0, tsOffset: -2 * 86_400_000 });
+    await insertRow({ flowId, costTotal: 9.0, tsOffset: -8 * 86_400_000 });
     const r = await costForPipeline(
       [makeRunRaw({ flowId, pipelineId: "pipe_sincedays" })],
       "pipe_sincedays",
@@ -526,9 +494,6 @@ describe("costForPipeline — time-window filtering", () => {
   });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// costForAllPipelines
-// ═══════════════════════════════════════════════════════════════════════════════
 
 describe("costForAllPipelines — empty / null input", () => {
   test("returns empty struct when runs is null", async () => {
@@ -617,7 +582,6 @@ describe("costForAllPipelines — total aggregate fields", () => {
       makeRunRaw({ flowId: fB, pipelineId: "all_cps", status: "succeeded" }),
     ];
     const r = await costForAllPipelines(runs, DB);
-    // spend from these two = 10, succeeded = 2 → 5
     assert.ok(Math.abs(r.total.costPerSuccess - 5.0) < 1e-9);
   });
 
@@ -675,7 +639,6 @@ describe("costForAllPipelines — succeededToday / failedToday / costToday", () 
 describe("costForAllPipelines — active-in-window gate (sinceMs)", () => {
   test("without sinceMs all runs are included regardless of createdAt", async () => {
     const flowId = randomUUID();
-    // No DB rows — included because sinceMs is null
     const runs = [makeRunRaw({ flowId, pipelineId: "all_gate_none" })];
     const p = (await costForAllPipelines(runs, DB)).pipelines.find((x) => x.pipelineId === "all_gate_none");
     assert.ok(p, "run should be included when sinceMs is null");
@@ -683,7 +646,6 @@ describe("costForAllPipelines — active-in-window gate (sinceMs)", () => {
 
   test("with sinceMs: excludes runs created before window with no DB cost", async () => {
     const flowId = randomUUID();
-    // No rows in DB → workedInWindow=false; createdAt before sinceMs → excluded
     const sinceMs = Date.now() - 5_000;
     const runs = [makeRunRaw({ flowId, pipelineId: "all_gate_out", createdAt: sinceMs - 60_000 })];
     const p = (await costForAllPipelines(runs, { sinceMs, _dbPath: LINEAGE_DB_PATH })).pipelines.find((x) => x.pipelineId === "all_gate_out");
@@ -692,7 +654,7 @@ describe("costForAllPipelines — active-in-window gate (sinceMs)", () => {
 
   test("with sinceMs: includes a run created before window if it has DB cost in window", async () => {
     const flowId = randomUUID();
-    await insertRow({ flowId, costTotal: 2.0, tsOffset: -1_000 }); // ts is in window
+    await insertRow({ flowId, costTotal: 2.0, tsOffset: -1_000 });
     const sinceMs = Date.now() - 10_000;
     const runs = [makeRunRaw({ flowId, pipelineId: "all_gate_in", createdAt: sinceMs - 60_000 })];
     const p = (await costForAllPipelines(runs, { sinceMs, _dbPath: LINEAGE_DB_PATH })).pipelines.find((x) => x.pipelineId === "all_gate_in");
@@ -703,7 +665,6 @@ describe("costForAllPipelines — active-in-window gate (sinceMs)", () => {
   test("with sinceMs: includes a run created inside window even with no DB cost", async () => {
     const flowId = randomUUID();
     const sinceMs = Date.now() - 60_000;
-    // createdAt is in-window but no DB rows
     const runs = [makeRunRaw({ flowId, pipelineId: "all_gate_created", createdAt: sinceMs + 1_000 })];
     const p = (await costForAllPipelines(runs, { sinceMs, _dbPath: LINEAGE_DB_PATH })).pipelines.find((x) => x.pipelineId === "all_gate_created");
     assert.ok(p, "run created in window should be included even with zero DB cost");

@@ -1,12 +1,8 @@
-// events/ws-dialog.js — message transport into an open discuss session,
-// over the harness's own WebSocket connection.
-//
-// The parrot channel's HTTP route and the gateway discuss route both
-// implemented this same turn lifecycle (validate → 202+turnId → persist
-// the operator message → stamp the session → run the turn → persist the
-// reply → emit the transcript). This door is that lifecycle on a socket:
-// one connection carries outbound turns and inbound replies, so any
-// harness client needs no channel plugin and no HTTP round-trips.
+// Message transport into an open discuss session over the harness's own
+// WebSocket connection — the discuss turn lifecycle (validate → ack+turnId →
+// persist operator message → stamp session → run turn → persist reply →
+// emit transcript) on one socket, so a harness client needs no channel
+// plugin and no HTTP round-trips.
 //
 // Wire protocol, client → server (JSON text frames):
 //   {"type":"message","id":<client-echo?>,flowId,itemId?,text}
@@ -19,10 +15,10 @@
 // the query string because WebSocket clients cannot set headers).
 // Bearer secrets travel in URLs: prefer wss:// and note proxy access logs.
 //
-// The turn itself runs through injected runTurn (the adapter closes over
+// The turn runs through injected runTurn (the adapter closes over
 // invokeElevated → /manifold/_elev/discuss, the same elevation the HTTP
-// route uses). No pending files: the old discuss-turns markers were
-// write-only, and discussStore's turn_status is the live record.
+// route uses). No pending files — discussStore's turn_status is the live
+// record.
 import http from "node:http";
 import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";
@@ -30,9 +26,8 @@ import { attachWsEndpoint, encodeWsFrame } from "./ws-frame.js";
 import { buildDiscussPrompt } from "../routes/discuss.js";
 
 const MAX_MESSAGE_BYTES = 1024 * 1024;
-// The dialog listener sits at 44302, inside the 44xxx band manifold reserves
-// for its own listeners (api 44301, dashboard 44300), so a collision can only
-// come from an explicit override.
+// Inside the 44xxx band manifold reserves for its own listeners (api 44301,
+// dashboard 44300) — a collision can only come from an explicit override.
 export const DEFAULT_DIALOG_PORT = 44302;
 
 function tokensEqual(a, b) {
@@ -64,7 +59,7 @@ function checkBearer(bearer, logger) {
 function send(socket, obj) {
   try {
     if (!socket.destroyed && socket.writable) socket.write(encodeWsFrame(JSON.stringify(obj)));
-  } catch { /* client gone; cleanup on close */ }
+  } catch {}
 }
 
 export function createDialogServer({
@@ -219,7 +214,7 @@ export function createDialogServer({
           let bearer = "";
           try {
             bearer = new URL(req.url ?? "/", "http://localhost").searchParams.get("bearer") ?? "";
-          } catch { /* keep "" */ }
+          } catch {}
           const authz = checkBearer(bearer, logger);
           if (!authz.ok) {
             send(socket, { type: "error", code: "unauthorized", error: authz.reason });

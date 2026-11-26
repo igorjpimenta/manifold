@@ -1,6 +1,5 @@
-// manifold — neutral core entry: pipeline runtime factories. The gateway
-// plugin entry that wires these factories to a live api lives in
-// plugins/openclaw/manifold/index.js.
+// Neutral core entry: pipeline runtime factories. The gateway plugin entry
+// that wires these to a live api is plugins/openclaw/manifold/index.js.
 
 import { createExecutor } from "./engine/executor.js";
 import { createPipelinesLoader } from "./engine/loader.js";
@@ -13,7 +12,6 @@ import { createNodeHealthStore } from "./state/node-health-store.js";
 import { createAdmissionQueueStore } from "./state/admission-queue-store.js";
 import { getNodeExecutionsStore } from "./state/node-executions.js";
 import { createGateResolver } from "./gates/gate-resolver.js";
-import { registerCliCommands } from "./bin/cli.js";
 import { invokeElevated } from "./elevation.js";
 
 export {
@@ -28,7 +26,6 @@ export {
   createAdmissionQueueStore,
   getNodeExecutionsStore,
   createGateResolver,
-  registerCliCommands,
   invokeElevated,
 };
 
@@ -44,6 +41,5 @@ export default {
   createAdmissionQueueStore,
   getNodeExecutionsStore,
   createGateResolver,
-  registerCliCommands,
   invokeElevated,
 };

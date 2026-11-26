@@ -1,12 +1,3 @@
-/**
- * Unit tests for events/kinds.js
- *
- * Verifies:
- *   - Registry shape: 19 wire kinds (frozen, unique), 1 reserved.
- *   - Unknown/reserved kinds rejected everywhere.
- *   - Payload contracts enforced (required fields, session scope + ids).
- *   - Routing: dashboard-only kinds.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -18,7 +9,6 @@ import {
   isDashboardOnly,
 } from "../../../events/kinds.js";
 
-// ── registry shape ───────────────────────────────────────────────────────────
 
 describe("kinds — registry", () => {
   test("19 wire kinds, frozen, unique", () => {
@@ -39,7 +29,6 @@ describe("kinds — registry", () => {
   });
 });
 
-// ── predicates ───────────────────────────────────────────────────────────────
 
 describe("kinds — predicates", () => {
   test("isWireKind true for registry, false otherwise", () => {
@@ -54,7 +43,6 @@ describe("kinds — predicates", () => {
   });
 });
 
-// ── payload contracts ────────────────────────────────────────────────────────
 
 describe("kinds — assertPayload", () => {
   test("unknown kind throws", () => {
@@ -113,7 +101,6 @@ describe("kinds — assertPayload", () => {
   });
 });
 
-// ── routing ────────────────────────────────────────────────────────────────────
 
 describe("kinds — routing", () => {
   test("run.created is dashboard-only", () => {

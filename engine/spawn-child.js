@@ -1,22 +1,11 @@
-// spawn-child.js — Phase 2 branch/flow unification: race-safe identity +
-// creation for a subflow-item child flow.
+// spawn-child.js — race-safe identity + creation for a subflow-item child flow.
 
-// resolveOrCreateChild finds or creates the flow_node_invocations row
-// identifying "nodeId processing item subflowKey", then finds or creates
-// the flow_runs child that invocation should own.
-//
-// Race safety comes entirely from findOrCreateInvocation's insert-then-
-// reselect pattern (state/node-executions.js) backed by the invocation
-// table's unique index — two concurrent callers for the same identity tuple
-// always agree on one invocation id, so at most one of them ever wins the
-// "does a child exist yet" check and creates one. That identity tuple
-// includes flowId, though — it says nothing about two DIFFERENT parent
-// flows independently deciding to dispatch the same subflowKey (e.g. two
-// freelance_freelancer-proposal scans both fanning out SCORE for the same
-// listing). `guard`, when supplied, is threaded straight through to
-// findOrCreateInvocation to close exactly that gap — see its own comment
-// for why running it inside that call's write-queue turn makes it
-// race-safe across flowIds, not just within one.
+// Race safety rests on findOrCreateInvocation's insert-then-reselect backed
+// by the invocation table's unique index: concurrent callers for one
+// identity tuple agree on one invocation id, so only one ever creates a
+// child. That tuple includes flowId, so it can't stop two DIFFERENT parent
+// flows dispatching the same subflowKey — `guard` closes that gap inside
+// findOrCreateInvocation's write-queue turn, race-safe across flowIds.
 export async function resolveOrCreateChild({
   flowId,
   pipelineId = null,
@@ -46,10 +35,9 @@ export async function resolveOrCreateChild({
     initialState,
     parentInvocationId: invocationId,
   });
-  // Re-query to find the actual winner of the concurrent-insert race.
-  // With async clients, multiple callers can pass the existence check
-  // before any of them persists, so only the one that won the UNIQUE
-  // constraint has a real row. The winner is always findable via the index.
+  // Re-query: with async clients several callers can pass the existence
+  // check before anyone persists, so only the UNIQUE-constraint winner has
+  // a real row — and that winner is always findable via the index.
   const winner = await runStore.getByParentInvocationId(invocationId);
   return { invocationId, childFlowId: winner?.flowId ?? child.flowId, created: winner?.flowId === child.flowId };
 }

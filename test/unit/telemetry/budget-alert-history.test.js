@@ -6,21 +6,12 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@libsql/client";
 import { initCapStore, getAlertHistory } from "../../../telemetry/budget-alert.js";
 
-// Each test gets its own fresh SQLite file — never touches the real
-// ~/.openclaw/ops.sqlite. initCapStore runs the module's snapshot migrate,
-// which is what actually creates the budget_alert_events table.
 async function freshDb() {
   const dbPath = path.join(os.tmpdir(), `manifold-alert-history-test-${randomUUID()}.sqlite`);
   await initCapStore({ dbPath });
   return dbPath;
 }
 
-// checkBudget's own writer (_recordAlertEvent) is private, and checkBudget
-// itself reads/writes the real, non-injectable ~/.openclaw/lineage/
-// .alerted-thresholds.json debounce file — not safe to exercise from a test
-// (it could suppress or duplicate a real operator's alerts on this machine).
-// Insert directly against the same physical file instead, isolating
-// getAlertHistory's read path from checkBudget's process-wide debounce state.
 async function insertEvent(dbPath, { threshold, totalUSD, capUSD, firedAt }) {
   const client = createClient({ url: `file:${dbPath}` });
   await client.execute({

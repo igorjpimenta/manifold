@@ -1,13 +1,7 @@
-/**
- * Unit tests for routes/health.js
- *
- * Manifold's own liveness: version + uptime, no harness contact.
- */
 import { test, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
 const TEST_BEARER = "test-bearer-health";
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = TEST_BEARER;
@@ -35,8 +29,6 @@ describe("registerHealthRoutes", () => {
     assert.equal(typeof out.ok, "boolean");
     assert.ok(typeof out.manifold === "string");
     assert.ok(out.uptimeMs >= 0);
-    // Per-file honesty: shape asserted, value depends on the machine.
-    // Missing files report ok:false (never created by the probe).
     assert.ok(out.db && typeof out.db.runtime === "object" && typeof out.db.ops === "object");
     assert.equal(typeof out.db.runtime.ok, "boolean");
   });

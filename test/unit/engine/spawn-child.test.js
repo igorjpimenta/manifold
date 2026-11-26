@@ -1,10 +1,3 @@
-/**
- * Unit tests for engine/spawn-child.js — Phase 2 branch/flow unification's
- * race-safe identity + creation primitive. Uses real sqlite-backed
- * run-store.js/node-executions.js/state-store.js instances (tmp files) so
- * the race-safety guarantee is exercised against the actual unique index,
- * not a mock. Synthetic parent/child pairs only.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -27,8 +20,6 @@ async function makeHarness() {
   return { runStore, nodeExecutionsStore, store };
 }
 
-// The parent run row exists in production before a node dispatches its
-// children; the FK requires it here too.
 async function spawn(args) {
   await args.runStore.insert({ flowId: args.flowId, status: "running" });
   return resolveOrCreateChild(args);
@@ -97,8 +88,6 @@ describe("resolveOrCreateChild", () => {
   });
 
   test("root-level identity (no subflowKey) is stable across repeated calls", async () => {
-    // Same COALESCE-NULL-collapse guarantee node-executions.js's own tests
-    // cover — exercised here through the full spawn-child path.
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;
     const flowId = randomUUID();
@@ -116,10 +105,6 @@ describe("resolveOrCreateChild", () => {
   });
 
   test("race safety: two concurrent calls for the same identity converge on one child", async () => {
-    // findOrCreateInvocation's insert-then-reselect is exercised directly
-    // in node-executions.test.js; here we confirm resolveOrCreateChild
-    // doesn't introduce a second race window on the child side (e.g. by
-    // creating a child before checking getByParentInvocationId again).
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;
     const flowId = randomUUID();
@@ -135,10 +120,6 @@ describe("resolveOrCreateChild", () => {
     assert.equal(results.filter((r) => r.created).length, 1, "exactly one call should have created the child");
   });
 
-  // guard — threaded straight through to findOrCreateInvocation (see its
-  // own tests in node-executions.test.js for the cross-flow race it
-  // closes); here we only need to confirm resolveOrCreateChild reports the
-  // rejection correctly and never touches store.create on a reject.
   test("a rejecting guard skips child creation entirely and reports guarded:true", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;

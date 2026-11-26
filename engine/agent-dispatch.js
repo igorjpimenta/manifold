@@ -2,27 +2,15 @@ import { usesNamedParams } from "./executor-helpers.js";
 
 // agent-dispatch.js — the engine's agent-node dispatch: run one turn
 // through the injected harness runtime, then reduce the result with the
-// node's apply().
-//
-// The turn itself is harness work — which runtime, which call shape, how a
-// reply comes back — so core injects it as `runTurn` and only ever sees
-// { text, runId, toolResult? }. A harness that cannot run a turn throws
-// GatewayHandoffNeeded from there, and core's failure path records it like
-// any other.
+// node's apply(). The turn itself is harness work; core injects it as
+// `runTurn` and only ever sees { text, runId, toolResult? }.
 
 export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
-  /**
-   * Run an `agent`-kind dispatch — a single attempt, no automatic retry.
-   *
-   * A failed dispatch throws immediately, gets recorded as a normal failure
-   * event the same way every other failure class does, and the operator
-   * retries manually via the flow's existing Retry action once whatever was
-   * wrong is actually fixed — same rule for every agent node, no exceptions.
-   * `node.retry` config, if still present on any node, is inert and ignored.
-   */
+  // Single attempt, no automatic retry: a failed dispatch records as a
+  // normal failure event and the operator retries manually via the flow's
+  // Retry action. `node.retry` config is inert.
   async function dispatchAgentWithRetry({ node, nodeId, session, initialMessage, applyCtx, applyExtraArg, applyMeta, flowId, needsCtx }) {
-    // The harness-owned session id stores verbatim.
-    if (sessionIndex?.record) await sessionIndex.record({ flowId, session, nodeId, agent: node.agent ?? null });
+    if (sessionIndex?.record) await sessionIndex.record({ flowId, session, nodeId });
     if (typeof runTurn !== "function") {
       throw new Error("manifold: no agent runtime bound — the harness must inject runTurn");
     }
@@ -35,11 +23,9 @@ export function createAgentDispatch({ runTurn, sessionIndex, logger, emit }) {
       skill: node.skill,
       agentId: node.agent,
     });
-    // Transcript event: without it the reply is visible only inside apply().
-    // The tool-fired path carries no reply text — skipped, since the
-    // contract requires text and an empty event helps nobody.
-    // Nullable like sessionIndex: callers without an emitter (CLI, tests)
-    // dispatch exactly as before.
+    // Emit the reply as a transcript event, or it's visible only inside
+    // apply(); skipped when there's no text (tool-fired turn). emit is
+    // optional like sessionIndex — CLI/tests dispatch without it.
     if (emit && output?.text) {
       try { await emit("session.transcript.completed", { scope: "node", nodeId, session, text: output.text }); } catch {}
     }

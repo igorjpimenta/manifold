@@ -1,8 +1,5 @@
-// graphql.js — client-agnostic query surface over manifold state.
-//
-// POST /manifold/graphql replaces per-view REST polling for read models:
-// the consumer picks fields, the core stays the single writer. Mutations
-// are intentionally absent — writes go through the existing POST routes.
+// Read-only query surface: POST /manifold/graphql replaces per-view REST
+// polling. Mutations are intentionally absent — writes go through POST routes.
 import { createRootValue, executeQuery } from "../graphql/schema.js";
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
@@ -13,7 +10,6 @@ export function registerGraphqlRoutes({
   runtimeDbPath,
   opsDbPath,
 }) {
-  // ── POST /manifold/graphql ───────────────────────────────────────────
   api.registerHttpRoute({
     path: "/manifold/graphql",
     auth: "plugin",

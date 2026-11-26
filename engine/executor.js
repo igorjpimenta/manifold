@@ -1,18 +1,4 @@
-// executor.js — runs a manifold pipeline against a managed flow_run.
-//
-// Lifecycle of one flow:
-//   1. Caller invokes start(pipelineId)
-//   2. We create_flow_runs row at status='running', lastStep='__start__'.
-//   3. We enter the run loop:
-//        a. Read flow row.
-//        b. If terminal — return.
-//        c. If blocked — return (resume() wakes us back up later).
-//        d. Resolve edge from lastStep → nextNodeId.
-//        e. If nextNodeId === '__end__': persist finish() with current state; return.
-//        f. Execute the node; collect stateUpdate (and waitJson if gate).
-//        g. Apply update onto state.
-//        h. Persist: setRunning() to advance lastStep, or setWaiting() to block.
-//        i. Loop.
+// executor.js — drives a manifold pipeline against a managed flow_run row.
 
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -36,26 +22,13 @@ import { createNodeRunner } from "./executor-nodes.js";
 import { completeCancellation } from "./executor-cancel.js";
 
 export function createExecutor({ api, config, approvalQueue, pipelinesDir, store, pipelinesRef, ensurePipelinesLoaded, logger, runTurn, failureStore, nodeHealthStore, notifyFlowEnteredWaiting, sessionIndex, nodeExecutionsStore, runStore, admissionQueueStore, emit, sessions }) {
-  // Explicit params win; api is the fallback the adapter still
-  // supplies (tests construct with api only).
   const _config = config ?? api?.config ?? null;
   const _lineage = api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? _config?.pipelinesDir ?? resolveStorePaths().pipelinesDir;
-  // Injectable for tests (defaults to the real singleton in production).
-  // A test constructing a real createExecutor() without this override would
-  // write its fixture rows into the real store's runtime.sqlite; store/
-  // branchService/failureStore etc. above already follow this DI pattern.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
 
-  // Wraps nodeExecutions.write() for the write-then-fail call sites below —
-  // write() can throw (its own self-validating kind-invariant check), and
-  // unlike its normal position (after persistFailRetrying, so the fail
-  // status is already durably persisted before any crash), these sites
-  // call it FIRST so the failure can be linked to the invocation/execution
-  // it just created. A local catch here preserves "the fail status always
-  // gets persisted" even if write() throws — persistFailRetrying still
-  // runs, just without a linked id, instead of the throw propagating out
-  // of runFlow() before the fail status is ever written.
+  // These call sites write the execution row before persistFailRetrying, so
+  // a throw from write() would skip the fail status entirely — swallow it.
   async function safeWriteExecution(args) {
     try {
       return (await nodeExecutions.write(args)) ?? {};
@@ -74,9 +47,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     store, failureStore, notifyFlowEnteredWaiting, logger,
   });
 
-  // The harness injects runTurn — core never speaks the runtime's call
-  // shape, so a node dispatch is one function call from the engine's point
-  // of view (see engine/agent-dispatch.js and the harness's run-turn.js).
   const { dispatchAgentWithRetry } = createAgentDispatch({
     runTurn,
     sessionIndex,
@@ -84,33 +54,14 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     emit,
   });
 
-  // nodeCtx is assigned after start/runFlow are defined (see below).
-  // Subflow/node runners read it via getter at call time, not at factory-construction
-  // time, so the undefined-at-construction gap is safe.
+  // Assigned below once start/runFlow exist; runners read it via getter.
   let nodeCtx;
 
-  // Every pipeline's subflow node now runs under childFlows:true — this is a
-  // direct call to the only dispatch path that remains. `runFlow` is a
-  // hoisted function declaration defined below — safe to reference here.
-  // `kind:"subflow"` covers both the many-children-via-selector shape and
-  // single-child use.
   async function executeSubflowNode({ node, nodeId, flowId, state }) {
-    // A subflow node's own selector(state) can legitimately need a PRIOR
-    // subflow node's aggregated per-subflow results (e.g. PROPOSE's selector
-    // reading state._subflowGroups.SCORE to resolve each shortlisted
-    // listing's score data) — same reason dispatchCodeEntry
-    // (executor-nodes.js) enriches state before calling a "code" node's
-    // run(). Subflow dispatch never does this enrichment, so any such
-    // selector silently sees undefined subflow groups and resolves to zero
-    // items regardless of how many upstream branches actually succeeded.
-    //
-    // assembleState(baseState: state) computes _subflowGroups here (the
-    // same getAllSubflowGroups call, folded in) and additionally overlays
-    // each node's resultJson on top of the real stateJson passed as
-    // baseState. The overlay is a no-op against real flows (resultJson-derived
-    // values are byte-identical to state_json's), so the enrichment stays
-    // scoped to the single narrowest read site (node.selector) rather than
-    // all 5 root call sites at once.
+    // Subflow selectors may read earlier nodes' aggregated results
+    // (state._subflowGroups), which dispatch never enriches — assembleState
+    // here is what makes them visible. Its resultJson overlay is a no-op
+    // against real flows.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
     return dispatchSubflowChildren({
       node, nodeId, flowId, state: enrichedState, store, runStore, nodeExecutionsStore: nodeExecutions,
@@ -124,15 +75,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     getNodeCtx: () => nodeCtx,
     runStore, nodeExecutionsStore: nodeExecutions,
     nodeHealthStore, pipelinesRef,
-    // Harness adapter's id minting (sessions.newNodeSessionId), same seam as
-    // the discuss routes: core asks, never shapes.
     sessions,
   });
 
-  /**
-   * Create the flow_run row for a new pipeline run and return the record.
-   * Does NOT start the execution loop — call `runFlow(record.flowId)` to drive it.
-   */
   async function start(pipelineId, args = {}, triggeredBy = null) {
     const pipeline = pipelinesRef.value.get(pipelineId);
     if (!pipeline) throw new Error(`unknown pipeline: ${pipelineId}`);
@@ -149,13 +94,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     const record = await store.create({ pipelineId, initialState });
     logger.info(`manifold [${record.flowId.slice(0, 8)}] start: pipeline=${pipelineId} runId=${runId.slice(0, 8)}`);
 
-    // Per-pipeline singleton gate. Default (unset) is unlimited — the
-    // shared admission pool below is the only gate almost every pipeline
-    // needs. `allowConcurrent: false` opts a pipeline out of overlap
-    // entirely (e.g. a browser-automation poller that would race itself
-    // over shared session/gate state): reject this run before it ever
-    // competes for an admission slot if another non-terminal run of the
-    // same pipelineId already exists.
+    // Default is unlimited; allowConcurrent:false rejects this run before it
+    // competes for an admission slot if a non-terminal run already exists.
     if (pipeline.allowConcurrent === false) {
       const others = await runStore.listRunsPage({ pipelineId });
       const active = others.find((r) => r.flowId !== record.flowId && !isTerminal(r.status));
@@ -171,14 +111,8 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       }
     }
 
-    // Whole-flow-run admission — the shared pool (state/admission-queue-
-    // store.js), same one subflow child-dispatch draws from. Every new flow
-    // competes for a real slot the instant it's created, and queues (rather
-    // than being rejected) if the pool is full — the caller gets back a
-    // record with status:"queued", exactly like an unadmitted subflow
-    // child. state-store.js's
-    // release/promotion wiring wakes it the moment a slot frees, no restart
-    // or caller retry needed.
+    // Shared admission pool (same one subflow child-dispatch draws from); a
+    // full pool queues the run instead of rejecting it.
     const admission = await admissionQueueStore.admit({ kind: "flow-start", flowId: record.flowId });
     if (admission.status === "queued") {
       logger.info(`manifold [${record.flowId.slice(0, 8)}] start: queued — no admission slot available yet`);
@@ -195,18 +129,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     return record;
   }
 
-  /**
-   * Drive the run loop until the flow reaches a terminal status or blocks.
-   * Safe to call multiple times — re-enters the loop wherever the flow is.
-   *
-   * `kind` describes why THIS runFlow() call was made — "fresh" | "retry" |
-   * "revival" | "recheck" — and is only actually consulted for the specific
-   * node the flow was already sitting at (a non-fresh re-entry); every
-   * subsequent genuinely-new node this loop advances to resolves to "fresh"
-   * regardless of what was passed here (see the execKind computation below).
-   * Required, not defaulted — see state/node-executions.js's write() for why
-   * a caller must always be explicit about this.
-   */
   async function runFlow(flowId, kind) {
     while (true) {
       const flow = await store.get(flowId);
@@ -222,15 +144,10 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         logger.info(`manifold [${flowId.slice(0, 8)}] ${flow.status} at ${flow.lastStep} on ${flow.waitJson?.kind ?? "?"}`);
         return;
       }
-      // A flow queued for its OWN flow-start or child-dispatch admission
-      // (kind:"flow-start" / "child-dispatch") is not yet cleared to run at
-      // all — its admission check lives OUTSIDE this loop (in start()'s
-      // caller for flow-start, in the parent's dispatch loop for
-      // child-dispatch), so a fresh runFlow() call here has no code path
-      // that would naturally re-request admission; it would just dispatch
-      // lastStep's outbound edge unconditionally, bypassing the pool
-      // entirely. Return immediately — admission-queue-store's own
-      // release()/promotion wakes it later.
+      // A flow queued for flow-start or child-dispatch admission is not yet
+      // cleared to run; its admission check lives outside this loop, so a
+      // fresh call here would dispatch lastStep's edge and bypass the pool.
+      // Return — admission-queue-store's release/promotion wakes it later.
       if (isQueued(flow.status) && (flow.waitJson?.kind === "flow-start" || flow.waitJson?.kind === "child-dispatch")) {
         logger.info(`manifold [${flowId.slice(0, 8)}] queued at ${flow.lastStep} on ${flow.waitJson?.kind}`);
         return;
@@ -258,19 +175,11 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       }
 
       const lastStep = flow.lastStep ?? "__start__";
-      // A cascade leg's own edge function (2-arg mode, see resolveEdge) can
-      // read the error the leg just threw — carried here via a transient
-      // `_cascadeError` state key set right before the retry-continue below,
-      // guarded on nodeId===lastStep so a stale marker from an earlier
-      // loop-back is never read once lastStep has moved past it. Survives a
-      // gateway restart for free — it's just persisted state_json, same as
-      // every other field the executor writes.
+      // Transient cascade-leg error, persisted in state_json so it survives a
+      // gateway restart; the nodeId===lastStep guard stops a stale marker
+      // from an earlier loop-back being read after lastStep moved past it.
       const cascadeError = state?._cascadeError?.nodeId === lastStep ? state._cascadeError : null;
-      // Edge functions read via assembleState(baseState: state), not raw
-      // state — the single call site every edge decision in the engine goes
-      // through (root and child flows alike, since they share this one
-      // runFlow loop). A separate local var, not a reassignment of `state`
-      // itself — `state` is still what gets persisted below; only the value
+      // Separate local: `state` is what gets persisted below; only the value
       // handed to the edge function changes.
       const edgeState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
       const nextNodeId = resolveEdge(pipeline.edges, lastStep, edgeState, {
@@ -278,15 +187,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         error: cascadeError ? { message: cascadeError.message, errorType: cascadeError.errorType } : null,
       });
       if (!nextNodeId) {
-        // If this exhaustion traces back to a throw already recorded
-        // immediately at throw-time (the cascade catch branch below),
-        // thread that same invocationId/executionId through so
-        // upsertFailureRow's execution_id-based upsert collapses this into
-        // the SAME failure_events row instead of creating a second,
-        // less-detailed one for the identical logical moment. A genuine
-        // non-throw dead-end (unknown node, business-logic exhaustion with
-        // no antecedent throw) has no cascadeError and gets the plain
-        // generic message, same as always.
+        // With a cascadeError, reuse its invocation/execution ids so the
+        // failure upserts onto the row the throw already wrote instead of
+        // creating a second, less-detailed one.
         await persistFailRetrying({
           flowId, revision: flow.revision, state,
           message: cascadeError?.message ?? `edge ${lastStep} returned no next node`,
@@ -298,27 +201,14 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         return;
       }
       if (nextNodeId === "__end__") {
-        // This root read site carries the same resultJson-replay need as
-        // every other: pipeline.display() and successCriteria() both read
-        // node output through here. assembleState() adds _subflowGroups AND
-        // replays resultJson onto raw `state` — both are needed, because
-        // state_json is entry-only and carries no node output of its own.
+        // state_json is entry-only: assembleState replays node output
+        // (resultJson) and folds in _subflowGroups so display() and
+        // successCriteria() can read node results here.
         const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: state });
         await runAuditIfConfigured({ flowId, pipeline, state: enrichedState, logger });
-        // failureStore.recordFromTerminalState's soft-marker scan was
-        // deleted — zero soft-error producers remain anywhere in
-        // `.pipelines`/`.shared`; every failure now persists directly from
-        // this file's own throw-catch paths via recordEngineFailure.
-        // finalState is enrichedState-based, not state-based — a node's own
-        // output (e.g. a runAudit-only sentinel field like
-        // `_successCriteriaReason`) only exists via resultJson replay now,
-        // so finalState._successCriteriaReason below would silently read
-        // undefined off raw `state` otherwise. Safe to carry _subflowGroups
-        // through here too: the persist-layer filter
-        // (executor-persist.js's toPersistableState) already narrows
-        // whatever's passed to persistFailRetrying/persistSkipRetrying/
-        // persistFinishRetrying down to entry-only fields regardless of
-        // what finalState itself contains.
+        // finalState must derive from enrichedState — raw state lacks node
+        // output such as _successCriteriaReason. The persist layer's
+        // toPersistableState narrows it back to entry-only fields anyway.
         let finalState = enrichedState;
         if (typeof pipeline.display === "function") {
           try {
@@ -384,20 +274,13 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       logger.info(`manifold [${flowId.slice(0, 8)}] → ${nextNodeId} (${node.kind})`);
 
       const enteredAt = Date.now();
-      // Computed once per dispatch, from this flow's
-      // own last-dispatched node — see executor-helpers.js's isFreshNodeEntry
-      // for the full reasoning. execKind is the actual value threaded to every write()
-      // call below in this iteration (only one ever fires per iteration) —
-      // a genuinely fresh node entry is always "fresh" regardless of why
-      // this runFlow() call happened; only a non-fresh re-entry (the node
-      // the flow was already at) "spends" the caller-supplied kind.
+      // Fresh node entry is always "fresh"; only a re-entry at the node the
+      // flow already sat at spends the caller-supplied kind.
       const lastNodeId = await nodeExecutions.findCurrentStep(flowId);
       const forceNew = isFreshNodeEntry(lastNodeId, nextNodeId);
       const execKind = forceNew ? "fresh" : kind;
-      // Create the invocation row before execution: "last invocation for
-      // this flow" tracks the in-flight node even during execution, not
-      // just after completion — this is how the currently-running node is
-      // identified.
+      // enter() before execution so the in-flight node is identifiable
+      // mid-dispatch, not only after completion.
       const enterResult = await nodeExecutions.enter({
         flowId, pipelineId: state.pipelineId ?? null,
         nodeId: nextNodeId, subflowKey: null, kind: execKind,
@@ -416,20 +299,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       let reentrant = false;
       let exitedAt = null;
       try {
-        // "needs:" resolution is lazy, via ctx.needs(varName) called
-        // from inside the node's own run()/promptBuilder()/selector(), NOT
-        // checked here ahead of the dispatch. executor-nodes.js/executor-subflow-children.js
-        // build that accessor (needs-resolver.js's makeNeedsCtx) and pass
-        // it through as part of ctx — nothing to do at this call site
-        // beyond letting a NodeBlocked(_kind:"needs-not-ready") thrown from
-        // inside executeNode() propagate to the catch block below exactly
-        // like any other NodeBlocked (the budget-gate pause already relies
-        // on this same path). Known gap, deliberately deferred (needs: is
-        // dormant, zero pipelines declare it yet): reviveAgentKindOrphan's
-        // own dispatch path does not pass a needs ctx at all, so an agent-
-        // kind node that crashes mid-flight can't call ctx.needs() on
-        // revival — worth fixing before any pipeline adopts needs: on an
-        // agent-kind node, not before.
         const result = await executeNode({ node, nodeId: nextNodeId, state, flowId, invocationId });
         exitedAt = Date.now();
         stateUpdate = result.stateUpdate ?? {};
@@ -451,46 +320,22 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
           logger.info(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} → needs-gateway-handoff: ${err.message}`);
         } else {
           const msg = err?.message ?? String(err);
-          // Duck-typed, not `instanceof NodeFailure` — pipeline/shared code
-          // and the engine itself can load executor-errors.js through
-          // different module registries (the gateway daemon's data:-URL
-          // pipeline loader vs. jiti-transpiled CJS for CLI tooling), which
-          // gives structurally-identical but reference-distinct NodeFailure
-          // classes; instanceof silently returns false across that
-          // boundary even for a genuine NodeFailure. A plain Error never
-          // has .errorType set, so this is equivalent and robust either way.
+          // Duck-typed, not instanceof: the engine and pipeline code can
+          // load executor-errors.js through different module registries,
+          // giving structurally-identical but reference-distinct
+          // NodeFailure classes. A plain Error never sets .errorType.
           const errorType = err?.errorType ?? null;
           logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} failed: ${msg}`);
-          // No error/errorType here — flow_node_executions is purely an
-          // execution-window/identity ledger; every throw's actual content
-          // now goes to failure_events instead, via the recordEngineFailure
-          // call(s) below.
           const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId: nextNodeId, enteredAt, exitedAt, kind: execKind, invocationId, isNewInvocation: isNew });
           if (pipeline.kind === "cascade") {
-            // A cascade-kind flow treats ANY throw like a completed dispatch,
-            // not a failure
-            // — lastStep advances to the node that just threw (same persist
-            // shape as the ordinary success path further below), and it's
-            // THAT node's own edge function that decides what happens next,
-            // the same way it would after a success. A cascade leg throwing
-            // NodeFailure (see executor-errors.js) carries WHY it failed via
-            // `errorType` — threaded here into `_cascadeError`, a transient
-            // state key the next loop iteration reads (guarded on
-            // nodeId===lastStep, see the resolveEdge call above) and passes
-            // to a 2-arg edge function as its error argument. This is what
-            // lets a cascade's own edge decide retry-vs-fallback-vs-give-up
-            // from the REAL thrown error, not a soft-returned field.
-            //
-            // Every throw persists a permanent failure_events row
-            // IMMEDIATELY, right here, regardless of what the edge
-            // decides next — not just on eventual give-up. This is the one
-            // gap the persistFailRetrying->recordEngineFailure path never
-            // covers (a cascade-continuing throw never reaches
-            // persistFailRetrying at all). If this attempt turns out to be
-            // the cascade's final one, the `!nextNodeId` branch at the top
-            // of this loop reuses this SAME invocationId/executionId when
-            // it fails the flow, so upsertFailureRow's execution_id upsert
-            // collapses onto this row instead of creating a second one.
+            // A cascade leg treats any throw as a completed dispatch: lastStep
+            // advances to the throwing node and its own edge function decides
+            // next (retry vs fallback vs give-up), reading the real error via
+            // the transient _cascadeError key. Every throw still records a
+            // failure_events row immediately — a cascade-continuing throw never
+            // reaches persistFailRetrying, and if this is the final attempt the
+            // !nextNodeId branch reuses these ids so the upsert collapses
+            // onto the same row.
             try {
               await failureStore?.recordEngineFailure?.({
                 flowId, pipelineId: state.pipelineId ?? null, failureNode: nextNodeId,
@@ -585,24 +430,12 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       }
 
       const freshAfterNode = (await store.get(flowId)) ?? { stateJson: state, revision: flow.revision };
-      // entryState is taken directly from freshAfterNode.stateJson, not
-      // recomputed as a merge of this node's own output. Every persist call
-      // below filters its `state:` argument down to entry/bookkeeping fields
-      // only (executor-persist.js's toPersistableState), so a wide merge of
-      // the node's output here would never reach the database. A node's own
-      // output reaches result_json separately, via writeResult(invocationId,
-      // stateUpdate) further down — entirely independent of this variable.
-      // freshAfterNode.stateJson is already entry-only (it was itself
-      // persisted through the same filter), so it's used directly.
+      // Entry-only state as persisted (toPersistableState strips node output,
+      // which reaches result_json via writeResult instead) — do not merge
+      // stateUpdate in here; it would never reach the database.
       let entryState = freshAfterNode.stateJson ?? state;
-      // This node just completed successfully (no throw, no blockedInfo, no
-      // skippedInfo — we're past all of those branches above) — any
-      // _cascadeError left over from an earlier failed attempt AT THIS SAME
-      // node is now stale. Only ever lives on this entry-only state (a
-      // success's own stateUpdate never mentions _cascadeError), so a node
-      // retried after a cascade throw and then succeeding would otherwise
-      // carry a stale error into its own next edge-function call if that
-      // edge checks `error` before `state`. Clear it explicitly.
+      // Success clears any _cascadeError left by an earlier failed attempt at
+      // this same node, so the next edge call doesn't read a stale error.
       if (entryState._cascadeError?.nodeId === nextNodeId) {
         const { _cascadeError, ...rest } = entryState;
         entryState = rest;
@@ -623,8 +456,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
           });
           return;
         }
-        // The wait summary is synthesized by describeWaitFallback(waitJson,
-        // nextNodeId) — no pipeline-visible render hook feeds this log line.
         const summary = describeWaitFallback(waitJson, nextNodeId);
         logger.info(`manifold [${flowId.slice(0, 8)}] ${reentrant ? "reentrant gate" : "gate"} → blocked\n${summary}`);
         await persistWaitingRetrying({
@@ -639,41 +470,21 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         return;
       }
 
-      // Write this node's own result FIRST and durably, before advancing
-      // flow_runs.last_step to nextNodeId via persistRunningRetrying below.
-      // last_step is what boot-time orphan revival and the pipeline-
-      // concurrency dequeue path both trust as "this node completed" — they
-      // jump straight to resolving its outbound edge without re-running
-      // apply(). Writing the result first makes that invariant crash-safe:
-      // a restart landing before last_step advances leaves last_step
-      // pointing at the previous node, so revival re-runs this node's
-      // apply() again — a duplicate call, not a silent failure.
-      //
-      // Also still AWAITED, not fire-and-forget: state_json is entry-only,
-      // so the very next loop iteration's assembleState() call (line ~288,
-      // feeding the edge function) is the ONLY way this node's own output
-      // becomes visible again — if
-      // that read raced ahead of this write, the edge function would see
-      // this node's output as still-missing, some edges then re-route back
-      // to the same node (or worse), producing a tight busy-loop.
-      // Awaiting costs one DB round-trip per dispatch, already priced into
-      // every other persist call this loop makes.
+      // Write the node's result BEFORE advancing last_step: boot-time orphan
+      // revival and concurrency dequeue trust last_step as "completed" and
+      // skip re-running apply(), so a crash before this write would advance
+      // past a node whose output never landed. Also awaited, not
+      // fire-and-forget: state_json is entry-only, so the next iteration's
+      // assembleState() is the only way this output becomes visible — a read
+      // racing this write makes the edge function see it as missing and
+      // re-route, risking a busy-loop.
       const resultWrite = await nodeExecutions.writeResult(invocationId, stateUpdate).catch(() => null);
       if (!resultWrite || !resultWrite.ok) {
         const reason = resultWrite?.reason ?? "threw";
-        // "race" means a CONCURRENT writer already committed real content
-        // for this exact invocation — advancing is correct, the data
-        // genuinely is there, just not from this call. Every other reason
-        // ("no-invocation-id"/"no-such-invocation"/"unserializable"/
-        // "db-error"/a genuine throw, normalized via the catch above) means
-        // NO ONE wrote anything. Advancing last_step in that case would
-        // move the flow past this node with its output never durably
-        // written: the next runFlow() iteration's assembleState() reads
-        // nothing for this node, and resolveEdge() dead-ends with "no next
-        // node" — the SCORE_LLM "edge returned no next node" shape, and the
-        // boot-revival gap it left uncovered (see reviveAgentKindOrphan
-        // below). Fail the flow outright for any non-race reason instead of
-        // silently continuing, so the operator sees the true cause.
+        // Only "race" means a concurrent writer already committed this
+        // invocation's content — advancing is correct. Any other reason means
+        // nobody wrote: advancing would let resolveEdge dead-end with "no
+        // next node" on the next iteration, hiding the real cause.
         if (reason !== "race") {
           const msg = `resultJson write failed (${reason})`;
           logger.warn(`manifold [${flowId.slice(0, 8)}] ${nextNodeId} ${msg}`);
@@ -707,19 +518,11 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     }
   }
 
-  // Object passed to `code`-kind node bodies as ctx. `invokePipeline` fires a
-  // background flow start and returns immediately. Assigned after start/runFlow
-  // are defined; subflow/node runners read it via getter so the gap is safe.
   nodeCtx = Object.freeze({
     async invokePipeline(targetPipelineId, args = {}) {
       const record = await start(targetPipelineId, args);
-      // start() does not throw when the shared admission pool is full —
-      // it queues instead (see start()'s own comment). Preserves the
-      // "singleton-busy" contract at this call site specifically: a caller
-      // handling invoked:false is expected to retry invokePipeline itself
-      // later, not rely on this record being silently promoted and run out
-      // from under it with nobody tracking the outcome — so the just-created
-      // queued record is cancelled rather than left to run unobserved.
+      // A queued record would be promoted and run unobserved — cancel it and
+      // report singleton-busy so the caller retries deliberately.
       if (record.status === "queued") {
         await cancel(record.flowId, "invokePipeline: shared admission pool was full").catch(() => {});
         return {
@@ -736,12 +539,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     },
   });
 
-  // resume() is the generic "continue a waiting flow" entry point, called
-  // both after a gate decision resolves (gate-resolver.js, routes/
-  // operator.js) and by boot-time revival's children-pending check
-  // (boot/flow-revival.js) — both are the same underlying mechanism (a
-  // node the flow was already sitting at gets re-evaluated), just
-  // triggered by different external events, so both resolve to "recheck".
   async function resume(flowId) {
     return runFlow(flowId, "recheck");
   }
@@ -784,8 +581,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
   async function cancel(flowId, reason = null) {
     const flow = await store.get(flowId);
     if (!flow) return { cancelled: false, reason: "Flow not found." };
-    // completeCancellation stamps in-flight branches with cancelledAt, kills any
-    // active LLM sessions, then writes status='cancelled' + stamped stateJson to DB.
     return completeCancellation({
       store,
       flowId,
@@ -800,22 +595,14 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     });
   }
 
-  /**
-   * Revive an "agent"-kind orphan left mid-flight by a crashed process.
-   *
-   * Unlike a code-kind orphan (safe to just re-enter via runFlow — the
-   * node hadn't produced any side effect yet), an agent-kind node may have
-   * already dispatched an agent turn that completed (or partially acted)
-   * before the crash. Re-running node.promptBuilder(state) fresh would give
-   * the agent no way to know it already tried this once, risking a
-   * duplicate side effect. Instead this sends REVIVAL_MSG to the SAME
-   * deterministic session key the original dispatch used, so the agent can
-   * check its own prior turns and decide whether to finish or resume.
-   */
-  // nodeId is the crashed/in-flight node — the caller (boot/flow-revival.js)
-  // resolves it from f.currentStep/waitJson.nodeId, since flow.lastStep is
-  // the last COMPLETED node, not this one. Falls back to flow.lastStep only
-  // for callers that don't pass it explicitly (defensive, not the expected path).
+  // Unlike a code-kind orphan (safe to re-enter via runFlow — no side effect
+  // yet), an agent-kind node may have already dispatched a completed or
+  // partial turn; re-running promptBuilder() would give the agent no way to
+  // know, risking a duplicate side effect. Send REVIVAL_MSG on the original
+  // deterministic session key instead so it can check its own prior turns.
+  //
+  // nodeId is the in-flight node (flow.lastStep is the last COMPLETED node);
+  // callers that omit it get the lastStep fallback.
   async function reviveAgentKindOrphan(flow, nodeId = flow.lastStep) {
     const flowId = flow.flowId;
     const flowId8 = flowId.slice(0, 8);
@@ -829,11 +616,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
 
     logger.info(`manifold revival [${flowId8}]: reviving interrupted agent-node "${nodeId}"`);
     const enteredAt = Date.now();
-    // Resolved up front (not after executeNode returns) so a tool call made
-    // during this revived dispatch can register itself under the SAME
-    // invocationId the original, interrupted attempt already created — see
-    // tool-handoff.js. No fresh nodeExecutions.enter() call here; the
-    // invocation row already exists from the original attempt.
+    // Resolve the original invocation up front (not after executeNode) so
+    // tool calls during the revived dispatch register under the same
+    // invocationId; no fresh enter() — that row already exists.
     const invocation = await nodeExecutions.getLatestInvocationForNode(flowId, nodeId, null);
     const invocationId = invocation?.id ?? null;
     let result;
@@ -841,12 +626,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       result = await executeNode({ node, nodeId, state, flowId, reviveMessage: REVIVAL_MSG, invocationId });
     } catch (err) {
       if (err instanceof GatewayHandoffNeeded) {
-        // A request-scope gap in the revived dispatch: block rather than
-        // failing the flow outright. No automatic resume exists for this
-        // wait kind (see executor-errors.js's GatewayHandoffNeeded
-        // docstring) — recovery
-        // is either a scope-gap fix at the actual call site or manual
-        // task-revival.
         await persistWaitingRetrying({
           flowId, revision: flow.revision, lastStep: nodeId, blockingNodeId: nodeId,
           state,
@@ -860,15 +639,10 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         return;
       }
       const msg = err?.message ?? String(err);
-      // Duck-typed — see the main loop's identical check above for why
-      // `instanceof NodeFailure` isn't reliable across this codebase's
-      // module-loading boundaries.
       const errorType = err?.errorType ?? null;
       logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" revival failed: ${msg}`);
-      // Revival always continues the exact node that crashed — there's no
-      // fresh dispatch decision here (unlike runFlow's loop,
-      // which resolves an edge to decide nextNodeId), so kind is hardcoded
-      // "revival" rather than derived from isFreshNodeEntry.
+      // Revival always continues this same node — no edge resolution — so
+      // kind is fixed rather than derived from isFreshNodeEntry.
       const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId, enteredAt, exitedAt: Date.now(), kind: "revival" });
       await persistFailRetrying({
         flowId, revision: flow.revision, state,
@@ -884,7 +658,6 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       if (!blockedInfo._kind) {
         const msg = blockedInfo.reason ?? `${nodeId} blocked without declaring a wait kind`;
         logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);
-        // Same reasoning as above — revival is always a continuation.
         const written = await safeWriteExecution({ flowId, pipelineId: state.pipelineId ?? null, nodeId, enteredAt, exitedAt: Date.now(), kind: "revival" });
         await persistFailRetrying({
           flowId, revision: flow.revision, state,
@@ -916,48 +689,21 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       return;
     }
 
-    // No wide stateUpdate merge before persisting — `state` here is
-    // already entry-only (freshly read via store.get() upstream), and
-    // stateUpdate's own node-output content reaches
-    // result_json separately via writeResult(), not through this. See the
-    // main dispatch loop's identical cleanup above for the full reasoning.
     let entryState = state;
-    // Same staleness clear as the main loop's success path above — an
-    // agent-kind cascade leg (e.g. SUBMIT_AGENT) revived and now succeeding
-    // shouldn't carry a leftover _cascadeError from its earlier crashed
-    // attempt into its own next edge-function call.
     if (entryState._cascadeError?.nodeId === nodeId) {
       const { _cascadeError, ...rest } = entryState;
       entryState = rest;
     }
-    // The main loop writes a node's result BEFORE advancing last_step, so a
-    // crash-then-revival never reads a stale/empty result for the node it
-    // just resumed. This revival path resumes the SAME crashed dispatch (no
-    // fresh nodeExecutions.enter() call here — the invocation row already
-    // exists from the original, interrupted attempt) and carries no
-    // writeResult() call of its own, so it writes the result here: without
-    // it, last_step has already advanced to `nodeId` while its result_json
-    // stayed empty from the interrupted attempt. The very next runFlow() iteration's
-    // assembleState() then read nothing for this node, and resolveEdge()
-    // dead-ended with "no next node" — deterministic on every revived
-    // agent-node whose outbound edge depends on its own output, not a race.
+    // The main loop writes a result before advancing last_step, but this
+    // revival resumes the original interrupted dispatch (no new enter(), no
+    // writeResult of its own) — without this write, last_step already points
+    // at nodeId while its result_json stays empty, so the next runFlow()
+    // iteration's assembleState() reads nothing and resolveEdge dead-ends
+    // with "no next node" on every revived agent-node whose edge depends on
+    // its output.
     const resultWrite = await nodeExecutions.writeResult(invocationId, stateUpdate).catch(() => null);
     if (!resultWrite || !resultWrite.ok) {
       const reason = resultWrite?.reason ?? "threw";
-      // "race" means a CONCURRENT writer already committed real content for
-      // this exact invocation — advancing is correct, the data genuinely is
-      // there, just not from this call. Every other reason (db-error,
-      // no-such-invocation, no-invocation-id, unserializable, threw) means
-      // NO ONE wrote anything: advancing here would move last_step past
-      // this node with its output never durably written. The next runFlow()
-      // iteration's assembleState() then reads nothing for this node, and
-      // resolveEdge() dead-ends with "no next node" — deterministic given
-      // the failure, not a race, and completely swallowing the REAL reason
-      // behind a generic edge-resolution message. Fail the flow outright
-      // instead — same shape as persistRunningRetrying's own CAS-failure
-      // branch just below — so the operator sees the true cause and can
-      // retry this one node, rather than a downstream "no next node" that
-      // hides it.
       if (reason !== "race") {
         const msg = `resultJson write failed (${reason})`;
         logger.warn(`manifold revival [${flowId8}]: agent-node "${nodeId}" ${msg}`);

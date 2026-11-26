@@ -1,17 +1,3 @@
-/**
- * Unit tests for engine/executor-cancel.js
- *
- * Covers: completeCancellation — returns store.cancel's result. Also
- * covers Phase 2's cascade-cancel step — real sqlite-backed stores, since
- * that logic is a real join across run-store.js/node-executions.js.
- *
- * killActiveSessions (the old branchService-era in-flight session abort
- * step) was deleted outright 2026-08-12 — permanently a no-op since
- * branchService's removal, never actually aborted anything. See
- * executor-cancel.js's own header comment and CANCEL_SESSION_ABORT
- * .design.md for the real (still-open) gap this leaves: cancelling a flow
- * doesn't interrupt an in-flight `kind:"agent"` dispatch, root or subflow.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -33,7 +19,7 @@ function makeDeps(overrides = {}) {
 }
 
 describe("completeCancellation — call order", () => {
-  test("completeCancellation no longer calls any branch store — store.cancel fires and that's it", async () => {
+  test("completeCancellation calls no branch store — store.cancel fires and that's it", async () => {
     const { store, calls } = makeDeps();
     await completeCancellation({ store, flowId: "f1", stateJson: {}, lastStep: "END", revision: 3 });
     assert.equal(calls.length, 1, "only store.cancel should fire");
@@ -76,14 +62,14 @@ describe("completeCancellation — return value", () => {
 });
 
 describe("completeCancellation — accepts any stateJson shape without throwing", () => {
-  test("plain new-style stateJson", async () => {
+  test("plain stateJson with a pipelineId field", async () => {
     const store = { cancel: () => ({ cancelled: true }) };
     await assert.doesNotReject(
       completeCancellation({ store, flowId: "f", stateJson: { pipelineId: "x" }, lastStep: null, revision: 0 })
     );
   });
 
-  test("a stale old-model stateJson.loop shape is simply ignored, not read", async () => {
+  test("an unexpected stateJson.loop shape is simply ignored, not read", async () => {
     const store = { cancel: () => ({ cancelled: true }) };
     const stateJson = { loop: { LOOP: { "branch-1": { step: "__end__", doneAt: 123 } } } };
     await assert.doesNotReject(
@@ -91,8 +77,6 @@ describe("completeCancellation — accepts any stateJson shape without throwing"
     );
   });
 });
-
-// ── cascade-cancel (Phase 2) ─────────────────────────────────────────────────
 
 function tmpPath(prefix) {
   return path.join(os.tmpdir(), `${prefix}-${randomUUID()}.sqlite`);
@@ -172,7 +156,6 @@ describe("completeCancellation — cascade-cancel childFlows children", () => {
     const { store, runStore, nodeExecutionsStore } = harness;
     const parentFlowId = randomUUID();
     const child = await spawnChild(harness, parentFlowId, "item-1");
-    // The child itself has its own childFlows loop node, spawning a grandchild.
     const grandchild = await spawnChild(harness, child, "sub-item-1", { nodeId: "INNER" });
 
     await completeCancellation({
@@ -197,7 +180,7 @@ describe("completeCancellation — cascade-cancel childFlows children", () => {
     assert.equal(result.cancelled, false, "cancelling a nonexistent flowId is still handled by the ordinary store.cancel path");
   });
 
-  test("does not throw when runStore/nodeExecutionsStore are omitted (backward compat)", async () => {
+  test("does not throw when runStore/nodeExecutionsStore are omitted", async () => {
     const store = { cancel: () => ({ cancelled: true }) };
     await assert.doesNotReject(
       completeCancellation({ store, flowId: "f", stateJson: {}, lastStep: null, revision: 0 })

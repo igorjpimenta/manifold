@@ -10,17 +10,10 @@ import {
   isRequestScopedSubagentError,
 } from "../../../engine/executor-errors.js";
 
-// ── constants ─────────────────────────────────────────────────────────────────
-
 describe("REVISION_RETRY_LIMIT", () => {
   it("is 5", () => assert.equal(REVISION_RETRY_LIMIT, 5));
 });
 
-// ── fetchSessionError ─────────────────────────────────────────────────────────
-
-// The openclaw tasks DB is dropped legacy (core never reads harness
-// homes) — fetchSessionError always resolves null and callers fall back to
-// their default detail.
 describe("fetchSessionError", () => {
   it("returns null for null session", async () => {
     assert.equal(await fetchSessionError(null), null);
@@ -28,12 +21,10 @@ describe("fetchSessionError", () => {
   it("returns null for undefined session", async () => {
     assert.equal(await fetchSessionError(undefined), null);
   });
-  it("returns null for any session — the tasks-DB fallback is gone", async () => {
+  it("returns null for any session key", async () => {
     assert.equal(await fetchSessionError("no-such-session-key-" + Math.random()), null);
   });
 });
-
-// ── NodeBlocked ───────────────────────────────────────────────────────────────
 
 describe("NodeBlocked", () => {
   it("is an instance of Error", () => {
@@ -62,8 +53,6 @@ describe("NodeBlocked", () => {
   });
 });
 
-// ── GatewayHandoffNeeded ──────────────────────────────────────────────────────
-
 describe("GatewayHandoffNeeded", () => {
   it("is an instance of Error", () => {
     assert.ok(new GatewayHandoffNeeded("ctx missing") instanceof Error);
@@ -78,10 +67,6 @@ describe("GatewayHandoffNeeded", () => {
     assert.ok(e.message.includes("api not ready"), e.message);
   });
 });
-
-// ── NodeFailure ───────────────────────────────────────────────────────────────
-// Thrown by a cascade leg instead of soft-returning {ok:false, error_type,
-// _error}.
 
 describe("NodeFailure", () => {
   it("is an instance of Error", () => {
@@ -109,8 +94,6 @@ describe("NodeFailure", () => {
     assert.equal(new NodeFailure("boom", undefined).errorType, null);
   });
 });
-
-// ── isRequestScopedSubagentError ──────────────────────────────────────────────
 
 describe("isRequestScopedSubagentError", () => {
   it("returns false for null", () => {
@@ -150,9 +133,7 @@ describe("isRequestScopedSubagentError", () => {
   });
 });
 
-// A block has no TTL — it persists until an operator resets it — so which
-// errors are allowed to create one is load-bearing. A standing configuration
-// fault parked behind a manual-only remedy is worse than a retry.
+// Blocks have no TTL — manual reset only — so trip classification is load-bearing.
 describe("isBreakerTrippingFailure — what is allowed to park a node", () => {
   it("trips on a genuine symptom: the agent misbehaving", () => {
     assert.equal(isBreakerTrippingFailure(new Error("subagent timeout: no error message")), true);
@@ -178,8 +159,6 @@ describe("isBreakerTrippingFailure — what is allowed to park a node", () => {
   });
 
   it("matches on text only where no shared class exists — never over-matches a symptom", () => {
-    // "scope" appears inside a legitimate failure too; the pattern must
-    // require the phrase that only the permission error uses.
     assert.equal(isBreakerTrippingFailure(new Error("telescope mount scope drifted")), true);
     assert.equal(isBreakerTrippingFailure(new Error("context window exceeded")), true);
   });

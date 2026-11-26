@@ -14,7 +14,6 @@ import {
   hasFlowRuns,
 } from "../../../telemetry/http-helpers.js";
 
-// ── ATTR_* constants ──────────────────────────────────────────────────────────
 
 describe("ATTR constants", () => {
   it("ATTR_JOIN is a non-empty SQL fragment", () => {
@@ -29,7 +28,6 @@ describe("ATTR constants", () => {
   });
 });
 
-// ── peersForKind ──────────────────────────────────────────────────────────────
 
 describe("peersForKind", () => {
   it("returns [kind] for unknown kind", () => {
@@ -56,11 +54,10 @@ describe("peersForKind", () => {
   });
 });
 
-// ── formatSessionLabel ────────────────────────────────────────────────────────
 
 describe("formatSessionLabel", () => {
   it("formats a known timestamp as 'Mon DD HH:MM'", () => {
-    const d = new Date(2025, 5, 15, 9, 5); // June 15, 09:05
+    const d = new Date(2025, 5, 15, 9, 5);
     const label = formatSessionLabel("any-key", d.getTime());
     assert.ok(label.includes("Jun"));
     assert.ok(label.includes("15"));
@@ -83,7 +80,6 @@ describe("formatSessionLabel", () => {
   });
 });
 
-// ── sessionKindForRoot ────────────────────────────────────────────────────────
 
 describe("sessionKindForRoot", () => {
   it("legacy operator prefix falls through to the generic operator-trigger", () => {
@@ -119,7 +115,6 @@ describe("sessionKindForRoot", () => {
   });
 });
 
-// ── formatSessionChildLabel ───────────────────────────────────────────────────
 
 describe("formatSessionChildLabel", () => {
   it("flow: prefix → 'flow <short-id>'", () => {
@@ -146,7 +141,6 @@ describe("formatSessionChildLabel", () => {
   });
 });
 
-// ── bootstrapForecast ─────────────────────────────────────────────────────────
 
 describe("bootstrapForecast", () => {
   it("returns null when no historical days", () => {
@@ -167,7 +161,7 @@ describe("bootstrapForecast", () => {
     ]);
     const result = bootstrapForecast(byDay, 10, [{ cost: 0.3 }], 50);
     assert.ok(Array.isArray(result));
-    assert.equal(result.length, 13);  // hours 11–23
+    assert.equal(result.length, 13);
     assert.equal(result[0].hour, 11);
     assert.equal(result[result.length - 1].hour, 23);
   });
@@ -186,7 +180,6 @@ describe("bootstrapForecast", () => {
   });
 });
 
-// ── hasFlowRuns ──────────────────────────────────────────────────────────
 
 describe("hasFlowRuns", () => {
   it("returns false when the db has no flow_runs table", async () => {

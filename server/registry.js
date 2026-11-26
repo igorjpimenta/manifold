@@ -1,12 +1,9 @@
-// registry.js — the HTTP route registry the route modules already speak.
-//
-// Route modules call `api.registerHttpRoute({ path, auth, match, handler })`
-// where handler(req, res) ends the response and returns true. The gateway
-// supplies that method today; this registry supplies the same one for a
-// standalone server, so `manifold serve` mounts the identical handlers.
-//
+// The HTTP route registry the route modules already speak: route modules
+// call `api.registerHttpRoute({ path, auth, match, handler })` where
+// handler(req, res) ends the response and returns true — the same method
+// the gateway supplies, so `manifold serve` mounts identical handlers.
 // `auth` is ignored here: every handler guards itself with the shared
-// MANIFOLD_BEARER (routes/bearer-auth.js), and the server binds loopback.
+// MANIFOLD_BEARER (routes/bearer-auth.js) and the server binds loopback.
 // Host/Origin is checked here, once, before the route table — per-route
 // bearer checks cannot see a rebinding attempt that never reaches them
 // (see local-request.js).

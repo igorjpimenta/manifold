@@ -1,14 +1,3 @@
-/**
- * Unit tests for engine/admission-promotion-resume.js — isEngineResumableKind
- * and wakePromotedRelease, the single shared "release → check promoted →
- * decide routing → resume-or-skip → log" helper that replaced 7 independent
- * hand-rolled copies of the same glue across state-store.js, child-resume-
- * trigger.js (x2), executor-nodes.js, boot/flow-revival.js (x2), and
- * bin/cli.js (x2). Each of those call sites still has its own thin wiring
- * test (or indirect coverage via state-store.test.js's promotion-routing
- * block) — this file is the one place that tests wakePromotedRelease's own
- * contract directly, independent of any one call site.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -102,9 +91,6 @@ describe("wakePromotedRelease", () => {
     assert.deepEqual(resumed, [target]);
   });
 
-  // The releaser (a flow inside its own state-store write) must not wait for
-  // the promoted flow's run. Here that run never finishes — if
-  // wakePromotedRelease awaited it, this test would hang.
   test("returns once the promoted flow is flipped to running, without waiting for its run to finish", async () => {
     const runStore = await createRunStore({ dbPath: tmpPath("wake-detach-runs") });
     harness = { runStore };
@@ -168,8 +154,6 @@ describe("wakePromotedRelease", () => {
     );
   });
 
-  // A throw reaching wakePromotedRelease's own try/catch needs something
-  // in the awaited part — e.g. runStore.get() inside flipToRunningAndResume.
   test("a throw from upstream of resume() (e.g. runStore.get failing) is caught here, logged, and returned as reason:'threw'", async () => {
     const { warnings, logger } = makeWarningLogger();
     const throwingRunStore = { async get() { throw new Error("db exploded"); } };

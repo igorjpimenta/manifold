@@ -1,5 +1,3 @@
-// The ingest contract: harnesses post semantic events, core derives the
-// lineage/cost rows. No harness field names below.
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";

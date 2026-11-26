@@ -5,16 +5,6 @@ import { NodeBlocked, GatewayHandoffNeeded, isBreakerTrippingFailure } from "./e
 import { detectBlockedSentinel, detectSkippedSentinel, assembleState } from "./executor-helpers.js";
 import { makeNeedsCtx } from "./needs-resolver.js";
 
-/**
- * Factory for the node-execution dispatcher: code, agent, subflow, human-gate.
- * The subflow branch is delegated to `executeSubflowNode`, a thin wrapper around
- * `dispatchSubflowChildren` (engine/executor-subflow-children.js) constructed in
- * executor.js.
- *
- * `getNodeCtx` is a getter closure that returns the frozen nodeCtx object (defined
- * in executor.js after start/runFlow). It reads the binding at call time so it's
- * safe to construct this factory before nodeCtx is assigned.
- */
 export function createNodeRunner({
   maybeBudgetGate,
   dispatchAgentWithRetry,
@@ -31,24 +21,18 @@ export function createNodeRunner({
   pipelinesRef,
   sessions,
 }) {
-  // Explicit params win; api is the fallback the adapter still
-  // supplies (tests construct with api only).
   const _lineage = lineage ?? api?.runtime?.lineage ?? null;
   const _pipelinesDir = pipelinesDir ?? config?.pipelinesDir ?? null;
-  // Shared by the plain "code" branch below and by cascade sub-nodes of
-  // kind "code" (cascade sub-nodes dispatch through the ordinary "code"/
-  // "agent" branches in executeNodeBody). Returns the RAW result from
-  // `entry.run(...)`;
-  // sentinel detection (_blocked/_skipped) and stateUpdate wrapping is the
-  // caller's job.
+  // Shared by the plain "code" branch and cascade sub-nodes of kind "code".
+  // Returns the RAW run() result — sentinel detection and stateUpdate
+  // wrapping are the caller's job.
   async function dispatchCodeEntry(entry, { state, flowId, nodeId }) {
     const flowId8 = flowId.slice(0, 8);
     const artifactDir = state.runId && state.pipelineId && _pipelinesDir
       ? path.join(_pipelinesDir, state.pipelineId, "runs", state.runId)
       : null;
-    // Same pattern as executeSubflowNode's selector call in executor.js:
-    // assembleState(baseState: state). Every kind:"code" node's run() goes
-    // through this one call.
+    // run() reads via assembleState, not raw state — that's what makes
+    // _subflowGroups and resultJson replay visible to it.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     return entry.run(enrichedState, {
       ...getNodeCtx(),
@@ -70,45 +54,33 @@ export function createNodeRunner({
         return readFile(path.join(artifactDir, name), "utf8");
       },
       blocked: (reason, hint) => { throw new NodeBlocked({ reason, hint }); },
-      // "needs:" resolution is lazy, only resolved if this node's own code
-      // actually awaits ctx.needs(varName); a NodeBlocked thrown here propagates
-      // straight up (no try/catch around entry.run() in this "code" branch
-      // — see executeNodeBody below) to executor.js's own catch, same path
-      // every other NodeBlocked already uses.
       needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }),
     });
   }
 
-  // Shared by the plain "agent" branch below and by cascade sub-nodes of
-  // kind "agent". `nodeId` is the id used for session-key derivation,
-  // lineage, and budget-gate scoping.
+  // Shared by the plain "agent" branch and cascade sub-nodes of kind
+  // "agent". `nodeId` scopes session-key derivation, lineage and budget.
   //
-  // No admission here: the admission pool governs flow runs, and the run
-  // executing this node already holds its own slot (flow-start/child-
-  // dispatch) for as long as it's running. A run executes one node at a
-  // time, so the run cap already bounds concurrent agent dispatches — a
-  // second slot taken mid-node from the same pool is what made hold-and-
-  // wait deadlock (keeping the run slot) or churn (giving it back) possible.
+  // No admission here: the pool governs flow RUNS, and this run already
+  // holds its own slot for as long as it runs — one node at a time, so the
+  // run cap already bounds concurrent agent dispatches. A second slot taken
+  // mid-node made hold-and-wait deadlock (keeping the run slot) or churn
+  // (giving it back) possible.
   //
-  // Circuit breaker: an agent node opts in via `entry.circuitBreaker: true`,
-  // checked here regardless of which kind of flow it's running inside —
-  // generalist, not flow-kind-aware. Fails fast before doing any work (no
-  // prompt build, no session spawn) when already blocked, naming the reset
-  // command because a block has no expiry.
-  //
-  // Which failures are allowed to trip it is decided by
-  // isBreakerTrippingFailure (engine/executor-errors.js) rather than
-  // inlined here, so the rule sits beside the error classes it inspects.
+  // Circuit breaker: `entry.circuitBreaker: true` opts in; checked here
+  // regardless of flow kind. Fails fast before any prompt build or session
+  // spawn when already blocked; a block has no expiry, so the error names
+  // the reset command.
   async function dispatchAgentEntry(entry, nodeId, { state, flowId, reviveMessage, invocationId }) {
     const pipelineId = state?.pipelineId ?? null;
-    // Anonymous dispatch is refused loudly: every agent turn is keyed to
-    // its agent for session attribution and push wake. No default, ever.
+    // Refused loudly: every agent turn is keyed to its agent for session
+    // attribution and push wake — no default, ever.
     if (!entry.agent) {
       throw new Error(`manifold: refusing anonymous dispatch of node "${nodeId}" (no entry.agent)`);
     }
     if (entry.circuitBreaker && await nodeHealthStore?.isBlocked(pipelineId, nodeId)) {
       throw new Error(
-        `unhealthy agent dispatch: "${nodeId}" is blocked after a prior failure — reset via "openclaw manifold node-health reset ${pipelineId} ${nodeId}" once the underlying issue is confirmed fixed`
+        `unhealthy agent dispatch: "${nodeId}" is blocked after a prior failure — clear its node-health block once the underlying issue is confirmed fixed`
       );
     }
     const gate = await maybeBudgetGate({
@@ -118,35 +90,30 @@ export function createNodeRunner({
     });
     if (gate.skip) return {};
     if (gate.pause) {
-      // NodeBlocked's constructor only keeps {reason, needed, hint} — budget
-      // gate pauses carry a _kind ("budget-gate-approval") that downstream
-      // wait_json routing depends on, so preserve the full object on top.
+      // NodeBlocked's constructor only keeps {reason, needed, hint} — the
+      // budget-gate pause's _kind drives downstream wait_json routing, so
+      // preserve the full object on top.
       const err = new NodeBlocked(gate.blockedInfo ?? {});
       err._blocked = { ...(gate.blockedInfo ?? {}) };
       throw err;
     }
-    // promptBuilder reads via assembleState(baseState: state) rather than
-    // raw state — that's what makes _subflowGroups visible to an agent
-    // node's promptBuilder. Same lazy ctx.needs(varName) accessor code
-    // nodes get, passed as promptBuilder's 2nd arg (a single-arg
-    // promptBuilder ignores it). A thrown NodeBlocked here propagates out
-    // of dispatchAgentEntry uncaught (this call is deliberately outside the
-    // try/catch below, same as the gate.pause throw above) to
-    // executeNodeBody's own "agent" branch catch, which converts
-    // NodeBlocked into blockedInfo.
+    // promptBuilder reads via assembleState (not raw state) so
+    // _subflowGroups is visible; needs ctx rides as its 2nd arg (a
+    // single-arg promptBuilder ignores it). A thrown NodeBlocked here is
+    // deliberately outside the try/catch below — it propagates to
+    // executeNodeBody's agent-branch catch, which converts it to
+    // blockedInfo.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
-    // Session ids belong to the harness, not manifold. A node's own
-    // entry.session / entry.sessionBuilder is passed through verbatim; when
-    // it declares neither, the harness adapter mints one (the injected
-    // `sessions.newNodeSessionId`, the dispatch counterpart of the discuss
-    // ids) so pipelines carry no harness key syntax. A refused dispatch means
-    // no harness mint function was injected at all — tool-handoff, the session
-    // index and the lineage ledger all key off this value, so neither core nor
-    // a silent default may invent one.
+    // Session ids belong to the harness, not manifold: entry.session /
+    // sessionBuilder pass through verbatim; otherwise the harness adapter
+    // mints one so pipelines carry no harness key syntax. A refused
+    // dispatch means no mint function was injected — tool-handoff, the
+    // session index and the lineage ledger all key off this value, so
+    // neither core nor a silent default may invent one.
     let session = entry.session ?? entry.sessionBuilder?.(state, flowId) ?? null;
-    // The mint may be local or a bridge call to the harness process, so it is
-    // awaited and its answer type-checked before anything keys off it.
+    // The mint may be a bridge call to the harness process, so it's
+    // awaited and type-checked before anything keys off it.
     if (!session && typeof sessions?.newNodeSessionId === "function") {
       session = await sessions.newNodeSessionId({ agentId: entry.agent, flowId, nodeId });
     }
@@ -163,13 +130,9 @@ export function createNodeRunner({
         node: entry, nodeId, session, initialMessage: message,
         applyCtx: state, applyExtraArg: undefined, flowId,
         applyMeta: { flowId, nodeId, invocationId },
-        // apply() gets the same lazy ctx.needs() accessor every other
-        // call site gets.
         needsCtx: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }),
       });
     } catch (err) {
-      // Which failures may park a node, and why the excluded ones must not,
-      // is documented once on isBreakerTrippingFailure — not restated here.
       if (entry.circuitBreaker && isBreakerTrippingFailure(err)) {
         await nodeHealthStore?.markUnhealthy(pipelineId, nodeId, { reason: err?.message ?? String(err), flowId });
       }
@@ -177,10 +140,6 @@ export function createNodeRunner({
     }
   }
 
-  /**
-   * Run the node body. A node that declares `crossProcessLock` is refused:
-   * the option is no longer supported.
-   */
   async function executeNode({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
     if (typeof node.crossProcessLock === "string" && node.crossProcessLock) {
       throw new Error(`manifold: node "${nodeId}" declares crossProcessLock "${node.crossProcessLock}" — the lock mechanism was removed; drop the option from the pipeline`);
@@ -188,10 +147,9 @@ export function createNodeRunner({
     return executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId });
   }
 
-  // `reviveMessage`, when set, is used in place of node.promptBuilder(state)
-  // for an "agent" node — boot revival's continuation prompt to an existing
-  // session (see engine/revival-messages.js), never a fresh re-dispatch of
-  // the original task.
+  // reviveMessage, when set, replaces promptBuilder(state) for an "agent"
+  // node — boot revival's continuation prompt to an existing session, never
+  // a fresh re-dispatch of the original task.
   async function executeNodeBody({ node, nodeId, state, flowId, reviveMessage, invocationId }) {
     if (node.kind === "code") {
       const update = await dispatchCodeEntry(node, { state, flowId, nodeId });
@@ -222,24 +180,19 @@ export function createNodeRunner({
     }
 
     if (node.kind === "human-gate") {
-      // Both pendingSelector and approvalRequestBuilder read via
-      // assembleState(baseState: state) rather than raw state.
-      //
-      // The two INTERNAL checks below (existingGate, openedAt
-      // preservation) deliberately do NOT read gates off enrichedState —
-      // state.gates is written by every gate node via a full-snapshot
-      // embed of the WHOLE shared key (required by state_json's own
-      // shallow-merge accumulation), so an earlier gate's resultJson row
-      // can go stale relative to a later gate and silently erase it on
-      // replay. gate_records (state/node-executions.js) sidesteps this
-      // entirely — one row per (flowId, nodeId), no shared key, no
-      // replay, so a direct point lookup is always correct. This is
-      // engine-internal bookkeeping, not a pipeline-authored-code read.
+      // pendingSelector / approvalRequestBuilder read enrichedState; the two
+      // internal checks below deliberately do NOT read gates off it —
+      // state.gates is a full-snapshot embed of the whole shared key (its
+      // shallow-merge accumulation), so an earlier gate's resultJson can go
+      // stale relative to a later gate and silently erase it on replay.
+      // gate_records is one row per (flowId, nodeId), no shared key, no
+      // replay — a direct point lookup is always correct. This is
+      // engine-internal bookkeeping, not a pipeline-authored read.
       const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
       const pending = await Promise.resolve(node.pendingSelector(enrichedState));
       if (!Array.isArray(pending) || pending.length === 0) {
-        // Gate satisfied — stamp consumedAt so consumption is observable
-        // (diagnostics, revival) even after wait_json is cleared.
+        // Stamp consumedAt so consumption stays observable (diagnostics,
+        // revival) even after wait_json is cleared.
         const existingGate = await nodeExecutionsStore.getGateRecord(flowId, nodeId);
         if (existingGate && !existingGate.consumedAt) {
           const updated = { ...existingGate, consumedAt: Date.now() };
@@ -253,12 +206,10 @@ export function createNodeRunner({
         return { itemId, requestPayload };
       }));
       const now = Date.now();
-      // Write the full gate payload into gate_records only, never to
-      // stateJson.gates[nodeId]: routes/runs.js sources .gates exclusively
-      // from gate_records, and a full-extension grep confirmed nothing else
-      // reads state.gates off state_json. openedAt is preserved across
-      // re-entries (partial decisions) so the record always reflects when
-      // the gate batch was first created.
+      // Gate payload lives in gate_records only, never stateJson.gates —
+      // routes/runs sources .gates exclusively from gate_records. openedAt
+      // is preserved across re-entries (partial decisions) so the record
+      // still shows when the batch was first created.
       const existingBeforeOpen = await nodeExecutionsStore.getGateRecord(flowId, nodeId);
       const gateRecord = {
         nodeId,
@@ -279,15 +230,12 @@ export function createNodeRunner({
       return {
         stateUpdate: {},
         waitJson,
-        // Without this, executor.js's waitJson-persist branch stamps
-        // lastStep to THIS node's own id (nextNodeId) instead of
-        // preserving the predecessor's — so a resume after a PARTIAL
-        // decision (pendingSelector still non-empty) would read lastStep
-        // as "already past this gate" and evaluate its outgoing edge
-        // instead of re-invoking pendingSelector, silently advancing
-        // past any still-undecided items. The children-pending path in
-        // executor-subflow-children.js sets the same flag for the same
-        // reason: neither has actually advanced past its own node.
+        // Without reentrant, executor's waitJson-persist stamps lastStep
+        // to THIS node instead of preserving the predecessor — a resume
+        // after a PARTIAL decision would then evaluate the outgoing edge
+        // instead of re-invoking pendingSelector, silently advancing past
+        // still-undecided items. Same flag, same reason, on the
+        // children-pending path.
         reentrant: true,
       };
     }

@@ -1,6 +1,5 @@
-// gateway-readiness.js — manifold's one "the gateway serves agent RPCs"
-// signal, awaited by the harness's run-turn gate (plugins/openclaw/manifold/run-turn.js)
-// before every agent dispatch.
+// Manifold's one "the gateway serves agent RPCs" signal, awaited by the
+// run-turn gate before every agent dispatch.
 //
 // For the first seconds after every start the gateway refuses the methods in
 // openclaw's STARTUP_UNAVAILABLE_GATEWAY_METHODS ("<method> unavailable
@@ -18,9 +17,6 @@
 //   - only the gateway starts plugin services. A process where manifold's
 //     services never started (the CLI) isn't the gateway: there is nothing
 //     to wait for, and whenReady() resolves at once.
-//   - there is no fallback: a gateway process that never delivers
-//     gateway_start to manifold (e.g. manifold enabled into an already-running
-//     gateway) holds every dispatch until the next restart.
 
 const SHARED_KEY = "__manifold_gateway_readiness__";
 
@@ -35,15 +31,9 @@ export function createReadinessState() {
   return { ready: false, gatewayProcess: false, promise, resolve };
 }
 
-/**
- * Wires one plugin registration into the shared readiness state.
- *
- *   markGatewayProcess() — call from manifold's first service start(): this
- *     process is the gateway. Never awaits.
- *   whenReady() — resolves once gateway_start has fired, or at once where no
- *     manifold service has started (not the gateway).
- *   isReady()
- */
+// Wires one plugin registration into the shared readiness state:
+// whenReady() resolves once gateway_start has fired, or at once where no
+// manifold service has started (not the gateway).
 export function registerGatewayReadiness(api, { logger, state = sharedState() } = {}) {
   if (!state.ready && typeof api?.on === "function") {
     api.on("gateway_start", () => {

@@ -1,12 +1,3 @@
-/**
- * Unit tests for routes/operator-resume.js
- *
- * Verifies resumeFlowFromGate's outcomes:
- *   - Applied path resumes via setImmediate and reports queued:false.
- *   - Full pool leaves status:queued to the admission cycle, no resume.
- *   - Unknown flow reports flow_not_found without touching admission.
- *   - Failed flip reports the code and releases the claimed slot.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { mock } from "node:test";
@@ -29,8 +20,6 @@ function makeFlow(overrides = {}) {
 function drainImmediate() {
   return new Promise((resolve) => setImmediate(resolve));
 }
-
-// ── applied path ─────────────────────────────────────────────────────────────
 
 describe("resumeFlowFromGate — applied", () => {
   test("flips running, resumes on setImmediate, reports queued:false", async () => {
@@ -82,8 +71,6 @@ describe("resumeFlowFromGate — applied", () => {
     assert.equal(executor.resume.mock.calls.length, 0, "queued flows resume via the admission cycle, not here");
   });
 });
-
-// ── failure paths ────────────────────────────────────────────────────────────
 
 describe("resumeFlowFromGate — failures", () => {
   test("unknown flow reports flow_not_found", async () => {

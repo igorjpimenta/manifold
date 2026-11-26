@@ -1,14 +1,3 @@
-// Unit tests for state/batch-writer.js — enqueue/flush/flushAll, size- and
-// time-triggered flush, FIFO ordering (last-enqueued-wins on same-row
-// writes), failure isolation (a bad batch is swallowed, not thrown), and
-// per-dbPath queue isolation.
-//
-// Uses flow_node_executions (schema.js) as the fixture table since it's the
-// first real call site this module gets wired into (node-executions.js's
-// write()) — createNodeExecutionsStore(dbPath) triggers the same migration
-// that store uses in production, so the table exists before batch-writer
-// writes to it directly.
-
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -25,13 +14,6 @@ function tmpDb() {
   return path.join(os.tmpdir(), `gf-bw-${randomUUID()}.sqlite`);
 }
 
-// batch-writer itself doesn't run migrations — tests need a store's boot-
-// time migrator to have created flow_node_executions first, same as
-// production (node-executions.js's own store-creation path does this before
-// batch-writer ever enqueues against the same dbPath). Returns both the
-// store (for read-back assertions via getExecution()) and the shared
-// drizzle `db` handle (so enqueue() gets the same query-builder instance
-// production code would) — both backed by the same getSharedDb() connection.
 let fixtureInvocationId = null;
 
 async function migratedDb(dbPath) {
@@ -77,7 +59,7 @@ describe("batch-writer — enqueue defers the write", () => {
     const { store, db } = await migratedDb(dbPath);
     const id = randomUUID();
 
-    enqueue(dbPath, insertExecQuery(db, { id }), { flushIntervalMs: 60_000 }); // long interval so the timer won't fire during the test
+    enqueue(dbPath, insertExecQuery(db, { id }), { flushIntervalMs: 60_000 });
     const before = await store.getExecution(id);
     assert.equal(before, null, "row must not be visible before flush");
 
@@ -100,10 +82,6 @@ describe("batch-writer — size-triggered flush", () => {
       enqueue(dbPath, insertExecQuery(db, { id }), { maxBatchSize: 3, flushIntervalMs: 60_000 });
     }
 
-    // The 3rd enqueue() should have triggered an async flush already — wait
-    // for whatever's in flight rather than asserting instantly, since the
-    // flush itself is an unawaited microtask chain from enqueue()'s
-    // perspective.
     await flush(dbPath);
 
     for (const id of ids) {
@@ -138,9 +116,6 @@ describe("batch-writer — FIFO ordering", () => {
     const id = randomUUID();
     const invocationId = await seedInvocation(dbPath);
 
-    // First insert, then an UPDATE on the same row queued in the same
-    // window — db.batch() runs its array in enqueue order inside one
-    // transaction, so the UPDATE (enqueued second) should win.
     enqueue(dbPath, insertExecQuery(db, { id, invocationId, kind: "fresh" }), { flushIntervalMs: 60_000 });
     enqueue(dbPath, db.update(flowNodeExecutions).set({ kind: "retry" }).where(eq(flowNodeExecutions.id, id)), { flushIntervalMs: 60_000 });
 
@@ -162,7 +137,6 @@ describe("batch-writer — failure isolation", () => {
     const warnings = [];
     const logger = { warn: (msg) => warnings.push(msg) };
 
-    // invocationId is NOT NULL — omitting it should make the batch fail.
     const badQuery = db.insert(flowNodeExecutions).values({
       id: randomUUID(),
       invocationId: null,

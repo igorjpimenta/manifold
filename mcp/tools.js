@@ -1,21 +1,9 @@
-// tools.js — agent-facing pipeline tools: manifold_start / _status /
-// _runs / _approve / _cancel.
-//
-// `createManifoldToolHandlers(ops)` returns static TOOL_DEFS (name,
-// description, JSON-schema inputSchema) plus a `handle(name, args,
-// identity)` dispatcher. Ops are injected by the host — stdio/HTTP servers
-// pass the real executor/run-store wiring, tests pass stubs:
-//
-//   startRun({ pipelineId, args, triggeredBy }) -> flow record
-//   runStatus({ flowId })                       -> flow record | null
-//   listRuns({ pipelineId, status, limit })     -> flow record[]
-//   approveGate({ flowId, itemId, decision, text }) -> { ok, ... }
-//   cancelFlow({ flowId, reason })                 -> { cancelled, ... }
-//   deliverResult({ session, runId, agent, kind, payload }) -> { ok }
-//   logger                                       -> { info, warn, error } (optional)
-//
-// The caller identity is the resolved `identity` — never a tool param —
-// so agents cannot start runs or approve gates under another agent's name.
+// Agent-facing pipeline tools (manifold_start/_status/_runs/_approve/_cancel/
+// _deliver_result). `createManifoldToolHandlers(ops)` returns static TOOL_DEFS
+// plus a `handle(name, args, identity)` dispatcher; ops (startRun, runStatus,
+// listRuns, approveGate, cancelFlow, deliverResult, logger) are injected by
+// the host. The caller identity is the resolved `identity` — never a tool
+// param — so agents cannot start runs or approve gates under another agent's name.
 
 import { identitySessionKey, assertCleanTriple } from "./identity.js";
 

@@ -1,6 +1,6 @@
-// SQLite store for lineage + cost_by_call. WAL mode so the hook write path
-// doesn't block on dashboard reads. Schema migrations are append-only — each
-// MIGRATIONS entry is one applied step; never edit a past entry in place.
+// SQLite store for lineage + cost_by_call. WAL so the hook write path doesn't
+// block on dashboard reads. Migrations are append-only: never edit an applied
+// entry in place.
 
 import path from "node:path";
 import { getSharedDb, withSharedWrite, resolveStorePaths } from "../state/db.js";
@@ -10,8 +10,8 @@ import { enqueueRaw, flush as flushBatchWriter } from "../state/batch-writer.js"
 import { ensureSessionKeys, ENSURE_SESSION_SQL } from "../state/session-keys.js";
 import { ensureFlowItems, ensureTurnRuns, ensurePipelineNodes } from "../state/attribution-registries.js";
 
-// Lineage/cost now live in runtime.sqlite so flow_id and pipeline_id can
-// carry FKs; resolve per call so MANIFOLD_DATA_DIR set after import wins.
+// Lives in runtime.sqlite so flow_id/pipeline_id can carry FKs. Resolved per
+// call so MANIFOLD_DATA_DIR set after import wins.
 export function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
@@ -95,13 +95,10 @@ function makeStore(client, dbPath) {
         return rows[0] ?? null;
       } catch { return null; }
     },
-    // Deferred via batch-writer: one call per LLM call with cost data
-    // (telemetry/index.js's before_message_write hook), likely the
-    // highest-volume write in runtime.sqlite. Already best-effort (errors
-    // swallowed, no caller inspects a return value or re-reads the row in
-    // the same hook invocation — unlike upsertLineage() above, which stays
-    // immediate because a closely-timed child session's getLineage() can
-    // depend on a parent's just-written row).
+    // Deferred through batch-writer: one call per LLM call, the highest-volume
+    // write in runtime.sqlite. upsertLineage stays immediate instead, because a
+    // closely-timed child session's getLineage() can depend on a parent's
+    // just-written row — insertCost has no such reader.
     insertCost(row) {
       const now = Date.now();
       for (const k of [row.session_key, row.root_session_key]) {
@@ -136,8 +133,7 @@ function makeStore(client, dbPath) {
         row.item_key ?? null,
       ]);
     },
-    // insertCost() defers through batch-writer — for tests that assert
-    // read-after-write. Not meant for production use.
+    // Test-only: drains the deferred path so reads can assert after writes.
     async flush() {
       await flushBatchWriter(dbPath);
     },

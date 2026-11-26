@@ -1,5 +1,3 @@
-// serve-fixture.js — stdio MCP server with stub ops, spawned by stdio.test.js
-// over a real transport. Not a test itself (no .test.js assertions run here).
 import { startMcpServer } from "../../../mcp/stdio.js";
 
 const calls = [];

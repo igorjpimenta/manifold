@@ -1,9 +1,6 @@
-// health.js — manifold's own liveness plus per-file DB reachability.
-//
-// The app's connectivity probe and any consumer's readiness check land
-// here instead of the harness status surface. `ok` is the AND of every
-// check: a degraded database reports ok:false with the failing file
-// named, never a blanket ok over silent rot. No harness contact.
+// Liveness plus per-file DB reachability: `ok` is the AND of every check —
+// a degraded database reports ok:false with the failing file named, never a
+// blanket ok over silent rot. No harness contact.
 import { createRequire } from "node:module";
 import { checkDb } from "../state/db-health.js";
 import { resolveStorePaths } from "../state/paths.js";
@@ -13,9 +10,8 @@ import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 const require = createRequire(import.meta.url);
 const MANIFOLD_VERSION = require("../package.json").version;
 
-// The app's own store home (MANIFOLD_DATA_DIR / MANIFOLD_*_DB), never a
-// harness default: the health answer must describe the files this process
-// actually reads.
+// This process's own store home (MANIFOLD_DATA_DIR / MANIFOLD_*_DB), never
+// a harness default — the health answer must describe the files we read.
 const DB_PATHS = () => resolveStorePaths();
 
 export function registerHealthRoutes({ api }) {

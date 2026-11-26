@@ -1,11 +1,3 @@
-/**
- * Unit tests for routes/discuss.js
- *
- * registerDiscussHandlers does NOT call api.registerHttpRoute — it returns
- * handler functions that runs.js and operator.js wire into their own routes.
- * These tests verify the return shape so that future refactors can't silently
- * drop a handler without breaking the contract.
- */
 import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { rm } from "node:fs/promises";
@@ -15,20 +7,12 @@ import os from "node:os";
 import { tmpdir } from "node:os";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Isolated store home for every sidecar write in this file (session stamps,
-// audio uploads). Resolution is per call, so setting the env here — after
-// the imports above — still relocates the store. node:test runs each file
-// in its own process, so the override never leaks into other files.
 const ISOLATED_DATA_DIR = mkdtempSync(path.join(tmpdir(), "manifold-discuss-test-"));
 process.env.MANIFOLD_DATA_DIR = ISOLATED_DATA_DIR;
 after(async () => {
   rmSync(ISOLATED_DATA_DIR, { recursive: true, force: true });
 });
 
-// B2.5 — handleDiscuss/handleDiscussAudio build their promptBuilder ctx via
-// assembleState() instead of trusting sourceFlow.stateJson directly. Mocked
-// here so the wiring test below doesn't need a real DB-backed runStore/
-// nodeExecutionsStore.
 let assembleStateCalls = [];
 let assembleStateReturn = { enriched: true };
 const executorHelpersUrl = new URL("../../../engine/executor-helpers.js", import.meta.url).href;
@@ -42,9 +26,6 @@ await mock.module(executorHelpersUrl, {
 });
 
 const { registerDiscussHandlers } = await import("../../../routes/discuss.js");
-// Real harness adapter (node builtins only, no gateway imports) —
-// resolveDiscussTarget sources thread ids from here, so the tests prove
-// the harness-owned path, not a stub.
 const sessions = await import("../../../plugins/openclaw/manifold/sessions.js");
 
 function createMockReqWithBody(method, path_, body, headers = {}) {
@@ -56,9 +37,6 @@ function createMockReqWithBody(method, path_, body, headers = {}) {
 }
 
 function makeDeps(api, overrides = {}) {
-  // In-memory thread roster standing in for the session index: keyed by
-  // (flow, gate, item) exactly like the discuss_threads table, so stamp →
-  // resolve round-trips behave the same.
   const threads = new Map();
   const key = (flowId, gateNodeId, itemId) => `${flowId} ${gateNodeId} ${itemId}`;
   return {
@@ -87,8 +65,6 @@ function makeDeps(api, overrides = {}) {
     ...overrides,
   };
 }
-
-// ── return shape ──────────────────────────────────────────────────────────────
 
 describe("registerDiscussHandlers — return shape", () => {
   test("does NOT call api.registerHttpRoute", () => {
@@ -119,16 +95,6 @@ describe("registerDiscussHandlers — return shape", () => {
   }
 });
 
-// ── apply-draft safety invariant ──────────────────────────────────────────────
-// handleDiscussApplyDraft must NEVER call gateResolver.recordItemDecision.
-// This invariant is documented in memory (feedback_apply_draft_not_approve.md):
-// Apply revises, Approve commits. They must stay separate.
-
-// ── resolveDiscussTarget — mid-batch (running) ────────────────────────────
-// While a loop node's worker pool is still active (flow.status === "running"),
-// waitJson stays null. resolveDiscussTarget ALWAYS rejects with
-// gate_transition when flow.status === "running" and waitJson is null.
-
 describe("registerDiscussHandlers — resolveDiscussTarget mid-batch (running)", () => {
   test("always 503s with gate_transition when flow is running and waitJson is null", async () => {
     const { api } = createMockApi();
@@ -143,11 +109,6 @@ describe("registerDiscussHandlers — resolveDiscussTarget mid-batch (running)",
     assert.equal(target.status, 503);
   });
 });
-
-// ── resolveDiscussTarget — thread identity comes from the session roster ──
-// No sidecar files: the first turn records (flow, gate, item) → session,
-// later turns re-resolve the same thread verbatim — including the agent,
-// so a pipeline config change mid-thread can't orphan the conversation.
 
 describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identity", () => {
   const testFlowId = `unit-test-discuss-roster-${Date.now()}`;
@@ -195,11 +156,6 @@ describe("registerDiscussHandlers — resolveDiscussTarget roster-backed identit
   });
 });
 
-// ── handleDiscuss — assembleState() wiring (B2.5) ─────────────────────────
-// promptBuilder's ctx.state now comes from assembleState(), not the raw
-// sourceFlow.stateJson blob — this proves the wiring, not assembleState()'s
-// own behavior (that has its own dedicated test coverage).
-
 describe("registerDiscussHandlers — handleDiscuss builds ctx.state via assembleState()", () => {
   const testFlowId = `unit-test-discuss-${Date.now()}`;
 
@@ -244,16 +200,6 @@ describe("registerDiscussHandlers — handleDiscuss builds ctx.state via assembl
   });
 });
 
-// ── discuss history — real store returns a Promise ────────────────────────
-// The real discussStore (state/discuss-store.js) is a Proxy whose every
-// method — including getState — returns a Promise, since the underlying
-// impl is constructed async. A regression let handleDiscussHistory call
-// `discussStore.getState(...)` without awaiting it: dsState was then always
-// the Promise object itself (truthy), so `dsState.messages.length` threw
-// "Cannot read properties of undefined (reading 'length')" on every reopen
-// of a discuss thread that already had messages. This mock mirrors that
-// Promise-returning shape so a missing `await` fails the test.
-
 describe("registerDiscussHandlers — handleDiscussHistory awaits discussStore.getState", () => {
   test("returns 200 with messages when the store resolves state asynchronously", async () => {
     const { api } = createMockApi();
@@ -295,10 +241,6 @@ describe("registerDiscussHandlers — handleDiscussHistory awaits discussStore.g
     assert.equal(parsed.messages[1].text, "hello back");
   });
 });
-
-// ── handleDiscussAudioRetry ────────────────────────────────────────────────
-// Re-transcribes an already-uploaded voice message in place (the operator's
-// Retry tap on a failed/empty transcription bubble), without a fresh upload.
 
 describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
   const testFlowId = `unit-test-discuss-audio-retry-${Date.now()}`;
@@ -362,10 +304,6 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.equal(body.turnId, turnId);
     assert.equal(body.audioUrl, audioUrl);
 
-    // The retry dispatches in the background (setImmediate after the 202);
-    // poll the meta sidecar until it flips, bounded and loud on timeout.
-    // Reads tolerate torn writes (writeFile truncates first): an unreadable
-    // or unparsable file just means "not yet".
     const metaPath = path.join(audioDir, `${turnId}.meta.json`);
     const deadline = Date.now() + 5000;
     let updatedMeta = null;
@@ -385,8 +323,6 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.equal(updatedMeta.error, null);
     assert.equal(updatedMeta.createdAtMs, 1000, "original createdAtMs must survive a retry");
 
-    // The sidecar write and the two events are separate steps of the same
-    // background job, so the write can land before the events do.
     await transcriptEventSeen;
     await turnEventSeen;
     await new Promise((r) => setTimeout(r, 20));
@@ -445,14 +381,14 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     assert.ok(transcriptCall, "must emit session.transcript.updated");
     assert.equal(transcriptCall.payload.scope, "discuss");
     assert.equal(transcriptCall.payload.text, "hello canonical");
-    assert.equal(transcriptCall.payload.transcript, undefined, "no legacy transcript dupe — text is canonical");
+    assert.equal(transcriptCall.payload.transcript, undefined, "transcript must not be duplicated — text is canonical");
 
     const turnCall = emitted.find((c) => c.kind === "session.transcript.completed");
     assert.ok(turnCall, "must emit session.transcript.completed for the agent turn");
     assert.equal(turnCall.payload.scope, "discuss");
     assert.equal(turnCall.payload.turnId, turnId);
     assert.equal(turnCall.payload.text, "agent reply");
-    assert.equal(turnCall.payload.reply, undefined, "no legacy reply dupe — text is canonical");
+    assert.equal(turnCall.payload.reply, undefined, "reply must not be duplicated — text is canonical");
     assert.equal(turnCall.payload.status, undefined, "no status dupe — the kind carries it");
   });
 
@@ -492,29 +428,17 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
 });
 
 describe("registerDiscussHandlers — apply-draft invariant", () => {  test("handleDiscussApplyDraft does not expose gateResolver in its closure", () => {
-    // We can't easily intercept the internal call chain without running the
-    // full handler, but we CAN verify the factory doesn't receive gateResolver
-    // as a dep at all — if someone passes it, the function signature doesn't
-    // destructure it, so it can't be used accidentally.
     const { api } = createMockApi();
     const deps = makeDeps(api);
-    // Inject a sentinel to detect accidental use
     let resolveCallCount = 0;
     deps.gateResolver = {
       recordItemDecision: () => { resolveCallCount++; },
     };
     const result = registerDiscussHandlers(deps);
-    // gateResolver is not in the factory signature, so this is a no-op check.
-    // The real guard is that the factory signature doesn't accept it.
     assert.equal(typeof result.handleDiscussApplyDraft, "function");
     assert.equal(resolveCallCount, 0, "gateResolver must not be called during factory setup");
   });
 });
-
-// ── resolveDiscussTarget — harness-owned thread ids ────────────────────────
-// Core never mints discuss ids: a new thread asks the harness adapter
-// (sessions.newDiscussSessionId); a harness that cannot name one gets a
-// loud refusal, not a core-minted fallback.
 
 describe("registerDiscussHandlers — resolveDiscussTarget harness-owned ids", () => {
   const testFlowId = `unit-test-discuss-harness-id-${Date.now()}`;

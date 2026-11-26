@@ -1,21 +1,14 @@
-// node-health-store.js — circuit breaker for any node's agent dispatch.
+// node-health-store.js — circuit breaker for any node's agent dispatch
+// (runtime.sqlite): once an agent dispatch fails, every subsequent flow
+// reaching the same (pipelineId, nodeId) fails immediately instead of
+// paying for another doomed LLM call — until an operator resets it.
 //
-// Storage: the store home's runtime.sqlite (sibling of flow_branches, failure_events).
-//
-// Any "agent"-kind node can opt in via node.circuitBreaker: true, checked by
-// the ordinary agent dispatch path regardless of which kind of flow it's
-// running inside. When the agent dispatch fails, we record it here so any
-// subsequent flow that reaches the same (pipelineId, nodeId) fails
-// immediately instead of paying for another doomed LLM call — until an
-// operator resets it.
-//
-// Column shape mirrors flow_runs (state/run-store.js / registry.sqlite): one
-// `status` column drives state instead of nullable timestamp columns doing
-// double duty as flags, plus generic created_at/updated_at/ended_at. A given
-// (pipeline_id, node_id) can have many historical rows across separate block
-// episodes; only one may be status='blocked' at a time, enforced by a partial
-// unique index rather than a primary key on (pipeline_id, node_id) — resets
-// flag the row resolved rather than deleting it, so history survives.
+// Column shape mirrors flow_runs: one `status` column drives state, and a
+// given (pipeline_id, node_id) may have many historical rows across
+// block episodes — only one may be status='blocked' at a time, enforced
+// by a partial unique index rather than a PK on (pipeline_id, node_id),
+// so resets can flag the row resolved instead of deleting it and history
+// survives.
 
 import { randomUUID } from "node:crypto";
 import { eq, and } from "drizzle-orm";
@@ -58,23 +51,22 @@ export async function createNodeHealthStore({ logger, dbPath = defaultDbPath() }
     return rows.length > 0;
   }
 
-  // First failure opens a new blocked row. A failure while already blocked
-  // is a silent no-op — the partial unique index rejects a second active
-  // row for the same (pipelineId, nodeId), so INSERT OR IGNORE just drops it.
+  // First failure opens a new blocked row; a failure while already
+  // blocked is a silent no-op — the partial unique index rejects a second
+  // active row, so INSERT OR IGNORE just drops it.
   //
-  // Deferred via batch-writer: its only caller (executor-nodes.js) awaits
-  // this purely to sequence before re-throwing the original dispatch error
-  // and never inspects a return value. rowsAffected (and therefore whether
-  // this was a genuinely new block vs. a no-op against an already-blocked
-  // row) isn't known until flush, so the old conditional "marked unhealthy"
-  // log is dropped rather than logged on a guess. reset() below stays
-  // immediate — its CLI caller reports a different message to the operator
-  // based on the real rowsAffected, so it can't be deferred the same way.
+  // Deferred via batch-writer: its only caller awaits this purely to
+  // sequence before re-throwing the original dispatch error and never
+  // inspects a return value. rowsAffected isn't known until flush, so no
+  // conditional "marked unhealthy" log is emitted — logging would be a
+  // guess. reset() below stays immediate: its CLI caller reports a
+  // different message based on the real rowsAffected.
   function markUnhealthy(pipelineId, nodeId, { reason, flowId } = {}) {
     if (!pipelineId || !nodeId) return;
     const now = Date.now();
-    // Raw on both statements: the batch-writer flushes drizzle and raw items
-    // as separate round-trips, and the registry row must land first.
+    // Raw on both statements: the batch-writer flushes drizzle and raw
+    // items as separate round-trips, and the registry row must land first
+    // (node_health's composite FK references pipeline_nodes).
     enqueueRaw(dbPath, "INSERT OR IGNORE INTO pipeline_nodes (pipeline_id, node_name, first_seen_at) VALUES (?, ?, ?)", [pipelineId, nodeId, now]);
     enqueueRaw(dbPath, `INSERT OR IGNORE INTO node_health
       (id, pipeline_id, node_id, status, reason, blocked_by_flow_id, created_at, updated_at)
@@ -114,8 +106,8 @@ export async function createNodeHealthStore({ logger, dbPath = defaultDbPath() }
     client.close();
   }
 
-  // markUnhealthy() defers through batch-writer — for tests that assert
-  // read-after-write. Not meant for production use.
+  // Drain point for markUnhealthy()'s deferred batch — for tests that
+  // assert read-after-write. Not meant for production use.
   async function flush() {
     await flushBatchWriter(dbPath);
   }

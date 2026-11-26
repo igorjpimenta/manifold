@@ -1,16 +1,7 @@
-/**
- * Unit tests for the run-detail node tree endpoints:
- *   GET /manifold/runs/:flowId/tree
- *   GET /manifold/runs/:flowId/tree/expand?type=node&invocationId=X
- *   GET /manifold/runs/:flowId/tree/expand?type=flow&childFlowId=Y
- *   GET /manifold/runs/:flowId/tree/invocation/:invocationId
- */
 import { test, describe, mock, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js);
-// the authReq helper below sends it, matching the "Bearer x" test token.
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = "x";
 after(() => {
@@ -22,16 +13,7 @@ let listInvocationsForFlowImpl = () => [];
 let getInvocationImpl = () => null;
 let listExecutionsForInvocationImpl = () => [];
 let hasInvocationsImpl = () => new Set();
-// Phase 1.5:
-// flow_node_executions carries no error content at all — buildTreeNodeRows/
-// sendInvocationDetail cross-reference failureStore.queryErrorsByFlow
-// instead. ErrorEntry-shaped rows (executionId/invocationId/message) tests
-// seed here to control which rows read as "failed".
 let queryErrorsByFlowImpl = () => [];
-// A subflow-kind row's own invocation (subflow_key=null) is never a child's
-// parent_invocation_id — each branch item gets its own separate invocation.
-// Tests simulate this by returning the REAL per-item invocation ids here,
-// distinct from whatever id the row itself carries.
 let listInvocationIdsForNodeImpl = () => [];
 const nodeExecutionsUrl = new URL("../../../state/node-executions.js", import.meta.url).href;
 await mock.module(nodeExecutionsUrl, {
@@ -74,14 +56,6 @@ function resetMocks() {
   queryErrorsByFlowImpl = () => [];
 }
 
-// Most tests just want kind/agent resolved from whatever's currently in
-// pipelinesRef, no real SCD2 time-travel — this mock reads `pipelinesRef`
-// live (late-bound via the ref object itself, not a snapshot of .value at
-// construction time) so it stays in sync with whatever a test sets
-// pipelinesRef.value to, before or after makeDeps() is called. `atMs` is
-// ignored here; the one test that needs genuine point-in-time behavior
-// (a node whose live definition has since changed/vanished) overrides
-// pipelineRegistryStore directly instead of using this shared mock.
 function makeMockPipelineRegistryStore(pipelinesRef) {
   return {
     getNodeVersionsBatch: async (requests) => requests.map(({ pipelineId, nodeName }) => {
@@ -129,9 +103,6 @@ const FIXTURE_PIPELINE = {
   },
 };
 
-// A flow-level kind:"cascade" pipeline (docs/pipelines.md's "retry-on-failure
-// as a flow characteristic") — its own root nodes are tried in sequence until
-// one succeeds or all are exhausted, no dedicated node kind involved.
 const CASCADE_PIPELINE = {
   id: "team_cascade",
   kind: "cascade",
@@ -140,8 +111,6 @@ const CASCADE_PIPELINE = {
     AGENT_LOGIN: { kind: "agent", agent: "login-agent" },
   },
 };
-
-// ── /tree root ──────────────────────────────────────────────────────────────
 
 describe("GET /manifold/runs/:flowId/tree", () => {
   test("maps invocations onto node rows with kind/agent resolved from the pipeline definition", async () => {
@@ -197,12 +166,6 @@ describe("GET /manifold/runs/:flowId/tree", () => {
 
   test("the LAST invocation with no error mirrors the flow's own live status (running/blocked/queued) — independent of any currentStep field", async () => {
     resetMocks();
-    // Real flow_runs rows never carry a currentStep field (column dropped
-    // in migration v7, state/run-store.js "Phase 2.5") — deliberately
-    // omitted here so this test can't silently pass for the wrong reason
-    // the way the old version did (it hand-built a currentStep field the
-    // real code path never receives, so it kept passing even after the
-    // comparison it was meant to exercise became permanently dead code).
     const flow = { flowId: "flow-c", status: "blocked", stateJson: { pipelineId: "team_pipe" } };
     listInvocationsForFlowImpl = () => [
       { invocationId: "inv-1", nodeId: "CACHE_CHECK", subflowKey: null, visitSeq: 1, invokedAt: 100, executionCount: 1, enteredAt: 100, exitedAt: 110, latestExecutionId: null, kind: "fresh" },
@@ -221,9 +184,6 @@ describe("GET /manifold/runs/:flowId/tree", () => {
   });
 
   test("the LAST invocation on a TERMINAL flow (failed) mirrors that terminal status too, not just running/blocked/queued/skipped", async () => {
-    // A terminal flow whose last node's own execution recorded no error must
-    // still mirror the flow's terminal status — defaulting to "succeeded"
-    // would show a green row on a flow the operator can plainly see failed.
     resetMocks();
     const flow = { flowId: "flow-terminal-fail", status: "failed", stateJson: { pipelineId: "team_pipe" } };
     listInvocationsForFlowImpl = () => [
@@ -262,10 +222,6 @@ describe("GET /manifold/runs/:flowId/tree", () => {
   test("a subflow-kind node with spawned children gets hasChildren:true and a shallow status rollup", async () => {
     resetMocks();
     const flow = { flowId: "flow-e", status: "succeeded", currentStep: null, stateJson: { pipelineId: "team_pipe" } };
-    // inv-propose is the node's OWN dispatch (subflow_key=null) — its id is
-    // NEVER a child's parent_invocation_id. Children point at the separate
-    // per-item invocations (inv-item-1/2/3), resolved via
-    // listInvocationIdsForNode(flowId, nodeId), not via inv-propose's id.
     listInvocationsForFlowImpl = () => [
       { invocationId: "inv-propose", nodeId: "PROPOSE", subflowKey: null, visitSeq: 1, invokedAt: 100, executionCount: 1, enteredAt: 100, exitedAt: 500, latestExecutionId: null, kind: "fresh" },
     ];
@@ -336,9 +292,6 @@ describe("GET /manifold/runs/:flowId/tree", () => {
     assert.deepEqual(body.items[0].rollup, { succeeded: 0, failed: 0, pending: 0, skipped: 0, cancelled: 0 });
   });
 
-  // everRetriedOrRevived. listInvocationsForFlow rows already carry this field
-  // (see state/node-executions.test.js); buildTreeNodeRows just threads it
-  // through onto the row unchanged.
   test("everRetriedOrRevived passes through from the invocation row onto the node row", async () => {
     resetMocks();
     const flow = { flowId: "flow-h", status: "succeeded", currentStep: null, stateJson: { pipelineId: "team_pipe" } };
@@ -378,13 +331,6 @@ describe("GET /manifold/runs/:flowId/tree", () => {
     assert.equal(body.items[0].hasChildren, false, "unresolvable kind can't be subflow, so never expandable");
   });
 
-  // Real evidence this once actually happened in production: a flow ran
-  // and rendered correctly, its pipeline's directory got deleted
-  // afterward (or a node renamed/its kind changed), and the SAME flow's
-  // tree silently degraded to kind:null with no error. pipelineRegistryStore
-  // is what's supposed to prevent that — this row's kind/agent must come
-  // from the historical snapshot, not from pipelinesRef (which here has
-  // nothing at all for this pipeline, simulating the deleted-directory case).
   test("a node whose pipeline definition has since changed/vanished still renders its ORIGINAL kind/agent, not null", async () => {
     resetMocks();
     const flow = { flowId: "flow-h", status: "succeeded", currentStep: null, stateJson: { pipelineId: "deleted_pipe" } };
@@ -395,12 +341,7 @@ describe("GET /manifold/runs/:flowId/tree", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, {
       readStore: { list: () => [], get: (id) => id === "flow-h" ? flow : null },
-      // pipelinesRef has NOTHING for this pipeline at all — the directory
-      // is gone, exactly like the design doc's own repro.
       pipelinesRef: { value: new Map() },
-      // pipelineRegistryStore still remembers what these nodes WERE at
-      // their own dispatch time (invokedAt 5000/6000) — the whole point
-      // of keeping SCD2 history independent of the live, mutable Map.
       pipelineRegistryStore: {
         getNodeVersionsBatch: async (requests) => requests.map((r) => {
           if (r.pipelineId !== "deleted_pipe") return null;
@@ -435,16 +376,10 @@ describe("GET /manifold/runs/:flowId/tree", () => {
   });
 });
 
-// ── /tree/expand ────────────────────────────────────────────────────────────
-
 describe("GET /manifold/runs/:flowId/tree/expand", () => {
   test("type=node returns the spawned child flows as type:flow rows", async () => {
     resetMocks();
     const flow = { flowId: "flow-i", status: "succeeded", currentStep: null, stateJson: { pipelineId: "team_pipe" } };
-    // inv-propose is the node's OWN dispatch (subflow_key=null) — the
-    // endpoint must resolve the real per-item invocation ids via
-    // listInvocationIdsForNode before calling listForParentInvocations,
-    // not pass inv-propose's id straight through.
     getInvocationImpl = (id) => id === "inv-propose" ? { id: "inv-propose", flowId: "flow-i", nodeId: "PROPOSE", subflowKey: null, visitSeq: 1, invokedAt: 100 } : null;
     listInvocationIdsForNodeImpl = (flowId, nodeId) =>
       flowId === "flow-i" && nodeId === "PROPOSE" ? ["inv-item-1"] : [];
@@ -520,10 +455,6 @@ describe("GET /manifold/runs/:flowId/tree/expand", () => {
     assert.equal(body.items[0].cascadeAttempt, null);
   });
 
-  // everRetriedOrRevived on a type:"flow" row — a SPAWNED CHILD's own
-  // retry, independent of both cascadeAttempt (root-node fallback count)
-  // and the subflow NODE's own row above — the parent node dispatching
-  // cleanly doesn't mean none of its children ever retried.
   test("everRetriedOrRevived: true when the child's own root invocation history includes a retry", async () => {
     resetMocks();
     const flow = { flowId: "flow-child-retry", status: "succeeded", currentStep: null, stateJson: { pipelineId: "team_pipe" } };
@@ -728,8 +659,6 @@ describe("GET /manifold/runs/:flowId/tree/expand", () => {
   });
 });
 
-// ── /tree/invocation/:id ────────────────────────────────────────────────────
-
 describe("GET /manifold/runs/:flowId/tree/invocation/:invocationId", () => {
   test("returns the full execution history for the invocation", async () => {
     resetMocks();
@@ -739,8 +668,6 @@ describe("GET /manifold/runs/:flowId/tree/invocation/:invocationId", () => {
       { executionId: "e1", enteredAt: 100, exitedAt: 110, kind: "fresh" },
       { executionId: "e2", enteredAt: 200, exitedAt: 230, kind: "retry" },
     ] : [];
-    // Error content is cross-referenced from failureStore now (Phase 1.5) —
-    // sendInvocationDetail merges message onto the matching executionId.
     queryErrorsByFlowImpl = () => [{ nodeId: "SCORE_LLM", subflowKey: null, message: "timeout", at: 110, executionId: "e1", invocationId: "inv-retried" }];
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api, {

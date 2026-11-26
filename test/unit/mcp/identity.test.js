@@ -1,4 +1,3 @@
-// identity.test.js — declaration refused-never-defaulted; per-call stamps.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { assertDeclaration, declaredFromEnv, resolveIdentity, identitySessionKey } from "../../../mcp/identity.js";

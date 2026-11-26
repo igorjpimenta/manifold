@@ -1,15 +1,3 @@
-/**
- * Unit tests for state/migrate.js + schema parity.
- *
- * Verifies:
- *   - Fresh DBs migrate to the full expected table set (runtime + ops),
- *     with a journal row; reruns are idempotent.
- *   - Snapshots are the sole schema path (journals only to
- *     __drizzle_migrations).
- *   - Schema parity: every table the real store boot produces matches the
- *     drizzle def column-for-column. A column in a def without a generated
- *     snapshot (or vice versa) fails here — that is the whole point.
- */
 import { test, describe, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import os from "node:os";
@@ -72,8 +60,6 @@ function defColumns(tableDef) {
     .sort();
 }
 
-// Map of drizzle table name -> def, per schema module (excludes nothing;
-// every def must materialize on a fresh migrate).
 function defEntries(schemaModule) {
   const out = [];
   for (const [key, v] of Object.entries(schemaModule)) {
@@ -81,13 +67,10 @@ function defEntries(schemaModule) {
       const cfg = getTableConfig(v);
       if (cfg?.name) out.push([key, v]);
     } catch {
-      // Not a table def (constants, helpers) — skipped, never asserted.
     }
   }
   return out;
 }
-
-// ── fresh migrate ────────────────────────────────────────────────────────────
 
 describe("migrateDatabase — fresh databases", () => {
   let dir = null;
@@ -128,20 +111,9 @@ describe("migrateDatabase — fresh databases", () => {
   });
 });
 
-// ── snapshot hygiene ─────────────────────────────────────────────────────────
-// Forward-safety invariants for every present and future snapshot file:
-// snapshots are the sole schema path, applied to whatever shape a file is
-// in, so every CREATE must be IF NOT EXISTS. DROP COLUMN and RENAME have
-// no IF EXISTS form in SQLite — they require manual review, so they fail
-// here by design. ADD COLUMN is allowed for genuinely new columns.
-
 describe("snapshots — forward safety", () => {
   const folders = [RUNTIME_MIGRATIONS_FOLDER, OPS_MIGRATIONS_FOLDER];
 
-  // Table rebuilds must create __new_<t> bare: IF NOT EXISTS would silently
-  // reuse a half-built table left by an interrupted run, and the following
-  // INSERT/DROP would then lose rows. These files were reviewed as one-shot
-  // rebuilds, so the guard rule does not apply to them.
   const reviewedRebuilds = new Set([
     "0008_wealthy_thundra.sql",
     "0010_solid_phantom_reporter.sql",
@@ -178,12 +150,6 @@ describe("snapshots — forward safety", () => {
   });
 
   test("no DROP COLUMN or RENAME without manual review", () => {
-    // Adding a FK to an existing SQLite table requires the 12-step table
-    // rebuild: create __new, copy, DROP, RENAME. There is no ALTER form.
-    // 0008 is the reviewed retrofit (14 FK edges + the pipelines registry
-    // backfill); future snapshots stay subject to the rule.
-    // 0010 rebuilds the six session-keyed tables to point at the sessions
-    // registry (and creates it); reviewed the same way as 0008.
     for (const stmt of snapshotSql()) {
       const file = stmt.slice(0, stmt.indexOf(":"));
       if (reviewedRebuilds.has(file)) continue;
@@ -194,12 +160,6 @@ describe("snapshots — forward safety", () => {
     }
   });
 });
-
-// ── one discuss_state row per thread ──────────────────────────────────────────
-//
-// One discuss_state row per thread: the unique index on (flow_id, item_id)
-// enforces it, so two concurrent appendMessage calls cannot each insert their
-// own row and split the thread's history across them.
 
 describe("migration 0006 — one discuss_state row per thread", () => {
   const DEDUPE_IDX = 6;
@@ -213,8 +173,6 @@ describe("migration 0006 — one discuss_state row per thread", () => {
     return entry;
   }
 
-  // A copy of the migrations folder with the dedupe migration withheld, so
-  // the duplicate rows can be written between the two states.
   async function preDedupeDb(dir) {
     const folder = path.join(dir, "runtime");
     fs.cpSync(RUNTIME_MIGRATIONS_FOLDER, folder, { recursive: true });
@@ -251,7 +209,6 @@ describe("migration 0006 — one discuss_state row per thread", () => {
       const { dbPath, entry } = await preDedupeDb(dir);
       const seed = createClient({ url: `file:${dbPath}` });
       try {
-        // Two rows for one thread — the shape the unique index now rejects.
         await seed.execute(
           "INSERT INTO discuss_state (flow_id, item_id, messages_json, turn_status, active_turn_id, pending_json, updated_at, components_json) VALUES (?,?,?,?,?,?,?,?)",
           ["flow-dup", "item-1", '[{"id":"m1","ts":1}]', "idle", null, null, 100, "[]"],
@@ -337,8 +294,6 @@ describe("migration 0006 — one discuss_state row per thread", () => {
   });
 });
 
-// ── snapshots are the sole schema path ───────────────────────────────────────
-
 describe("migrateDatabase — snapshots only, no chain", () => {
   test("opening a store creates the full schema with no _schema_version table", async () => {
     const { dbPath } = tmpDb("snapshots-only");
@@ -352,20 +307,7 @@ describe("migrateDatabase — snapshots only, no chain", () => {
   });
 });
 
-// ── schema parity guard ──────────────────────────────────────────────────────
-
 describe("schema parity — live boot vs drizzle defs", () => {
-  // Boots every store through its real open path, then asserts the
-  // produced columns equal the def columns exactly. Add a column to a
-  // def without generating (or vice versa) and this fails — that is the
-  // whole point.
-  //
-  // One tmp file PER STORE (same precedent as the engine e2e tests):
-  // Proxy-lazy factories resolve await instantly while construction races
-  // in the background, so each boot below polls for its store's tables
-  // before the assertions run. Bounded waits, fail loudly on timeout —
-  // never blind sleeps. One tmp file PER STORE (same precedent as the
-  // engine e2e tests).
   test("runtime tables match defs column-for-column", async () => {
     const { dbPath: runsDb } = tmpDb("parity-runs");
     const { dbPath: execDb } = tmpDb("parity-exec");

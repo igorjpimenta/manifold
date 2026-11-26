@@ -1,6 +1,3 @@
-// Dashboard reads come straight from manifold's own stores — no gateway hop,
-// no pairing token, no gatewayFetch mock. Each converted read path is hit
-// over HTTP against a real dashboard server wired to stub stores.
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";

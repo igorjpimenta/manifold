@@ -1,25 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors freelance_workana-touch-cadence's
- * TOUCH (DRAFT_NUDGE → GATE → SEND_NUDGE → STAMP_TOUCH / STAMP_TOUCH_
- * REJECT), the simplest of the three pipelines migrated so far — no
- * loop-back, exactly one human-gate node. Every "code"/"agent" sub-node
- * is a trivial no-op stand-in — zero real filesystem, subprocess, or
- * agent dispatch I/O anywhere in this fixture. GATE's pendingSelector/
- * edge logic is NOT stubbed away — it uses the real plain-item-id shape
- * TOUCH's own GATE uses (no round-scoping helper needed here, unlike
- * PROPOSE's GAP_GATE). SEND_NUDGE was a real kind:"fallback" node here
- * until an earlier rewrite retired that mechanism entirely — now a
- * plain "code" stand-in like every other
- * node in this fixture; the real cascade-migration coverage lives in
- * workspace/.pipelines/test/unit/freelance_workana-touch-cadence/nodes/
- * touch/send-nudge.test.js.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal, waitForStatus } from "../../helpers/wait-for-event.js";
@@ -34,8 +12,6 @@ import { createGateResolver } from "../../../gates/gate-resolver.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -150,8 +126,6 @@ async function childFlowIds(harness, parentFlowId) {
   return (await harness.runStore.listForParentInvocations(invocationIds)).map((c) => c.flowId);
 }
 
-// Raised above the sibling e2e files' tighter default — a full-suite
-// concurrent run showed the tighter margin flakes under load.
 function flush(ms = 60) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -184,7 +158,7 @@ describe("childFlows:true TOUCH-shaped loop, full engine E2E", () => {
     assert.equal(child.waitJson.kind, "human-gate");
     assert.equal(child.waitJson.items[0].itemId, "job-1", "must block at GATE with the plain item id — TOUCH has no round-scoping");
 
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-1", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-1", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -205,7 +179,7 @@ describe("childFlows:true TOUCH-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-2", decision: "reject", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-2", decision: "reject", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -225,7 +199,7 @@ describe("childFlows:true TOUCH-shaped loop, full engine E2E", () => {
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-4", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "job-4", decision: "approve", source: "ws" });
     await flush();
 
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });

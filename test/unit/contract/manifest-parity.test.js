@@ -1,11 +1,3 @@
-// Pins openclaw.plugin.json to the registration surface in code.
-//
-// Invariant: the plugin registers no raw tools and declares no tool
-// contract — manifold exposes its pipeline tools over MCP only — and the set
-// of config-schema property paths in the manifest's configSchema is exactly
-// the set in index.js's inline configSchema. A tool registered without the
-// host knowing about it fails here.
-//
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -15,11 +7,6 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
-// Real call shapes in a plugin: api.registerTool((ctx) => ({ name: "..." }))
-// and api.registerTool({ name: "..." }). The tool name is the `name` property
-// of the definition object, never a registerTool argument. The MCP servers
-// register through their own SDK's server.registerTool(name, schema), which
-// this does not match.
 const REGISTER_TOOL_NAME_RE =
   /api\.registerTool\(\s*(?:\(\w*\)\s*=>\s*\(\s*\{|\{)\s*name:\s*(['"])([^'"\n]+)\1/g;
 
@@ -42,10 +29,6 @@ function registeredToolNames() {
   return names;
 }
 
-// ── string/comment/template-aware brace matching ────────────────────────────
-// index.js's configSchema is an inline object literal containing template
-// literals and nested objects; it cannot be imported (the openclaw/plugin-sdk
-// specifier is bare), so the test slices and parses the literal statically.
 
 function skipStringLiteral(src, i) {
   const quote = src[i];
@@ -129,8 +112,6 @@ function topLevelEntries(objInner) {
         while (k < objInner.length && /\s/.test(objInner[k])) k += 1;
         const valueOpenIdx = objInner[k] === "{" ? k : -1;
         entries.push({ key, valueOpenIdx });
-        // Skip the whole value object so nested keys are not mistaken for
-        // top-level entries of this object.
         if (valueOpenIdx >= 0) {
           i = matchBrace(objInner, valueOpenIdx) + 1;
           continue;
@@ -207,8 +188,6 @@ describe("openclaw.plugin.json contract parity", () => {
       "contracts.tools must stay empty: the plugin contributes no raw tools",
     );
 
-    // The raw registration is gone, not the capability: the MCP server still
-    // carries the same pipeline tools.
     const { TOOL_DEFS } = await import("../../../mcp/tools.js");
     const mcpToolNames = TOOL_DEFS.map((d) => d.name);
     assert.ok(

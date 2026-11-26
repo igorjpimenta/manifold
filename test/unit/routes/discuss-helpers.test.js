@@ -5,8 +5,6 @@ import {
   DRAFT_META_PREFIXES,
 } from "../../../routes/discuss-helpers.js";
 
-// ── looksLikeMetaNarration ────────────────────────────────────────────────────
-
 describe("looksLikeMetaNarration", () => {
   it("returns true for short text (< 40 chars)", () => {
     assert.equal(looksLikeMetaNarration("Short."), true);

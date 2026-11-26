@@ -1,10 +1,3 @@
-// Unit tests for state/admission-queue-store.js — the single durable
-// admission table for flow runs (kind:"child-dispatch", kind:"flow-start").
-//
-// Real tmp-sqlite instances throughout (same convention as run-store.test.js),
-// not mocks — the whole point of this store is a genuine atomicity
-// guarantee under real concurrent access, which a mock can't verify.
-
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -82,7 +75,6 @@ describe("admission-queue-store — admit()", () => {
   test("getLimit is re-read on every call, not cached at store creation", async () => {
     let limit = 1;
     const store = makeStore(0, { getLimit: () => limit });
-    // getLimit passed via override replaces makeStore's fixed-limit closure.
     const a = await store.admit({ kind: "flow-start", flowId: "f1" });
     assert.equal(a.status, "admitted");
     const b = await store.admit({ kind: "flow-start", flowId: "f2" });
@@ -100,10 +92,6 @@ describe("admission-queue-store — admit()", () => {
     assert.notEqual(a.id, b.id, "a flow legitimately cycles through admit()/release() many times over its life");
   });
 
-  // Idempotency: a caller re-entering the same logical request (e.g. a
-  // resume racing a revival for the same flow) must not create a second
-  // live row — that would double-admit and permanently shrink the shared
-  // pool by one slot.
   describe("idempotency — re-admitting the same (kind, flowId, nodeId) while a live row exists", () => {
     test("a repeated admit() for the same admitted tuple returns the SAME row, not a new one", async () => {
       const store = makeStore(5);
@@ -115,7 +103,7 @@ describe("admission-queue-store — admit()", () => {
     });
 
     test("a repeated admit() for the same still-queued tuple returns the SAME row, not a new one", async () => {
-      const store = makeStore(0); // pool full immediately — everything queues
+      const store = makeStore(0);
       const a = await store.admit({ kind: "flow-start", flowId: "f1", nodeId: "N1" });
       assert.equal(a.status, "queued");
       const b = await store.admit({ kind: "flow-start", flowId: "f1", nodeId: "N1" });
@@ -134,7 +122,7 @@ describe("admission-queue-store — admit()", () => {
 
     test("null nodeId (flow-start/child-dispatch) dedupes correctly against another null, not against a real nodeId", async () => {
       const store = makeStore(5);
-      const a = await store.admit({ kind: "flow-start", flowId: "f1" }); // nodeId defaults to null
+      const a = await store.admit({ kind: "flow-start", flowId: "f1" });
       const b = await store.admit({ kind: "flow-start", flowId: "f1" });
       assert.deepEqual(b, a, "two admit() calls with no nodeId for the same flow+kind must dedupe");
       const c = await store.admit({ kind: "child-dispatch", flowId: "f1", nodeId: "REAL_NODE" });
@@ -185,7 +173,7 @@ describe("admission-queue-store — release()", () => {
     const store = makeStore(1);
     const held = await store.admit({ kind: "flow-start", flowId: "holder" });
     const first = await store.admit({ kind: "child-dispatch", flowId: "f1", nodeId: "C1" });
-    await new Promise((r) => setTimeout(r, 5)); // ensure a distinct created_at ordering
+    await new Promise((r) => setTimeout(r, 5));
     const second = await store.admit({ kind: "flow-start", flowId: "f2", nodeId: "N2" });
     assert.equal(first.status, "queued");
     assert.equal(second.status, "queued");
@@ -313,15 +301,6 @@ describe("admission-queue-store — get() / listByStatus()", () => {
   });
 });
 
-// ── the test that actually proves the race is closed ────────────────────────
-//
-// Fires many real, genuinely concurrent admit() calls (Promise.all, not
-// sequential awaits) against one real sqlite file, with a limit well below
-// the caller count. If admit()'s count-then-claim weren't atomic, this
-// would overshoot the limit under real concurrent load — the same way any
-// count-then-claim check that doesn't happen inside admit()'s own
-// transaction would.
-
 describe("admission-queue-store — concurrent admit() under real contention", () => {
   test("N concurrent callers, limit L (L < N): exactly L admitted, the rest queued, never an overshoot", async () => {
     const store = makeStore(5);
@@ -341,16 +320,11 @@ describe("admission-queue-store — concurrent admit() under real contention", (
   test("concurrent admit() + release() interleaved: pool size is never exceeded at any observed point", async () => {
     const store = makeStore(3);
     const ids = [];
-    // Fill to capacity first (sequential, to get real ids to release below).
     for (let i = 0; i < 3; i++) {
       const r = await store.admit({ kind: "flow-start", flowId: `seed${i}` });
       assert.equal(r.status, "admitted");
       ids.push(r.id);
     }
-    // Now fire a burst of concurrent releases (freeing slots) and concurrent
-    // new admits (claiming them) at the same time — the contended case that
-    // actually matters: a slot freeing up while multiple new requests race
-    // for it.
     const [releaseResults, admitResults] = await Promise.all([
       Promise.all(ids.map((id) => store.release(id))),
       Promise.all(Array.from({ length: 6 }, (_, i) => store.admit({ kind: "flow-start", flowId: `new${i}`, nodeId: "N" }))),
@@ -359,7 +333,7 @@ describe("admission-queue-store — concurrent admit() under real contention", (
     const stats = await store._stats();
     assert.equal(stats.admitted, 3, "pool never exceeds its limit even mid-churn — 3 freed, exactly 3 of the 6 new admits claimed them");
     assert.equal(stats.queued, 3);
-    void admitResults; // shape already covered by the aggregate stats assertion above
+    void admitResults;
   });
 });
 
@@ -380,7 +354,7 @@ describe("admission-queue-store — fillFreeSlots()", () => {
     const q3 = await store.admit({ kind: "flow-start", flowId: "q3" });
     assert.deepEqual(await store._stats(), { admitted: 1, queued: 3 });
 
-    limit = 3; // two slots free, three rows queued
+    limit = 3;
     const promoted = await store.fillFreeSlots();
 
     assert.deepEqual(promoted.map((p) => p.id), [q1.id, q2.id], "oldest first, only as many as are free");
@@ -402,49 +376,21 @@ describe("admission-queue-store — fillFreeSlots()", () => {
   });
 });
 
-// ── cross-module contention on the shared connection ────────────────────────
-//
-// Two hazards the write serialization has to work around:
-//   1. A plain execute()/update()/batch() issued on a connection while a
-//      transaction() (or a raw BEGIN/COMMIT) is open fails instantly,
-//      bypassing busy_timeout, and can corrupt the holder's own commit.
-//   2. Across separate connections to the same file, concurrent calls queued
-//      on one client each pay close to the full busy_timeout instead of
-//      exiting as soon as the real lock clears.
-// admission-queue-store, run-store, batch-writer (node-executions' path) and
-// failure-store serialize through state/db.js's withSharedWrite. The other
-// getSharedDb() users — node-health-store, session-index, discuss-store,
-// pipeline-registry — are not on it yet.
-
 describe("admission-queue-store.js vs. other state/*.js writers — real cross-module contention on the SAME shared connection", () => {
   test("concurrent admissionQueueStore admit()/release(), runStore CAS writes, nodeExecutionsStore batched writes, and failureStore writes against the same dbPath never throw a transaction-corruption error, and admission counts stay exact", async () => {
     const dbPath = tmpDb();
-    // Constructed and awaited-ready SEQUENTIALLY, not concurrently — boot
-    // opens share one connection, and overlapping transactions on it fail
-    // ("cannot start a transaction within a transaction") regardless of
-    // which API opened them. Keeping boot sequential isolates what THIS
-    // test checks, which is LIVE-OPERATION contention after all stores
-    // are already up and their schemas exist.
     const admissionQueueStore = createAdmissionQueueStore({ dbPath, getLimit: () => 5 });
     await admissionQueueStore.ready();
     const runStore = createRunStore({ dbPath });
     await runStore.ready();
     const nodeExecutionsStore = createNodeExecutionsStore(dbPath);
     await nodeExecutionsStore.ready();
-    // No explicit ready() on this store's Proxy — every method call already
-    // awaits its own async init internally on first use. A harmless read
-    // forces it to finish here, sequentially, before the concurrent round
-    // below.
     const failureStore = createFailureStore({
       dbPath,
       nodeExecutionsStore: { getInvocation: () => null },
     });
     await failureStore.list({ limit: 1 });
 
-    // Real flow_runs rows for runStore's CAS writes to have a genuine
-    // target — an update against a nonexistent row would just return
-    // {applied:false} harmlessly, which wouldn't exercise the write path
-    // for real (no actual row-lock/UPDATE statement would need to run).
     const flowIds = Array.from({ length: 20 }, () => randomUUID());
     await Promise.all(flowIds.map((flowId) => runStore.insert({
       flowId, ownerKey: "test", pipelineId: "p", revision: 0, status: "running",
@@ -458,11 +404,6 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
     for (let round = 0; round < ROUNDS; round++) {
       const ops = [];
 
-      // Category 1: real admission-queue-store.js transactions — the ONLY
-      // client.transaction() user in the codebase. Mix of admit + release
-      // so both the read-then-INSERT path and the delete-then-promote path
-      // (release()'s own internal SELECT + UPDATE inside the same
-      // transaction) both fire concurrently.
       const admissions = [];
       for (let i = 0; i < CALLER_COUNT; i++) {
         ops.push(
@@ -472,9 +413,6 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
         );
       }
 
-      // Category 2: real run-store.js single-shot CAS writes (db.update(),
-      // no held-open transaction) against real rows, fired at the exact
-      // same time as category 1's open transactions.
       for (let i = 0; i < CALLER_COUNT; i++) {
         const flowId = flowIds[i % flowIds.length];
         ops.push(
@@ -483,14 +421,6 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
         );
       }
 
-      // Category 3: real node-executions.js writes — routed through
-      // batch-writer.js's enqueue()/db.batch(), the other real consumer of
-      // this shared connection. Deliberately not awaited individually
-      // (matches every real call site's own fire-and-forget contract) —
-      // collected via the returned promise-less call, then force-flushed
-      // below to guarantee the db.batch() round-trip actually overlaps
-      // this round's open admission-queue-store transactions instead of
-      // happening to land in some later, uncontended window.
       for (let i = 0; i < CALLER_COUNT; i++) {
         ops.push(
           nodeExecutionsStore.write({
@@ -499,17 +429,8 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
           }).catch((err) => errors.push(`nodeExecutions.write: ${err?.message ?? err}`)),
         );
       }
-      // Force the batch-writer flush to actually run NOW, concurrently
-      // with the still-in-flight admit()/casSetRunning calls above, rather
-      // than waiting for its own flush timer (which could land after this
-      // round's transactions have all already committed, silently
-      // defeating the point of this test).
       ops.push(flushBatchWriter(dbPath).catch((err) => errors.push(`flushBatchWriter: ${err?.message ?? err}`)));
 
-      // Category 4: real failure-store.js writes (recordEngineFailure ->
-      // upsertFailureRow) mixed into the same contention round — a burst
-      // of these must not corrupt an unrelated admission-queue-store
-      // release() transaction.
       for (let i = 0; i < CALLER_COUNT; i++) {
         ops.push(
           failureStore.recordEngineFailure({
@@ -521,17 +442,11 @@ describe("admission-queue-store.js vs. other state/*.js writers — real cross-m
 
       await Promise.all(ops);
 
-      // Release everything admitted this round so the pool doesn't fill up
-      // across rounds and start masking real admit() behavior as "queued"
-      // for a reason unrelated to what this test is actually checking.
       await Promise.all(admissions.map((a) => admissionQueueStore.release(a.id).catch((err) => errors.push(`release: ${err?.message ?? err}`))));
     }
 
     assert.deepEqual(errors, [], "no cross-module transaction-corruption error (e.g. 'cannot commit transaction - SQL statements in progress') across 5 rounds of 30-way concurrent admission-queue-store + run-store + node-executions + failure-store writes on the same connection");
 
-    // Sanity: the pool is empty again (every admission from every round was
-    // released) — confirms admission-queue-store.js's own bookkeeping
-    // stayed internally consistent throughout, not just error-free.
     assert.deepEqual(await admissionQueueStore._stats(), { admitted: 0, queued: 0 });
   });
 });

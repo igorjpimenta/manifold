@@ -1,12 +1,9 @@
 // The sessions registry is the FK target for every session-key pointer.
-// Keys are assigned by the harness, so a row has to exist before the first
-// pointer to it is written; writers insert OR IGNORE the key they are about
-// to reference (telemetry/store.js, state/session-index.js,
-// state/tool-handoff.js, budget/index.js). This module backfills the keys
-// already referenced by rows that predate the registry — it is the only
-// place that reads across the child tables, and it runs once per file open
-// after migrations (and after the ops→runtime copy, which brings its own
-// queue/lineage/cost keys).
+// Keys are assigned by the harness, so a row has to exist before the
+// first pointer to it is written. This module backfills the keys already
+// referenced by rows that predate the registry — the only place that
+// reads across the child tables, run once per file open after
+// migrations.
 
 export const SESSION_KEYS_FROM_ROWS_SQL = `
   INSERT OR IGNORE INTO sessions (session_key, first_seen_at)

@@ -1,16 +1,3 @@
-/**
- * Unit tests for the transcripts endpoint in routes/runs.js.
- *
- * Verifies transcripts come from manifold's own stores only:
- *   - discuss threads carry full turns from discuss-store (operator/agent
- *     roles mapped to user/assistant), attributed via stored (flowId, itemId)
- *     keys and flow_sessions identity rows — never parsed from key shape.
- *   - dispatch entries carry a single assistant turn taken from the node's
- *     stored resultJson when it holds reply text, and list metadata-only
- *     otherwise (content is never invented).
- *   - lite=1 returns turnCount without turn text; session=X drills into
- *     the exact stored transcript.
- */
 import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
@@ -80,8 +67,6 @@ async function getTranscripts(t, query, depsOverrides) {
   return JSON.parse(res.body);
 }
 
-// ── discuss threads ──────────────────────────────────────────────────────────
-
 describe("transcripts — discuss threads from discuss-store", () => {
   test("lists full turns with stored identity, roles mapped to user/assistant", async (t) => {
     const body = await getTranscripts(t, "", {
@@ -144,8 +129,6 @@ describe("transcripts — discuss threads from discuss-store", () => {
   });
 });
 
-// ── dispatch turns ───────────────────────────────────────────────────────────
-
 describe("transcripts — dispatch turns from resultJson", () => {
   const sessionRows = [
     { session: "sk-m1", nodeId: "SUM", branchItemId: null, spawnedAt: 700 },
@@ -204,8 +187,6 @@ describe("transcripts — dispatch turns from resultJson", () => {
     }
   });
 });
-
-// ── drill-in ─────────────────────────────────────────────────────────────────
 
 describe("transcripts — session drill-in", () => {
   test("session=X returns only the matching stored transcript", async (t) => {

@@ -4,9 +4,6 @@ import { createBudgetGate } from "../../../engine/executor-budget.js";
 
 const logger = { info: () => {}, warn: () => {} };
 
-// Fake nodeCallStats — no history by default, matching the real function's
-// null-on-no-samples contract, so existing tests keep exercising the
-// $0.001-$0.05 fallback branch of estimateNodeCost exactly as before.
 const noStats = async () => null;
 
 function makeBudgetGate(aqOpts = {}, nodeCallStats = noStats) {
@@ -18,8 +15,6 @@ function makeBudgetGate(aqOpts = {}, nodeCallStats = noStats) {
   };
   return createBudgetGate({ getApprovalQueue: () => defaults, logger, nodeCallStats });
 }
-
-// ── no approval queue ─────────────────────────────────────────────────────────
 
 describe("createBudgetGate — no approval queue", () => {
   it("proceeds when getApprovalQueue returns null", async () => {
@@ -35,8 +30,6 @@ describe("createBudgetGate — no approval queue", () => {
   });
 });
 
-// ── gate not locked ───────────────────────────────────────────────────────────
-
 describe("createBudgetGate — gate not locked", () => {
   it("proceeds when isGateLocked returns false", async () => {
     const { maybeBudgetGate } = makeBudgetGate({ isGateLocked: async () => false });
@@ -44,8 +37,6 @@ describe("createBudgetGate — gate not locked", () => {
     assert.deepEqual(result, { proceed: true });
   });
 });
-
-// ── prior decision ────────────────────────────────────────────────────────────
 
 describe("createBudgetGate — prior decision", () => {
   it("proceeds when decision is approve", async () => {
@@ -79,8 +70,6 @@ describe("createBudgetGate — prior decision", () => {
     assert.equal(enqueued, false);
   });
 });
-
-// ── no prior decision — enqueue ───────────────────────────────────────────────
 
 describe("createBudgetGate — gate locked, no decision", () => {
   it("enqueues item and returns pause + blockedInfo", async () => {
@@ -154,8 +143,6 @@ describe("createBudgetGate — gate locked, no decision", () => {
     assert.equal(enqueuedArgs.costHigh, 0.05 * 3);
   });
 });
-
-// ── isGateLocked errors propagate ───────────────────────────────────────────
 
 describe("createBudgetGate — isGateLocked throws", () => {
   it("propagates a thrown error from isGateLocked instead of silently proceeding", async () => {

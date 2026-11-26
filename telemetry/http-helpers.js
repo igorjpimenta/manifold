@@ -1,4 +1,3 @@
-// Pure helpers and shared SQL fragments for telemetry HTTP routes.
 import { displayRootKind } from "./labels.js";
 
 const ALL_ROOT_KINDS = [
@@ -13,8 +12,8 @@ export function peersForKind(kind) {
   return ALL_ROOT_KINDS.filter((k) => displayRootKind(k) === label);
 }
 
-// Trigger-edge re-attribution: re-root pipeline cost to its originating session
-// (cron / operator / telegram) instead of graph-flow-owner at query time.
+// Trigger-edge re-attribution: re-root pipeline cost to its originating
+// session (cron / operator / telegram) instead of the flow's owner session.
 export const ATTR_JOIN = `
   LEFT JOIN session_lineage sl
     ON cbc.flow_id IS NOT NULL
@@ -74,8 +73,6 @@ export function formatSessionChildLabel(row) {
   return `${parts[1] ?? "?"} · ${(parts[parts.length - 1] ?? "").slice(0, 30)}`;
 }
 
-// Probabilistic midnight forecast: sample per-hour historical distributions,
-// run numSamples ensemble paths, return column-wise p10/p50/p90 per remaining hour.
 export function bootstrapForecast(byDay, currentHour, todayRows, numSamples = 200) {
   const horizon = 23 - currentHour;
   if (horizon <= 0 || byDay.size === 0) return null;
@@ -105,11 +102,8 @@ export function bootstrapForecast(byDay, currentHour, todayRows, numSamples = 20
   });
 }
 
-// execAll/execGet — @libsql/client's `execute()` returns rows as
-// array-like Proxy objects (indexable by both position and column name).
-// Spreading one directly (`{...row}`) picks up numeric index keys
-// alongside the named ones, so we flatten to a plain object here once,
-// at the query boundary, instead of at every call site.
+// libsql rows are array-like Proxies: spreading one directly also picks up
+// numeric index keys. Flatten to a plain object once, at the query boundary.
 export async function execAll(client, sql, args = []) {
   const { rows, columns } = await client.execute({ sql, args });
   return rows.map((r) => {

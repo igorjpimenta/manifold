@@ -1,23 +1,7 @@
-/**
- * Unit tests for routes/operator.js
- *
- * Verifies:
- *   - registerOperatorRoutes registers 9 routes at the right paths/auth/match.
- *   - Key plugin-auth routes (gate/resolve, cancel, start) are present.
- *   - Key gateway-auth elevation routes (_elev/*) are present.
- *   - Method guards on plugin-auth POST-only routes.
- *
- * operator.js has a static import of `openclaw/plugin-sdk/agent-runtime`.
- * We mock that before importing the module under test. If the mock itself
- * fails to resolve (e.g. in a fresh CI environment), all tests are skipped
- * with a clear reason — they still run in any environment where the gateway
- * is normally installed.
- */
 import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
 const TEST_BEARER = "test-bearer-operator";
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = TEST_BEARER;
@@ -34,16 +18,8 @@ function createMockReqWithBody(method, path, body) {
   };
 }
 
-// Stamped harness caller identity every elevated route now requires.
 const STAMP = { session: "agent:main:k1", agentId: "main" };
 
-// Mock the external deps that operator.js statically imports:
-//   1. openclaw/plugin-sdk/agent-runtime  (resolveAgentEffectiveModelPrimary)
-//   2. state/state-store.js               (createStateStore) — spied, not
-//      stubbed inert, so the ownerKey-mismatch cancel fallback's call
-//      arguments can be asserted directly (see "cancel handler ownerKey
-//      mismatch fallback" below). Route auth needs no mock: it reads
-//      process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
 let registerOperatorRoutes = null;
 let importError = null;
 
@@ -72,8 +48,6 @@ try {
 
 const SKIP = !registerOperatorRoutes;
 const SKIP_MSG = importError ? `operator.js could not be imported: ${importError}` : undefined;
-
-// ── fixtures ──────────────────────────────────────────────────────────────────
 
 function makeDeps(api, overrides = {}) {
   return {
@@ -104,8 +78,6 @@ function makeDeps(api, overrides = {}) {
   };
 }
 
-// ── registration ──────────────────────────────────────────────────────────────
-
 describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
   test("registers 10 routes total", () => {
     const { api, routes } = createMockApi();
@@ -113,7 +85,6 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
     assert.equal(routes.length, 10, `expected 10 routes, got ${routes.length}: ${routes.map((r) => r.path).join(", ")}`);
   });
 
-  // plugin-auth routes (mobile can hit these directly)
   for (const { path, auth } of [
     { path: "/manifold/gate/resolve", auth: "plugin" },
     { path: "/manifold/cancel",        auth: "plugin" },
@@ -129,7 +100,6 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
     });
   }
 
-  // gateway-auth elevation routes (internal cross-route hops)
   for (const path of [
     "/manifold/_elev/start",
     "/manifold/_elev/gate-resolve",
@@ -155,8 +125,6 @@ describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
   });
 });
 
-// ── method guards ─────────────────────────────────────────────────────────────
-
 describe("registerOperatorRoutes — method guards", { skip: SKIP_MSG }, () => {
   for (const path of ["/manifold/gate/resolve", "/manifold/cancel", "/manifold/start"]) {
     test(`${path}: GET → 405`, async () => {
@@ -169,14 +137,6 @@ describe("registerOperatorRoutes — method guards", { skip: SKIP_MSG }, () => {
     });
   }
 });
-
-// ── gate/resolve handler behaviour ────────────────────────────────────────────
-//
-// /manifold/gate/resolve is auth:"plugin" — it must never call
-// gateResolver.recordItemDecision() directly (that path can trigger
-// executor.resume(), which may dispatch a kind:"agent" node needing
-// operator.write scope this route doesn't have ambient). It must loop back
-// through invokeElevated to /manifold/_elev/gate-resolve instead.
 
 describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, () => {
   test("loops back via invokeElevated instead of calling recordItemDecision directly", async () => {
@@ -191,7 +151,7 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
     const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app", ...STAMP,
+      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -216,7 +176,7 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
     registerOperatorRoutes(makeDeps(api, { invokeElevated }));
     const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
     const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app", ...STAMP,
+      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -225,8 +185,6 @@ describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, 
   });
 });
 
-// ── _elev/gate-resolve handler behaviour ──────────────────────────────────────
-
 describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_MSG }, () => {
   test("calls gateResolver.recordItemDecision with the request body", async () => {
     const { api, routes } = createMockApi();
@@ -234,7 +192,7 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
     const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
     const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "app", editedText: "revised", ...STAMP,
+      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", editedText: "revised", ...STAMP,
     });
     const res = createMockRes();
     await handler(req, res);
@@ -254,7 +212,7 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
       gateResolver: { recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }) },
     }));
     const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
-    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "app", ...STAMP });
+    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "ws", ...STAMP });
     const res = createMockRes();
     await handler(req, res);
     assert.equal(res.statusCode, 404);
@@ -269,12 +227,6 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     assert.equal(res.statusCode, 405);
   });
 });
-
-// ── elevated identity guards ────────────────────────────────────────────────
-//
-// Every _elev route refuses calls without the harness-stamped caller identity
-// (session/agentId, plus flowId where the operation is flow-bound)
-// with 400 + missing_identity before touching any store or executor.
 
 describe("registerOperatorRoutes — elevated identity guards", { skip: SKIP_MSG }, () => {
   async function elevRes(path, body) {
@@ -346,8 +298,6 @@ describe("registerOperatorRoutes — elevated identity guards", { skip: SKIP_MSG
   });
 });
 
-// ── /manifold/start loopback forwards the stamp ─────────────────────────────
-
 describe("registerOperatorRoutes — start handler", { skip: SKIP_MSG }, () => {
   test("forwards stamped caller identity to _elev/start", async () => {
     const { api, routes } = createMockApi();
@@ -372,14 +322,11 @@ describe("registerOperatorRoutes — start handler", { skip: SKIP_MSG }, () => {
   });
 });
 
-// ── cancel handler behaviour ──────────────────────────────────────────────────
-
 describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => {
   test("missing flowId → 400", async () => {
     const { api, routes } = createMockApi();
     registerOperatorRoutes(makeDeps(api));
     const { handler } = routes.find((r) => r.path === "/manifold/cancel");
-    // The handler reads the body as a stream, like every other route here.
     const req = {
       ...createMockReq("POST", "/manifold/cancel", { authorization: `Bearer ${TEST_BEARER}` }),
       body: "{}",
@@ -423,16 +370,6 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
   });
 });
 
-// ── cancel handler: ownerKey-mismatch fallback ──────────────────────────────
-//
-// When the primary executor.cancel() reports "Flow not found." (the flow
-// belongs to a different ownerKey — legacy graph-flow-owner flows, or any
-// flow this process's default store doesn't recognize), the handler builds a
-// second, ad-hoc state-store bound to the flow's real ownerKey and retries
-// through it. That store MUST carry admissionQueueStore and resumeParentRef:
-// state-store.js internals (triggerAdmissionRelease, triggerParentResume)
-// no-op without them, permanently leaking the flow-start/child-dispatch
-// admission slot and never waking a waiting parent.
 describe("registerOperatorRoutes — cancel handler ownerKey mismatch fallback", { skip: SKIP_MSG }, () => {
   test("builds the fallback cancelStore with the full dependency set, not just runStore", async () => {
     createStateStoreCalls.length = 0;

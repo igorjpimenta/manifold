@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { registerTelemetry } from "../../../telemetry/index.js";
 
-// ── helpers ────────────────────────────────────────────────────────────────────
 
 function makeMockApi() {
   const handlers = {};
@@ -25,8 +24,6 @@ function makeMockApi() {
 
 process.env.MANIFOLD_INGEST_TOKEN = "test-ingest";
 
-// Post one canonical telemetry event through the ingest route, the way a
-// harness adapter does.
 async function ingest(api, payload) {
   const route = api._routes["/manifold/telemetry/event"];
   const req = {
@@ -39,8 +36,6 @@ async function ingest(api, payload) {
   return res.statusCode;
 }
 
-// A canonical cost.usage event for a known provider/model so resolveCost
-// returns a non-null result and the insertion path runs to completion.
 function makeEvent(overrides = {}) {
   return {
     kind: "cost.usage",
@@ -54,7 +49,6 @@ function makeEvent(overrides = {}) {
   };
 }
 
-// ── before_message_write → cost.record.added ───────────────────────────────────
 
 describe("telemetry ingest — cost.record.added broadcast", () => {
   let ingestApi;
@@ -95,8 +89,6 @@ describe("telemetry ingest — cost.record.added broadcast", () => {
   });
 
   it("uses pre-computed cost.total from usage when model is unknown", async () => {
-    // resolveCost falls back to usage.cost.total when the model isn't in the
-    // known-models table — so broadcast still fires with costTotal == srcTotal.
     broadcastFn.mock.resetCalls();
     const eventUnknown = makeEvent({ provider: "unknown-provider", model: "unknown-model" });
     await ingest(ingestApi, eventUnknown);

@@ -6,14 +6,6 @@ function makePipelinesRef(pipelines = {}) {
   return { value: new Map(Object.entries(pipelines)) };
 }
 
-// Builds a runStore/nodeExecutionsStore pair covering exactly what
-// needs-resolver.js's own dependency chain touches: walkUpHops (runStore.get
-// + nodeExecutionsStore.getInvocation), ordinary-node resolution
-// (nodeExecutionsStore.getResultForNode), and subflow-sourced resolution
-// (getSubflowGroup/areSiblingsAllTerminal's own dependencies —
-// listInvocationIdsForNode + listForParentInvocations + getInvocation,
-// the same three this file's sibling executor-helpers.test.js already
-// stubs for getAllSubflowGroups).
 function makeStore({ flows = {}, invocations = {}, results = {}, subflowInvocationIds = {}, subflowChildren = {} } = {}) {
   return {
     runStore: {
@@ -76,27 +68,13 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
 
   it("hops exceeds real ancestor depth — walked off the top, not-found", async () => {
     const { runStore, nodeExecutionsStore } = makeStore({
-      flows: { root: { parentInvocationId: null } }, // a real root — no parent at all
+      flows: { root: { parentInvocationId: null } },
     });
     const result = await resolveOneNeed({ flowId: "root", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
     assert.equal(result.status, "not-found");
   });
 
-  it("a legacy pre-cap-removal row (resultJson null, resultTooLargeBytes set) resolves ready with the _resultTooLarge marker, same as assembleState()", async () => {
-    // node-executions.js's writeResult() no longer caps results at all
-    // and never sets resultTooLargeBytes on a new
-    // write — this row shape can only come from before that removal,
-    // where the real value was genuinely never stored.
-    const { runStore, nodeExecutionsStore } = makeStore({
-      flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
-      invocations: { "inv-parent-SCAN": { flowId: "parent" } },
-      results: { "parent:SCAN": { resultWrittenAt: 1000, resultJson: null, resultTooLargeBytes: 165000 } },
-    });
-    const result = await resolveOneNeed({ flowId: "child", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
-    assert.deepEqual(result, { status: "ready", value: { _resultTooLarge: true, bytes: 165000 } });
-  });
-
-  it("a legacy row with resultJson non-null AND resultTooLargeBytes set (from the brief field-trim era) resolves the real surviving value, not the bytes-only marker", async () => {
+  it("a row with resultJson non-null AND resultTooLargeBytes set resolves the real surviving value", async () => {
     const { runStore, nodeExecutionsStore } = makeStore({
       flows: { child: { parentInvocationId: "inv-parent-SCAN" } },
       invocations: { "inv-parent-SCAN": { flowId: "parent" } },
@@ -109,7 +87,7 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
       },
     });
     const result = await resolveOneNeed({ flowId: "child", hops: 1, nodeId: "SCAN", runStore, nodeExecutionsStore });
-    assert.deepEqual(result, { status: "ready", value: { ok: true } }, "real (if partial) data beats a bytes-only marker whenever resultJson is present");
+    assert.deepEqual(result, { status: "ready", value: { ok: true } });
   });
 
   it("a corrupted resultJson row resolves as not-found, not a thrown error", async () => {
@@ -126,7 +104,7 @@ describe("resolveOneNeed — ordinary (non-subflow) targets", () => {
 describe("resolveOneNeed — hops:0 (same-flow)", () => {
   it("ready — resolves the declaring node's OWN flow's completed sibling result, no walk", async () => {
     const { runStore, nodeExecutionsStore } = makeStore({
-      flows: { self: { parentInvocationId: "inv-parent-SCAN" } }, // parentInvocationId irrelevant at hops:0 — never walked
+      flows: { self: { parentInvocationId: "inv-parent-SCAN" } },
       results: { "self:SCAN": { resultWrittenAt: 1000, resultJson: JSON.stringify({ SCAN: { listings: [1, 2] } }), resultTooLargeBytes: null } },
     });
     const result = await resolveOneNeed({ flowId: "self", hops: 0, nodeId: "SCAN", runStore, nodeExecutionsStore });

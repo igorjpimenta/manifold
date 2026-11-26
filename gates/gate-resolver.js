@@ -4,78 +4,55 @@ import { createEmitter } from "../events/emit.js";
 import { assembleState } from "../engine/executor-helpers.js";
 import { admitAndSetRunning } from "../engine/child-resume-trigger.js";
 
-// gate-resolver.js — channel-agnostic resolution for gate items.
+// Channel-agnostic resolution for gate items — the one write site for every
+// decision channel (dashboard POST /approve, MCP manifold_approve, the
+// companion ws bridge, automated pipeline writers). All call
+// `recordItemDecision`: validate flow → idempotently merge into
+// state.approvalPending[itemId] → maybeResolveFlow →
+// applyResolutionsAndResume once every item has a decision (or sendFailed
+// marker), which calls setRunning + executor.resume so the flow advances.
 //
-// One write site for every consumer that records a decision on a gate
-// item: the dashboard's POST /approve (source="dashboard"), the CLI's
-// `manifold approve` (source="cli"), and a harness/app bridge over the
-// gateway REST surface (source="app"). All of them call
-// `recordItemDecision`, which:
+// "human-gate" appears only as the wait-kind discriminator the executor
+// stamps; nothing here talks to a delivery channel. The gateway broadcasts
+// manifold.gate.opened/closed over WS; each consumer (app bridge, dashboard,
+// CLI) decides how to surface it. Channel-specific delivery + cleanup lives
+// in that consumer, which calls this factory the same way.
 //
-//   1. validates the flow (status, kind, item membership)
-//   2. idempotently merges {decision, source, decidedAt, ...} into
-//      state.approvalPending[itemId]
-//   3. triggers maybeResolveFlow → applyResolutionsAndResume once all items
-//      have a decision (or a sendFailed marker). That last step calls
-//      setRunning + executor.resume so the flow actually advances.
-//
-// "human-gate" appears in this module only as the wait-kind discriminator the
-// executor stamps; nothing here talks to a specific delivery channel. The
-// gateway broadcasts manifold.gate.opened/closed over WS with the payload
-// below, and each consumer (app bridge, dashboard, CLI) decides how to
-// surface it. Channel-specific delivery + cleanup lives in that consumer,
-// which calls this factory the same way the dashboard and CLI do.
-//
-// Per-process design: the factory closes over a store + executor instance,
-// so the gateway and the CLI each spin up their own resolver (different
-// stores/executors, same logic).
+// Per-process: the factory closes over a store + executor instance, so the
+// gateway and the CLI each spin up their own resolver.
 //
 // Optional per-item apply hook: a human-gate node can declare
-// `apply(ctx, {itemId, decision, editedText, reason})` on itself.
-// When `pipelineLookup` is supplied, applyResolutionsAndResume calls it
-// once per decided item immediately after that item's decision durably
-// commits. No return value is folded back into state, node authors
-// persist their own results.
-//
-// `ctx` (apply's first arg) is the flow-level assembled state, matching
-// PRIME_FILL's existing apply(state, item) signature.
-//
-// Consumers allowed to resolve a gate. Mostly human-driven (app approval,
-// dashboard buttons, CLI), plus
-// `pipeline` for automated self-resolutions — used by audit / sweep
-// nodes inside other pipelines that need to cancel stale gates whose
-// underlying state changed out from under the operator (e.g. poll-
-// inbox's EVICT_GATES cancelling reply/touch gates after the listing
-// got a reply or was won).
-const VALID_SOURCES = ["app", "dashboard", "cli", "pipeline"];
+// `apply(ctx, {itemId, decision, editedText, reason})` on itself. When
+// `pipelineLookup` is supplied, applyResolutionsAndResume calls it once per
+// decided item immediately after that item's decision durably commits. No
+// return value is folded back into state — node authors persist their own
+// results. `ctx` is the flow-level assembled state, matching PRIME_FILL's
+// existing apply(state, item) signature.
+const VALID_SOURCES = ["ws", "dashboard", "mcp", "pipeline"];
 
 export function createGateResolver({ api, store, executor, getBroadcast, readStore, runStore, pipelineLookup, nodeExecutionsStore, admissionQueueStore }) {
   const logger = api.logger;
-  // Canonical-kind fan-out for this resolver's WS emission (events/emit.js):
-  // validated envelope + `plugin.`-prefixed wire names, never throws
-  // on transport faults — the same contract the inline broadcasts had.
+  // Canonical-kind fan-out (events/emit.js): validated envelope,
+  // `plugin.`-prefixed wire names, never throws on transport faults.
   const { emit } = createEmitter({ getBroadcast, logger });
-  // Injectable for tests (defaults to the real singleton in production) —
-  // same DI pattern as engine/executor.js.
+  // Injectable for tests; production defaults to the real singleton.
   const nodeExecutions = nodeExecutionsStore ?? getNodeExecutionsStore();
 
-  // Revision-checked state_json update for flows that are in the DB but not in
-  // the in-process Map (post-restart blocked flows). The executor won't resume
-  // the flow until it's revived (gateway restart), but the decision IS persisted
-  // in runtime.sqlite and will be picked up on revival.
+  // Revision-checked state_json write for flows in the DB but not in the
+  // in-process Map (post-restart blocked flows). The executor won't resume
+  // the flow until it's revived, but the decision IS persisted in
+  // runtime.sqlite and is picked up on revival.
   function writeSqlDirect(flowId, expectedRevision, stateJson) {
     if (!runStore) return { applied: false, code: "no_run_store" };
     return runStore.updateStateJsonCAS(flowId, expectedRevision, stateJson);
   }
 
-  // Durable, operator-visible record of an apply() failure — called from
-  // the catch block below, in addition to (not instead of) the warn log.
-  // Best-effort: this already runs on a failure path, so it takes a single
-  // attempt rather than a full CAS retry loop — if this write itself
-  // fails, the warn log above is still the fallback trail. Written to
-  // flow_node_executions so it surfaces through the same errorEntries path
-  // as every other failure — branch-mode (subNodeId set) keys the row to
-  // that branch; root-level (subNodeId null) writes a flow-level row.
+  // Durable, operator-visible record of an apply() failure — in addition to
+  // (not instead of) the warn log. Best-effort single attempt (this already
+  // runs on a failure path; if the write itself fails, the warn log is the
+  // fallback trail). Written to flow_node_executions so it surfaces through
+  // the same errorEntries path as every other failure; branch-mode
+  // (subNodeId set) keys the row to that branch.
   async function persistApplyFailureMarker({ flowId, nodeId, subNodeId, itemId, message }) {
     const errMsg = `apply() failed: ${message}`;
     const now = Date.now();
@@ -91,20 +68,16 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     }
   }
 
-  // Revision-aware state update for a blocked/running flow. Re-reads
-  // the flow up to N times to handle concurrent updates (e.g., poller
+  // Revision-aware state update, re-reading on conflict (e.g. a poller
   // delivering while a callback resolves). Routes by status:
-  //   blocked → setWaiting preserves the existing waitJson and keeps
-  //     status pinned at "blocked" (the canonical resting state for an
-  //     open gate — despite the function's name, it never writes
-  //     "waiting"; see index.js's _wsRunEventsListener for why).
-  //   running → setRunning. Used by the eager-delivery + during-running
-  //     decision path: the executor's loop workers are still
-  //     advancing branches, so we MUST NOT flip status to blocked or we'd
-  //     yank the rug out from under them and race them onto stale state.
-  //     setRunning is a no-op on status itself; it just persists the new
-  //     stateJson (and incidentally re-nulls waitJson, which was already null
-  //     while running anyway).
+  //   blocked → setWaiting: preserves waitJson, keeps status pinned at
+  //     "blocked" (the canonical resting state for an open gate — despite
+  //     the function's name it never writes "waiting").
+  //   running → setRunning: used by the eager-delivery + during-running
+  //     decision path. The executor's loop workers are still advancing
+  //     branches, so we MUST NOT flip status to blocked — that would yank
+  //     the rug out from under them and race them onto stale state.
+  //     setRunning is a no-op on status; it just persists the new stateJson.
   async function updateApprovalState(flowId, updater) {
     for (let attempt = 0; attempt < 5; attempt++) {
       const flow = (await store.get(flowId)) ?? (await readStore?.get(flowId));
@@ -129,30 +102,27 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
         });
       }
       if (result.applied) return result;
-      // Flow exists in SQL (readStore) but not in the in-process Map —
-      // store.setWaiting/setRunning return "not_found" in this case. Write
-      // the decision directly to SQL so it persists for when the flow is
-      // revived. maybeResolveFlow is a no-op for Map-absent flows (it
-      // short-circuits on store.get returning null), so the flow stays
-      // blocked until a restart/revival picks up the persisted decision.
+      // Flow exists in SQL (readStore) but not the in-process Map —
+      // store.setWaiting/setRunning return "not_found". Write the decision
+      // directly to SQL so it persists for revival; maybeResolveFlow is a
+      // no-op for Map-absent flows (it short-circuits on store.get null), so
+      // the flow stays blocked until a restart picks up the persisted
+      // decision.
       if (result.code === "not_found" && !(await store.get(flowId))) {
         logger.info(`manifold gate-resolver: ${flowId.slice(0, 8)} not in Map; writing decision via sql-direct`);
         return writeSqlDirect(flowId, flow.revision, next);
       }
       if (result.code !== "revision_conflict") return result;
-      // tight backoff before retry
       await new Promise((r) => setTimeout(r, 25 + attempt * 25));
     }
     return { applied: false, code: "retry_exhausted" };
   }
 
-  // Resolve EACH decided item as soon as its decision lands — don't wait
-  // for the whole gate batch. Items with no decision yet stay in the
-  // waiting set; their branch sits at the gate. Items that have a
-  // decision (or a sendFailed marker from a TG delivery failure) get
-  // applied + appended to approvalResults, and the executor re-enters
-  // the loop node to advance just those branches. Multiple
-  // partial passes can fire as decisions trickle in.
+  // Resolve EACH decided item as soon as its decision lands — don't wait for
+  // the whole gate batch. Undecided items stay in the waiting set; decided
+  // ones get applied + appended to approvalResults, and the executor
+  // re-enters the loop node to advance just those branches. Multiple partial
+  // passes can fire as decisions trickle in.
   async function maybeResolveFlow(flowId, awaitCompletion = false) {
     const flow = await store.get(flowId);
     if (!flow) return;
@@ -165,20 +135,16 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     const approvalPending = flow.stateJson?.approvalPending ?? {};
     // Idempotency: an item already reflected in approvalResults[nodeId] for
     // THIS SPECIFIC decision was processed by an earlier partial-resume
-    // pass. The executor may re-emit it in the next waitJson (top-level
+    // pass — the executor may re-emit it in the next waitJson (top-level
     // gate nodes whose pendingSelector returns all items, not just
-    // undecided ones), and we'd re-fire forever. Skip it here — the next
-    // node already consumed the decision.
-    //
-    // Compared by decidedAt, not just itemId presence: a branch item
-    // (itemId === branchKey) can be legitimately decided more than once if
-    // its branch revisits the SAME human-gate sub-node for a new round
-    // (GAP_GATE's round 2 after round 1 already resolved) — a blanket
-    // itemId-presence check would treat round 2's freshly-recorded
-    // approvalPending entry (newer decidedAt) as already processed forever,
-    // since approvalResults is append-only and round 1's older entry for
-    // the same itemId never goes away. Keep the LATEST entry per itemId
-    // (array is append-only, so last write wins) and only skip when the
+    // undecided ones), and we'd re-fire forever. Compared by decidedAt, not
+    // just itemId presence: a branch item (itemId === branchKey) can be
+    // legitimately decided again when its branch revisits the SAME
+    // human-gate sub-node for a new round (GAP_GATE round 2 after round 1
+    // resolved) — approvalResults is append-only and round 1's older entry
+    // never goes away, so a blanket itemId-presence check would treat round
+    // 2's freshly-recorded entry as already processed forever. Keep the
+    // LATEST entry per itemId (last write wins) and skip only when the
     // pending decision IS that already-recorded one.
     const nodeId = flow.waitJson?.nodeId;
     const resultsForNode = (nodeId && Array.isArray(flow.stateJson?.approvalResults?.[nodeId]))
@@ -193,11 +159,11 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       if (!entry) continue;
       const alreadyProcessedEntry = lastProcessedByItem.get(itemId);
       if (alreadyProcessedEntry && alreadyProcessedEntry.decidedAt === entry.decidedAt) continue;
-      // Skip entries recorded for a different gate. approvalPending is a
-      // flat map keyed by itemId; when a later gate reuses the same itemIds
-      // (e.g. VERIFY_SUBMIT after PROPOSE), stale decisions would otherwise
-      // auto-resolve the new gate. entry.gateNodeId is null for entries written
-      // before this guard was added — treat those as unscoped (always eligible).
+      // Skip entries recorded for a different gate: approvalPending is a
+      // flat map keyed by itemId, so a later gate reusing the same itemIds
+      // (e.g. VERIFY_SUBMIT after PROPOSE) would otherwise auto-resolve off
+      // stale decisions. entry.gateNodeId is null for entries written before
+      // this guard existed — treat those as unscoped (always eligible).
       if (entry.gateNodeId != null && entry.gateNodeId !== nodeId) continue;
       if (entry.decision) {
         decided.push({ itemId, decision: entry.decision, editedText: entry.editedText, reason: entry.reason, decidedAt: entry.decidedAt });
@@ -211,37 +177,30 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
 
   // A decision is recorded in two separate CAS writes — (1)
   // recordItemDecision's updateApprovalState durably persists
-  // approvalPending[itemId], already committed by the time this function
-  // runs; (2) this function's own setRunning below moves it into
-  // approvedIds/rejectedIds and resumes the flow. If (2)'s retry loop
-  // exhausts under sustained revision contention (e.g. several items in
-  // one gate batch each independently triggering a maybeResolveFlow pass
-  // that races the others' CAS writes), the decision sits recorded-but-
-  // unapplied until the next gateway restart — flow-revival.js's
-  // stuck-gate-decision reconciliation pass is a boot-time backstop, not a
-  // live one. ROUND_BACKOFF_MS/MAX_ROUNDS give the SAME exhausted call up
-  // to 2 more full 5-attempt passes, spaced out to let concurrent writers
-  // finish, before truly giving up — closing the gap live instead of only
-  // at the next restart.
+  // approvalPending[itemId]; (2) this function's own setRunning below moves
+  // it into approvedIds/rejectedIds and resumes. If (2)'s retry loop
+  // exhausts under sustained revision contention (several items in one gate
+  // batch each triggering a maybeResolveFlow pass that races the others'
+  // CAS writes), the decision sits recorded-but-unapplied until the next
+  // gateway restart — flow-revival.js's stuck-gate-decision reconciliation
+  // is a boot-time backstop, not a live one. ROUND_BACKOFF_MS/MAX_ROUNDS
+  // give the SAME exhausted call up to 2 more full 5-attempt passes,
+  // spaced to let concurrent writers finish, before truly giving up.
   const ROUND_BACKOFF_MS = 500;
   const MAX_ROUNDS = 3;
 
   // `awaitCompletion` mirrors routes/operator-retry.js's retryFailureBranch
-  // param of the same name and exists for the same reason: this function's
-  // default behavior schedules the actual executor.resume via setImmediate
-  // (and, on sustained revision contention, a further round via setTimeout)
-  // and returns before either fires — correct for the long-lived HTTP
-  // callers that use this (dashboard, companion apps), but fatal for the CLI's
-  // one-shot `manifold approve` process, which needs the resume (and any
-  // scheduled retry round) to have genuinely finished before it exits.
+  // param of the same name: the default schedules executor.resume via
+  // setImmediate (plus a further round on sustained contention) and returns
+  // before either fires — correct for long-lived HTTP callers, fatal for a
+  // caller that must observe the resume genuinely finished before returning.
   async function applyResolutionsAndResume(flowId, resolutions, retryRound = 0, awaitCompletion = false) {
     // Revision-aware: re-read on conflict. Appends new decisions to
     // approvalResults[nodeId] so the executor sees the full decision history
-    // on each re-entry. approvalPending is
-    // left untouched: its entries double as clients' "already-delivered"
-    // guard, so dropping them would cause re-delivery
-    // on the next setWaiting pass for any
-    // gate whose pendingSelector doesn't filter on approvedIds/rejectedIds.
+    // on each re-entry. approvalPending is left untouched: its entries double
+    // as clients' "already-delivered" guard, so dropping them would cause
+    // re-delivery on the next setWaiting pass for any gate whose
+    // pendingSelector doesn't filter on approvedIds/rejectedIds.
     // recordItemDecision separately enforces per-item idempotency via the
     // entry.decision check, so leaving decided entries in place is safe.
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -278,14 +237,12 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
         return n + (e?.decision || e?.sendFailed ? 0 : 1);
       }, 0);
       // Re-requests this flow's own admission (kind:"flow-start" for a
-      // root-level gate, kind:"child-dispatch" for a loop-branch gate) —
-      // it was released the moment the flow blocked on this gate
-      // (state-store.js's setWaiting hook), so resuming past it must
-      // re-claim a slot, not assume one is still held. If the pool is
-      // full, the flow is left at status:"queued" instead of running —
-      // the decision itself still commits below (approvedIds/rejectedIds/
-      // apply hooks), only the actual resume is deferred to
-      // admission-queue-store's own release()/promotion cycle.
+      // root-level gate, "child-dispatch" for a loop-branch gate) — it was
+      // released the moment the flow blocked (state-store's setWaiting
+      // hook), so resuming past it must re-claim a slot, not assume one is
+      // still held. If the pool is full the flow is left "queued" instead of
+      // running — the decision itself still commits below; only the actual
+      // resume is deferred to admission-queue-store's release/promotion.
       const result = await admitAndSetRunning({
         flowId,
         expectedRevision: flow.revision,
@@ -305,87 +262,74 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
         // Resume patches for this write come from the WS run listener's
         // per-revision patch — emit no second shape here; clients decode one.
         // Human-gate apply hook: fires per item, immediately after THAT
-        // item's decision lands — the "write the moment this one decides,
-        // don't wait for siblings" semantics, for both a root-level gate
-        // (own pendingSelector, no loop/branch involved) and a loop
-        // branch's own human-gate sub-node (e.g. PROPOSE's GATE/GAP_GATE).
-        // Fired ONLY here, after the CAS write above has committed — the
-        // retry loop above re-runs its in-memory computation on a
-        // revision_conflict and must stay pure; firing apply() inside it
-        // would double-run any real side effect (e.g. a file write) on
-        // every retry attempt. No return value is folded back into
-        // state — if a node needs to persist something, it does so
-        // itself inside apply (mirrors WRITE, which owns its own file
-        // I/O rather than expecting the engine to round-trip a result).
+        // item's decision lands (both a root-level gate and a loop branch's
+        // own human-gate sub-node, e.g. PROPOSE's GATE/GAP_GATE). Fired ONLY
+        // here, after the CAS write above committed — the retry loop re-runs
+        // its in-memory computation on revision_conflict and must stay pure;
+        // firing apply() inside it would double-run any real side effect
+        // (e.g. a file write) on every retry attempt. No return value is
+        // folded back into state — a node that needs to persist something
+        // does so itself inside apply (mirrors WRITE, which owns its own
+        // file I/O).
         const pipelineNode = pipelineLookup?.(state.pipelineId)?.nodes?.[nodeId];
         if (pipelineNode) {
           // newState only ever carries ENTRY_FIELDS + pipelineId/item/
-          // itemIndex/parentItem (executor-persist.js's toPersistableState
-          // allowlist) — any kind:"code" node's own output key (e.g.
-          // state.DRAFT, state.tbds) is stripped before it ever reaches
-          // flow.stateJson and is only reconstructed via assembleState()'s
-          // replay of flow_node_invocations.result_json. Every other live
-          // read site (executor.js's dispatch loop) goes through
-          // assembleState() for exactly this reason; apply() needs the
-          // same so it can see prior nodes' real output (e.g.
+          // itemIndex/parentItem (executor-persist's toPersistableState
+          // allowlist) — a kind:"code" node's own output key (state.DRAFT,
+          // state.tbds) is stripped before it reaches flow.stateJson and is
+          // only reconstructed via assembleState()'s replay of
+          // flow_node_invocations.result_json. apply() needs the same
+          // assembly so it sees prior nodes' real output (e.g.
           // state.DRAFT.draftPath), not just entry/bookkeeping fields.
-          // Computed once per pass (same for every item in
-          // newResultsThisPass), and only when there's actually an apply()
-          // to feed — skips a needless nodeExecutionsStore round-trip for
-          // every gate that doesn't define one.
+          // Computed once per pass, only when there's an apply() to feed.
           const hasApply = typeof pipelineNode.apply === "function";
           const assembledState = hasApply
             ? await assembleState(flowId, { runStore, nodeExecutionsStore: nodeExecutions, baseState: newState })
             : null;
           for (const r of newResultsThisPass) {
-            // apply lives directly on the waited-on node.
             let gateNode = hasApply ? pipelineNode : null;
             // Dead in practice: a childFlows child's gate is resolved against
             // the CHILD's own flow_runs row, so the flow-level gate node is
-            // always the right one and no per-item sub-node hop is needed.
-            // Kept in the signature because persistApplyFailureMarker still
-            // takes it and keys its row on it.
+            // always right and no per-item sub-node hop is needed. Kept in
+            // the signature because persistApplyFailureMarker still takes it
+            // and keys its row on it.
             let subNodeId = null;
             let applyCtx = assembledState;
             if (typeof gateNode?.apply !== "function") continue;
             // The matching waitJson item — carries requestPayload.layout,
-            // where a gate-UI field edit (persistRevisedMeta) actually
-            // lands. `r` only ever carries the decision + optional body
-            // editedText, never the edited metadata fields, so apply()
-            // needs this to see what the operator actually changed.
+            // where a gate-UI field edit (persistRevisedMeta) actually lands.
+            // `r` only carries the decision + optional editedText, never the
+            // edited metadata fields, so apply() needs this to see what the
+            // operator actually changed.
             const matchedItem = items.find((it) => it?.itemId === r.itemId);
             try {
               await gateNode.apply(applyCtx, r, matchedItem);
             } catch (err) {
               const errMessage = err?.message ?? String(err);
               logger.warn(`manifold [${flowId.slice(0, 8)}] gate-resolver: apply(${nodeId}, ${r.itemId}) threw: ${errMessage}`);
-              // Beyond the warn log: persist a durable, operator-visible
-              // marker. Without this, the gate decision still commits (the
-              // item is approved/rejected either way) but if apply()'s own
-              // side effect failed — a file-lock timeout, a disk error —
-              // the operator has no way to know their decision didn't
-              // durably land anywhere; they'd see "approved" and assume
-              // done.
+              // Beyond the warn: without this durable marker the decision
+              // still commits (the item is approved/rejected either way) but
+              // if apply()'s own side effect failed — a file-lock timeout, a
+              // disk error — the operator would see "approved" and assume
+              // done with no way to know it didn't land anywhere.
               await persistApplyFailureMarker({ flowId, nodeId, subNodeId, itemId: r.itemId, message: errMessage });
             }
           }
         }
-        // Queued for admission — the decision durably committed above
-        // (approvedIds/rejectedIds/apply hooks all already ran), but the
-        // flow itself isn't running yet. Nothing left to do here:
-        // admission-queue-store's own release()/promotion cycle resumes it
-        // once a slot frees, same as any other queued flow.
+        // Queued for admission — the decision durably committed above; the
+        // flow itself isn't running yet. admission-queue-store's own
+        // release/promotion cycle resumes it once a slot frees.
         if (result.queued) return;
         const resumeAndReconsume = async () => {
           try {
             await executor.resume(flowId);
             // Race: decisions can land while the flow is `running` (between
             // setRunning above and the executor's next setWaiting). Those
-            // writes go to approvalPending but maybeResolveFlow short-circuits
-            // on non-blocked status. After resume() returns, the flow has
-            // either transitioned back to blocked (more items to process) or
-            // terminated; in the blocked case, re-fire to consume any
-            // decisions that arrived mid-flight.
+            // writes go to approvalPending but maybeResolveFlow
+            // short-circuits on non-blocked status. After resume() returns,
+            // the flow has either re-blocked (more items to process) or
+            // terminated; in the blocked case, re-fire to consume decisions
+            // that arrived mid-flight.
             await maybeResolveFlow(flowId, awaitCompletion);
           } catch (err) {
             logger.warn(`manifold gate-resolver: resume [${flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
@@ -432,12 +376,9 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
   }
 
   // Shared write path for every channel resolving a gate item.
-  // See module header for the full caller list.
-  //
-  // Returns { ok, status, code? }. Status:
-  //   "already-decided" — idempotent; no write performed
-  //   "applied"         — decision recorded; consolidator triggered
-  //   ok=false          — code carries the failure reason
+  // Returns { ok, status, code? }: "already-decided" (idempotent no-op),
+  // "applied" (decision recorded, consolidator triggered), or ok=false with
+  // code carrying the failure reason.
   async function recordItemDecision({ flowId, itemId, decision, source, editedText, reason, awaitCompletion = false }) {
     if (!flowId || typeof flowId !== "string") {
       return { ok: false, code: "missing_flow_id" };
@@ -451,33 +392,10 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     if (decision === "edit" && typeof editedText !== "string") {
       return { ok: false, code: "edit_requires_text" };
     }
-    // Defense in depth: detect payloads that echo the gate's own
-    // description back as `editedText` — a client edit intent can ship the
-    // whole dialog body (including its "Approve to send / Reject to drop /
-    // To edit, run in a terminal: openclaw manifold respond ..." footer)
-    // instead of the operator's typed input. The check looks for any of
-    // the description's telltale strings; one match is enough since these
-    // never appear in genuine reply text.
-    if (decision === "edit" && typeof editedText === "string") {
-      const tellTale = [
-        "Approve to send",
-        "Reject to drop",
-        "openclaw manifold respond",
-        "─── Approve to send",
-      ];
-      if (tellTale.some((s) => editedText.includes(s))) {
-        logger.warn(
-          `manifold [${flowId.slice(0, 8)}] gate-resolver: ${itemId} edit payload looks like the gate description itself (source=${source}); rejecting to avoid shipping it as a reply`
-        );
-        return { ok: false, code: "edit_text_looks_like_description" };
-      }
-    }
     // "edit" is caller-facing sugar for "approve, with modified text" — an
-    // edit IS an approval, there's no distinct third resolution state.
-    // Normalize here (after the telltale check above, which still needs to
-    // see the literal "edit" value) so storage/idempotency-logging/
-    // applyResolutionsAndResume only ever see approve|reject; editedText
-    // still carries through regardless of which spelling the caller used.
+    // edit IS an approval, no distinct third resolution state. Normalize
+    // here so storage/idempotency/applyResolutionsAndResume only ever see
+    // approve|reject; editedText still carries through either spelling.
     if (decision === "edit") decision = "approve";
     if (!source || !VALID_SOURCES.includes(source)) {
       return { ok: false, code: "invalid_source" };
@@ -488,38 +406,35 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
     if (flow.status !== "blocked" && flow.status !== "running") {
       return { ok: false, code: "flow_not_awaiting" };
     }
-    // Item-membership validation:
-    //  - blocked: validate against flow.waitJson.items (canonical batch list).
-    //  - running: never mid-batch — childFlows gates always surface via
-    //    waitJson when blocked; validItem=false.
-    // Idempotency first — if a decision was already recorded for this
-    // itemId (any source, any earlier call), short-circuit ok:true.
-    // This MUST run before the item-membership validation below: after
-    // the executor consumes a decision, the resolved itemId drops out
-    // of waitJson.items, so re-calling resolve for the same itemId
-    // (audit retry, double-tap, channel race) would otherwise 409 with
-    // item_not_in_wait even though the desired end state is already
-    // in place. Idempotent retries should be no-ops, not failures.
+    // Idempotency first — a decision already recorded for this itemId (any
+    // source, any earlier call) short-circuits ok:true. This MUST run
+    // before the item-membership validation below: after the executor
+    // consumes a decision the itemId drops out of waitJson.items, so
+    // re-calling resolve (audit retry, double-tap, channel race) would
+    // otherwise 409 with item_not_in_wait even though the desired end state
+    // is already in place. Idempotent retries are no-ops, not failures.
     const existing = flow.stateJson?.approvalPending?.[itemId];
     if (existing?.decision) {
       // A branch item's identity (itemId === branchKey) is shared across
-      // every visit to a human-gate sub-node — a branch only ever awaits
-      // one thing at a time, so GAP_GATE's round 2 reuses the exact same
-      // itemId as round 1. A blanket "already decided" here would
-      // silently swallow round 2's answer forever: nothing else in this file
-      // clears approvalPending[itemId], by design — client dismiss-signal
-      // checks depend on it surviving past consumption.
-      // This guard runs BEFORE the item-membership validation below, so it
-      // cannot use membership to tell the two cases apart: a re-presented
-      // gate does carry a fresh waitJson.items entry, but nothing has
-      // consulted that by here. An existing approvalPending entry is
-      // therefore always treated as a genuine duplicate.
+      // every visit to a human-gate sub-node — a branch only ever awaits one
+      // thing at a time, so GAP_GATE's round 2 reuses round 1's exact itemId.
+      // A blanket "already decided" here would silently swallow round 2's
+      // answer forever: nothing else in this file clears
+      // approvalPending[itemId], by design — client dismiss-signal checks
+      // depend on it surviving past consumption. This guard runs BEFORE the
+      // membership validation below, so it cannot use membership to tell the
+      // two cases apart: a re-presented gate carries a fresh waitJson.items
+      // entry, but nothing has consulted that by here. An existing
+      // approvalPending entry is therefore always a genuine duplicate.
       logger.info(
         `manifold [${flowId.slice(0, 8)}] gate-resolver: ${itemId} already decided (${existing.decision} via ${existing.source ?? "?"}); ignoring duplicate from ${source}`
       );
       return { ok: true, status: "already-decided" };
     }
 
+    // Membership: blocked validates against waitJson.items (canonical batch
+    // list); running never validates — childFlows gates always surface via
+    // waitJson when blocked, so a running flow has no mid-batch items.
     let validItem = false;
     if (flow.status === "blocked") {
       if (flow.waitJson?.kind !== "human-gate" && flow.waitJson?.kind !== "gate" && flow.waitJson?.kind !== "verify-required") {
@@ -528,17 +443,15 @@ export function createGateResolver({ api, store, executor, getBroadcast, readSto
       const items = Array.isArray(flow.waitJson?.items) ? flow.waitJson.items : [];
       validItem = items.some((it) => it?.itemId === itemId);
     } else {
-      // status === "running": never mid-batch — childFlows gates always
-      // surface via waitJson when blocked.
       validItem = false;
     }
     if (!validItem) {
       return { ok: false, code: "item_not_in_wait" };
     }
 
-    // Capture the gate that owns this decision so maybeResolveFlow can
-    // skip entries that were recorded for an earlier gate with the same
-    // itemId (e.g. PROPOSE items leaking into VERIFY_SUBMIT).
+    // Gate that owns this decision, so maybeResolveFlow can skip entries
+    // recorded for an earlier gate with the same itemId (PROPOSE items
+    // leaking into VERIFY_SUBMIT).
     const gateNodeId = flow.waitJson?.nodeId ?? null;
 
     const writeResult = await updateApprovalState(flowId, (s) => ({

@@ -1,9 +1,3 @@
-/**
- * Unit tests for state/node-health-store.js
- *
- * Covers: schema creation, markUnhealthy/isBlocked/reset round-trip,
- * markUnhealthy idempotency while already blocked, and list scoping.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -52,9 +46,7 @@ describe("createNodeHealthStore — markUnhealthy / isBlocked / reset", () => {
 
   test("markUnhealthy blocks the node", async () => {
     const store = await makeStore();
-    // markUnhealthy() defers through batch-writer and no longer returns a
-    // value — its only production caller never inspected one. Assert the
-    // effect after an explicit flush instead.
+    // markUnhealthy defers through batch-writer; flush before asserting.
     await store.markUnhealthy("pipe_a", "SCAN_AGENT", { reason: "boom", flowId: "flow-1" });
     await store.flush();
     assert.equal(await store.isBlocked("pipe_a", "SCAN_AGENT"), true);
@@ -75,7 +67,7 @@ describe("createNodeHealthStore — markUnhealthy / isBlocked / reset", () => {
   test("reset flags the block resolved rather than deleting it", async () => {
     const store = await makeStore();
     await store.markUnhealthy("pipe_a", "SCAN_AGENT", { reason: "boom", flowId: "flow-1" });
-    await store.flush(); // reset()'s WHERE status='blocked' guard needs the row committed first
+    await store.flush();
     const r = await store.reset("pipe_a", "SCAN_AGENT", { via: "operator" });
     assert.equal(r.reset, 1);
     assert.equal(await store.isBlocked("pipe_a", "SCAN_AGENT"), false);
@@ -114,7 +106,7 @@ describe("createNodeHealthStore — list scoping", () => {
     await store.markUnhealthy("pipe_a", "SCAN_AGENT", { reason: "a" });
     await store.markUnhealthy("pipe_a", "ENSURE_LOGIN_AGENT", { reason: "b" });
     await store.markUnhealthy("pipe_b", "SCAN_AGENT", { reason: "c" });
-    await store.flush(); // reset() below needs pipe_a/SCAN_AGENT's row committed first
+    await store.flush();
     await store.reset("pipe_a", "SCAN_AGENT");
 
     assert.equal((await store.list("pipe_a")).length, 2);

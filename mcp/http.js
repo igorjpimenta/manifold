@@ -1,13 +1,11 @@
-// http.js — shared Streamable HTTP MCP server.
-// Same tools + same identity contract as stdio (mcp/stdio.js), different
-// door: one TCP socket, many harnesses as HTTP clients.
-//
-// Auth: `Authorization: Bearer <MANIFOLD_BEARER>` checked before any tool
-// runs (MANIFOLD_BEARER required; missing/empty refuses to start). Terminate
-// TLS in front (reverse proxy / ingress) — the server itself speaks plain
-// HTTP. Identity: `X-Manifold-Harness: <name>` declares the harness per
-// session; agent+session still arrive per call via _meta.manifold or stamped
-// args — identical to stdio resolution. GET /health is unauthenticated.
+// Shared Streamable HTTP MCP server: same tools + identity contract as
+// stdio (mcp/stdio.js), different door — one TCP socket, many harnesses as
+// HTTP clients. Auth: `Authorization: Bearer <MANIFOLD_BEARER>` checked
+// before any tool runs (missing/empty refuses to start); terminate TLS in
+// front — the server speaks plain HTTP. Identity: `X-Manifold-Harness`
+// declares the harness per session; agent+session arrive per call via
+// _meta.manifold or stamped args, identical to stdio. GET /health is
+// unauthenticated.
 
 import http from "node:http";
 import { randomUUID } from "node:crypto";

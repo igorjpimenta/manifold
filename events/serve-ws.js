@@ -1,9 +1,7 @@
-// serve-ws.js — dumb event pipe over WebSocket. Tails the in-process push
-// stream (events/stream.js) and broadcasts every appended entry to all
-// connected clients, verbatim. No interpretation, no filtering, no notify
-// logic: a gate opening is just another entry, and what it means is the
-// subscriber's decision. Framing and client hygiene live in
-// events/ws-frame.js (shared with the dashboard's live endpoint).
+// Dumb event pipe over WebSocket: tails the in-process push stream
+// (events/stream.js) and broadcasts every appended entry verbatim — no
+// interpretation, no filtering; what a gate opening means is the
+// subscriber's decision. Framing/client hygiene lives in ws-frame.js.
 //
 // Wire protocol (JSON text frames, server → client only):
 //   {"type":"welcome","lastEventId":N}    on connect (history length)

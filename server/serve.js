@@ -1,13 +1,8 @@
-// serve.js — `manifold serve`: the core application as its own process.
-//
-// Everything harness-specific arrives through the host this file builds:
-//   - agent turns go to MANIFOLD_TURN_URL (the harness adapter's endpoint)
-//   - dispatch session ids go to MANIFOLD_SESSION_URL (the same adapter mints
-//     them; the core process cannot know a harness's id format)
-//   - discuss session ids are minted locally (no harness to ask)
-//   - elevation loops back to this process's own API port
-//
-// Loopback only by default; the routes authenticate with MANIFOLD_BEARER.
+// `manifold serve`: the core application as its own process. Harness-specific
+// wiring arrives via env: turns to MANIFOLD_TURN_URL, dispatch session ids to
+// MANIFOLD_SESSION_URL (the adapter mints them; core cannot know a harness's
+// id format), discuss ids minted locally, elevation looped back to this
+// process's own API port. Loopback only by default; MANIFOLD_BEARER required.
 
 import http from "node:http";
 import { createRouteRegistry } from "./registry.js";
@@ -32,8 +27,8 @@ function createLogger(prefix) {
   };
 }
 
-// Deterministic discuss thread ids — core names the thread, the harness would
-// have minted it. Same flow/gate/item always maps to the same thread.
+// Deterministic discuss thread ids — core names the thread, the harness
+// would have minted it. Same flow/gate/item always maps to the same thread.
 export function localSessions() {
   return {
     newDiscussSessionId({ agentId, flowId, gateNodeId, itemId }) {
@@ -76,9 +71,9 @@ export function createHttpRunTurn({ url, token, timeoutMs = 600_000, logger, fet
 }
 
 // Dispatch session ids come from the harness, never from here: POST to the
-// adapter's bridge (same per-boot token as the turn bridge) and pass its answer
-// through verbatim. A bridge that answers nothing is an error, not a cue to
-// fall back on an id this process would have to invent.
+// adapter's bridge (same per-boot token as the turn bridge) and pass its
+// answer through verbatim. A bridge that answers nothing is an error, not a
+// cue to fall back on an id this process would have to invent.
 export function createHttpSessionId({ url, token, timeoutMs = 5_000, fetchImpl = globalThis.fetch } = {}) {
   return async function newNodeSessionId({ agentId, flowId, nodeId }) {
     const res = await fetchImpl(url, {
@@ -149,7 +144,7 @@ export function resolveServeConfig({ env = process.env } = {}) {
     apiHost: env.MANIFOLD_API_HOST || DEFAULT_API_HOST,
     turnUrl: env.MANIFOLD_TURN_URL || null,
     sessionUrl: env.MANIFOLD_SESSION_URL || null,
-    turnToken: env.MANIFOLD_TURN_TOKEN || env.MANIFOLD_BEARER || null,
+    turnToken: env.MANIFOLD_TURN_TOKEN || null,
     bearer: env.MANIFOLD_BEARER || null,
   };
 }
@@ -159,7 +154,7 @@ export async function serve({ env = process.env, logger: injectedLogger = null }
   const logger = injectedLogger ?? createLogger("manifold");
 
   // Refuse at boot: every operator route fails closed on an unset bearer, so
-  // serving without one produces a listener that answers nothing but 401s —
+  // serving without one yields a listener that rejects everything —
   // indistinguishable from a bad client token, and silent about the real
   // cause.
   if (!cfg.bearer) {

@@ -1,13 +1,9 @@
-// link-core-self.mjs — make `@igorjpimenta/manifold/<path>` resolvable in a
-// repo checkout.
-//
-// The adapter imports core through the published package name, which resolves
-// from node_modules when installed. In the repo the core is the root package,
-// and npm cannot link the root into its own node_modules as a workspace, so
-// the link is made here. Installed consumers never run this: the dependency
-// resolves from the registry.
-//
-// Idempotent; a non-writable node_modules (host install) is skipped silently.
+// Make `@igorjpimenta/manifold/<path>` resolvable in a repo checkout: the
+// adapter imports core through the published package name, but in the repo
+// the core is the root package and npm cannot link the root into its own
+// node_modules, so the link is made here (installed consumers resolve from
+// the registry instead). Idempotent; non-writable node_modules is skipped
+// silently.
 
 import { existsSync, lstatSync, mkdirSync, symlinkSync, rmSync } from "node:fs";
 import path from "node:path";
@@ -25,7 +21,4 @@ try {
   mkdirSync(scopeDir, { recursive: true });
   if (existsSync(link)) rmSync(link, { force: true });
   symlinkSync(root, link, "dir");
-} catch {
-  // Read-only or absent node_modules: the dependency resolves normally when
-  // the package is installed for real.
-}
+} catch {}

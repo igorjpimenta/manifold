@@ -1,20 +1,5 @@
-// node-executions.js — per-node invocation + execution-attempt records
-// (flow_node_invocations, flow_node_executions).
-//
-// Lazy singleton: first caller opens the DB and creates the schema; subsequent
-// calls return the cached store. Writes are fire-and-forget (errors swallowed)
-// so a timing/error-recording failure never disrupts flow execution.
-//
-// Two tables, two granularities:
-//   flow_node_invocations — one row per LOGICAL node dispatch (root-level
-//     node-per-flow-visit, or subflow-item), created exactly once and never
-//     duplicated by retries. flow_runs.parent_invocation_id points here.
-//   flow_node_executions — one row per EXECUTION ATTEMPT of an invocation
-//     (one per retry), referencing its invocation via invocation_id.
-// The split matters because retries legitimately write multiple execution
-// rows sharing the same (flow_id, node_id, group_id, branch_key) tuple, so
-// that tuple could never safely be used as a stable identity/anchor on its
-// own.
+// flow_node_invocations: one row per logical dispatch (retries reuse it).
+// flow_node_executions: one row per attempt, keyed to its invocation.
 
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -30,27 +15,7 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// No size cap on resultJson: no cap width is both safe for real payloads
-// and small enough to matter, so writeResult() always stores the full
-// result. resultTooLargeBytes and the read-only handling in
-// result-replay.js/needs-resolver.js stay in place for rows whose capped
-// result cannot be recovered.
-
 const VALID_EXECUTION_KINDS = new Set(["fresh", "retry", "revival", "recheck"]);
-
-// Normalizes flow_branches.errors' mixed shape (bare strings vs
-// {node, itemId, message, at} objects) — only the last entry is taken.
-// Belongs to the flow_branches error backfill, not to the runtime write
-// path.
-export function lastErrorMessage(errorsJson) {
-  let arr;
-  try { arr = JSON.parse(errorsJson); } catch { return null; }
-  if (!Array.isArray(arr) || arr.length === 0) return null;
-  const last = arr[arr.length - 1];
-  if (typeof last === "string") return last;
-  if (last && typeof last === "object") return last.message ?? JSON.stringify(last);
-  return String(last);
-}
 
 let _singleton = null;
 
@@ -73,7 +38,6 @@ export function getNodeExecutionsStore(dbPath = defaultDbPath()) {
   return _singleton;
 }
 
-// Exported for tests: creates an independent store (bypasses the singleton).
 export function createNodeExecutionsStore(dbPath) {
   return _makeStoreProxy(_createStore(dbPath));
 }
@@ -83,8 +47,6 @@ async function _createStore(dbPath) {
     mkdirSync(path.dirname(dbPath), { recursive: true });
     await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
     const { db, client } = await getSharedDb(dbPath);
-
-    // ── helpers ────────────────────────────────────────────────────────────
 
     async function _findLatestInvocation(flowId, nodeId, subflowKey) {
       const nullGuard = subflowKey == null
@@ -107,20 +69,14 @@ async function _createStore(dbPath) {
     // forceNew=false reuses the latest. Race-safe via INSERT OR IGNORE +
     // re-select.
     //
-    // `guard`, if supplied, is an async () => boolean evaluated INSIDE the
-    // same withSharedWrite(dbPath, ...) turn as the insert — that queue
-    // already serializes every write against this dbPath to one at a time
-    // (state/db.js), so running the check there closes the gap a caller-side
-    // check can't: two concurrent findOrCreateInvocation calls for
-    // DIFFERENT flowIds but the SAME cross-flow identity (e.g. the same
-    // listing's SCORE/PROPOSE dispatch, decided by two parent flow-start
-    // runs that both read "nothing in flight yet" before either committed)
-    // are forced through this one queue, so the second caller's guard always
-    // observes the first caller's already-committed row. A false result
-    // skips the insert entirely — findOrCreateInvocation returns null rather
-    // than creating a duplicate identity for a different flowId. guard has
-    // no opinion on same-flow identity (that's the latest/visitSeq check
-    // above, unchanged) — it only ever runs for a genuinely new insert.
+    // `guard`, if supplied, is evaluated INSIDE the withSharedWrite turn —
+    // that queue serializes every write against this dbPath (state/db.js),
+    // so a cross-flow identity race (two flow-starts both reading "nothing
+    // in flight" before either commits) is forced through one queue: the
+    // second caller's guard always observes the first caller's committed
+    // row. A false result skips the insert and returns null. guard only
+    // ever runs for a genuinely new insert — same-flow reuse is decided by
+    // the latest/visitSeq check above.
     async function findOrCreateInvocation({ flowId, pipelineId = null, nodeId, subflowKey = null, forceNew = false, guard }) {
       const latest = await _findLatestInvocation(flowId, nodeId, subflowKey);
       if (!forceNew && latest) return latest.id;
@@ -134,48 +90,24 @@ async function _createStore(dbPath) {
       });
       if (r.guardRejected) return null;
       if (r.rowsAffected > 0) return id;
-      // Lost the race — re-select.
       const row = await _findLatestInvocation(flowId, nodeId, subflowKey);
       if (row) return row.id;
       throw new Error(`node-executions: findOrCreateInvocation lost the race and found nothing on re-select (${flowId}/${nodeId})`);
     }
 
-    // ── store API ──────────────────────────────────────────────────────────
-
     return {
       _db: client,
 
-      // write() defers its INSERT through batch-writer (see there) instead
-      // of awaiting it immediately — production callers don't need this
-      // (they never awaited write()'s DB completion either), but a test
-      // asserting read-after-write needs an explicit drain point. Not meant
-      // for production use.
       async flush() {
         await flushBatchWriter(dbPath);
       },
 
       findOrCreateInvocation,
 
-      // Public wrapper around the internal _findLatestInvocation helper —
-      // used by engine/child-resume-trigger.js's repair-propagation guard
-      // to confirm a settling child's spawning invocation is still the
-      // CURRENT invocation of its node/subflowKey lineage before
-      // resurrecting a terminal 'failed' parent — a stale invocation
-      // (superseded by a fresh top-level retry or a loop-back re-entry)
-      // must not repair a flow that's since moved on independently.
-      // Returns `{id, visitSeq}` or null.
       async getLatestInvocationForNode(flowId, nodeId, subflowKey) {
         return _findLatestInvocation(flowId, nodeId, subflowKey);
       },
 
-      // A companion live-bridge snapshot() uses this to backfill blockedAtMs
-      // for gate items opened before requestedAt existed on wait_json
-      // items — invokedAt is the exact moment the gate NODE itself was
-      // dispatched (written eagerly at invocation start, independent of
-      // the node resolving/blocking), a much tighter bound than
-      // flow.createdAt, which reflects the whole flow's creation and can
-      // be earlier than the gate node's actual dispatch by however long
-      // earlier steps in the same flow took to run.
       async getLatestInvocationInvokedAt(flowId, nodeId, subflowKey) {
         const row = await _findLatestInvocation(flowId, nodeId, subflowKey);
         return row?.invokedAt != null ? Number(row.invokedAt) : null;
@@ -239,12 +171,9 @@ async function _createStore(dbPath) {
         } catch { return []; }
       },
 
-      // Create the invocation row before execution starts. Returns
-      // { invocationId, isNew } on success, null on DB error (fire-safe).
-      // Callers must thread both values through to write() so the post-
-      // execution completion row links to the same invocation and the
-      // fresh/re-entry invariant check can be satisfied without a second
-      // _findLatestInvocation lookup.
+      // Callers must thread {invocationId, isNew} from enter() through to
+      // write() so the completion row links to the same invocation without
+      // a second _findLatestInvocation lookup.
       async enter({ flowId, pipelineId = null, nodeId, subflowKey = null, kind }) {
         if (!VALID_EXECUTION_KINDS.has(kind)) {
           throw new Error(`node-executions: enter() requires a valid kind (fresh|retry|revival|recheck), got ${JSON.stringify(kind)}`);
@@ -260,33 +189,16 @@ async function _createStore(dbPath) {
         }
       },
 
-      // The node_id of the most recently created invocation for this flow.
-      // After enter() is called before execution, this correctly identifies the
-      // in-flight node even during execution, not just after completion.
-      // Returns null if no invocations exist yet.
-      //
-      // subflow_key IS NULL scopes this to the flow's own top-level dispatch
-      // sequence — enter() (this store's own write path, called from
-      // executor.js's runFlow loop) always passes subflowKey: null, so this
-      // is the same slice of rows that path ever creates. Per-item child-
-      // spawn bookkeeping rows (subflow_key set, written by
-      // resolveOrCreateChild/spawn-child.js, never by enter()) are a
-      // separate concern and are excluded here on purpose — an unscoped
-      // query would occasionally return one of those instead of the node's
-      // own identity row, which happens to carry the same node_id today (so
-      // callers reading only node_id were never actually wrong) but isn't a
-      // designed guarantee. This makes it correct by construction instead.
+      // subflow_key IS NULL scopes this to the flow's own top-level
+      // dispatch sequence: child-spawn bookkeeping rows (subflow_key set,
+      // written by spawn-child.js, never by enter()) can carry the same
+      // node_id and must not be returned here.
       async findCurrentStep(flowId) {
         try {
-          // rowid DESC breaks ties on invoked_at (Date.now(), millisecond
-          // resolution — two rapid successive dispatches for the same flow
-          // can genuinely land in the same millisecond). rowid is SQLite's
-          // own implicit, strictly-insertion-order column on this table
-          // (never declared WITHOUT ROWID) — the only reliable tiebreaker,
-          // since `id` is a random UUID with no correlation to insert order.
-          // Found via a real, reproducible test flake (not hypothetical):
-          // ORDER BY invoked_at DESC LIMIT 1 alone returned either of two
-          // same-millisecond rows nondeterministically.
+          // rowid DESC breaks invoked_at ties (Date.now() has ms
+          // resolution — two dispatches can land in the same millisecond).
+          // rowid is SQLite's insertion-order column; `id` is a random UUID
+          // with no correlation to insert order.
           const { rows } = await client.execute({
             sql: `SELECT node_id FROM flow_node_invocations WHERE flow_id = ? AND subflow_key IS NULL ORDER BY invoked_at DESC, rowid DESC LIMIT 1`,
             args: [flowId],
@@ -295,12 +207,10 @@ async function _createStore(dbPath) {
         } catch { return null; }
       },
 
-      // `kind` is required and self-validating. Invariant violations throw
-      // OUTSIDE any try/catch — must fail loud in tests/dev. Genuine DB
-      // failures keep the fire-and-forget contract: swallowed, not thrown.
-      // When invocationId + isNewInvocation are provided (from a prior enter()
-      // call), the internal findOrCreateInvocation is skipped and those values
-      // are trusted directly — saving one DB round-trip per dispatch.
+      // `kind` violations throw OUTSIDE try/catch (fail loud in tests/dev);
+      // genuine DB failures keep the fire-and-forget contract. When
+      // invocationId + isNewInvocation come from a prior enter() call they
+      // are trusted directly, skipping the internal findOrCreateInvocation.
       async write({ flowId, pipelineId = null, nodeId, subflowKey = null, enteredAt, exitedAt, kind, invocationId: providedId = null, isNewInvocation = null }) {
         if (!VALID_EXECUTION_KINDS.has(kind)) {
           throw new Error(`node-executions: write() requires a valid kind (fresh|retry|revival|recheck), got ${JSON.stringify(kind)}`);
@@ -325,16 +235,9 @@ async function _createStore(dbPath) {
         if (kind !== "fresh" && wasCreated) {
           throw new Error(`node-executions: kind="${kind}" but this is the first execution for a brand-new invocation (flow=${flowId} node=${nodeId}) — should be "fresh"`);
         }
-        // Routed through batch-writer instead of an immediate awaited
-        // INSERT: this is the highest-volume write in the codebase (one per
-        // node execution attempt), already fire-and-forget by contract (see
-        // this file's header) and every real call site (executor.js) fires
-        // it without awaiting the result — safe to defer and coalesce with
-        // other pending writes into one db.batch() round-trip instead of
-        // one write-lock acquisition per call. executionId is generated
-        // synchronously up front (a random UUID, not derived from the row
-        // actually landing), so the caller-facing return value doesn't
-        // depend on the deferred write having completed yet.
+        // Deferred via batch-writer (highest-volume write; call sites never
+        // await it). executionId is generated up front so the return value
+        // doesn't depend on the deferred insert landing.
         const executionId = randomUUID();
         enqueue(dbPath, db.insert(flowNodeExecutions).values({
           id: executionId, invocationId, enteredAt, exitedAt, kind,
@@ -342,26 +245,14 @@ async function _createStore(dbPath) {
         return { invocationId, executionId };
       },
 
-      // Writes an invocation's own resultJson once it completes, no size
-      // cap (see this file's own header comment). resultTooLargeBytes is
-      // always written null here — a non-null value marks a row whose
+      // resultTooLargeBytes stays null here — a non-null marks a row whose
       // result was never stored.
       //
-      // Two things this deliberately isn't: (1) it doesn't throw on
-      // ordinary failure — same fire-and-forget contract as write() above,
-      // a result-recording failure must never disrupt flow execution; (2)
-      // it isn't a blind UPDATE. `flow_node_invocations` has no CAS/
-      // revision of its own (unlike flow_runs), so an unconditional write
-      // here would silently accept last-write-wins on a genuine double-
-      // completion race with zero signal — exactly the detection
-      // flow_runs.revision's own conflict handling already provides at the
-      // flow level. This does the per-row equivalent: read the invocation's
-      // current resultWrittenAt, then write conditioned on that same value
-      // still being current. A 0-row UPDATE means something else won this
-      // invocation's write between the read and the write — the caller
-      // gets { ok: false, reason: "race" } back and is expected to log it
-      // loudly (this module has no logger of its own — see file header;
-      // executor.js does).
+      // flow_node_invocations has no CAS/revision of its own, so the write
+      // is conditioned on resultWrittenAt still matching the value read
+      // under the write lock: a 0-row UPDATE means another writer won the
+      // double-completion race, and the caller gets
+      // { ok: false, reason: "race" } to log loudly.
       async writeResult(invocationId, result) {
         if (!invocationId) return { ok: false, reason: "no-invocation-id" };
         let serialized;
@@ -373,11 +264,9 @@ async function _createStore(dbPath) {
         const byteLength = Buffer.byteLength(serialized, "utf8");
         const now = Date.now();
         try {
-          // Read-then-conditional-write, retried as one unit on SQLITE_BUSY:
-          // a retry re-reads resultWrittenAt fresh and re-attempts the
-          // conditional update against that current value, rather than
-          // blindly retrying just the UPDATE against a now-possibly-stale
-          // `expected` captured before the retry.
+          // Retried as one unit on SQLITE_BUSY: the retry re-reads
+          // resultWrittenAt fresh rather than re-attempting the UPDATE
+          // against a now-stale `expected`.
           return await withSharedWrite(dbPath, async () => {
             const rows = await db.select({ resultWrittenAt: flowNodeInvocations.resultWrittenAt })
               .from(flowNodeInvocations)
@@ -398,12 +287,6 @@ async function _createStore(dbPath) {
         }
       },
 
-      // Single execution row by id — used by failure-store.js's read-time
-      // resolved-status derivation to check whether a failure's linked
-      // execution recorded a genuine thrown error (error IS NOT NULL,
-      // eligible for same-flow auto-resolve) vs a soft state-marker with
-      // no throw at all (error IS NULL, never eligible for same-flow
-      // auto-resolve — only cross-flow supersession applies to those).
       async getExecution(id) {
         try {
           const rows = await db.select().from(flowNodeExecutions).where(eq(flowNodeExecutions.id, id));
@@ -413,16 +296,9 @@ async function _createStore(dbPath) {
         } catch { return null; }
       },
 
-      // Latest execution outcome for a (pipelineId, nodeId, subflowKey)
-      // tuple ACROSS ANY FLOW — not scoped to one flow_id. Used by
-      // failure-store.js's cross-flow "auto:branch-success" derivation:
-      // when a later flow supersedes an earlier one's failure for the
-      // same item (e.g. a re-shortlisted listing that succeeds on a
-      // fresh flow), this is how the earlier failure is found to now be
-      // resolved. Returns identity + timing only, not error content
-      // (this table doesn't know success vs failure at
-      // all; the caller checks failure_events for that execution_id
-      // instead: no row there means it succeeded).
+      // ACROSS ANY FLOW — keyed by (pipelineId, nodeId, subflowKey), not
+      // flowId. Returns identity + timing only; success/failure comes from
+      // failure_events for that execution_id.
       async getLatestExecutionOutcomeForItem({ pipelineId, nodeId, subflowKey }) {
         try {
           const { rows } = await client.execute({
@@ -466,11 +342,6 @@ async function _createStore(dbPath) {
         });
         return rows;
       },
-
-      // queryErrorsByFlow/queryErrorsByFlowIds live in
-      // state/failure-store.js — this table stores no error content, so
-      // it has nothing to query for "which nodes errored." failure_events
-      // is the only source; see failureStore.queryErrorsByFlow(Ids).
 
       async summarizeChildrenByFlowIds(flowIds) {
         if (!Array.isArray(flowIds) || flowIds.length === 0) return new Map();
@@ -518,11 +389,6 @@ async function _createStore(dbPath) {
           if (!byInvocation.has(e.invocationId)) byInvocation.set(e.invocationId, []);
           byInvocation.get(e.invocationId).push(e);
         }
-        // No error field here (Phase 1.5 — this table doesn't know success
-        // vs failure at all anymore). latestExecutionId is exposed so
-        // callers can cross-reference failureStore.queryErrorsByFlow(Ids)
-        // themselves to determine whether the MOST RECENT attempt of this
-        // invocation failed — see routes/runs.js's buildTreeNodeRows.
         return invocations.map((inv) => {
           const execs = byInvocation.get(inv.id) ?? [];
           const latest = execs.length > 0 ? execs[execs.length - 1] : null;
@@ -537,49 +403,26 @@ async function _createStore(dbPath) {
             exitedAt:  latest ? Number(latest.exitedAt)  : null,
             latestExecutionId: latest?.id ?? null,
             kind:  latest?.kind  ?? null,
-            // `kind` above is the LATEST execution only — a subflow node
-            // re-entered via "recheck" once its children finish always
-            // masks an earlier "retry" among its own executions. Derived
-            // from the same `execs` array already loaded above — no extra
-            // query.
+            // `kind` is the LATEST attempt only — a "recheck" after
+            // children finish masks an earlier "retry"; this flag scans
+            // every execution instead.
             everRetriedOrRevived: execs.some((e) => e.kind === "retry" || e.kind === "revival"),
           };
         });
       },
 
-      // Option B, Phase B1 — one resultJson row per top-level node, ready
-      // for assembleState
-      // (engine/executor-helpers.js) to replay into a working state
-      // object. Two things this does that listInvocationsForFlow (above)
-      // deliberately doesn't:
-      //   - Reduces to exactly one row per node_id — the chronologically
-      //     LATEST occurrence (a genuine loop-back creates a new row with
-      //     a higher visit_seq; a retry reuses the same row in place). The
-      //     dedup preserves that latest occurrence's own position in
-      //     invocation order, not its first-seen position — so if node A
-      //     re-fires (loop-back) AFTER node B already ran, A's replay
-      //     position correctly moves to after B's, matching what actually
-      //     happened chronologically. (Retries reuse one row and so never
-      //     move position at all — no ordering question there.)
-      //   - Orders by invoked_at then rowid, the same tiebreak
-      //     findCurrentStep uses — invoked_at alone (Date.now(), millisecond
-      //     resolution) can't distinguish two dispatches landing in the
-      //     same millisecond; rowid (SQLite's own strictly-insertion-order
-      //     column, unlike the random-UUID id) breaks the tie deterministically.
+      // One row per node_id: the chronologically LATEST completed
+      // invocation. Re-setting the Map key moves it to the end, so a
+      // loop-back re-fire lands at its actual chronological position, not
+      // first-seen position (retries reuse one row and never move).
       async listResultsForFlow(flowId) {
         try {
-          // result_written_at IS NOT NULL is load-bearing, not an
-          // optimization: without it, a node that re-enters itself (a
-          // loop-back, or any revisit) creates a NEW in-flight invocation
-          // whose invoked_at is later than its own prior completed
-          // invocation — the per-node dedup below keeps only the latest
-          // row BY INVOCATION, so it would keep that in-flight,
-          // not-yet-written row and silently drop the earlier COMPLETED
-          // one entirely, even though the caller (assembleState(), read
-          // from INSIDE that very re-entry's own dispatch) needs exactly
-          // that prior value to compute its own next result. The failure
-          // mode is silent and livelocks: a LOOP node's edge condition
-          // never advances and the node re-dispatches forever.
+          // result_written_at IS NOT NULL is load-bearing: a re-entry
+          // creates a NEW in-flight invocation whose invoked_at is later
+          // than its own prior completed one — the per-node dedup below
+          // would keep that in-flight row and silently drop the completed
+          // value assembleState() needs. Failure mode is a silent
+          // livelock: a LOOP node's edge condition never advances.
           const { rows } = await client.execute({
             sql: `SELECT node_id, visit_seq, result_json, result_written_at, result_too_large_bytes
                     FROM flow_node_invocations
@@ -602,16 +445,10 @@ async function _createStore(dbPath) {
         } catch { return []; }
       },
 
-      // Single-node-scoped sibling of listResultsForFlow — Option B's
-      // "needs:" accessor (engine/needs-resolver.js) only ever wants one
-      // named node's latest result from a (possibly ancestor) flow, not
-      // that flow's entire result set, so this skips fetching/deduping
-      // every other node's rows just to throw them away. Same latest-
-      // visit_seq convention (ORDER BY invoked_at DESC, rowid DESC LIMIT 1)
-      // as findCurrentStep/listResultsForFlow. Returns null — not a
-      // resultWrittenAt:null row — when there's no invocation at all for
-      // this (flowId, nodeId), so a caller can tell "never dispatched"
-      // apart from "dispatched, not yet complete" without a second query.
+      // null when no invocation exists for this (flowId, nodeId) —
+      // distinct from a resultWrittenAt:null row ("dispatched, not yet
+      // complete"), so callers can tell the two apart without a second
+      // query.
       async getResultForNode(flowId, nodeId) {
         try {
           const { rows } = await client.execute({
@@ -634,11 +471,6 @@ async function _createStore(dbPath) {
         } catch { return null; }
       },
 
-      // gate_records — see the gateRecords def in state/schema.js for why
-      // this needs its own identity-keyed table rather than riding along
-      // in resultJson.
-      // Point upsert: a gate node only ever touches its own (flowId, nodeId)
-      // row, so there's no merge/replay involved and no staleness possible.
       async writeGateRecord(flowId, nodeId, record) {
         try {
           const recordJson = JSON.stringify(record ?? null);
@@ -656,9 +488,8 @@ async function _createStore(dbPath) {
         }
       },
 
-      // Point lookup — always the real, current value for this one gate,
-      // never a stale snapshot. Returns null if this gate has never
-      // written a record (not the same as "record exists but is empty").
+      // null = this gate has never written a record — distinct from a
+      // record that exists but is empty.
       async getGateRecord(flowId, nodeId) {
         try {
           const { rows } = await client.execute({
@@ -674,14 +505,6 @@ async function _createStore(dbPath) {
         } catch { return null; }
       },
 
-      // Batch sibling of getGateRecord — "every gate this flow has ever
-      // opened," for a consumer that needs to display the whole flow's
-      // gate state at once (e.g. routes/runs.js's run-detail response,
-      // once B2.5 cuts it over) rather than one specific node. Each row
-      // is independently correct (no shared key, no merge), so building
-      // the {[nodeId]: record} dict here is just a fan-in of already-
-      // correct point values — nothing about batching reopens the
-      // staleness risk assembleState()'s own gates merge has.
       async listGateRecordsForFlow(flowId) {
         try {
           const { rows } = await client.execute({
@@ -698,10 +521,6 @@ async function _createStore(dbPath) {
         } catch { return {}; }
       },
 
-      // No error field here either — same Phase 1.5 reasoning. Callers
-      // needing per-attempt failure content cross-reference executionId
-      // against failureStore.queryErrorsByFlow(Ids) themselves (see
-      // routes/runs.js's sendInvocationDetail).
       async listExecutionsForInvocation(invocationId) {
         const rows = await db.select().from(flowNodeExecutions)
           .where(eq(flowNodeExecutions.invocationId, invocationId))
@@ -723,12 +542,6 @@ async function _createStore(dbPath) {
         } catch { return new Set(); }
       },
 
-      // Batched version of "which top-level nodes did this flow visit" —
-      // backing the dashboard auto-funnel's per-node visit check without
-      // one HTTP/DB round-trip per run. subflow_key IS NULL for the same
-      // reason listInvocationsForFlow/findCurrentStep filter on it —
-      // only the flow's own top-level dispatch sequence, not per-item
-      // child-spawn bookkeeping rows.
       async listVisitedNodeIdsByFlow(flowIds) {
         if (!Array.isArray(flowIds) || flowIds.length === 0) return new Map();
         try {
@@ -749,7 +562,7 @@ async function _createStore(dbPath) {
       close() { try { client.close(); } catch { /* ignore */ } },
     };
   } catch (err) {
-    // If the DB can't open, return a no-op store so callers don't need try/catch.
+    // DB couldn't open: no-op store so callers need no try/catch.
     const noop = () => {};
     return {
       _db: null, flush: async () => {}, findOrCreateInvocation: () => { throw new Error("node-executions store unavailable"); },

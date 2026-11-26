@@ -1,13 +1,5 @@
-// run-store.js — manifold-owned flow_runs in runtime.sqlite.
-//
-// This is the sole read/write store for manifold flows. No dual-write;
-// registry.sqlite is never touched. All executor transitions go through the
-// CAS methods here.
-//
-// CAS pattern: every active-state write is revision-checked.
-//   UPDATE ... WHERE flow_id = ? AND revision = ? AND status NOT IN (terminals)
-// If rowsAffected === 0 → disambiguate via SELECT revision, status to return the
-// right code: not_found | terminal | revision_conflict.
+// run-store.js — sole read/write store for manifold flow_runs
+// (runtime.sqlite); all executor transitions go through the CAS methods.
 
 import path from "node:path";
 import os from "node:os";
@@ -23,17 +15,13 @@ function defaultDbPath() {
   return resolveStorePaths().runtimeDb;
 }
 
-// Exported so callers deciding "is this flow cancellable / already done"
-// (e.g. the CLI's and dashboard's own cancel handlers) check against the
-// real terminal set instead of hand-rolling their own allowlist of active
-// statuses — a `status !== "running" && status !== "blocked"` check misses
-// "queued" (an admission-pool wait, very much non-terminal) and wrongly
-// refuses to cancel it.
+// Exported so callers check against the real terminal set instead of
+// hand-rolling one — a `status !== "running" && status !== "blocked"`
+// allowlist misses "queued" (an admission-pool wait, non-terminal) and
+// wrongly refuses to cancel it.
 export const TERMINAL_STATUSES = ["succeeded", "failed", "cancelled", "skipped"];
 export const TERMINAL_STATUS_SET = new Set(TERMINAL_STATUSES);
 const TERMINAL_SET = TERMINAL_STATUS_SET;
-
-// ── store factory ────────────────────────────────────────────────────────────
 
 export function createRunStore(opts = {}) {
   const _p = _createRunStoreImpl(opts);
@@ -49,8 +37,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
   await migrateDatabase({ dbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER });
   const { db, client } = await getSharedDb(dbPath);
 
-  // ── CAS failure classifier ───────────────────────────────────────────────
-
   async function _casClassify(flowId) {
     const rows = await db.select({ revision: flowRuns.revision, status: flowRuns.status })
       .from(flowRuns).where(eq(flowRuns.flowId, flowId));
@@ -59,8 +45,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
     if (TERMINAL_SET.has(row.status)) return { applied: false, code: "terminal" };
     return { applied: false, code: "revision_conflict" };
   }
-
-  // ── public API ───────────────────────────────────────────────────────────
 
   return {
     async insert({ flowId, ownerKey, pipelineId, revision, status,
@@ -89,7 +73,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       } catch {}
     },
 
-    // CAS: advance to next running step (clears wait state).
     async casSetRunning(flowId, { expectedRevision, lastStep, stateJson }) {
       try {
         return await withSharedWrite(dbPath, async () => {
@@ -115,7 +98,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // CAS: block on external signal (human-gate).
     async casSetWaiting(flowId, { expectedRevision, lastStep, blockingNodeId, stateJson, waitJson, statusReason }) {
       try {
         return await withSharedWrite(dbPath, async () => {
@@ -141,10 +123,9 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // CAS: block on an internal resource (a shared admission-pool slot,
-    // cross-process lock) — same shape as casSetWaiting, distinct status so
-    // consumers can tell "waiting on an operator decision" from "waiting
-    // on a resource that will free itself" without inspecting wait_json.kind.
+    // Distinct status from 'blocked' so consumers can tell "waiting on an
+    // operator decision" from "waiting on a resource that will free
+    // itself" without inspecting wait_json.kind.
     async casSetQueued(flowId, { expectedRevision, lastStep, blockingNodeId, stateJson, waitJson, statusReason }) {
       try {
         return await withSharedWrite(dbPath, async () => {
@@ -170,7 +151,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // CAS: terminal success.
     async casFinish(flowId, { expectedRevision, stateJson }) {
       try {
         return await withSharedWrite(dbPath, async () => {
@@ -196,7 +176,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // CAS: terminal skip (pipeline ran, nothing to output).
     async casSkip(flowId, { expectedRevision, stateJson, reason }) {
       try {
         return await withSharedWrite(dbPath, async () => {
@@ -222,7 +201,8 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // CAS: terminal failure. current_step stays frozen at the failing node.
+    // last_step is intentionally NOT cleared — it stays frozen at the
+    // failing node.
     async casFail(flowId, { expectedRevision, stateJson, statusReason }) {
       try {
         return await withSharedWrite(dbPath, async () => {
@@ -248,9 +228,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // CAS: force a terminal flow back to 'blocked'.
-    // Returns { applied: false, code: "not_terminal" } when the row exists,
-    // the revision matches, but its status is not in TERMINAL_STATUSES.
     async forceBlock(flowId, { expectedRevision, stateJson, statusReason, ownerKey }) {
       try {
         return await withSharedWrite(dbPath, async () => {
@@ -282,7 +259,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // Non-CAS cancel: terminal guard only. Returns { cancelled: boolean }.
     async cancelFlow(flowId, reason = null) {
       try {
         const now = Date.now();
@@ -302,7 +278,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // Stamps state_json before the cancel status flip.
     async stampStateJson(flowId, stateJson) {
       try {
         await withSharedWrite(dbPath, () => db.update(flowRuns)
@@ -311,16 +286,12 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       } catch {}
     },
 
-    // Atomic combination of stampStateJson() + cancelFlow(), for
-    // state-store.js's cancel(): the state_json stamp and the cancel
-    // status flip must commit together — as two separate awaited writes a
-    // crash between them could leave state_json updated but status not
-    // flipped to 'cancelled', or vice versa. One db.batch() call commits
-    // both inside a single transaction instead.
-    // Returns the same { cancelled } shape cancelFlow() alone returns,
-    // read from that statement's own rowsAffected within the batch —
-    // db.batch() preserves each query's normal per-statement result shape,
-    // not just an overall success flag.
+    // The state_json stamp and the cancel flip must commit together — as
+    // two separate writes a crash between them could leave state_json
+    // updated but status not 'cancelled' (or vice versa). One db.batch()
+    // commits both in a single transaction; db.batch() preserves each
+    // query's per-statement result, so `cancelled` reads that statement's
+    // own rowsAffected.
     async cancelWithStateJson(flowId, stateJson, reason = null) {
       try {
         const results = await withSharedWrite(dbPath, () => {
@@ -350,14 +321,11 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // Stamps cancel_requested_at flag (no revision check — just a signal).
-    // Deferred via batch-writer: requestCancel() (state-store.js) awaits
-    // this purely to sequence before returning { applied: true } — it
-    // never inspects a result, so there's no read-after-write to preserve.
-    // NOT the same as cancelFlow()/stampStateJson() below — those feed a
-    // caller-visible { cancelled } result that gates real side effects
-    // (event emission, resume triggers), so they stay immediate. The
-    // deferred batch itself is protected at flush time — see batch-writer.js.
+    // No revision check — just a signal. Deferred via batch-writer:
+    // requestCancel() awaits this purely to sequence before returning, and
+    // never inspects a result. NOT deferred for cancelFlow()/stampStateJson()
+    // — those feed a caller-visible { cancelled } that gates real side
+    // effects, so they stay immediate.
     stampCancelRequested(flowId) {
       const now = Date.now();
       enqueue(dbPath, db.update(flowRuns)
@@ -365,8 +333,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
         .where(eq(flowRuns.flowId, flowId)));
     },
 
-    // Revision-checked state_json update for flows that are in the DB but not
-    // in the executor's in-process Map (post-restart blocked flows).
     async updateStateJsonCAS(flowId, expectedRevision, stateJson) {
       try {
         const r = await withSharedWrite(dbPath, () => db.update(flowRuns).set({
@@ -428,10 +394,9 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       } catch { return []; }
     },
 
-    // ── Read-only dashboard/route queries ────────────────────────
+    // ── Read-only dashboard/route queries ──
 
     // list() with optional includeChildren flag (default: top-level only).
-    // The no-arg form is identical to the original list() above.
     async list({ includeChildren = false } = {}) {
       const q = includeChildren
         ? db.select().from(flowRuns).orderBy(desc(flowRuns.updatedAt))
@@ -441,20 +406,16 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       return (await q).map(mapRow);
     },
 
-    // Returns all non-terminal flows (ended_at IS NULL) across all pipelines,
-    // including children. Used by live-bridge's one-shot startup seed —
-    // only active flows need tracking set entries, so O(active) not O(all).
     async listActive() {
       return (await db.select().from(flowRuns)
         .where(isNull(flowRuns.endedAt))
         .orderBy(desc(flowRuns.updatedAt))).map(mapRow);
     },
 
-    // { [status]: count } for top-level runs, optionally filtered by pipeline.
-    // Additive dashboard data: a failed count must degrade to no counts, the
-    // same contract as get/list — GET /manifold/runs renders the runs list
-    // whatever this returns, and letting it throw turns an additive card
-    // into a 500 for the whole response.
+    // Additive dashboard data: must degrade to no counts on failure —
+    // GET /manifold/runs renders the runs list whatever this returns, and
+    // letting it throw would turn an additive card into a 500 for the
+    // whole response.
     async listStatusCounts({ pipelineId } = {}) {
       try {
         const conditions = [isNull(flowRuns.parentInvocationId)];
@@ -473,7 +434,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }
     },
 
-    // Aggregate stats for a single pipeline in two queries.
     async statsFor(pipelineId, { todayStartMs = 0, sevenDaysMs = 0 } = {}) {
       const where = and(eq(flowRuns.pipelineId, pipelineId), isNull(flowRuns.parentInvocationId));
       const [row] = await db.select({
@@ -504,7 +464,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       };
     },
 
-    // Narrow 5-column rows for succeeded peers of a pipeline.
     async listPeers({ pipelineId, excludeFlowId } = {}) {
       const where = excludeFlowId
         ? and(eq(flowRuns.pipelineId, pipelineId), eq(flowRuns.status, "succeeded"), isNull(flowRuns.parentInvocationId), ne(flowRuns.flowId, excludeFlowId))
@@ -518,9 +477,8 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }).from(flowRuns).where(where).orderBy(desc(flowRuns.endedAt));
     },
 
-    // Queued flows with parent context via LEFT JOIN. Raw client — Drizzle
-    // JOIN merges both tables' columns and the alias approach is verbose enough
-    // that the raw SQL is clearer here.
+    // Raw client: Drizzle's JOIN merges both tables' columns, and the
+    // alias workaround is verbose enough that raw SQL is clearer here.
     async listQueued() {
       try {
         const { rows } = await client.execute(`
@@ -557,7 +515,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       } catch { return []; }
     },
 
-    // Cursor-paginated run list for companion views — includes JSON_EXTRACT display fields.
     async listRunsPage({ pipelineId, status, limit = 50, beforeMs, beforeId } = {}) {
       const conditions = [isNull(flowRuns.parentInvocationId)];
       if (pipelineId) conditions.push(eq(flowRuns.pipelineId, pipelineId));
@@ -589,9 +546,8 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       });
     },
 
-    // Map<pipelineId, stats> for ALL pipelines — one GROUP BY aggregate + one
-    // window-function query for last-run status (raw client: Drizzle has no
-    // window function support).
+    // Raw client for the last-run query: Drizzle has no window-function
+    // support.
     async listAllPipelineStats({ todayStartMs = 0, sevenDaysMs = 0 } = {}) {
       const agg = await db.select({
         pipelineId:      flowRuns.pipelineId,
@@ -641,7 +597,6 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       return statsMap;
     },
 
-    // Narrow 5-column snapshot for cost analysis.
     async listCostSnapshot() {
       return db.select({
         flowId:     flowRuns.flowId,
@@ -652,8 +607,8 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
       }).from(flowRuns).where(isNull(flowRuns.parentInvocationId));
     },
 
-    // stampCancelRequested() defers through batch-writer — for tests that
-    // assert read-after-write. Not meant for production use.
+    // Drain point for stampCancelRequested()'s deferred batch — for tests
+    // that assert read-after-write. Not meant for production use.
     async flush() {
       await flushBatchWriter(dbPath);
     },
@@ -663,16 +618,12 @@ async function _createRunStoreImpl({ logger, dbPath = defaultDbPath() } = {}) {
   };
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 function _str(v) {
   if (v == null) return null;
   if (typeof v === "string") return v;
   return JSON.stringify(v);
 }
 
-// Drizzle returns camelCase keys matching the schema field names.
-// JSON columns (stateJson, waitJson) are still stored as text — parse them here.
 function mapRow(row) {
   if (!row) return null;
   let stateJson = null, waitJson = null;

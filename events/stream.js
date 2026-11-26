@@ -1,8 +1,6 @@
-// events/stream.js — in-process push-event stream for subscribers that live
-// in this process (adapter wake routes, dashboard relays). Append-only
-// history plus fan-out subscribe; delivery faults never throw into the
-// producer — a dead subscriber must not fail the dispatch that produced
-// the event.
+// In-process push-event stream: append-only history plus fan-out subscribe.
+// Delivery faults never throw into the producer — a dead subscriber must not
+// fail the dispatch that produced the event.
 export function createEventStream({ maxHistory = 200, logger = null } = {}) {
   const history = [];
   const subscribers = new Set();

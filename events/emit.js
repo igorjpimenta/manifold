@@ -1,11 +1,9 @@
-// events/emit.js — single fan-out for canonical kinds.
-//
-// emit(kind, payload) validates, stamps the envelope, and delivers to the
-// gateway WS broadcast. Transport faults are reported in the delivery
+// Single fan-out for canonical kinds: validate, stamp the envelope, deliver
+// to the gateway WS broadcast. Transport faults are reported in the delivery
 // receipt, never thrown (a dead gateway must not fail the dispatch that
-// produced the event); validation faults reject (programmer errors).
-// The `plugin.` prefix is applied here and only here — producers name
-// the kind, never the wire.
+// produced the event); validation faults reject (programmer errors). The
+// `plugin.` prefix is applied here and only here — producers name the kind,
+// never the wire.
 import {
   assertPayload,
   isDashboardOnly,
@@ -13,7 +11,6 @@ import {
 
 export function createEmitter({ getBroadcast, logger } = {}) {
   async function emit(kind, payload = {}) {
-    // Throws (rejects) on unknown/reserved kinds and missing fields.
     assertPayload(kind, payload);
     // A `type` field here is a producer bug — the kind is the only name.
     const { type: _strayType, ...fields } = payload;

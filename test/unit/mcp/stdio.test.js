@@ -1,6 +1,3 @@
-// stdio.test.js — MCP round-trip over a real stdio transport: declared
-// harness ok (stamped call invokes the injected op stub), unstamped calls
-// refused loudly, undeclared server fails fast.
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";

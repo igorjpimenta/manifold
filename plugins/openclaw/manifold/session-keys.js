@@ -1,8 +1,6 @@
-// session-keys.js — adapter-owned session identity helpers.
-//
-// Run ids are a separate namespace: gateway runIds are native gateway
-// events, so the dispatch-lifecycle registry maps them independently of
-// whatever shape a session key carries.
+// Adapter-owned session identity helpers. Run ids are a separate namespace:
+// gateway runIds are native gateway events, so the dispatch-lifecycle
+// registry maps them independently of whatever shape a session key carries.
 
 import { randomBytes } from "node:crypto";
 
@@ -101,7 +99,6 @@ export function wrapSubagentKeys(raw) {
 
   if (typeof raw.getSessionMessages === "function") {
     wrapped.getSessionMessages = async (args) => {
-      // Adapter edge: core `session` → harness `sessionKey` on the way out.
       const { session, ...rest } = args ?? {};
       const out = await raw.getSessionMessages(session != null ? { ...rest, sessionKey: session } : { ...args });
       if (out && typeof out === "object" && Array.isArray(out.messages)) {

@@ -1,7 +1,3 @@
-// session-keys.test.js — core `session` maps to the harness `sessionKey`
-// field on the way out (and back on echo); only runIds translate
-// symmetrically (mapped for the dispatch lifecycle, forgotten when the
-// wait settles).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {

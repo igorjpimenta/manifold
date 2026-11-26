@@ -49,11 +49,11 @@ describe("resolveServeConfig", () => {
     assert.equal(cfg.turnToken, "tok");
   });
 
-  it("falls back to MANIFOLD_BEARER for the turn token", () => {
+  it("turn token comes only from MANIFOLD_TURN_TOKEN, not from the bearer", () => {
     const cfg = resolveServeConfig({
       env: { MANIFOLD_DATA_DIR: "/tmp/manifold-cfg-test", MANIFOLD_BEARER: "shared" },
     });
-    assert.equal(cfg.turnToken, "shared");
+    assert.equal(cfg.turnToken, null);
   });
 });
 

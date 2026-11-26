@@ -1,13 +1,3 @@
-/**
- * Unit tests for routes/discuss-component.js
- *
- * Verifies:
- *   - Persists the component before emitting anything.
- *   - Draft components emit proposed + pending with text mapping.
- *   - Meta components emit proposed + pending with fields mapping.
- *   - Unknown component kinds emit proposed only (no pending derivation).
- *   - Missing emitter still persists without throwing.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createComponentEmitter } from "../../../routes/discuss-component.js";
@@ -31,8 +21,6 @@ function makeEmit() {
   emit.calls = calls;
   return emit;
 }
-
-// ── draft path ───────────────────────────────────────────────────────────────
 
 describe("componentEmitter — proposed_draft", () => {
   test("persists first, then emits proposed + pending with text", async () => {
@@ -76,8 +64,6 @@ describe("componentEmitter — proposed_draft", () => {
   });
 });
 
-// ── meta path ────────────────────────────────────────────────────────────────
-
 describe("componentEmitter — proposed_meta", () => {
   test("pending carries fields, null text", async () => {
     const discussStore = makeStore();
@@ -101,8 +87,6 @@ describe("componentEmitter — proposed_meta", () => {
     });
   });
 });
-
-// ── edges ────────────────────────────────────────────────────────────────────
 
 describe("componentEmitter — edges", () => {
   test("unknown component kind emits proposed only", async () => {

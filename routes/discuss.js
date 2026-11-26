@@ -5,24 +5,16 @@ import { persistRevisedDraft, persistRevisedMeta } from "./discuss-draft.js";
 import { AUDIO_MIME_EXT, EXT_TO_MIME, audioDirForFlow, audioRootsForFlow, loadAudioMetasForFlow, resolveAudioHarness } from "./discuss-audio.js";
 import { assembleState } from "../engine/executor-helpers.js";
 
-// ── Factory ─────────────────────────────────────────────────────────────────
-// All handlers close over the deps passed from index.js / runs.js / operator.js
-// rather than using module-level singletons.
-
-// Shared prompt projection for every discuss turn entry point (HTTP route,
-// audio route, WS dialog door): feed the gate's promptBuilder the same
-// assembleState-enriched state the engine's own dispatch loop reads.
-// Returns the prompt string or null (no builder, or the builder threw).
+// Shared prompt projection for every discuss turn entry point (HTTP, audio,
+// WS dialog): feed the gate's promptBuilder the same assembleState-enriched
+// state the engine's dispatch loop reads. Returns the prompt or null.
 export async function buildDiscussPrompt({ flow, target, runStore, nodeExecutionsStore, logger = null } = {}) {
   if (!target?.promptBuilder) return null;
   try {
     const ctx = {
-      // B2.5 — read via assembleState() (resultJson replayed on top of
-      // the still-live stateJson) instead of trusting the raw blob
-      // directly, matching how the engine's own dispatch loop reads
-      // state. Fixes a real gap too: this call site never enriched
-      // with _subflowGroups before, so a discuss promptBuilder reading
-      // state.loop (the pre-migration field name) always got nothing.
+      // assembleState (resultJson replayed over live stateJson), not the raw
+      // blob — the blob is never enriched with _subflowGroups, so a
+      // promptBuilder reading state.loop would always get nothing from it.
       state: await assembleState(flow.flowId, { runStore, nodeExecutionsStore, baseState: flow.stateJson ?? {} }),
       itemId: target.itemId,
       flowId: flow.flowId,
@@ -49,11 +41,8 @@ export function registerDiscussHandlers({
   // the harness (sessions.newDiscussSessionId), never minted here — core
   // never imports the gateway's session store (same seam as operator.js).
   sessions,
-  // The roster records what each thread was given, keyed by its coordinates.
   sessionIndex,
 }) {
-
-  // ── Resolve discuss target ────────────────────────────────────────────────
 
   async function resolveDiscussTarget(sourceFlow, wantItemId) {
     const items = Array.isArray(sourceFlow.waitJson?.items) ? sourceFlow.waitJson.items : [];
@@ -73,7 +62,6 @@ export function registerDiscussHandlers({
       normalizedItemId = resolveItemId(item.itemId) ?? String(item.itemId);
       gateNodeId = sourceFlow.waitJson?.nodeId;
     } else if (sourceFlow.status === "running") {
-      // Old-model mid-batch path (flow_branches / branchService) removed.
       // All subflow gates now surface their pending items via waitJson.
       return { ok: false, status: 503, code: "gate_transition", error: "gate is transitioning, try again shortly" };
     } else {
@@ -87,16 +75,11 @@ export function registerDiscussHandlers({
     }
     const topNode = pipeline?.nodes?.[gateNodeId];
     let discuss = null;
-    // Cost/lineage attribution wants the MOST SPECIFIC node the discuss
-    // session is actually about. For a bare top-level gate that's just
-    // gateNodeId; for a gate nested inside a loop's branch, waitJson.nodeId
-    // only ever names the LOOP (e.g. "PROPOSE"), never the nested gate sub-
-    // node — so every discuss session under any loop's gate was being
-    // attributed to the loop itself instead of the specific gate, making
-    // real human-review cost look like coarse loop-level activity in the
-    // dashboard's cost breakdown. `${gateNodeId}.${subNodeId}` matches the
-    // executor's own branch-child naming convention (see nodeKindMap/
-    // stepOrder in the dashboard, which key branch children the same way).
+    // Attribution wants the most specific node the session is about: for a
+    // gate nested in a loop branch, waitJson.nodeId only names the LOOP, so
+    // `${gateNodeId}.${subNodeId}` (the executor's branch-child naming,
+    // mirrored by the dashboard) keeps human-review cost off the coarse
+    // loop-level line.
     let effectiveNodeId = gateNodeId;
     if (topNode?.kind === "human-gate") {
       discuss = topNode.discuss;
@@ -128,8 +111,7 @@ export function registerDiscussHandlers({
     }
     // Thread identity: the roster (keyed by flow, gate, item) holds what
     // earlier turns used; a thread with no row asks the harness for an id,
-    // because the harness owns the session namespace. A missing row means
-    // no turn ran yet — the caller records the new thread.
+    // because the harness owns the session namespace.
     const stamp = await sessionIndex?.findThread?.(sourceFlow.flowId, gateNodeId, normalizedItemId);
     const resolvedAgent = stamp?.agentId ?? effectiveDiscuss.agent;
     const session = stamp?.session
@@ -154,15 +136,13 @@ export function registerDiscussHandlers({
       itemId: normalizedItemId,
       agent: resolvedAgent,
       needsStamp: !stamp,
-      // Coarse node id the discuss thread itself is keyed under in the
-      // roster — the loop's own id for a branch-mode gate, not the
-      // fine-grained per-sub-node id below.
+      // Coarse id the roster keys the thread under (loop's own id for a
+      // branch gate); nodeId below is the fine-grained attribution id.
       gateNodeId,
-      // Specific node this discuss session is actually about, for cost/
-      // lineage attribution — "PROPOSE.GATE", not just "PROPOSE", when the
-      // gate lives inside a loop's branch. The sidecar stays keyed on the
-      // coarser gateNodeId above (a harness id is opaque to core, so only
-      // the (flow, gate, item) coordinates re-find the thread).
+      // Specific node this session is about for cost/lineage attribution —
+      // "PROPOSE.GATE", not "PROPOSE". The sidecar stays keyed on the
+      // coarser gateNodeId: a harness id is opaque to core, so only the
+      // (flow, gate, item) coordinates re-find the thread.
       nodeId: effectiveNodeId,
       modelOverride: typeof effectiveDiscuss.model === "string" && effectiveDiscuss.model.trim()
         ? effectiveDiscuss.model.trim()
@@ -170,8 +150,6 @@ export function registerDiscussHandlers({
       promptBuilder: typeof effectiveDiscuss.promptBuilder === "function" ? effectiveDiscuss.promptBuilder : null,
     };
   }
-
-  // ── handleDiscuss ─────────────────────────────────────────────────────────
 
   async function handleDiscuss(req, res, sourceFlow) {
     let raw = "";
@@ -223,7 +201,7 @@ export function registerDiscussHandlers({
     // the transcripts endpoint attributes this thread from stored columns
     // (nodeId, branchItemId) instead of parsing the session. Best-effort:
     // the discuss turn itself is already durable in discuss-store above.
-    try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, session: target.session, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null, agent: target.agent ?? null }); } catch {}
+    try { await sessionIndex?.record?.({ flowId: sourceFlow.flowId, session: target.session, nodeId: target.nodeId ?? null, branchItemId: target.itemId ?? null }); } catch {}
 
     setImmediate(async () => {
       try {
@@ -301,15 +279,11 @@ export function registerDiscussHandlers({
     return true;
   }
 
-  // ── transcribeAndDispatch ─────────────────────────────────────────────────
   // Shared by handleDiscussAudio (fresh upload) and handleDiscussAudioRetry
-  // (re-transcribe an already-persisted file, e.g. after the operator taps
-  // Retry on a failed voice message) — transcribes, updates the meta
-  // sidecar, pushes session.transcript.updated, and on success dispatches
-  // the agent turn + session.transcript.completed. Callers wrap this in
-  // setImmediate since the HTTP response has already been sent by the time
-  // it runs.
-
+  // (re-transcribe a persisted file after the operator taps Retry):
+  // transcribe → update meta sidecar → emit transcript.updated → on success
+  // dispatch the agent turn + transcript.completed. Callers wrap this in
+  // setImmediate since the HTTP response has already been sent.
   async function transcribeAndDispatch({
     sourceFlow, target, turnId, audioPath, audioUrl, metaPath,
     mime, language, systemPrompt, createdAtMs, logPrefix,
@@ -409,8 +383,6 @@ export function registerDiscussHandlers({
     }
   }
 
-  // ── handleDiscussAudio ────────────────────────────────────────────────────
-
   // Connection-declared harness for audio file paths (X-Manifold-Harness,
   // same declaration the MCP transport requires). Refuses before any
   // filesystem touch — audio is namespaced per harness, never defaulted.
@@ -499,13 +471,10 @@ export function registerDiscussHandlers({
     return true;
   }
 
-  // ── handleDiscussAudioRetry ───────────────────────────────────────────────
   // Re-runs transcription on an already-uploaded voice message (identified
-  // by turnId) without re-uploading the audio bytes — the operator's Retry
-  // tap on a failed/empty transcription bubble. Reuses the same turnId and
-  // audioUrl so the existing bubble updates in place via the session
+  // by turnId) without re-uploading the audio bytes. Reuses the same turnId
+  // and audioUrl so the existing bubble updates in place via the session
   // transcript events rather than creating a new turn.
-
   async function handleDiscussAudioRetry(req, res, sourceFlow) {
     const harness = requireAudioHarness(req, res);
     if (!harness) return true;
@@ -587,8 +556,6 @@ export function registerDiscussHandlers({
     return true;
   }
 
-  // ── handleDiscussAudioGet ─────────────────────────────────────────────────
-
   async function handleDiscussAudioGet(req, res, sourceFlow, audioFileName) {
     const harness = requireAudioHarness(req, res);
     if (!harness) return true;
@@ -623,8 +590,6 @@ export function registerDiscussHandlers({
     return true;
   }
 
-  // ── handleDiscussHistory ──────────────────────────────────────────────────
-
   async function handleDiscussHistory(req, res, sourceFlow) {
     const harness = requireAudioHarness(req, res);
     if (!harness) return true;
@@ -656,8 +621,6 @@ export function registerDiscussHandlers({
         })),
         turnStatus: dsState.turnStatus,
         activeTurnId: dsState.activeTurnId ?? null,
-        // In-memory store always returns the full thread — nothing paged
-        // out, so there's never more to load from this branch.
         hasMore: false,
       };
       const pending = dsState.pending;
@@ -679,9 +642,6 @@ export function registerDiscussHandlers({
           updatedAt: typeof pending.updatedAt === "number" ? pending.updatedAt : null,
         };
       } else {
-        // No recorded turn yet — the thread is empty. Discuss history is the
-        // discuss store's own record (both directions of every turn); the
-        // harness's session files are not a source for it.
         parsed = { ok: true, messages: [] };
       }
       parsed.turnStatus = dsState?.turnStatus ?? "idle";
@@ -738,8 +698,8 @@ export function registerDiscussHandlers({
       if (!parsed) parsed = { ok: false, code: "internal", error: err?.message ?? String(err) };
     }
     if (parsed?.ok) {
-      // No channel plugin anymore: replies go back through the same HTTP
-      // discuss route this history came from, or the WS dialog door.
+      // Replies go back through this HTTP discuss route or the WS dialog
+      // door.
       parsed.channelId = "manifold-dialog";
       parsed.channelInboundUrl = null;
     }
@@ -748,8 +708,6 @@ export function registerDiscussHandlers({
     res.end(JSON.stringify(parsed ?? { ok: false, code: "internal" }));
     return true;
   }
-
-  // ── handleDiscussApplyDraft ───────────────────────────────────────────────
 
   async function handleDiscussApplyDraft(req, res, sourceFlow) {
     let raw = "";
@@ -761,10 +719,7 @@ export function registerDiscussHandlers({
     let fields = (body.fields && typeof body.fields === "object" && !Array.isArray(body.fields))
       ? body.fields
       : null;
-    const source = typeof body.source === "string" ? body.source : null;
     const wantItemId = typeof body.itemId === "string" ? body.itemId : null;
-    // Resolve target first so we can use target.itemId for the sidecar
-    // lookup before checking whether payload is present.
     const target = await resolveDiscussTarget(sourceFlow, wantItemId);
     if (!target.ok) {
       res.statusCode = target.status;
@@ -773,8 +728,7 @@ export function registerDiscussHandlers({
       return true;
     }
     // No explicit payload — fall back to the pending proposal so a client
-    // can commit a pre-built proposal with a single tap without
-    // needing to fetch and re-POST the full draft text.
+    // can commit a pre-built proposal with a single tap.
     if (!text && !fields) {
       const pending = await discussStore.readPending(sourceFlow.flowId, target.itemId);
       if (pending?.text) text = pending.text;
@@ -794,7 +748,6 @@ export function registerDiscussHandlers({
         flowId: sourceFlow.flowId,
         itemId: target.itemId,
         newDraft: text,
-        source,
         store,
         logger: api.logger,
       });
@@ -833,8 +786,6 @@ export function registerDiscussHandlers({
     res.end(JSON.stringify({ ok: true }));
     return true;
   }
-
-  // ── Return all exported symbols ───────────────────────────────────────────
 
   return {
     handleDiscuss,

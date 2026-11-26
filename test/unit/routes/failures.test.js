@@ -1,16 +1,7 @@
-/**
- * Unit tests for routes/failures.js
- *
- * Verifies:
- *   - registerFailureRoutes registers exactly 2 routes at the right paths/auth/match.
- *   - Method guards fire before the bearer check.
- *   - Happy-path handler returns failure list JSON (bearer-authenticated).
- */
 import { test, mock, describe, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
 const TEST_BEARER = "test-bearer-failures";
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = TEST_BEARER;
@@ -25,8 +16,6 @@ function authedReq(method, path) {
   return createMockReq(method, path, { authorization: `Bearer ${TEST_BEARER}` });
 }
 
-// ── fixtures ─────────────────────────────────────────────────────────────────
-
 function makeDeps(api, overrides = {}) {
   return {
     api,
@@ -35,8 +24,6 @@ function makeDeps(api, overrides = {}) {
     ...overrides,
   };
 }
-
-// ── registration tests ───────────────────────────────────────────────────────
 
 describe("registerFailureRoutes — registration", () => {
   test("registers exactly 2 routes", () => {
@@ -72,8 +59,6 @@ describe("registerFailureRoutes — registration", () => {
   });
 });
 
-// ── method-guard tests (fire before auth, no mock needed) ────────────────────
-
 describe("registerFailureRoutes — method guards", () => {
   test("list route: POST → 405", async () => {
     const { api, routes } = createMockApi();
@@ -94,8 +79,6 @@ describe("registerFailureRoutes — method guards", () => {
   });
 });
 
-// ── handler behaviour tests (auth mocked) ────────────────────────────────────
-
 describe("registerFailureRoutes — list handler", () => {
   test("returns {rows, count} with empty rows", async () => {
     const { api, routes } = createMockApi();
@@ -108,8 +91,6 @@ describe("registerFailureRoutes — list handler", () => {
     assert.ok(Array.isArray(body.rows), "body.rows is an array");
     assert.equal(body.count, 0);
   });
-
-// ── retry handler: stamped identity forwarding ───────────────────────────────
 
 describe("registerFailureRoutes — retry handler", () => {
   test("forwards stamped caller identity to _elev/retry-failure", async () => {

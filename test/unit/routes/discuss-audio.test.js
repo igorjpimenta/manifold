@@ -14,9 +14,6 @@ import {
   loadAudioMetasForFlow,
 } from "../../../routes/discuss-audio.js";
 
-// Every test runs against an isolated store home so the real ~/.manifold
-// is never touched. Resolution is per call, so setting the env here (after
-// import) still relocates the store.
 let prevDataDir;
 let dataDir;
 beforeEach(() => {
@@ -29,8 +26,6 @@ afterEach(() => {
   else process.env.MANIFOLD_DATA_DIR = prevDataDir;
   rmSync(dataDir, { recursive: true, force: true });
 });
-
-// ── constants ─────────────────────────────────────────────────────────────────
 
 describe("AUDIO_MIME_EXT", () => {
   it("maps audio/m4a to m4a", () => assert.equal(AUDIO_MIME_EXT["audio/m4a"], "m4a"));
@@ -48,8 +43,6 @@ describe("EXT_TO_MIME", () => {
   it("maps webm to audio/webm", () => assert.equal(EXT_TO_MIME["webm"], "audio/webm"));
   it("maps ogg to audio/ogg",   () => assert.equal(EXT_TO_MIME["ogg"], "audio/ogg"));
 });
-
-// ── audioDirForFlow ───────────────────────────────────────────────────────────
 
 describe("audioDirForFlow", () => {
   it("builds path under <store-home>/media/audio/<harness>/<flowId>/<itemId>", () => {
@@ -89,8 +82,6 @@ describe("audioDirForFlow", () => {
     assert.equal(path.basename(dir), "_");
   });
 });
-
-// ── loadAudioMetasForFlow ─────────────────────────────────────────────────────
 
 describe("loadAudioMetasForFlow", () => {
   it("returns empty array for non-existent flowId directory", async () => {

@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { computeCost, resolveCost, knownModels } from "../../../telemetry/pricer.js";
 
-// ── computeCost ────────────────────────────────────────────────────────────────
 
 describe("computeCost", () => {
   it("returns null for missing args", () => {
@@ -50,7 +49,6 @@ describe("computeCost", () => {
   });
 });
 
-// ── resolveCost ────────────────────────────────────────────────────────────────
 
 describe("resolveCost", () => {
   it("returns runner cost when srcTotal > 0", () => {
@@ -94,7 +92,6 @@ describe("resolveCost", () => {
   });
 });
 
-// ── knownModels ────────────────────────────────────────────────────────────────
 
 describe("knownModels", () => {
   it("returns a non-empty array of { provider, model } pairs", () => {

@@ -1,10 +1,3 @@
-/**
- * Unit tests for state/db.js's withSharedWrite()/isSqliteBusy() — the
- * shared write-serializer + busy-retry primitive extracted from
- * admission-queue-store.js's own proven serialize()/withWriteTx(),
- * generalized per-dbPath so every store sharing a connection via
- * getSharedDb() gets the same protection without reimplementing it.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -49,8 +42,6 @@ describe("withSharedWrite — serialization", () => {
     const [a, b] = await Promise.all([call("a"), call("b")]);
     assert.equal(a, "a");
     assert.equal(b, "b");
-    // Whichever ran first, its start/end must be adjacent — never
-    // a:start, b:start, a:end, b:end (that would mean they overlapped).
     assert.ok(
       (order[0] === "a:start" && order[1] === "a:end" && order[2] === "b:start" && order[3] === "b:end") ||
       (order[0] === "b:start" && order[1] === "b:end" && order[2] === "a:start" && order[3] === "a:end"),
@@ -67,7 +58,6 @@ describe("withSharedWrite — serialization", () => {
       await new Promise((r) => setTimeout(r, 30));
       return "a";
     });
-    // Give slowA a moment to actually start before firing b.
     await new Promise((r) => setTimeout(r, 5));
     const fastB = withSharedWrite(dbPathB, async () => {
       bStartedWhileAWasRunning = true;

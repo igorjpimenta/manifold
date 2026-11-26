@@ -1,23 +1,3 @@
-/**
- * Engine-mechanics E2E for a real childFlows:true
- * loop node whose topology mirrors nyxen_linkedin-touch's TOUCH
- * (DRAFT_TOUCH → GATE → STAMP_APPROVED/STAMP_REJECTED → ROUTE_CHANNEL →
- * SEND_LINKEDIN_DM_CODE/(_AGENT)/SEND_EMAIL → STAMP_SENT). One
- * human-gate, no fallback node, no loop-back — the simplest topology in
- * this whole migration series in terms of engine novelty, but the
- * largest branch node COUNT (9), and the only one with a 3-way channel
- * fan-out after the gate. Named "touch2" to avoid colliding with the
- * existing executor-loop-children-touch-e2e.test.js, which covers the
- * unrelated freelance_workana-touch-cadence pipeline's own TOUCH loop.
- *
- * Every sub-node is a trivial no-op stand-in — zero real filesystem,
- * subprocess, or agent dispatch I/O anywhere in this fixture.
- *
- * Isolated-sandbox discipline (per the incident writeup):
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal, waitForStatus } from "../../helpers/wait-for-event.js";
@@ -32,8 +12,6 @@ import { createGateResolver } from "../../../gates/gate-resolver.js";
 import { getAllSubflowGroups } from "../../../state/subflow-state.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -215,7 +193,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     assert.equal(child.waitJson.kind, "human-gate");
     assert.equal(child.waitJson.items[0].itemId, "p-1", "must block at GATE with the plain item id — TOUCH has no round-scoping");
 
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-1", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-1", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -237,7 +215,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-2", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-2", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -257,7 +235,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-3", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-3", decision: "approve", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -278,7 +256,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-4", decision: "reject", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-4", decision: "reject", source: "ws" });
     const settled = await waitForStatus(runStore, childFlowId, (r) => r.status === "succeeded");
     assert.equal(settled.status, "succeeded");
     const settledState = await assembleState(settled.flowId, { runStore, nodeExecutionsStore, baseState: settled.stateJson });
@@ -299,7 +277,7 @@ describe("childFlows:true TOUCH-shaped loop (nyxen_linkedin-touch), full engine 
     await _blocked;
 
     const [childFlowId] = await childFlowIds(harness, record.flowId);
-    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-5", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: childFlowId, itemId: "p-5", decision: "approve", source: "ws" });
     await flush();
 
     const groups = await getAllSubflowGroups({ flowId: record.flowId, runStore, nodeExecutionsStore });

@@ -1,16 +1,3 @@
-/**
- * Unit tests for events/ws-run-events.js
- *
- * Verifies the gateway WS projection (previously zero coverage):
- *   - every write emits a per-revision run.updated patch (no status-gated
- *     narrow events: no run.started, no gate.opened, no run.ended, no
- *     pipeline.stats.updated — subscribers that need lifecycle edges derive
- *     them from status transitions in the patch stream).
- *   - Revision dedupe: replays of the same write emit nothing.
- *   - Child flows also push a per-revision patch to the non-terminal parent.
- *   - Terminal flows drop their revision entry (no unbounded map growth).
- *   - Null broadcast / unknown flow stay silent, never throw.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { createWsRunEventsListener } from "../../../events/ws-run-events.js";
@@ -49,7 +36,6 @@ function names(calls) {
   return calls.map((c) => c.name);
 }
 
-// ── lifecycle ────────────────────────────────────────────────────────────────
 
 describe("ws-run-events — lifecycle", () => {
   test("revision emits only the per-revision patch", async () => {
@@ -90,7 +76,6 @@ describe("ws-run-events — lifecycle", () => {
   });
 });
 
-// ── gates ────────────────────────────────────────────────────────────────────
 
 describe("ws-run-events — gates", () => {
   test("blocked human-gate emits only the per-revision patch", async () => {
@@ -124,7 +109,6 @@ describe("ws-run-events — gates", () => {
   });
 });
 
-// ── silence ──────────────────────────────────────────────────────────────────
 
 describe("ws-run-events — silence", () => {
   test("unknown flowId is silent", async () => {

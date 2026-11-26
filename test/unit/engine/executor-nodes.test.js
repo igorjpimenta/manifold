@@ -3,17 +3,10 @@ import assert from "node:assert/strict";
 import { createNodeRunner } from "../../../engine/executor-nodes.js";
 import { NodeBlocked, GatewayHandoffNeeded } from "../../../engine/executor-errors.js";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
-
 const logger = { info: () => {}, warn: () => {}, error: () => {} };
 const api = { runtime: {} };
 
-// Minimal nodeExecutionsStore covering what assembleState()/makeNeedsCtx()
-// touch via optional chaining (so a missing method there is a harmless
-// no-op overlay) PLUS the two gate_records methods the human-gate branch
-// calls directly, unconditionally — a real store (or the production no-op
-// fallback) always has these, so the branch doesn't optional-chain them;
-// this mock has to provide them for the same reason.
+// getGateRecord/writeGateRecord are called unconditionally by the human-gate branch — the mock must provide them.
 function makeNodeExecutionsStore(overrides = {}) {
   const gateRecords = new Map();
   return {
@@ -38,12 +31,7 @@ function makeRunner(opts = {}) {
   });
 }
 
-// Records isBlocked/markUnhealthy calls so tests can assert exactly what
-// dispatchAgentEntry threaded through, without a real sqlite-backed store.
-// Methods return Promises (not plain values) — the real store is async, and
-// a sync mock here would let a missing `await` at the call site pass green
-// (an un-awaited Promise from a sync mock is falsy-truthy-wrong in ways an
-// un-awaited Promise from a real async call is not caught by).
+// Returns Promises — a sync mock would let a missing `await` at the call site pass green.
 function makeFakeNodeHealthStore(overrides = {}) {
   const marked = [];
   const isBlockedImpl = overrides.isBlocked ?? (() => false);
@@ -56,8 +44,6 @@ function makeFakeNodeHealthStore(overrides = {}) {
     marked,
   };
 }
-
-// ── code kind ─────────────────────────────────────────────────────────────────
 
 describe("executeNode — code kind", () => {
   it("calls node.run and returns stateUpdate", async () => {
@@ -95,8 +81,6 @@ describe("executeNode — code kind", () => {
     );
   });
 });
-
-// ── agent kind ───────────────────────────────────────────────────────────────
 
 describe("executeNode — agent kind", () => {
   it("returns stateUpdate from apply", async () => {
@@ -163,10 +147,6 @@ describe("executeNode — agent kind", () => {
   });
 });
 
-// ── agent kind — circuit breaker ──
-// node.circuitBreaker: true is a generalist opt-in on any "agent" node,
-// independent of which kind of flow it's running inside.
-
 describe("executeNode — agent kind: circuit breaker", () => {
   it("fails fast without dispatching when already blocked", async () => {
     let dispatched = false;
@@ -218,7 +198,6 @@ describe("executeNode — agent kind: circuit breaker", () => {
       nodeHealthStore,
       dispatchAgentWithRetry: async ({ node, applyCtx }) => node.apply(applyCtx, { text: "ok" }),
     });
-    // No circuitBreaker flag — isBlocked() returning true must not matter.
     const node = { kind: "agent", agent: "a", session: "agent:a:test", promptBuilder: () => "x", apply: (_s, o) => ({ text: o.text }) };
     const result = await executeNode({ node, nodeId: "SCAN_AGENT", state: { pipelineId: "p" }, flowId: "f" });
     assert.deepEqual(result.stateUpdate, { text: "ok" });
@@ -238,8 +217,6 @@ describe("executeNode — agent kind: circuit breaker", () => {
   });
 
   it("a missing tool scope does NOT mark unhealthy — an operator grants that, not a retry", async () => {
-    // A block has no TTL, so a configuration fault would park the node
-    // forever behind something only a human can fix.
     const nodeHealthStore = makeFakeNodeHealthStore();
     const { executeNode } = makeRunner({
       nodeHealthStore,
@@ -282,8 +259,6 @@ describe("executeNode — agent kind: circuit breaker", () => {
   });
 });
 
-// ── loop kind ─────────────────────────────────────────────────────────────────
-
 describe("executeNode — loop kind", () => {
   it("delegates to executeSubflowNode", async () => {
     let called = false;
@@ -296,8 +271,6 @@ describe("executeNode — loop kind", () => {
     assert.deepEqual(result.stateUpdate, { ran: true });
   });
 });
-
-// ── human-gate kind ───────────────────────────────────────────────────────────
 
 describe("executeNode — human-gate kind", () => {
   it("returns empty stateUpdate when pending is empty", async () => {
@@ -348,24 +321,18 @@ describe("executeNode — human-gate kind", () => {
       pendingSelector: (state) => allItems.filter((id) => !(state.approvedIds ?? []).includes(id)),
       approvalRequestBuilder: (_state, itemId) => ({ title: `${itemId}?` }),
     };
-    // First entry: nothing decided yet — all 3 pending, reentrant true.
     const first = await executeNode({ node, nodeId: "CHECKLIST", state: { approvedIds: [] }, flowId: "f" });
     assert.equal(first.waitJson.items.length, 3);
     assert.equal(first.reentrant, true);
-    // Resume after ONE decision — pendingSelector re-run with updated
-    // state must still report the other two as pending, still reentrant.
     const second = await executeNode({ node, nodeId: "CHECKLIST", state: { approvedIds: ["spelling"] }, flowId: "f" });
     assert.equal(second.waitJson.items.length, 2);
     assert.deepEqual(second.waitJson.items.map((i) => i.itemId), ["formatting", "links"]);
     assert.equal(second.reentrant, true);
-    // All three decided — gate satisfied, no waitJson, not reentrant.
     const third = await executeNode({ node, nodeId: "CHECKLIST", state: { approvedIds: allItems }, flowId: "f" });
     assert.equal(third.waitJson, undefined);
     assert.notEqual(third.reentrant, true);
   });
 });
-
-// ── unknown kind ──────────────────────────────────────────────────────────────
 
 describe("executeNode — unknown kind", () => {
   it("throws for unrecognized node kind", async () => {
@@ -377,4 +344,3 @@ describe("executeNode — unknown kind", () => {
     );
   });
 });
-

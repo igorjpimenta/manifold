@@ -1,9 +1,3 @@
-// Unit tests for the openclaw run-turn module — the harness half of an
-// agent dispatch: readiness gate, the waitForRun/tool-result race, and
-// the reply extraction.
-//
-// The tool-result race reads the shared sqlite store, so the suite runs
-// against an isolated store home (MANIFOLD_DATA_DIR), never the real one.
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -39,7 +33,6 @@ function makeRuntime(overrides = {}) {
   };
 }
 
-// ─── readiness gate ──────────────────────────────────────────────────────────
 
 describe("createGatewaySubagentGate", () => {
   test("no RPC reaches the runtime until whenGatewayReady settles", async () => {
@@ -68,7 +61,6 @@ describe("createGatewaySubagentGate", () => {
   });
 });
 
-// ─── the turn ────────────────────────────────────────────────────────────────
 
 describe("createRunTurn — the turn", () => {
   test("returns the last assistant text with the run id", async () => {
@@ -156,7 +148,7 @@ describe("createRunTurn — the turn", () => {
     const session = `sk-turn-${randomUUID()}`;
     let fetched = false;
     const raw = makeRuntime({
-      waitForRun: () => new Promise(() => {}), // only the tool row can settle this
+      waitForRun: () => new Promise(() => {}),
       getSessionMessages: async () => { fetched = true; return { messages: [] }; },
     });
     const { runTurn } = createRunTurn({ getRuntime: () => raw, logger });

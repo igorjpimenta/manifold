@@ -1,11 +1,3 @@
-// Unit tests for state/tool-handoff.js — sqlite-backed tool-result bridge.
-//
-// Every test runs against an isolated store home (mkdtemp MANIFOLD_DATA_DIR)
-// so the real ~/.manifold is never touched. Resolution is per call, so
-// setting the env once here (before any tool-handoff call) relocates the
-// whole store for this file. node:test runs each file in its own process,
-// so the override never leaks into other suites.
-
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -81,7 +73,6 @@ describe("writePendingResult / readPendingResult", () => {
   test("write is a no-op without a session key or with an undefined payload", async () => {
     await writePendingResult({ session: null, payload: { v: 1 } });
     await writePendingResult({ session: session(), payload: undefined });
-    // Nothing observable to assert beyond "did not throw".
   });
 
   test("sessions are independent", async () => {

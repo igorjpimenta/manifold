@@ -1,12 +1,9 @@
-// events/ws-frame.js — shared server-side WebSocket framing for manifold's
-// loopback event servers (events/serve-ws.js, dashboard/server.js).
-//
-// One door, two rooms: the handshake accept, server→client text frames, and
-// client-frame hygiene (ping→pong, close→destroy, everything else consumed
-// and ignored) live here so both servers behave identically. No stream,
-// store, or routing coupling — attachWsEndpoint only moves bytes for
-// sockets whose upgrade URL matches, and hands each socket to onConnect
-// for the server's own hello frames.
+// Shared server-side WebSocket framing for manifold's loopback event servers
+// (events/serve-ws.js, dashboard/server.js): handshake accept,
+// server→client text frames, and client-frame hygiene (ping→pong,
+// close→destroy, everything else consumed and ignored) — so both servers
+// behave identically. No stream/store/routing coupling; attachWsEndpoint
+// only moves bytes for sockets whose upgrade URL matches.
 import crypto from "node:crypto";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -39,9 +36,8 @@ export function encodeWsFrame(text) {
 // Attach a server→client event door to an existing http server. `match` is
 // the server's own path predicate (dashboard strips its /graph prefix
 // before matching; serve-ws accepts every upgrade target).
-//
 // onConnect(socket, req) runs after the 101 response: send hello frames
-// there and optionally return a tag stored for broadcast filtering.
+// there, optionally return a tag stored for broadcast filtering.
 // broadcast(obj, visibleTo) encodes once and writes to every open socket
 // whose tag passes — untagged sockets always receive.
 export function attachWsEndpoint(server, { match, onConnect = null, onMessage = null, logger = null } = {}) {
@@ -70,10 +66,10 @@ export function attachWsEndpoint(server, { match, onConnect = null, onMessage = 
     }
   }
 
-  // Client frames are only ever interesting as close/ping — unless the
-  // endpoint takes messages, in which case complete text messages are
-  // delivered to onMessage and everything else is consumed and ignored.
-  // Mask bit respected when skipping payloads.
+  // Client frames are only interesting as close/ping — unless the endpoint
+  // takes messages, in which case complete text messages go to onMessage and
+  // everything else is consumed and ignored (mask bit respected while
+  // skipping payloads).
   function wireSocket(socket) {
     let buf = Buffer.alloc(0);
     let textParts = null;
@@ -148,7 +144,7 @@ export function attachWsEndpoint(server, { match, onConnect = null, onMessage = 
     let pathname = "/";
     try {
       pathname = new URL(req.url ?? "/", "http://localhost").pathname;
-    } catch { /* keep "/" */ }
+    } catch {}
     const key = req.headers["sec-websocket-key"];
     if (!match(pathname) || (req.headers.upgrade || "").toLowerCase() !== "websocket" || !key) {
       socket.destroy();

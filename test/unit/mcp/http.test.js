@@ -1,6 +1,3 @@
-// Unit tests for mcp/http.js — the Streamable HTTP door onto the same tools
-// and identity contract as stdio. Real socket on an ephemeral port, stub ops
-// (no tools are invoked here; this file covers the door, not the tools).
 
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";

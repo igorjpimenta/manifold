@@ -1,27 +1,3 @@
-/**
- * Option B — engine-mechanics E2E for assembleState(), one test per node
- * shape, matching this suite's own established convention (see
- * executor-subflow-children-e2e.test.js):
- * a real createExecutor() driving a real dispatch loop against isolated tmp
- * sqlite stores, asserting assembleState()'s output against the SAME flow's
- * real stateJson rather than a hand-built mock of listResultsForFlow.
- *
- * B0 only wires nodeExecutions.writeResult() into the ordinary code/agent
- * success branch (executor.js's main loop, ~line 619) — human-gate's own
- * *completion* write goes through that same branch once its pendingSelector
- * clears, but a gate's approvedIds/rejectedIds (written by gate-resolver.js
- * directly onto stateJson, never through a node's own stateUpdate) and
- * dispatchSubflowChildren's parent-side write (always stateUpdate:{}, per
- * the design doc's corrected "SCORE is itself a subflow" resolution) are
- * NOT node-keyed results — assembleState() correctly has no way to see them.
- * Several tests below assert that gap explicitly, as documented current
- * behavior, not as something this phase is expected to fix.
- *
- * Isolated-sandbox discipline:
- * independent tmp-sqlite run-store/node-executions/state-store instances,
- * never ~/.openclaw/runtime.sqlite; pipelines registered directly in an
- * in-memory Map, never touching workspace/.pipelines/.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { waitForGateOpen, waitForTerminal } from "../../helpers/wait-for-event.js";
@@ -35,8 +11,6 @@ import { createExecutor } from "../../../engine/executor.js";
 import { createGateResolver } from "../../../gates/gate-resolver.js";
 import { assembleState } from "../../../engine/executor-helpers.js";
 
-// Always-admits-immediately fake — admissionQueueStore is required by createExecutor's
-// subflow-children paths. These tests don't exercise queue behavior.
 function makeAdmissionQueueStore(overrides = {}) {
   return {
     admit: async () => ({ id: "fake-admission", status: "admitted" }),
@@ -90,7 +64,7 @@ async function makeHarness(pipelineDef) {
   return { runStore, nodeExecutionsStore, store, executor, gateResolver, pipelinesRef };
 }
 
-describe("Option B Phase B1 — assembleState() against a real dispatch loop, per node shape", () => {
+describe("assembleState() against a real dispatch loop, per node shape", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
 
@@ -115,12 +89,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
 
-    // B4: state_json is entry-only — A/B/C never land
-    // there at all. assembleState() is the only source for a node's own
-    // output; this test proves the cutover actually happened (real
-    // stateJson has nothing to compare against) and that assembleState()
-    // alone is still correct.
-    assert.equal(flow.stateJson.A, undefined, "state_json must not carry node output post-B4");
+    assert.equal(flow.stateJson.A, undefined, "state_json must not carry node output");
     assert.equal(flow.stateJson.B, undefined);
     assert.equal(flow.stateJson.C, undefined);
 
@@ -144,20 +113,12 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     const { executor, runStore, nodeExecutionsStore } = harness;
 
     const record = await executor.start("test_loop", {}, { kind: "test" });
-    // Unlike the other tests in this file, LOOP revisits the SAME nodeId
-    // within one runFlow() call — isFreshNodeEntry only forces "fresh" on a
-    // genuinely new node, so the 2nd/3rd dispatch falls through to whatever
-    // `kind` runFlow() itself was called with. The real call sites (agent/
-    // cli.js, routes/operator.js, dashboard/server.js) always pass "fresh"
-    // after start() — match that convention rather than the no-arg form the
-    // other tests in this file get away with (they never revisit a node).
+// LOOP revisits the same nodeId mid-run; isFreshNodeEntry only forces "fresh" on genuinely new nodes, and real call sites pass "fresh" after start() — so this test does too.
     await executor.runFlow(record.flowId, "fresh");
 
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
-    // B4: state_json is entry-only — LOOP's count never lands there at
-    // all anymore. assembleState() (below) is the only place it survives.
-    assert.equal(flow.stateJson.LOOP, undefined, "state_json must not carry node output post-B4");
+    assert.equal(flow.stateJson.LOOP, undefined, "state_json must not carry node output");
 
     const assembled = await assembleState(record.flowId, { runStore, nodeExecutionsStore });
     assert.equal(assembled.LOOP.count, 3, "assembleState must not accidentally return the 1st or 2nd pass's row");
@@ -166,7 +127,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     assert.equal(results.filter((r) => r.nodeId === "LOOP").length, 1, "3 visits dedup to exactly 1 row per listResultsForFlow's contract");
   });
 
-  test("human-gate: both gates' records land in gate_records, never in state_json or assembleState() — the FULL replacement for the old state.gates snapshot, across TWO gates in sequence", async () => {
+  test("human-gate: both gates' records land in gate_records, never in state_json or assembleState() — across TWO gates in sequence", async () => {
     harness = await makeHarness({
       test_gates: {
         id: "test_gates",
@@ -195,31 +156,24 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     assert.equal(flow.waitJson.nodeId, "GATE_1");
 
     const gate2Open = waitForGateOpen((p) => p.flowId === record.flowId && p.nodeId === "GATE_2");
-    await gateResolver.recordItemDecision({ flowId: record.flowId, itemId: "g1", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: record.flowId, itemId: "g1", decision: "approve", source: "ws" });
     await gate2Open;
     flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "blocked");
     assert.equal(flow.waitJson.nodeId, "GATE_2", "GATE_1 cleared, now blocked on GATE_2");
 
     const parentDone = waitForTerminal((p) => p.flowId === record.flowId);
-    await gateResolver.recordItemDecision({ flowId: record.flowId, itemId: "g2", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: record.flowId, itemId: "g2", decision: "approve", source: "ws" });
     await parentDone;
     flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
 
-    // B4: the human-gate branch (executor-nodes.js) stopped
-    // writing a state.gates full-snapshot entirely — gate_records was
-    // always the correctness-safe source (see its own MIGRATIONS v11
-    // comment for why a shared-key snapshot embed goes stale across
-    // sibling gates), the parallel state_json write was pure "display/
-    // backward-compat" that turned out to have zero real readers left.
-    // Both gates' own point-lookup rows are the whole story now.
     const gate1 = await nodeExecutionsStore.getGateRecord(record.flowId, "GATE_1");
     const gate2 = await nodeExecutionsStore.getGateRecord(record.flowId, "GATE_2");
     assert.ok(gate1?.consumedAt, "GATE_1's own record survives independently, keyed by its own nodeId");
     assert.ok(gate2?.consumedAt);
 
-    assert.equal(flow.stateJson.gates, undefined, "state_json must never carry gate data post-B4");
+    assert.equal(flow.stateJson.gates, undefined, "state_json must never carry gate data");
     const assembled = await assembleState(record.flowId, { runStore, nodeExecutionsStore });
     assert.equal(assembled.gates, undefined, "assembleState has no gates key either — gate_records is the only source now");
   });
@@ -244,7 +198,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     const record = await executor.start("test_gate_bookkeeping", {}, { kind: "test" });
     await executor.runFlow(record.flowId);
     const settled = waitForTerminal((p) => p.flowId === record.flowId);
-    await gateResolver.recordItemDecision({ flowId: record.flowId, itemId: "x", decision: "approve", source: "cli" });
+    await gateResolver.recordItemDecision({ flowId: record.flowId, itemId: "x", decision: "approve", source: "ws" });
     await settled;
 
     const flow = await runStore.get(record.flowId);
@@ -252,7 +206,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     assert.deepEqual(flow.stateJson.approvedIds, ["x"], "sanity: gate-resolver really does write this to real stateJson");
 
     const assembled = await assembleState(record.flowId, { runStore, nodeExecutionsStore });
-    assert.equal(assembled.approvedIds, undefined, "documented gap — B2.5/B4 must carry these forward as named bookkeeping fields, not silently drop them");
+    assert.equal(assembled.approvedIds, undefined, "documented gap — gate bookkeeping is not carried into assembled state");
   });
 
   test("subflow (childFlows:true): assembled state carries _subflowGroups, no synthesized state[nodeId] for the subflow's own key", async () => {
@@ -297,7 +251,7 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
     assert.equal(assembled.CONNECT, undefined, "CONNECT's own dispatchSubflowChildren always writes stateUpdate:{} — there is no flat state[nodeId] to assemble");
   });
 
-  test("a result well over the old 64KB cap is assembled in full — no size limit left at all", async () => {
+  test("a result well over 64KB is assembled in full — no size limit applies", async () => {
     harness = await makeHarness({
       test_oversize: {
         id: "test_oversize",
@@ -315,24 +269,14 @@ describe("Option B Phase B1 — assembleState() against a real dispatch loop, pe
 
     const flow = await runStore.get(record.flowId);
     assert.equal(flow.status, "succeeded");
-    // B4: state_json is entry-only — BIG never lands there regardless of
-    // size. assembleState() (below) is the only place a node's own output
-    // survives.
-    assert.equal(flow.stateJson.BIG, undefined, "state_json must not carry node output post-B4");
+    assert.equal(flow.stateJson.BIG, undefined, "state_json must not carry node output");
 
     const assembled = await assembleState(record.flowId, { runStore, nodeExecutionsStore });
     assert.equal(assembled.BIG._resultTooLarge, undefined, "no cap left to trigger the marker");
     assert.equal(assembled.BIG.blob, "x".repeat(70_000), "the full oversized payload survives, unmodified");
   });
 
-  test("a result well over the old cap, flat small+bulk fields: assembled state keeps ALL fields, including the bulk one", async () => {
-    // Regression coverage for a flat (unwrapped) node result mixing tiny
-    // scalars (accessToken, bidderId) with a large array (listings) that
-    // lost EVERYTHING (and, under an intermediate fix, just the bulk
-    // field) once the whole result crossed the size cap — the tiny fields
-    // a much-later node (SUBMIT_CODE) depended on vanished with no error
-    // until that unrelated node failed. The cap itself is now gone, so
-    // nothing gets dropped at all.
+  test("a result well over the size cap, flat small+bulk fields: assembled state keeps ALL fields, including the bulk one", async () => {
     harness = await makeHarness({
       test_oversize_mixed: {
         id: "test_oversize_mixed",

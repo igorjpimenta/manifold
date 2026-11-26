@@ -10,11 +10,6 @@ import {
 } from "../../../routes/operator-discuss.js";
 import { createMockApi } from "../../helpers/mock-api.js";
 
-// No mocking required — the pure helpers carry no external static imports.
-
-
-// ── stringifyMessageContent ───────────────────────────────────────────────────
-
 describe("stringifyMessageContent", () => {
   it("returns string content unchanged", () => {
     assert.equal(stringifyMessageContent("hello world"), "hello world");
@@ -54,8 +49,6 @@ describe("stringifyMessageContent", () => {
     assert.ok(result.includes("direct text"));
   });
 });
-
-// ── filterDiscussHistoryMessages ──────────────────────────────────────────────
 
 describe("filterDiscussHistoryMessages", () => {
   it("returns empty array for empty input", () => {
@@ -147,8 +140,6 @@ describe("filterDiscussHistoryMessages", () => {
   });
 });
 
-// ── selectDiscussProvider ─────────────────────────────────────────────────────
-
 describe("selectDiscussProvider", () => {
   it("returns primary when chain is empty", () => {
     const result = selectDiscussProvider({ primarySpec: "anthropic/claude-haiku-4-5", chain: [], isCooldown: () => false });
@@ -176,7 +167,6 @@ describe("selectDiscussProvider", () => {
   it("returns primary when cooldown but no healthy fallback exists", () => {
     const chain = ["anthropic/claude-haiku-4-5", "claude-cli/claude-sonnet-4-6"];
     const result = selectDiscussProvider({ primarySpec: "", chain, isCooldown: () => true });
-    // All in cooldown — returns primary anyway (no healthy alternative)
     assert.equal(result.provider, "anthropic");
   });
 
@@ -198,10 +188,6 @@ describe("selectDiscussProvider", () => {
     assert.equal(result.provider, null);
   });
 });
-
-// ── stamped caller identity — kept guards ───────────────────────────────────
-// The elevated discuss route refuses unstamped calls before touching the
-// agent runtime or the session file: missing/empty identity → 400.
 
 describe("elev discuss handlers — stamped caller identity", () => {
   it("handleDiscuss: missing identity → 400 invalid_body", async () => {

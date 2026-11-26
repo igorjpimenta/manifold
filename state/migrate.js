@@ -1,16 +1,16 @@
 // state/migrate.js — better-sqlite3 migrate-on-open: schema DDL lives in
-// state/schema.js (runtime.sqlite) and
-// state/schema.ops.js (ops.sqlite); `npm run db:generate` snapshots them
-// into .migrations/*/<n>.sql; drizzle's migrate() applies pending snapshots.
+// state/schema.js (runtime.sqlite) and state/schema.ops.js (ops.sqlite);
+// `npm run db:generate` snapshots them into .migrations/*/<n>.sql;
+// drizzle's migrate() applies pending snapshots.
 //
-// Call sites run this BEFORE opening any libsql handle for the file, and it
-// runs at most once per file per process (migratedPaths): a second driver
-// writing under live handles is the one ordering that was observed to
+// Call sites run this BEFORE opening any libsql handle for the file, and
+// it runs at most once per file per process (migratedPaths): a second
+// driver writing under live handles is the one ordering observed to
 // poison them, so the first opener applies pending snapshots while no
-// handle exists yet and later opens find the journal current. Cross-process
-// safety comes from the drizzle journal transaction + busy_timeout.
+// handle exists yet. Cross-process safety comes from the drizzle journal
+// transaction + busy_timeout.
 //
-// Snapshots are the sole schema path. A snapshot that fails throws here,
+// Snapshots are the sole schema path; a failing snapshot throws here,
 // failing the open fast with the file named, instead of surfacing as
 // missing-column errors on first query later.
 //
@@ -26,9 +26,8 @@ import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import * as runtimeSchema from "./schema.js";
 import * as opsSchema from "./schema.ops.js";
-import { mergeOpsTables } from "./ops-merge.js";
 import { SESSION_KEYS_FROM_ROWS_SQL } from "./session-keys.js";
-import { BACKFILL_ATTRIBUTION_SQL, BACKFILL_LEGACY_BRANCH_ITEMS_SQL } from "./attribution-registries.js";
+import { BACKFILL_ATTRIBUTION_SQL } from "./attribution-registries.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.join(HERE, "..");
@@ -45,29 +44,20 @@ const migratedPaths = new Set();
 
 export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
   if (migratedPaths.has(dbPath)) return { applied: false };
-  // ops/0001 drops the tables that moved to runtime.sqlite, so the copy has
-  // to exist first. The runtime sibling is migrated here — including on an
-  // install where only ops exists — because that run is what performs the
-  // merge and the registry backfill. Non-canonical paths (tests, one-off
-  // stores) are left alone: they have no sibling to copy from.
-  if (migrationsFolder === OPS_MIGRATIONS_FOLDER && path.basename(dbPath) === "ops.sqlite") {
-    const runtimeDbPath = path.join(path.dirname(dbPath), "runtime.sqlite");
-    migrateDatabase({ dbPath: runtimeDbPath, migrationsFolder: RUNTIME_MIGRATIONS_FOLDER, logger });
-  }
   const dir = path.dirname(dbPath);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const sqlite = new Database(dbPath);
   try {
     sqlite.exec("PRAGMA journal_mode = WAL;");
-    // Snapshot rebuilds copy rows that predate the constraints (SQLite cannot
-    // add an FK in place), and drizzle wraps every snapshot in one
-    // transaction — a PRAGMA inside it is a no-op, so the posture has to be
-    // set here, around the whole run. Enforcement resumes before the handle
-    // closes; opening a migrated file never re-validates existing rows.
+    // Snapshot rebuilds copy rows that predate the constraints (SQLite
+    // cannot add an FK in place), and drizzle wraps every snapshot in one
+    // transaction — a PRAGMA inside it is a no-op, so the posture has to
+    // be set here, around the whole run. Enforcement resumes before the
+    // handle closes; opening a migrated file never re-validates existing
+    // rows.
     sqlite.exec("PRAGMA foreign_keys = OFF;");
-    // 30000 to match state/db.js's busy posture — the contended moment is a
-    // second process mid-migration, and the read path elsewhere tolerates the
-    // longer wait.
+    // Matches state/db.js's busy posture — the contended moment is a
+    // second process mid-migration.
     sqlite.exec("PRAGMA busy_timeout = 30000;");
     migrate(drizzle(sqlite, { schema: SCHEMAS.get(migrationsFolder) ?? {} }), { migrationsFolder });
     sqlite.exec("PRAGMA foreign_keys = ON;");
@@ -79,19 +69,14 @@ export function migrateDatabase({ dbPath, migrationsFolder, logger } = {}) {
     sqlite.close();
   }
   if (migrationsFolder === RUNTIME_MIGRATIONS_FOLDER) {
-    mergeOpsTables({ runtimeDbPath: dbPath, logger });
     // The registry must hold every key already referenced before the FKs
-    // are consulted; rows copied by mergeOpsTables carry keys of their own,
-    // so this runs after it rather than inside the migration snapshot.
+    // are consulted; the backfill runs after the snapshot rather than
+    // inside the migration transaction.
     const backfill = new Database(dbPath);
     try {
       const now = Date.now();
       backfill.prepare(SESSION_KEYS_FROM_ROWS_SQL).run(now);
       for (const sql of BACKFILL_ATTRIBUTION_SQL) backfill.prepare(sql).run(now);
-      const hasBranches = backfill
-        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'flow_branches'")
-        .get();
-      if (hasBranches) backfill.prepare(BACKFILL_LEGACY_BRANCH_ITEMS_SQL).run(now);
     } catch (err) {
       throw new Error(`migrate: sessions backfill failed on ${dbPath}: ${err?.message ?? err}`);
     } finally {

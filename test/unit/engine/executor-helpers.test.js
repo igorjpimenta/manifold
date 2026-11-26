@@ -18,8 +18,6 @@ import {
   assembleState,
 } from "../../../engine/executor-helpers.js";
 
-// ── resolveEdge ───────────────────────────────────────────────────────────────
-
 describe("resolveEdge", () => {
   it("returns string edge directly", () => {
     assert.equal(resolveEdge({ a: "b" }, "a", {}), "b");
@@ -40,15 +38,9 @@ describe("resolveEdge", () => {
     assert.equal(resolveEdge(edges, "bad", {}, { logger: { warn: () => {} }, flowId: "00000000" }), null);
   });
 
-  // ── 2-arg "edge function" mode (arity dispatch) ────────────────────────────
-  // 2-param edge opts into receiving the node's thrown error as its 2nd arg,
-  // via ctx.error. A 1-param edge (every edge in the codebase before this)
-  // is completely unaffected.
-
   it("a 1-param edge is invoked with exactly 1 argument, even when ctx.error is present", () => {
     let receivedArgCount = "not called";
-    // A plain `function` (not an arrow) so `arguments` is its own binding,
-    // not inherited from the test callback's scope.
+    // Plain `function`, not arrow: `arguments` must be this function's own binding.
     const edges = { step: function (s) { receivedArgCount = arguments.length; return "next"; } };
     resolveEdge(edges, "step", {}, { error: { message: "boom", errorType: "infra_unavailable" } });
     assert.equal(receivedArgCount, 1);
@@ -80,15 +72,9 @@ describe("resolveEdge", () => {
     let receivedError = "not called";
     const edges = { step: (s, error = "default") => { receivedError = error; return "next"; } };
     resolveEdge(edges, "step", {}, { error: { message: "boom", errorType: "infra_unavailable" } });
-    // fn.length is 0 here (a default value excludes that param from .length),
-    // so this silently takes the 1-arg path — receivedError stays whatever
-    // the default evaluates to, never the real error. Documents the trap
-    // called out in resolveEdge's own comment; don't write edges this way.
     assert.equal(receivedError, "default");
   });
 });
-
-// ── isTerminal / isBlocked ────────────────────────────────────────────────────
 
 describe("isTerminal", () => {
   it("returns true for succeeded, failed, cancelled, skipped", () => {
@@ -107,9 +93,7 @@ describe("isBlocked", () => {
   it("returns true for blocked", () => {
     assert.equal(isBlocked("blocked"), true);
   });
-  // "waiting" is never actually written anywhere (confirmed repo-wide) —
-  // gate pauses are always persisted as "blocked" — so it's treated the
-  // same as any other non-blocked status now.
+  // "waiting" is never persisted — gate pauses write "blocked" — so it's non-blocked like any other status.
   it("returns false for running, waiting, and terminal statuses", () => {
     for (const s of ["running", "waiting", "succeeded", "failed"]) {
       assert.equal(isBlocked(s), false, s);
@@ -128,36 +112,21 @@ describe("isQueued", () => {
   });
 });
 
-// ── isFreshNodeEntry (re-pointed off flow_node_invocations) ──────────────────
-
 describe("isFreshNodeEntry", () => {
   it("returns true for the first-ever entry to any node (no prior invocation at all)", () => {
-    // lastNodeId is whatever nodeExecutions.findCurrentStep(flowId)
-    // resolved to — null when the flow has never dispatched a node.
     assert.equal(isFreshNodeEntry(null, "DRAFT"), true);
     assert.equal(isFreshNodeEntry(undefined, "DRAFT"), true);
   });
 
   it("returns true for a genuine loop-back — the last dispatched node differs from the one being entered", () => {
-    // ...→PRIME→DRAFT→...→GATE→DRAFT (a real second pass through DRAFT) —
-    // findCurrentStep would resolve to "GATE" at the moment DRAFT is about
-    // to be re-entered.
     assert.equal(isFreshNodeEntry("GATE", "DRAFT"), true);
   });
 
   it("returns false when the last dispatched node IS the one being entered (continuation)", () => {
-    // An operator retry rewinds lastStep but never creates a new
-    // invocation for the failed node — findCurrentStep still resolves to
-    // that node's own id when resolveEdge lands back on it. A reentrant
-    // loop-wait re-check is the same shape: the loop node's own invocation
-    // was created on its first entry and nothing since has created a
-    // later one, so every re-check's findCurrentStep still resolves to
-    // the loop node's own id.
+    // Operator retry and reentrant loop-wait both land here: findCurrentStep still resolves to the node's own id.
     assert.equal(isFreshNodeEntry("DRAFT", "DRAFT"), false);
   });
 });
-
-// ── mergeForConflict ──────────────────────────────────────────────────────────
 
 describe("mergeForConflict", () => {
   it("returns mine when fresh is not an object", () => {
@@ -182,8 +151,6 @@ describe("mergeForConflict", () => {
   });
 });
 
-// ── withEditableTextDefault ───────────────────────────────────────────────────
-
 describe("withEditableTextDefault", () => {
   it("returns payload unchanged when editableText is already set", () => {
     const p = { editableText: "existing" };
@@ -205,8 +172,6 @@ describe("withEditableTextDefault", () => {
     assert.equal(withEditableTextDefault(null, {}), null);
   });
 });
-
-// ── shortSummary ──────────────────────────────────────────────────────────────
 
 describe("shortSummary", () => {
   it("returns empty string for falsy input", () => {
@@ -231,8 +196,6 @@ describe("shortSummary", () => {
   });
 });
 
-// ── deepClone ─────────────────────────────────────────────────────────────────
-
 describe("deepClone", () => {
   it("clones a nested object", () => {
     const orig = { a: { b: [1, 2] } };
@@ -246,8 +209,6 @@ describe("deepClone", () => {
     assert.deepEqual(deepClone(orig), orig);
   });
 });
-
-// ── detectBlockedSentinel ─────────────────────────────────────────────────────
 
 describe("detectBlockedSentinel", () => {
   it("returns _blocked when present", () => {
@@ -265,8 +226,6 @@ describe("detectBlockedSentinel", () => {
   });
 });
 
-// ── usesNamedParams ───────────────────────────────────────────────────────────
-
 describe("usesNamedParams", () => {
   it("returns true for destructured single-param function", () => {
     assert.equal(usesNamedParams(({ state, output }) => state), true);
@@ -282,8 +241,6 @@ describe("usesNamedParams", () => {
   });
 });
 
-// ── detectSkippedSentinel ─────────────────────────────────────────────────────
-
 describe("detectSkippedSentinel", () => {
   it("returns _skipped when present", () => {
     const skip = { reason: "already done" };
@@ -296,8 +253,6 @@ describe("detectSkippedSentinel", () => {
     assert.equal(detectSkippedSentinel(null), null);
   });
 });
-
-// ── validateGateLayout ──────────────────────────────────────────────────────
 
 describe("validateGateLayout", () => {
   it("does nothing for non-array or empty items", () => {
@@ -371,15 +326,6 @@ describe("validateGateLayout", () => {
   });
 });
 
-// ── describeWaitFallback ─────────────────────────────────────────────────────
-// Only human-gate and children-pending route through this fallback in
-// practice (every other wait kind carries a real reason by construction —
-// see executor.js's two Path-B/Path-C split). Covered here as a direct
-// pure-function unit test since exercising children-pending through a full
-// runFlow() would need a real childFlows loop dispatch — see executor.test.js's
-// "blocked-wait reason synthesis" describe block for the human-gate
-// integration-level coverage this complements.
-
 describe("describeWaitFallback", () => {
   it("human-gate: pluralizes correctly for multiple pending items", () => {
     const waitJson = { kind: "human-gate", nodeId: "GATE", pending: ["a", "b", "c"] };
@@ -422,21 +368,10 @@ describe("describeWaitFallback", () => {
   });
 });
 
-// ── assembleState (Option B, Phase B1) ─────────────────────────────────────
-// reconstructs the working state a node would see, replaying
-// flow_node_invocations.resultJson rows instead
-// of reading an accumulated blob. Not wired into the live dispatch loop
-// yet (that's B2); these tests validate the function in isolation.
-
 function resultRow(nodeId, { resultWrittenAt = 1000, resultJson = null, resultTooLargeBytes = null } = {}) {
   return { nodeId, resultWrittenAt, resultJson, resultTooLargeBytes };
 }
 
-// Minimal nodeExecutionsStore covering both assembleState's own direct
-// dependency (listResultsForFlow) and getAllSubflowGroups' dependencies
-// (called internally, unconditionally, for the _subflowGroups attachment) —
-// defaults produce zero subflow groups so tests that don't care about
-// _subflowGroups don't need to stub all four.
 function makeStore({ results = [], subflowNodeIds = [], invocationIdsByNode = {}, invocations = {}, children = [] } = {}) {
   return {
     nodeExecutionsStore: {
@@ -499,16 +434,6 @@ describe("assembleState", () => {
     assert.deepEqual(state, {});
   });
 
-  it("a legacy pre-cap-removal row (resultJson null, resultTooLargeBytes set) gets a _resultTooLarge marker at its own node key instead of being silently absent", async () => {
-    // node-executions.js's writeResult() no longer caps results — this row
-    // shape can only exist from before that removal.
-    const { nodeExecutionsStore, runStore } = makeStore({
-      results: [resultRow("SCAN", { resultJson: null, resultTooLargeBytes: 165000 })],
-    });
-    const state = await assembleState("flow-1", { runStore, nodeExecutionsStore });
-    assert.deepEqual(state, { SCAN: { _resultTooLarge: true, bytes: 165000 } });
-  });
-
   it("a corrupted resultJson row is skipped, not fatal to the rest of assembly", async () => {
     const { nodeExecutionsStore, runStore } = makeStore({
       results: [
@@ -557,7 +482,7 @@ describe("assembleState", () => {
     assert.deepEqual(state.DRAFT, { text: "hi" });
   });
 
-  it("a resultJson value overlays baseState's own copy of the same key — resultJson wins, matching real-flow B1 validation (they're identical today)", async () => {
+  it("a resultJson value overlays baseState's own copy of the same key — resultJson wins", async () => {
     const { nodeExecutionsStore, runStore } = makeStore({
       results: [resultRow("DRAFT", { resultJson: JSON.stringify({ DRAFT: { text: "fresher" } }) })],
     });

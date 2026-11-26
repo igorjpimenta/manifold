@@ -1,11 +1,9 @@
-// identity.js — harness declared, agent and session stamped per call.
-//
-// One thing is declared, two things arrive with the work. The server is
+// Harness declared, agent and session stamped per call. The server is
 // CONSTRUCTED with the harness it serves (MANIFOLD_HARNESS env or ctor
-// base); the agent and session of each call are the calling harness's job
-// to stamp — via _meta.manifold on harnesses with request-params access,
-// else stamped manifold_agent/manifold_session args. Unstamped calls fail;
-// nothing defaults, ever.
+// base); agent and session arrive per call from the calling harness — via
+// _meta.manifold where request params are accessible, else stamped
+// manifold_agent/manifold_session args. Unstamped calls fail; nothing
+// defaults, ever.
 
 function isUsableLayer(v) {
   return (

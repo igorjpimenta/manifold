@@ -4,33 +4,15 @@ import { ENTRY_FIELDS } from "./needs-resolver.js";
 
 export { REVISION_RETRY_LIMIT };
 
-// The write cutover: state_json stops accumulating a key per dispatched
-// node — a node's own output lives exclusively in
-// flow_node_invocations.result_json and is reconstructed on read via
-// assembleState() (already wired into every dispatch-loop read site). What's
-// persisted here narrows to entry/bookkeeping data only: pipelineId,
-// everything in needs-resolver.js's ENTRY_FIELDS (the same allowlist
-// ctx.needs({entry}) already validates against — this is its exact intended
-// meaning), and the 3 fields buildChildInitialState
-// (executor-subflow-children.js) sets on a freshly spawned child. `gates` is
-// deliberately NOT in this list — it's
-// sourced exclusively from gate_records (executor-nodes.js's human-gate
-// branch stopped writing state.gates in the same change that added this
-// filter) and reading it back through state_json would reopen the staleness
-// bug gate_records exists to prevent.
-//
-// Applied once, centrally, inside these 6 functions rather than at each of
-// executor.js's ~20 call sites — every persist path funnels through here,
-// so this is the one place that needs to change for the cutover, and it's
-// a single choke point to audit instead of twenty scattered edits.
-//
-// A global, unconditional filter, not a per-flow gate: the alternative
-// ("check whether THIS flow's current state_json has 100% resultJson
-// coverage before dropping its blob") was considered and rejected once the
-// backfill closed every genuine gap across every non-test, non-terminal
-// flow (verified via a full-history audit, not sampling) — carrying that
-// runtime check forever would guard against a scenario the backfill + the
-// live write path already rule out structurally, not just today.
+// state_json is entry-only: a node's own output lives exclusively in
+// flow_node_invocations.result_json, reconstructed on read via
+// assembleState(). PERSISTED_FIELDS narrows every persist path to
+// entry/bookkeeping data (needs-resolver's ENTRY_FIELDS plus pipelineId
+// and the 3 fields buildChildInitialState sets on a spawned child).
+// Applied centrally inside these 6 functions rather than at executor.js's
+// ~20 call sites — one choke point to audit. Unconditional, not a per-flow
+// coverage check: a runtime guard would protect against a scenario the
+// backfill plus the live write path already rule out structurally.
 const PERSISTED_FIELDS = new Set([...ENTRY_FIELDS, "pipelineId", "item", "itemIndex", "parentItem"]);
 
 function toPersistableState(state) {
@@ -75,8 +57,6 @@ export function createPersist({ store, failureStore, notifyFlowEnteredWaiting, l
         statusReason: args.statusReason,
       });
       if (result.applied) {
-        // Push-from-node: tell whoever's listening (typically the
-        // telegram-block-notifier) that this flow just transitioned to waiting.
         if (typeof notifyFlowEnteredWaiting === "function") {
           try {
             const fresh = await store.get(args.flowId);
@@ -101,12 +81,9 @@ export function createPersist({ store, failureStore, notifyFlowEnteredWaiting, l
     return { applied: false, code: "retry_exhausted" };
   }
 
-  // Same shape as persistWaitingRetrying, but for status='queued' (waiting
-  // on an internal resource — a shared admission-pool slot, cross-process
-  // lock — rather than an operator decision). No notifyFlowEnteredWaiting push:
-  // that hook exists specifically for external-channel delivery (e.g. the
-  // telegram-block-notifier) on human-gate waits, which queued transitions
-  // are not.
+  // Same shape as persistWaitingRetrying, but for status='queued'. No
+  // notifyFlowEnteredWaiting push — that hook is for external-channel
+  // delivery of human-gate waits, which queued transitions are not.
   async function persistQueuedRetrying(args) {
     let rev = args.revision;
     let curState = args.state;
@@ -178,10 +155,8 @@ export function createPersist({ store, failureStore, notifyFlowEnteredWaiting, l
             pipelineId: curState?.pipelineId,
             failureNode,
             message,
-            // Deliberately unfiltered — recordEngineFailure's own `state`
-            // param is currently unused in its body (see state/failure-store.js),
-            // separate from flow_runs.state_json entirely, so there's nothing
-            // here that needs entry-only narrowing.
+            // Deliberately unfiltered — this `state` param is separate from
+            // flow_runs.state_json, so entry-only narrowing doesn't apply.
             state: curState,
             invocationId,
             executionId,

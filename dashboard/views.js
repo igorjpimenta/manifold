@@ -1,45 +1,22 @@
-// Pipeline-declared dashboard views. Each pipeline can opt into
-// extra surfaces on its detail page by exporting a `views: [...]`
-// array; the dashboard renders them generically — no per-pipeline
-// dashboard code.
-//
-// View shape (pipeline-side):
-//
-//   {
-//     id: "outcomes",                           // stable, per-pipeline-unique
-//     kind: "funnel",                           // currently the only kind
-//     label: "outcomes (last 30d)",             // card title
-//     source: {
-//       kind: "frontmatter-dir",
-//       path: "/abs/path/to/dir",
-//       timeField: "sent-at",                   // optional; default "sent-at"
-//     },
-//     stages: [
-//       { id: "sent",    label: "sent"     },                                    // no filter ⇒ matches all records
-//       { id: "replied", label: "replied", outcomeIn: ["replied","qualified","meeting-scheduled","won"] },
-//       { id: "won",     label: "won",     outcomeEq: "won" },
-//     ],
-//   }
-//
-// To add a new view kind: extend `computeView` with the new branch and
-// add a record-loader if it pulls from a new source kind. The
-// frontend's <DeclaredView> dispatcher mirrors the same `kind` switch.
+// Pipeline-declared views: a pipeline exports `views: [...]`, rendered
+// generically — no per-pipeline dashboard code. Shape:
+//   { id, kind: "funnel"|"metric"|"table", label, sinceDays?,
+//     source: { kind: "frontmatter-dir", path, timeField? },
+//     stages: [{ id, label, outcomeIn? | outcomeEq? }]   // funnel
+//     compute: "count" | "sum:field" | "avg:field"       // metric
+//     columns?, limit?, sortBy? }                        // table
+// New kinds: extend computeView plus a record loader; the frontend's
+// <DeclaredView> mirrors the same kind switch.
 
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-// ─── Top-level dispatcher ────────────────────────────────────────────────────
-
 export async function computeViews(pipeline, { sinceMs = null } = {}) {
   if (!Array.isArray(pipeline?.views) || pipeline.views.length === 0) return [];
-  // Each view is independent; parallelise the IO. The frontmatter-dir
-  // loader is already libuv-pool-bound, so this won't fan out further
-  // than Node can handle.
   return Promise.all(pipeline.views.map((v) => computeView(v, { sinceMs })));
 }
 
 async function computeView(view, { sinceMs }) {
-  // Per-view sinceDays overrides the caller-supplied window.
   const effectiveSinceMs = typeof view.sinceDays === "number" && view.sinceDays > 0
     ? Date.now() - view.sinceDays * 86_400_000
     : sinceMs;
@@ -54,18 +31,13 @@ async function computeView(view, { sinceMs }) {
   }
 }
 
-// ─── kind: "funnel" ──────────────────────────────────────────────────────────
-
 async function computeFunnelView(view, { sinceMs }) {
   const records = await loadRecords(view.source, { sinceMs });
   if (!records) return { total: 0, funnel: [] };
   const stageDefs = Array.isArray(view.stages) ? view.stages : [];
 
-  // Compute each stage's count by counting records that match the
-  // stage's filter. Stages are filters over the full record set —
-  // they don't have to be nested supersets, but for an honest funnel
-  // they should be (each later stage ⊆ earlier stage). That's the
-  // pipeline author's responsibility.
+  // Stages are independent filters, not required to be nested supersets —
+  // keeping them nested for an honest funnel is the pipeline author's call.
   const stages = stageDefs.map((s) => ({
     ...s,
     count: records.filter((r) => matchStage(r, s)).length,
@@ -83,9 +55,7 @@ async function computeFunnelView(view, { sinceMs }) {
     out[out.length - 1].conversionFromStart = out[out.length - 1].count / stages[0].count;
   }
 
-  // Per-`outcome` distribution — handy for funnels over frontmatter
-  // sources where the field name is "outcome". When the source uses a
-  // different field name (future) this is omitted.
+  // Per-`outcome` distribution; omitted when the source has no such field.
   const byOutcome = {};
   for (const r of records) {
     if (typeof r.outcome === "string") {
@@ -107,16 +77,8 @@ function matchStage(record, stage) {
   if (typeof stage.outcomeEq === "string") {
     return record.outcome === stage.outcomeEq;
   }
-  // No filter declared — stage matches every record (used for "sent",
-  // i.e. the cohort base of a funnel).
   return true;
 }
-
-// ─── kind: "metric" ──────────────────────────────────────────────────────────
-//
-// compute: "count"           — number of records in the window
-// compute: "sum:fieldName"   — sum of record[fieldName] (parsed as float)
-// compute: "avg:fieldName"   — average of record[fieldName]
 
 async function computeMetricView(view, { sinceMs }) {
   const records = await loadRecords(view.source, { sinceMs });
@@ -131,12 +93,6 @@ async function computeMetricView(view, { sinceMs }) {
   if (op === "avg") return { value: nums.reduce((a, b) => a + b, 0) / nums.length, compute };
   return { value: null, error: `unknown metric op "${op}"` };
 }
-
-// ─── kind: "table" ───────────────────────────────────────────────────────────
-//
-// columns: string[]   — frontmatter fields to include in each row
-// limit:   number     — max rows (default 50), most-recent first
-// sortBy:  string     — frontmatter field to sort by (default: timeField)
 
 async function computeTableView(view, { sinceMs }) {
   const records = await loadRecords(view.source, { sinceMs });
@@ -159,8 +115,6 @@ async function computeTableView(view, { sinceMs }) {
   return { columns, rows, total: records.length };
 }
 
-// ─── source loaders ──────────────────────────────────────────────────────────
-
 async function loadRecords(source, { sinceMs }) {
   if (!source || typeof source !== "object") return null;
   if (source.kind === "frontmatter-dir") return loadFrontmatterDirRecords(source, { sinceMs });
@@ -169,9 +123,6 @@ async function loadRecords(source, { sinceMs }) {
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 
-// Minimal YAML frontmatter extractor. The sent/*.md files use flat
-// `key: value` lines (no nesting, no arrays). A full YAML parser would
-// be overkill for five-key headers and would change the build surface.
 function parseFrontmatter(text) {
   const m = text.match(FRONTMATTER_RE);
   if (!m) return null;
@@ -216,9 +167,8 @@ async function loadFrontmatterDirRecords({ path: dir, timeField = "sent-at" }, {
     if (!fm) return;
     const ts = parseDate(fm[timeField]);
     if (sinceMs != null) {
-      // Records missing the time field are excluded from windowed
-      // queries — better to be honest about the cohort than to
-      // silently inflate it with unknown-date records.
+      // Undated records are excluded from windowed queries: an honest cohort
+      // beats inflating it with unknown dates.
       if (ts == null || ts < sinceMs) return;
     }
     records.push({

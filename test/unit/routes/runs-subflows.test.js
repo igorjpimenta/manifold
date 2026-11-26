@@ -1,16 +1,7 @@
-/**
- * Unit tests for the /manifold/runs/:flowId/subflows endpoint.
- *
- * sendSubflowsList serves GET /manifold/runs/:flowId/subflows and resolves
- * a subflow node's real flow_runs children via getAllSubflowGroups
- * (nodeExecutionsStore/runStore). The old branchService path is gone.
- */
 import { test, describe, mock, after } from "node:test";
 import assert from "node:assert/strict";
 import { createMockApi, createMockRes, createMockReq } from "../../helpers/mock-api.js";
 
-// Route auth reads process.env.MANIFOLD_BEARER directly (routes/bearer-auth.js).
-// Set the env var before importing so the real guard passes our test token.
 const TEST_TOKEN = "test-token-for-unit-tests-runs-branches";
 const SAVED_BEARER = process.env.MANIFOLD_BEARER;
 process.env.MANIFOLD_BEARER = TEST_TOKEN;
@@ -19,10 +10,6 @@ after(() => {
   else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
-// sendSubflowsList now calls getNodeExecutionsStore() (via getAllSubflowGroups)
-// — mocked so tests are deterministic regardless of the real (or
-// singleton-cached) DB. Each test controls the childFlows surface directly via
-// these mutable impls rather than touching a real sqlite file.
 let listSubflowNodeIdsForFlowImpl = () => [];
 let listInvocationIdsForNodeImpl = () => [];
 let getInvocationImpl = () => null;
@@ -41,7 +28,6 @@ await mock.module(nodeExecutionsUrl, {
 
 const { registerRunRoutes } = await import("../../../routes/runs.js");
 
-// Wraps createMockReq with the auth header so the prefix handler doesn't 401.
 function authReq(method, path) {
   return createMockReq(method, path, { authorization: `Bearer ${TEST_TOKEN}` });
 }
@@ -68,9 +54,6 @@ function makeDeps(api, overrides = {}) {
   };
 }
 
-// Resets the getNodeExecutionsStore mock's childFlows surface to "no subflow
-// node is migrated" — the default every test not explicitly exercising the
-// dual-mode path should start from.
 function resetNodeExecutionsMock() {
   listSubflowNodeIdsForFlowImpl = () => [];
   listInvocationIdsForNodeImpl = () => [];
@@ -81,12 +64,9 @@ function prefixHandler(routes) {
   return routes.find((r) => r.path === "/manifold/runs/" && r.match === "prefix").handler;
 }
 
-
 function subflowReq(flowId) {
   return authReq("GET", `/manifold/runs/${flowId}/subflows`);
 }
-
-// ── GET /manifold/runs/:flowId/subflows ───────────────────────────────────────
 
 describe("sendSubflowsList — 200 + subflow data", () => {
   test("returns { subflows: [] } when no subflows for the flow", async () => {
@@ -105,9 +85,8 @@ describe("sendSubflowsList — 200 + subflow data", () => {
 
 });
 
-
-describe("sendSubflowsList — dual-mode (Phase 2): real childFlows children", () => {
-  test("a childFlows-migrated subflow node's real flow_runs children are returned, even when branchService.listByFlow has nothing", async () => {
+describe("sendSubflowsList — real childFlows children", () => {
+  test("a childFlows subflow node's real flow_runs children surface as subflow rows", async () => {
     resetNodeExecutionsMock();
     const { api, routes } = createMockApi();
     const flowId = "flow-with-real-children";
@@ -147,7 +126,7 @@ describe("sendSubflowsList — dual-mode (Phase 2): real childFlows children", (
     assert.deepEqual(b.data, { SCORE_LLM: { score: 77 } });
   });
 
-  test("a childFlows-blocked-on-gate child folds into status 'running' with an awaiting payload, matching the old model's shape", async () => {
+  test("a childFlows-blocked-on-gate child folds into status 'running' with an awaiting payload", async () => {
     resetNodeExecutionsMock();
     const { api, routes } = createMockApi();
     const flowId = "flow-with-blocked-child";
@@ -172,7 +151,7 @@ describe("sendSubflowsList — dual-mode (Phase 2): real childFlows children", (
     const res = createMockRes();
     await prefixHandler(routes)(subflowReq(flowId), res);
     const b = JSON.parse(res.body).subflows[0];
-    assert.equal(b.status, "running", "blocked-on-gate child folds into 'running' to match the old model");
+    assert.equal(b.status, "running", "blocked-on-gate child folds into 'running'");
     assert.equal(b.awaiting?.requestPayload?.kind, "human-gate");
     assert.equal(b.awaiting?.subNodeId, "GATE");
   });
@@ -232,7 +211,6 @@ describe("sendSubflowsList — error cases", () => {
     const { api, routes } = createMockApi();
     registerRunRoutes(makeDeps(api));
     const res = createMockRes();
-    // 405 is checked before auth, so no token needed
     await prefixHandler(routes)(createMockReq("DELETE", "/manifold/runs/some-flow/subflows"), res);
     assert.equal(res.statusCode, 405);
   });

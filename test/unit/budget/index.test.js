@@ -7,12 +7,7 @@ import { registerBudgetRoutes, openStore } from "../../../budget/index.js";
 import { createRunStore } from "../../../state/run-store.js";
 import { todayLocal } from "../../../budget/lib.js";
 
-// registerBudgetRoutes's real store (openStore(), hitting ~/.openclaw/ops.sqlite)
-// is swapped for a fake via the `openStore` DI param — tests run without
-// touching real sqlite or the gateway's service-registration lifecycle.
 
-// queue_items.flow_id/pipeline_id carry FKs to runtime parents; the
-  // fixture flows are real rows now, not just strings.
   async function seedFlow(dbPath, flowId, pipelineId = "p") {
     const store = createRunStore({ dbPath: `${dbPath}.runtime.sqlite` });
     await store.insert({ flowId, pipelineId, status: "running" });
@@ -48,11 +43,6 @@ describe("registerBudgetRoutes — isGateLocked awaits attachment without an ext
 
     registerBudgetRoutes(api, { openStore });
 
-    // A single call must just await attachment and return the real answer —
-    // no throw, no special "not ready" state the caller has to handle, even
-    // though registerService.start() is never invoked (matching the live
-    // orphaned-generation bug: a closure whose own start() never runs must
-    // still self-heal on demand).
     const locked = await api.runtime.approvalQueue.isGateLocked();
     assert.equal(locked, true);
     assert.equal(openStoreCalls, 1);
@@ -86,10 +76,6 @@ describe("registerBudgetRoutes — isGateLocked awaits attachment without an ext
 
     registerBudgetRoutes(api, { openStore });
 
-    // Must NOT silently resolve to false (which would let arbitrarily
-    // expensive nodes dispatch with zero budget control just because the
-    // store itself is broken) — a broken attach is a real failure, not a
-    // "not locked" answer.
     await assert.rejects(
       () => api.runtime.approvalQueue.isGateLocked(),
       /disk full/,
@@ -97,21 +83,11 @@ describe("registerBudgetRoutes — isGateLocked awaits attachment without an ext
   });
 });
 
-// Real sqlite, real (unmocked) openStore() — the seam every test above
-// deliberately bypasses via the openStore DI param. These exercise the
-// actual change this store's default openStore() made: getSharedDb(dbPath)
-// instead of a fresh openDb(dbPath) call, so a second registerBudgetRoutes
-// generation against the SAME dbPath (simulating a gateway plugin reload)
-// reuses the already-open, already-migrated connection instead of paying a
-// fresh connection-open + migration cost.
 describe("registerBudgetRoutes — real openStore(), connection reuse across generations", () => {
   function tmpDbPath() {
     return path.join(os.tmpdir(), `budget-index-test-${randomUUID()}.sqlite`);
   }
 
-  // Real openStore(), pinned to a tmp dbPath via the openStore DI param —
-  // still exercises the actual getSharedDb(dbPath) call inside openStore()
-  // itself, just without touching the real ~/.openclaw/ops.sqlite.
   function realOpenStoreAt(dbPath) {
     return () => openStore({ dbPath });
   }
@@ -121,9 +97,6 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
     const dbPath = tmpDbPath();
     const gen1Api = makeFakeApi();
     registerBudgetRoutes(gen1Api, { openStore: realOpenStoreAt(dbPath) });
-    // Real callers always reach isGateLocked() first (executor-budget.js's
-    // maybeBudgetGate), which is what attaches `client` — enqueueNodeApproval
-    // has no readiness guard of its own, matching production call order.
     await gen1Api.runtime.approvalQueue.isGateLocked();
     await seedFlow(dbPath, "flow-1");
 
@@ -132,9 +105,6 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
     });
     assert.ok(itemId);
 
-    // Simulate a gateway plugin reload: a brand-new registerBudgetRoutes
-    // closure, same dbPath, no shared JS state with gen1 beyond db.js's
-    // process-wide getSharedDb() cache.
     const gen2Api = makeFakeApi();
     registerBudgetRoutes(gen2Api, { openStore: realOpenStoreAt(dbPath) });
     await gen2Api.runtime.approvalQueue.isGateLocked();
@@ -147,7 +117,7 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
     const dbPath = tmpDbPath();
     const gen1Api = makeFakeApi();
     registerBudgetRoutes(gen1Api, { openStore: realOpenStoreAt(dbPath) });
-    await gen1Api.runtime.approvalQueue.isGateLocked(); // attaches gen1's client
+    await gen1Api.runtime.approvalQueue.isGateLocked();
 
     const today = todayLocal();
     const gen1Route = gen1Api._routes.find((r) => r.path === "/manifold/budget/gate/lock");
@@ -175,9 +145,6 @@ function postReq(body) {
   };
 }
 
-// ─── canonical budget emissions ─────────────────────────────────────────────
-// decide/lock/unlock go through the shared emitter: identical legacy wire
-// strings, envelope adds kind. Real sqlite at a tmp dbPath, same as above.
 
 describe("registerBudgetRoutes — canonical emissions", () => {
   function tmpDbPath() {
@@ -255,7 +222,6 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     const { api } = makeApiWithBroadcast();
     const client = await openStore({ dbPath });
     registerBudgetRoutes(api, { openStore: async () => client });
-    // Attachment happens on first isGateLocked(), same as production call order.
     await api.runtime.approvalQueue.isGateLocked();
     await seedFlow(dbPath, "flow-1");
 
@@ -275,7 +241,7 @@ describe("registerBudgetRoutes — canonical emissions", () => {
 
   it("lock/unlock emit budget.lock.changed with locked + day", async () => {
     const { api, calls, getBroadcast } = makeApiWithBroadcast();
-    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath(), legacyDbPath: null }), getBroadcast });
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath() }), getBroadcast });
     await api.runtime.approvalQueue.isGateLocked();
 
     const lockRoute = api._routes.find((r) => r.path === "/manifold/budget/gate/lock");

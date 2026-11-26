@@ -1,6 +1,4 @@
 
-// ── Pure helpers ──────────────────────────────────────────────────────────────
-
 export function stringifyMessageContent(content) {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -12,9 +10,8 @@ export function stringifyMessageContent(content) {
   return "";
 }
 
-// Takes [{role, content, timestamp}] from a discuss JSONL session and returns
-// [{isOperator, text, ts}] with protocol headers/footers stripped from user
-// turns and <draft>...</draft> tags stripped from assistant turns.
+// Discuss JSONL rows → [{isOperator, text, ts}], protocol headers/footers
+// stripped from user turns, <draft> tags from assistant turns.
 export function filterDiscussHistoryMessages(msgs) {
   const toEpochMs = (v) => {
     if (v == null) return null;
@@ -43,9 +40,7 @@ export function filterDiscussHistoryMessages(msgs) {
   return out;
 }
 
-// Given a resolved provider chain and a sync isCooldown predicate, returns the
-// best {provider, model} to use for this turn. Skips the primary if it's in
-// billing cooldown and a healthy fallback is available.
+// Skips a primary in billing cooldown when a healthy fallback exists.
 export function selectDiscussProvider({ primarySpec, chain, isCooldown }) {
   const resolveRef = (ref) => {
     const [p, ...mPts] = (ref ?? "").split("/");
@@ -69,11 +64,8 @@ export function selectDiscussProvider({ primarySpec, chain, isCooldown }) {
   return primary;
 }
 
-// ── Discuss handler factory ───────────────────────────────────────────────────
-
 export function createDiscussHandler({
   api,
-  // The discuss store owns the pending proposal (discuss_state.pending_json).
   discussStore,
   sessions,
 }) {

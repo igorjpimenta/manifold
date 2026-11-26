@@ -1,20 +1,4 @@
-// HTTP routes for manifold telemetry. Mounted under /manifold/telemetry/*.
-//
-// All routes are GET/PUT, read-only except budget cap writes, and return JSON.
-// Auth: "plugin" — operator session only, matches dashboard semantics.
-//
-// Routes:
-//   /manifold/telemetry/cost/today                       — running total + top movers
-//   /manifold/telemetry/cost/by-root  [?since=&until=]   — group by root session
-//   /manifold/telemetry/cost/by-trigger                  — group by root_kind (cron / telegram / explicit / ...)
-//   /manifold/telemetry/cost/by-cron-job                 — group by cron job name
-//   /manifold/telemetry/cost/by-pipeline                 — group by pipeline_id
-//   /manifold/telemetry/cost/by-flow  [?pipeline_id=]    — group by flow_id (drill-down inside a pipeline)
-//   /manifold/telemetry/cost/by-node  [?flow_id=]        — group by node_id (drill-down inside a flow)
-//   /manifold/telemetry/cost/by-model                    — group by provider+model
-//   /manifold/telemetry/cost/by-day   [?days=14]         — group by local day for the last N days
-//   /manifold/telemetry/cost/top-calls [?limit=20]       — most expensive single LLM calls
-//   /manifold/telemetry/cost/home                        — combined Home-tile payload
+// Telemetry HTTP routes — cost, tree, budget — under /manifold/telemetry/*.
 
 import { registerCostRoutes }    from "./http-cost.js";
 import { registerTreeRoutes }    from "./http-tree.js";

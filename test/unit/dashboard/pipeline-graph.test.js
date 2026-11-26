@@ -1,6 +1,3 @@
-// Unit tests for dashboard/pipeline-graph.js — the serializer that turns a
-// loaded pipeline def (functions included) into UI-safe JSON for the graph
-// view. Pure: no IO, no stores.
 
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";

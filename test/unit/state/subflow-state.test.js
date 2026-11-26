@@ -1,19 +1,8 @@
-/**
- * Unit tests for state/subflow-state.js
- *
- * Both getAllSubflowGroups/getSubflowGroup read flow_runs children via
- * nodeExecutionsStore.listSubflowNodeIdsForFlow.
- */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { getSubflowGroup, getAllSubflowGroups } from "../../../state/subflow-state.js";
 
-// ── fake run-store / node-executions-store ─────────────────────────────────
-
-// An invocation's own nodeId IS the group/loop-node id
-// (see subflow-state.js's normalizeChildAsSubflowRow comment) — fixtures below
-// use `nodeId` as the group id.
 function fakeStores({ invocations = [], children = [] } = {}) {
   const nodeExecutionsStore = {
     listInvocationIdsForNode: (flowId, nodeId) =>
@@ -28,8 +17,6 @@ function fakeStores({ invocations = [], children = [] } = {}) {
   return { runStore, nodeExecutionsStore };
 }
 
-// ── getAllSubflowGroups — base behavior ───────────────────────────────────────
-
 describe("getAllSubflowGroups — base behavior", () => {
   test("returns empty object when the flow has no subflow nodes", async () => {
     const { runStore, nodeExecutionsStore } = fakeStores();
@@ -37,10 +24,8 @@ describe("getAllSubflowGroups — base behavior", () => {
   });
 });
 
-// ── new-model (child flow_runs) path ────────────────────────────────────────
-
-describe("getSubflowGroup — new model (real flow_runs children)", () => {
-  test("returns real flow_runs children for a migrated group", async () => {
+describe("getSubflowGroup — real flow_runs children", () => {
+  test("returns the group's real flow_runs children", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
       invocations: [{ id: "inv-1", flowId, nodeId: "group1", subflowKey: "item-1" }],
@@ -54,7 +39,7 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.equal(result["item-1"].flowId, "child-1");
   });
 
-  test("maps status/data/timing fields onto the old row shape", async () => {
+  test("maps status/data/timing fields onto the row shape callers read", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
       invocations: [{ id: "inv-1", flowId, nodeId: "group1", subflowKey: "item-1" }],
@@ -74,7 +59,7 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.deepEqual(result["item-1"].data, { foo: "bar" });
   });
 
-  test("folds 'blocked' status into 'running', matching the old model", async () => {
+  test("folds 'blocked' status into 'running'", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
       invocations: [{ id: "inv-1", flowId, nodeId: "group1", subflowKey: "item-1" }],
@@ -87,10 +72,6 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     assert.equal(result["item-1"].status, "running");
   });
 
-  // Phase 4: unlike 'blocked', 'queued'
-  // has no old-model analogue to fold into "running" — it's an internal-
-  // resource wait (an admission slot), not a gate,
-  // so it's passed through unchanged along with its reason text.
   test("passes 'queued' status through unchanged, with statusReason carried onto the row", async () => {
     const flowId = randomUUID();
     const { runStore, nodeExecutionsStore } = fakeStores({
@@ -107,8 +88,7 @@ describe("getSubflowGroup — new model (real flow_runs children)", () => {
     const result = await getSubflowGroup({ flowId, groupId: "group1", runStore, nodeExecutionsStore });
     assert.equal(result["item-2"].status, "queued");
     assert.equal(result["item-2"].statusReason, "queued: waiting for an admission slot (node SCRAPE_PROFILE)");
-    // A queued child's wait_json is not gate-shaped — it must not populate
-    // `awaiting` (reserved for human-gate payloads with a subNodeId).
+    // Non-gate wait_json must not populate `awaiting`.
     assert.equal(result["item-2"].awaiting, null);
   });
 

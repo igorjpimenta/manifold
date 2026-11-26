@@ -1,7 +1,6 @@
-// node-cost.js — lazy-singleton reader over cost_by_call (runtime.sqlite).
-// No new storage: lineage already tags every LLM call with pipeline_id +
-// node_id. This just exposes a percentile query so estimateNodeCost can
-// return historically-grounded low/high bounds instead of a static range.
+// node-cost.js — lazy-singleton reader over cost_by_call
+// (runtime.sqlite): a percentile query so estimateNodeCost can return
+// historically-grounded low/high bounds instead of a static range.
 
 import path from "node:path";
 import { getSharedDb, resolveStorePaths } from "./db.js";
@@ -62,6 +61,6 @@ export function createNodeCostReader({ dbPath = defaultDbPath() } = {}) {
   return { nodeCallStats };
 }
 
-// Default singleton backed by the store home's ops.sqlite
+// Default singleton backed by the store home's runtime.sqlite
 const _default = createNodeCostReader();
 export const { nodeCallStats } = _default;

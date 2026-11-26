@@ -19,12 +19,11 @@ export const pipelines = sqliteTable('pipelines', {
 ]);
 
 // Session keys are assigned by the harness, outside this database, so a
-// key can be referenced (parent/root lineage, cost attribution, dispatch
-// session) before any table of ours has seen it. This registry is the
-// target that makes those pointers FKs; writers insert OR IGNORE the keys
-// they are about to reference, and state/session-keys.js backfills the
-// union on migration. Rows are never pruned — a key is an identity, not a
-// live record.
+// key can be referenced before any table of ours has seen it — this
+// registry is the FK target; writers insert OR IGNORE the key they are
+// about to reference, and state/session-keys.js backfills the union on
+// migration. Rows are never pruned — a key is an identity, not a live
+// record.
 export const sessions = sqliteTable('sessions', {
   sessionKey:  text('session_key').primaryKey(),
   firstSeenAt: integer('first_seen_at').notNull(),
@@ -33,11 +32,9 @@ export const sessions = sqliteTable('sessions', {
 ]);
 
 // Attribution keys (item, node name, turn run) are written by engine and
-// telemetry frames, not owned by a row of ours, so these three registries
-// are their materialized key set. Every writer registers what it is about
-// to attribute (state/attribution-registries.js), and migration backfills
-// the union, so a key is never dangling. Rows are append-only: a pruned
-// flow must not erase the attribution that names it.
+// telemetry frames, not owned by a row of ours, so these registries are
+// their materialized key set (state/attribution-registries.js). Rows are
+// append-only: a pruned flow must not erase the attribution that names it.
 export const flowItems = sqliteTable('flow_items', {
   flowId:      text('flow_id').notNull(),
   itemKey:     text('item_key').notNull(),
@@ -92,54 +89,42 @@ export const flowNodeInvocations = sqliteTable('flow_node_invocations', {
   subflowKey: text('subflow_key'),
   visitSeq:   integer('visit_seq').notNull().default(1),
   invokedAt:  integer('invoked_at').notNull(),
-  // Option B, Phase B0 — this
-  // table's first payload column. resultWrittenAt is the "is this real"
-  // signal a bare nullable resultJson can't provide on its own (not
-  // dispatched vs. dispatched-not-complete vs. complete-with-null-result).
-  // resultTooLargeBytes carries the real size of a result that was capped
-  // instead of stored (see writeResult() in
-  // state/node-executions.js). Every write today sets it null; a non-null
-  // value marks a row whose result was never stored.
+  // resultWrittenAt is the "is this real" signal a bare nullable
+  // resultJson can't provide: not-dispatched vs dispatched-not-complete
+  // vs complete-with-null-result. resultTooLargeBytes: every write sets
+  // it null; a non-null marks a result that was never stored.
   resultJson:          text('result_json'),
   resultWrittenAt:     integer('result_written_at'),
   resultTooLargeBytes: integer('result_too_large_bytes'),
 }, (table) => [
-  // NOTE: idx_invocations_identity (UNIQUE on flow_id, node_id,
-  // COALESCE(subflow_key, ''), visit_seq) is intentionally absent here —
+  // idx_invocations_identity (UNIQUE on flow_id, node_id,
+  // COALESCE(subflow_key, ''), visit_seq) is intentionally absent here:
   // drizzle-kit cannot serialize sql fragments inside an index ON clause,
-  // so it lives verbatim at the end of .migrations/runtime/0000 (same
-  // anchor-edit category as the IF NOT EXISTS pass above it).
+  // so it lives verbatim at the end of .migrations/runtime/0000.
   index('idx_invocations_flow').on(table.flowId),
   index('idx_invocations_node_subflow').on(table.nodeId, table.subflowKey),
   index('idx_invocations_pipe_node').on(table.pipelineId, table.nodeId),
 ]);
 
 // error/error_type intentionally NOT here — error content lives entirely
-// into failure_events, which gets a permanent row on every single
-// throw regardless of what a cascade edge decides to do next. This table
-// is purely an execution-window/identity ledger: which node, which
-// attempt, when it ran, why kind of dispatch (fresh/retry/revival/
-// recheck) — never what went wrong.
+// in failure_events, which gets a permanent row on every throw. This
+// table is purely an execution-window/identity ledger: which node, which
+// attempt, when it ran, why kind of dispatch — never what went wrong.
 export const flowNodeExecutions = sqliteTable('flow_node_executions', {
   id:           text('id').primaryKey(),
   invocationId: text('invocation_id').notNull().references(() => flowNodeInvocations.id, { onDelete: 'cascade' }),
   enteredAt:    integer('entered_at').notNull(),
   exitedAt:     integer('exited_at').notNull(),
-  kind:         text('kind').notNull().default('legacy'),
+  kind:         text('kind').notNull(),
 }, (table) => [
   index('idx_fne_invocation').on(table.invocationId),
   index('idx_fne_exited').on(table.exitedAt),
 ]);
 
-// flow_branches (branch storage) is still a real table in runtime.sqlite —
-// read directly via raw SQL by state/node-executions.js, never through
-// Drizzle — and deliberately has no schema export here: nothing imports
-// one.
-
 // Deliberately thin — pipeline_id/branch_item_id/failure_node/recovery_hint/
 // resolved status are reconstructed at read time via invocation_id/
-// execution_id joining to flow_node_invocations/flow_node_executions
-// (see failure-store.js's deriveFailureContext), not stored here.
+// execution_id joins (failure-store.js's deriveFailureContext), not
+// stored here.
 export const failureEvents = sqliteTable('failure_events', {
   id:             text('id').primaryKey(),
   flowId:         text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
@@ -148,12 +133,10 @@ export const failureEvents = sqliteTable('failure_events', {
   invocationId:   text('invocation_id').references(() => flowNodeInvocations.id, { onDelete: 'set null' }),
   executionId:    text('execution_id').references(() => flowNodeExecutions.id, { onDelete: 'set null' }),
   // Error content lives here, not in flow_node_executions, so it is not
-  // derivable via a join. NodeFailure vocabulary: never_attempted|
-  // confirmed_absent|inconclusive|infra_unavailable|blocked — plus
-  // "subflow-mode-not-satisfied" for a subflow node whose exit mode wasn't
-  // met (not a thrown NodeFailure at all, a policy verdict — see
-  // failure-store.js's classifyRecoveryHint) — or null for an ordinary
-  // engine-caught throw with no further classification.
+  // derivable via a join. error_type carries the thrown NodeFailure's
+  // errorType verbatim (pipeline-authored string) or null for an ordinary
+  // engine-caught throw; "subflow-mode-not-satisfied" is written directly
+  // by the engine (a policy verdict, not a thrown NodeFailure).
   errorType:      text('error_type'),
 }, (table) => [
   index('idx_failures_flow').on(table.flowId),
@@ -173,7 +156,7 @@ export const discussState = sqliteTable('discuss_state', {
   componentsJson: text('components_json').notNull().default('[]'),
 }, (table) => [
   index('idx_discuss_updated').on(table.updatedAt),
-  // One row per discuss thread. Without this constraint two concurrent
+  // One row per discuss thread: without this, two concurrent
   // appendMessage calls each insert their own row and the thread's
   // messages split across them.
   uniqueIndex('idx_discuss_state_unique').on(table.flowId, table.itemId),
@@ -193,8 +176,7 @@ export const flowSessions = sqliteTable('flow_sessions', {
 ]);
 
 // Gate discuss thread identity: one row per (flow, gate, item), keyed by
-// the coordinates — never by parsing the session id. Replaces the
-// per-thread JSON sidecars: the roster is the map, the harness owns the id.
+// the coordinates — never by parsing the session id.
 export const discussThreads = sqliteTable('discuss_threads', {
   flowId:      text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   gateNodeId:  text('gate_node_id').notNull(),
@@ -225,7 +207,7 @@ export const nodeHealth = sqliteTable('node_health', {
 
 // Point lookup of one gate node's own record — keyed (flow_id, node_id) so
 // sibling gates never share a key that can go stale. Written/read via raw
-// SQL (like flow_branches below); the def exists so snapshots cover it.
+// SQL; the def exists so snapshots cover it.
 export const gateRecords = sqliteTable('gate_records', {
   flowId:     text('flow_id').notNull().references(() => flowRuns.flowId, { onDelete: 'cascade' }),
   nodeId:     text('node_id').notNull(),
@@ -296,10 +278,10 @@ export const flowEvents = sqliteTable('flow_events', {
   index('idx_flow_events_flow_id').on(table.flowId),
   index('idx_flow_events_occurred_at').on(table.occurredAt),
 ]);
-// Model-routing circuit-breaker state. Separate from node_health because the
-// two tiers disagree on expiry: a quarantined model carries its own deadline
-// in until_ms, while a blocked node has no deadline at all and waits for an
-// operator. See model-circuit-breaker/store.js.
+// Model-routing circuit-breaker state. Separate from node_health because
+// the two tiers disagree on expiry: a quarantined model carries its own
+// deadline in until_ms, while a blocked node has no deadline and waits
+// for an operator.
 export const modelHealth = sqliteTable('model_health', {
   id:             text('id').primaryKey(),
   ref:            text('ref').notNull(),
@@ -315,9 +297,8 @@ export const modelHealth = sqliteTable('model_health', {
 });
 
 
-// Per-harness pipeline directory overrides, one row per harness. Written by
-// deliberate admin acts (`manifold pipelines register`, operator tooling);
-// read once at boot to resolve the pipelines dir. No expiry: removing an
+// Per-harness pipeline directory overrides, one row per harness, written
+// by deliberate admin acts and read once at boot. No expiry: removing an
 // override is a delete, not a flag.
 export const pipelineDirs = sqliteTable('pipeline_dirs', {
   harness:   text('harness').primaryKey().references(() => harnesses.id, { onDelete: 'cascade' }),
@@ -325,9 +306,8 @@ export const pipelineDirs = sqliteTable('pipeline_dirs', {
   createdAt: integer('created_at').notNull(),
 });
 
-// Structured tool results delivered by agents over MCP
-// (manifold_deliver_result). Keyed by the harness-stamped session the
-// agent and the waiting dispatch both know — no invocationId resolution.
+// Structured tool results delivered by agents over MCP. Keyed by the
+// harness-stamped session both sides know — no invocationId resolution.
 // Latest write wins; the dispatch consumes the row for its own turn.
 export const toolResults = sqliteTable('tool_results', {
   session:  text('session_key').primaryKey().references(() => sessions.sessionKey),
@@ -338,10 +318,10 @@ export const toolResults = sqliteTable('tool_results', {
   updatedAt:   integer('updated_at').notNull(),
 });
 
-// Lineage and cost telemetry, moved out of ops.sqlite: flow_id and
-// pipeline_id carry FKs to runtime parents, and SQLite cannot constrain a
-// column against a table in another file. The ops-side definitions stay in
-// schema.ops.js as the frozen shape of the old file.
+// Lineage and cost telemetry live in runtime.sqlite because flow_id and
+// pipeline_id carry FKs to runtime parents — SQLite cannot constrain a
+// column against a table in another file. schema.ops.js is the
+// ops.sqlite schema.
 export const queueItems = sqliteTable('queue_items', {
   id:               text('id').primaryKey(),
   label:            text('label').notNull(),

@@ -6,15 +6,10 @@ import { randomUUID } from "node:crypto";
 import { registerBudgetRoutes } from "../../../telemetry/http-budget.js";
 import { initCapStore } from "../../../telemetry/budget-alert.js";
 
-// setCapAndPersist/setLockThresholdAndPersist (called by the PUT handlers
-// below) write to a real cap_versions SQLite table — point them at an
-// isolated per-run temp file so this suite never touches the real
-// ~/.openclaw/ops.sqlite.
 await initCapStore({
   dbPath: path.join(os.tmpdir(), `manifold-http-budget-test-${randomUUID()}.sqlite`)
 });
 
-// ── helpers ───────────────────────────────────────────────────────────────────
 
 function makeApi() {
   const routes = new Map();
@@ -52,15 +47,12 @@ function makeReq(method, path, body = null) {
   return req;
 }
 
-// Mirrors budget/index.js's gate lock/unlock broadcast contract: getBroadcast()
-// returns the actual broadcast(event, payload) function.
 function makeBroadcast() {
   const calls = [];
   const broadcast = (event, payload) => calls.push({ event, payload });
   return { getBroadcast: () => broadcast, calls };
 }
 
-// ── /budget/cap ───────────────────────────────────────────────────────────────
 
 describe("registerBudgetRoutes /budget/cap", () => {
   it("GET returns current capUSD", async () => {
@@ -139,7 +131,7 @@ describe("registerBudgetRoutes /budget/cap", () => {
   it("no getBroadcast passed — PUT still succeeds (broadcast is optional)", async () => {
     const api = makeApi();
     const { json, bad } = makeJson();
-    registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad }); // getBroadcast omitted
+    registerBudgetRoutes({ api, getStore: () => ({}), logger: null, json, bad });
 
     const def = api._routes.get("/manifold/telemetry/budget/cap");
     const req = makeReq("PUT", "/manifold/telemetry/budget/cap", { capUSD: 2.0 });
@@ -161,7 +153,6 @@ describe("registerBudgetRoutes /budget/cap", () => {
   });
 });
 
-// ── /budget/gate-threshold ────────────────────────────────────────────────────
 
 describe("registerBudgetRoutes /budget/gate-threshold", () => {
   it("GET returns current lockThreshold", async () => {
@@ -222,7 +213,6 @@ describe("registerBudgetRoutes /budget/gate-threshold", () => {
   });
 });
 
-// ── /budget/cap-history ───────────────────────────────────────────────────────
 
 describe("registerBudgetRoutes /budget/cap-history", () => {
   it("GET returns versions array with capUSD, lockThreshold, registeredAt, retiredAt", async () => {
@@ -267,11 +257,6 @@ describe("registerBudgetRoutes /budget/cap-history", () => {
   });
 });
 
-// ── /budget/alert-history ─────────────────────────────────────────────────────
-// Populated-data coverage (ordering, limit) lives in
-// budget-alert-history.test.js, which can insert rows directly; this suite
-// shares one store across all its tests (seeded at module load) so it only
-// checks the route's registration and empty-state shape here.
 
 describe("registerBudgetRoutes /budget/alert-history", () => {
   it("GET returns an events array (empty on a fresh store)", async () => {

@@ -1,10 +1,3 @@
-/**
- * Unit tests for engine/child-resume-trigger.js — Phase 2's "wake the parent
- * once every sibling child is terminal" mechanism. Uses real sqlite-backed
- * run-store.js/node-executions.js instances (tmp files) plus
- * engine/spawn-child.js to build genuine parent/child pairs, since the
- * logic under test is a join across both tables' real schemas.
- */
 import { test, describe, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -30,8 +23,6 @@ async function makeHarness() {
   return { runStore, nodeExecutionsStore, store };
 }
 
-// Spawns `count` children of a synthetic parent flow under one loop node
-// ("LOOP"), returning their childFlowIds.
 async function spawnChildren(harness, parentFlowId, count) {
   const { runStore, nodeExecutionsStore, store } = harness;
   await runStore.insert({ flowId: parentFlowId, status: "running" });
@@ -65,7 +56,6 @@ describe("areSiblingsAllTerminal", () => {
     const parentFlowId = randomUUID();
     const [child1, child2] = await spawnChildren(harness, parentFlowId, 2);
     await store.finish({ flowId: child1, expectedRevision: 0, stateJson: {} });
-    // child2 left running
 
     const result = await areSiblingsAllTerminal({ flowId: parentFlowId, nodeId: "LOOP", runStore, nodeExecutionsStore });
     assert.equal(result.allTerminal, false);
@@ -93,10 +83,6 @@ describe("maybeResumeParent", () => {
   test("resumes the parent when the finishing child is the last non-terminal sibling", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;
-    // A real flow_runs row, blocked (as dispatchLoopChildren would leave it)
-    // — maybeResumeParent must flip this back to 'running' before calling
-    // resume(), since resume() is just runFlow() and runFlow's own first
-    // check returns immediately for a still-blocked flow.
     const parent = await store.create({ pipelineId: "parent_pipe", initialState: {} });
     const parentFlowId = parent.flowId;
     await store.setWaiting({
@@ -122,7 +108,7 @@ describe("maybeResumeParent", () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;
     const parentFlowId = randomUUID();
-    const [child1] = await spawnChildren(harness, parentFlowId, 2); // second sibling left running
+    const [child1] = await spawnChildren(harness, parentFlowId, 2);
     await store.finish({ flowId: child1, expectedRevision: 0, stateJson: {} });
 
     let called = false;
@@ -204,8 +190,6 @@ describe("subflowOutcomeSatisfied", () => {
   });
 });
 
-// Stage 1.5: a subflow node's
-// `mode` decides whether terminal children resume the parent or fail it.
 describe("maybeResumeParent — Stage 1.5 mode enforcement", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
@@ -318,13 +302,6 @@ describe("maybeResumeParent — Stage 1.5 mode enforcement", () => {
     assert.equal(resumedWith, parent.flowId);
   });
 
-  // A mode-not-satisfied failure gets a REAL failure_events row, not just a
-  // bare flow_runs.status
-  // write. Note: `invocation` inside maybeResumeParent is the CHILD's own
-  // PER-ITEM invocation (spawn-child.js keys it by the item's subflowKey) —
-  // recordEngineFailure must target the subflow node's OWN dispatch
-  // invocation (subflowKey:null) instead, which these tests create
-  // explicitly via nodeExecutionsStore.write() to mimic a real dispatch.
   describe("maybeResumeParent — records a real failure for mode-not-satisfied", () => {
     test("calls failureStore.recordEngineFailure against the subflow node's OWN invocation/execution, not the per-item one", async () => {
       harness = await makeHarness();
@@ -406,7 +383,7 @@ describe("maybeResumeParent — Stage 1.5 mode enforcement", () => {
       const failFlow = (args) => store.fail(args);
       const result = await maybeResumeParent({
         flowId: child2, runStore, nodeExecutionsStore, pipelinesRef: pipelinesRefWithMode("any"),
-        resume: async () => {}, failFlow, logger: null, // no failureStore
+        resume: async () => {}, failFlow, logger: null,
       });
 
       assert.equal(result.reason, "mode_not_satisfied");
@@ -514,13 +491,6 @@ describe("flipToRunningAndResume", () => {
   });
 });
 
-// Regression for the "orphaned promotion" bug class (see engine/admission-
-// promotion-resume.js's header): a CAS-lost cleanup release() here always
-// holds a genuinely 'admitted' row, so it can promote a DIFFERENT flow's
-// queued row from the shared combined pool as a side effect — discarding
-// that promotion strands the promoted flow exactly like the boot-time leak
-// sweep once did (fixed separately in boot/flow-revival.js's own admission-
-// leak release, which drives wakePromotedRelease on the same release).
 describe("flipToRunningAndResume — CAS-lost-after-admitted release drives resumePromotedAdmission", () => {
   test("resumes the different flow promoted by this call's own cleanup release", async () => {
     const parentFlowId = "parent-flow";
@@ -532,10 +502,6 @@ describe("flipToRunningAndResume — CAS-lost-after-admitted release drives resu
       get: async (id) => rows[id] ?? null,
       casSetRunning: async (id, args) => {
         if (id === parentFlowId) {
-          // Simulate a real concurrent waiter showing up for the pool's one
-          // free slot right as this CAS is about to lose the race — by the
-          // time the cleanup below releases parentFlowId's own admission,
-          // "other-flow" is the oldest queued entry and gets promoted.
           await admissionQueueStore.admit({ kind: "flow-start", flowId: "other-flow" });
           return { applied: false, code: "test_forced_cas_loss" };
         }
@@ -586,8 +552,6 @@ describe("admitAndSetRunning — CAS-lost-after-admitted release drives resumePr
 
     const store = {
       setRunning: async () => {
-        // Simulate a real concurrent waiter showing up for the pool's one
-        // free slot right as this CAS is about to lose the race.
         await admissionQueueStore.admit({ kind: "flow-start", flowId: "other-flow" });
         return { applied: false, code: "test_forced_cas_loss" };
       },
@@ -607,11 +571,6 @@ describe("admitAndSetRunning — CAS-lost-after-admitted release drives resumePr
   });
 });
 
-// A 'failed' parent (Stage 1.5's mode-not-satisfied path) can be resurrected
-// once the fan-out it failed on
-// later becomes satisfied — but only via the repairGuard the caller
-// supplies, and only when that guard confirms the settling child's
-// spawning invocation is still the current one for its node/subflowKey.
 describe("flipToRunningAndResume — repair propagation", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
@@ -638,7 +597,7 @@ describe("flipToRunningAndResume — repair propagation", () => {
     assert.equal(row.status, "running");
   });
 
-  test("does not repair when a fresh invocation has superseded the one the repairGuard expects (stale settlement)", async () => {
+  test("does not repair when a fresh invocation has replaced the one the repairGuard expects (stale settlement)", async () => {
     harness = await makeHarness();
     const { runStore, nodeExecutionsStore, store } = harness;
     const parent = await store.create({ pipelineId: "p", initialState: {} });
@@ -646,8 +605,6 @@ describe("flipToRunningAndResume — repair propagation", () => {
       flowId: parent.flowId, nodeId: "SUBMIT", subflowKey: "only",
     });
     await store.fail({ flowId: parent.flowId, expectedRevision: 0, stateJson: {}, statusReason: "boom" });
-    // The node gets re-entered independently (a fresh top-level retry, a
-    // loop-back) — a new visit_seq invocation now owns this identity.
     await nodeExecutionsStore.findOrCreateInvocation({
       flowId: parent.flowId, nodeId: "SUBMIT", subflowKey: "only", forceNew: true,
     });
@@ -694,7 +651,7 @@ describe("flipToRunningAndResume — repair propagation", () => {
     }
   });
 
-  test("a 'failed' parent with no repairGuard supplied (legacy callers) keeps the pre-repair behavior", async () => {
+  test("a 'failed' parent with no repairGuard supplied stays terminal — no flip, no resume", async () => {
     harness = await makeHarness();
     const { runStore, store } = harness;
     const parent = await store.create({ pipelineId: "p", initialState: {} });
@@ -711,10 +668,6 @@ describe("flipToRunningAndResume — repair propagation", () => {
   });
 });
 
-// End-to-end through maybeResumeParent: a real single-item-cascade child
-// retried and re-settled must repair its once-failed parent automatically,
-// with no code path specific to "this is a repair" — the same
-// triggerParentResume hook that handles ordinary first-time settlement.
 describe("maybeResumeParent — repair propagation end to end", () => {
   let harness;
   afterEach(() => { harness?.runStore?.close(); harness?.nodeExecutionsStore?.close(); });
@@ -737,8 +690,6 @@ describe("maybeResumeParent — repair propagation end to end", () => {
       store, runStore, nodeExecutionsStore,
     });
 
-    // First attempt fails — Stage 1.5 fails the parent since mode:"all"
-    // isn't satisfied yet.
     const failFlow = (args) => store.fail(args);
     await store.fail({ flowId: childFlowId, expectedRevision: 0, stateJson: {}, statusReason: "infra blip" });
     const firstResult = await maybeResumeParent({
@@ -748,8 +699,6 @@ describe("maybeResumeParent — repair propagation end to end", () => {
     assert.equal(firstResult.reason, "mode_not_satisfied");
     assert.equal((await runStore.get(parent.flowId)).status, "failed");
 
-    // The child gets retried (flipped back to running by whatever retry
-    // mechanism — simulated directly here) and this time succeeds.
     const beforeRetry = await runStore.get(childFlowId);
     const unblocked = await runStore.forceBlock(childFlowId, {
       expectedRevision: beforeRetry.revision, stateJson: beforeRetry.stateJson, statusReason: null, ownerKey: beforeRetry.ownerKey,

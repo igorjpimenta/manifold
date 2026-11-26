@@ -1,16 +1,6 @@
-// Per-run / per-pipeline cost aggregation backed by runtime.sqlite::cost_by_call.
-// The hook writer inserts one row per LLM call with full metadata (flow_id,
-// node_id, item_key, model, tokens, cost_total) so all aggregations are
-// single SQL queries rather than JSONL walks.
-//
-// Read-only, backed by state/db.js's shared getSharedDb() rather than a
-// bespoke @libsql/client call — connections are cached per (dbPath, readonly)
-// process-wide (see db.js) and reused across calls instead of opened+closed
-// on every invocation, and shared with any other reader of the same file
-// (e.g. state/node-cost.js's cost reader) instead of each keeping its
-// own redundant connection. The path mirrors telemetry/store.js's
-// DEFAULT_DB_PATH so cost.js stays in sync with where telemetry writes — if
-// telemetry ever moves its file, update both.
+// Cost aggregation over runtime.sqlite::cost_by_call (one row per LLM call).
+// The path mirrors telemetry/store.js's DEFAULT_DB_PATH — if telemetry moves
+// its file, update both.
 
 import { existsSync } from "node:fs";
 import path from "node:path";
@@ -26,17 +16,7 @@ function getClient(dbPath) {
   return getSharedDb(dbPath, { readonly: true });
 }
 
-// costForRun — sum all cost_by_call rows for a given flow_id.
-// opts: { sinceMs?, untilMs?, _dbPath? }
-// _sessionIndex: legacy param, accepted and ignored.
-//
-// Returns:
-//   { flowId, total, tokens, byModel, byNode, bySession }
-//
-// byModel: { [model]: { total, calls, inputTokens, outputTokens } }
-// byNode:  { [nodeId]: { total, calls, items: { [itemKey]: { total, calls } } } }
-// bySession: { [session]: { total, calls, inputTokens, outputTokens, model, agentId } }
-export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPath = null } = {}, _sessionIndex = null) {
+export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPath = null } = {}) {
   const result = {
     flowId,
     total: 0,
@@ -76,7 +56,6 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
     result.tokens.cacheRead  += row.cache_read_tokens  ?? 0;
     result.tokens.cacheWrite += row.cache_write_tokens ?? 0;
 
-    // byModel
     const modelKey = row.model ?? "unknown";
     const mAcc = result.byModel[modelKey] ?? { total: 0, calls: 0, inputTokens: 0, outputTokens: 0 };
     mAcc.total       += cost;
@@ -85,11 +64,9 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
     mAcc.outputTokens += row.output_tokens ?? 0;
     result.byModel[modelKey] = mAcc;
 
-    // byNode — lowercased: node_id casing has drifted across pipeline/executor
-    // versions ("SCORE" vs "score"), and the dashboard's per-node lookups
-    // (nodeKindMap, nodeGroupDefs, stepOrder) are all keyed lowercase.
-    // Without normalizing here, case variants of the same node split into
-    // separate rows instead of merging.
+    // node_id casing has drifted across pipeline/executor versions ("SCORE"
+    // vs "score") and the dashboard's per-node lookups are keyed lowercase —
+    // without normalizing, case variants split into separate rows.
     const nodeId = (row.node_id ?? "unknown").toLowerCase();
     const nAcc = result.byNode[nodeId] ?? { total: 0, calls: 0, items: {} };
     nAcc.total += cost;
@@ -102,7 +79,6 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
     }
     result.byNode[nodeId] = nAcc;
 
-    // bySession — keyed by the harness-written session_id column.
     const sid = row.session_id ?? "unknown";
     const sAcc = result.bySession[sid] ?? {
       total: 0, calls: 0, inputTokens: 0, outputTokens: 0,
@@ -118,39 +94,17 @@ export async function costForRun(flowId, { sinceMs = null, untilMs = null, _dbPa
   return result;
 }
 
-// costForPipeline — aggregate cost for one pipeline across all its runs.
-// runs: full flow_run list from the state store (filtered to this pipeline here or by caller).
-// opts: { sinceMs?, untilMs?, sinceDays?, priorWindowMs?, _dbPath? }
-//
-// Returns a PipelineCost:
-//   { pipelineId, runs, succeeded, total, mean, p50, p95, costPerSuccess,
-//     costPerSuccessPrior, byModel, byNode, byDay, since, until, byRun }
-//
-// byRun: [{ flowId, status, createdAt, total, byNode }] sorted by createdAt desc
-// byDay: [{ day, total, runs }] sorted by day
-// byNode: pipeline-wide per-node { cost, calls, p50Ms, p95Ms, meanMs, p50Cost, p95Cost, perDay }
-//
-// *Ms fields (byNode[x].p50Ms/p95Ms/meanMs, perDay[].p50Ms) come from
-// runtime.sqlite::flow_step_timings (entered_at/exited_at), NOT cost_by_call
-// — that table carries no duration column. Timings there only cover
-// top-level pipeline steps (plus a fallback wrapper's own direct children);
-// nodes running inside a subflow's per-item child iterations aren't timed at
-// that granularity, so those legitimately stay null — the UI treats null
-// as "—".
-//
-// `runs`/`succeeded` use the same active-in-window gate as
-// costForAllPipelines: createdAt in window OR cost > 0 in window. A plain
-// updatedAt filter inflates the count after any mass-touch event (see
-// project memory reference_cost_window_gate).
+// *Ms fields come from flow_node_executions joined to flow_node_invocations
+// (entered_at/exited_at), not cost_by_call, which has no duration column.
+// Timing covers only the pipeline's own top-level nodes: nodes running inside
+// a subflow's per-item iterations stay null, and the UI renders null as "—".
 export async function costForPipeline(runs, pipelineId, { sinceMs = null, untilMs = null, sinceDays = null, priorWindowMs = null, _dbPath = null } = {}) {
-  // Resolve window bounds.
   let resolvedSince = sinceMs;
   if (resolvedSince == null && sinceDays != null && Number.isFinite(sinceDays) && sinceDays > 0) {
     resolvedSince = Date.now() - sinceDays * 86_400_000;
   }
   const resolvedUntil = untilMs ?? (resolvedSince ? Date.now() : null);
 
-  // Filter runs to this pipeline.
   const mine = runs.filter((r) => {
     const pid = r.pipelineId ?? r.stateJson?.pipelineId ?? "";
     return pid === pipelineId;
@@ -173,9 +127,8 @@ export async function costForPipeline(runs, pipelineId, { sinceMs = null, untilM
   const { client } = await getClient(dbPath);
   const result = await aggregatePipelineCost(client, pipelineId, flowIds, mine, resolvedSince, resolvedUntil);
 
-  // Prior-window costPerSuccess for the trend delta — same-length window
-  // immediately before `resolvedSince`. Only meaningful with a bounded
-  // window (sinceMs set); an all-time query has no "prior" to compare.
+  // Same-length window right before `resolvedSince`; only meaningful with a
+  // bounded window — an all-time query has no "prior" to compare.
   if (priorWindowMs != null && resolvedSince != null) {
     const prior = await aggregatePipelineCost(client, pipelineId, flowIds, mine, resolvedSince - priorWindowMs, resolvedSince);
     result.costPerSuccessPrior = prior.succeeded > 0 ? prior.total / prior.succeeded : null;
@@ -188,8 +141,6 @@ function dayString(ts) {
   return new Date(ts).toISOString().slice(0, 10);
 }
 
-// One windowed pass over cost_by_call for a pipeline's flows, producing a
-// full PipelineCost (minus costPerSuccessPrior, filled in by the caller).
 async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs, untilMs) {
   const placeholders = flowIds.map(() => "?").join(",");
   const conditions = [`flow_id IN (${placeholders})`];
@@ -207,12 +158,11 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
     args,
   });
 
-  const flowCost = new Map();      // flowId → total cost
-  const modelCost = new Map();     // model → total cost
-  const nodeAcc = new Map();       // nodeId → { calls: number[], dayMap: Map<day, {cost, calls: number[]}> }
-  const dayAcc = new Map();        // day → { cost, calls: number[], runSet: Set<flowId> }
-  // Per-run per-node cost accumulator
-  const runNodeAcc = new Map();    // flowId → Map<nodeId, { total, calls }>
+  const flowCost = new Map();
+  const modelCost = new Map();
+  const nodeAcc = new Map();
+  const dayAcc = new Map();
+  const runNodeAcc = new Map();
 
   for (const row of rows) {
     const cost = row.cost_total ?? 0;
@@ -224,11 +174,6 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
 
     const day = dayString(row.ts);
 
-    // Lowercased: node_id casing has drifted across pipeline/executor versions
-    // ("SCORE" vs "score"), and the dashboard's per-node lookups (nodeKindMap,
-    // nodeGroupDefs, stepOrder) are all keyed lowercase — without this,
-    // case variants of the same node split into separate byNode rows instead
-    // of merging, and node-group coalescing never matches.
     const nodeId = (row.node_id ?? "unknown").toLowerCase();
     const nAcc = nodeAcc.get(nodeId) ?? { calls: [], dayMap: new Map() };
     nAcc.calls.push(cost);
@@ -244,7 +189,6 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
     dAcc.runSet.add(fid);
     dayAcc.set(day, dAcc);
 
-    // Per-run per-node
     if (!runNodeAcc.has(fid)) runNodeAcc.set(fid, new Map());
     const rnMap = runNodeAcc.get(fid);
     const rnAcc = rnMap.get(nodeId) ?? { total: 0, calls: 0 };
@@ -253,14 +197,12 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
     rnMap.set(nodeId, rnAcc);
   }
 
-  // Wall-time: separate pass over flow_node_executions, since it's a
-  // different table at a different granularity (one row per node EXECUTION,
-  // vs one cost_by_call row per LLM call) — joined only at the (nodeId, day)
-  // key, same case-normalization as the cost pass above.
+  // Separate pass: one row per node EXECUTION versus one cost_by_call row per
+  // LLM call — the two join only at (nodeId, day).
   const nodeExecutionsStore = await getNodeExecutionsStore();
   const timingRows = await nodeExecutionsStore.queryByPipeline({ pipelineId, sinceMs, untilMs });
-  const nodeTimingAcc = new Map(); // nodeId → { durations: number[], dayMap: Map<day, number[]> }
-  const dayTimingAcc = new Map();  // day → number[] (pipeline-wide durations)
+  const nodeTimingAcc = new Map();
+  const dayTimingAcc = new Map();
   for (const row of timingRows) {
     const ms = row.exited_at - row.entered_at;
     if (!Number.isFinite(ms) || ms < 0) continue;
@@ -279,10 +221,8 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
     dayTimingAcc.set(day, dArr);
   }
 
-  // Active-in-window gate: a run counts if it started in-window, OR it has
-  // no createdAt-in-window overlap but still logged cost in-window (e.g. a
-  // long-running flow that started earlier). Unbounded window (sinceMs
-  // null) counts everything.
+  // A run counts if it started in-window OR logged cost in-window (long-running
+  // flows that began earlier). Unbounded window counts everything.
   const gatedRuns = mine.filter((r) => {
     if (sinceMs == null) return true;
     const startedInWindow = (r.createdAt ?? 0) >= sinceMs && (untilMs == null || (r.createdAt ?? 0) <= untilMs);
@@ -295,7 +235,6 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
   const grandTotal = runTotals.reduce((s, c) => s + c, 0);
   const mean = gatedRuns.length > 0 ? grandTotal / gatedRuns.length : 0;
 
-  // byRun: per-run cost with per-run node breakdown, sorted by createdAt desc
   const byRun = gatedRuns
     .map((r) => {
       const rnMap = runNodeAcc.get(r.flowId);
@@ -314,10 +253,8 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
 
   const byModel = Object.fromEntries(modelCost);
 
-  // Union of nodes with cost data and nodes with timing data — a code node
-  // that never calls an LLM (no cost_by_call rows) can still have real
-  // wall-time from flow_step_timings, and the UI's row filter already
-  // expects that (`v.cost > 0 || (v.p50Ms ?? 0) > 0`).
+  // Union of cost nodes and timing nodes: a code node with no LLM calls still
+  // has wall-time, and the UI row filter checks `v.cost > 0 || (v.p50Ms ?? 0) > 0`.
   const byNode = {};
   const allNodeIds = new Set([...nodeAcc.keys(), ...nodeTimingAcc.keys()]);
   for (const nodeId of allNodeIds) {
@@ -385,22 +322,12 @@ async function aggregatePipelineCost(client, pipelineId, flowIds, mine, sinceMs,
   };
 }
 
-// costForAllPipelines — home-page overview across every pipeline.
-// runs: full flow_run list from the state store.
-// opts: { sinceMs?, _dbPath? }
-//
-// Returns:
-//   { sinceMs, untilMs, total, pipelines }
-//
-// pipeline entry: { pipelineId, total, runCount, succeededToday, failedToday, costToday }
-// total: cross-pipeline aggregate { spend, runs, succeeded, costPerSuccess }
 export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null } = {}) {
   const untilMs = sinceMs ? Date.now() : null;
 
   const empty = { sinceMs, untilMs, pipelines: [], total: { spend: 0, runs: 0, succeeded: 0, costPerSuccess: null } };
   if (!runs || runs.length === 0) return empty;
 
-  // Build a flowId → pipeline mapping from the runs list.
   const flowToPipeline = new Map();
   for (const r of runs) {
     if (!r.flowId) continue;
@@ -414,8 +341,7 @@ export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null
 
   const dbPath = _dbPath ?? defaultDbPath();
   if (!existsSync(dbPath)) {
-    // DB absent: still return pipeline entries derived purely from the runs list,
-    // all with zero cost (active-in-window gate still applies for run counts).
+    // DB absent: entries still come from the run list, all zero cost.
     return _aggregateFromRunsOnly(runs, flowToPipeline, sinceMs, untilMs);
   }
 
@@ -427,7 +353,6 @@ export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null
   if (untilMs != null) { conditions.push("ts <= ?"); args.push(untilMs); }
   const where = conditions.join(" AND ");
 
-  // Per-flow cost total in one query — enough to build per-pipeline rollup.
   const { rows } = await client.execute({
     sql: `
       SELECT flow_id, SUM(cost_total) AS flow_total
@@ -438,7 +363,6 @@ export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null
     args,
   });
 
-  // flowId → total cost from the DB
   const dbFlowCost = new Map();
   for (const row of rows) {
     dbFlowCost.set(row.flow_id, row.flow_total ?? 0);
@@ -447,21 +371,18 @@ export async function costForAllPipelines(runs, { sinceMs = null, _dbPath = null
   return _buildPipelineResult(runs, flowToPipeline, dbFlowCost, sinceMs, untilMs);
 }
 
-// Build pipeline result when DB has no rows (absent or empty cost).
-// All pipeline entries still appear, but with zero cost.
+// DB had no cost rows: every entry still appears, with zero cost.
 function _aggregateFromRunsOnly(runs, flowToPipeline, sinceMs, untilMs) {
-  const dbFlowCost = new Map(); // empty — no DB rows
+  const dbFlowCost = new Map();
   return _buildPipelineResult(runs, flowToPipeline, dbFlowCost, sinceMs, untilMs);
 }
 
 function _buildPipelineResult(runs, flowToPipeline, dbFlowCost, sinceMs, untilMs) {
-  // Today boundary for succeededToday / failedToday / costToday.
   const todayStart = (() => {
     const d = new Date();
     return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   })();
 
-  // Accumulate per-pipeline metrics.
   const byPipeline = new Map();
 
   for (const r of runs) {
@@ -469,7 +390,6 @@ function _buildPipelineResult(runs, flowToPipeline, dbFlowCost, sinceMs, untilMs
     const pid = flowToPipeline.get(r.flowId);
     if (!pid) continue;
 
-    // Active-in-window gate: must have been created in-window OR had DB cost in-window.
     const startedInWindow = sinceMs == null || (r.createdAt ?? 0) >= sinceMs;
     const workedInWindow = (dbFlowCost.get(r.flowId) ?? 0) > 0;
     if (sinceMs != null && !startedInWindow && !workedInWindow) continue;
