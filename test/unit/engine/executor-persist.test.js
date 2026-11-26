@@ -231,9 +231,9 @@ describe("persistFailRetrying", () => {
     await persistFailRetrying({
       flowId: flow.flowId, revision: 1, state: { pipelineId: "p" },
       message: "landing page unresolved", failureNode: "SUBMIT_CODE",
-      invocationId: "inv-1", executionId: "exec-1", errorType: "infra_unavailable",
+      invocationId: "inv-1", executionId: "exec-1", errorType: "provider-5xx",
     });
-    assert.equal(recorded?.errorType, "infra_unavailable");
+    assert.equal(recorded?.errorType, "provider-5xx");
 
     const flow2 = makeFlow({ flowId: "12345678-0000-0000-0000-000000000002" });
     const store2 = makeStore(flow2);

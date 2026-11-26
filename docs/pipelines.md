@@ -209,8 +209,8 @@ resolves any open failure rows for the same `(pipeline_id,
 branch_item_id)` tuple with `resolved_via = "auto:operator-<kind>"` —
 pipelines don't have to touch the failure store themselves.
 
-Live example: `freelance_workana-proposal/index.js`'s `skip` handler
-writes `workspace/.shared/freelance/workana/skipped/<jobId>.md` so
+Example: a pipeline whose `skip` handler
+writes `<workspace>/.shared/<domain>/skipped/<itemId>.md` so
 future FILTER passes exclude the listing. Implementation lives in
 `recovery-actions.js` (descriptor merge + handler lookup); HTTP
 dispatch in `index.js: /manifold/failures/<id>/action/<kind>`.
@@ -353,7 +353,7 @@ export default {
         nodes: {
           WRITE: {
             kind: "agent",
-            agent: "content-writer",
+            agent: "writer",
             promptBuilder: (state) => `Process item ${state.item?.id}.`,
             apply: (state, output) => ({ WRITE: { ...state.item, result: output.text } }),
           },

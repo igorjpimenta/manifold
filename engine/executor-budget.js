@@ -78,9 +78,12 @@ function formatNodeBrief(_node, items, itemCount) {
   return `${itemCount} item(s): ${preview}${items.length > 3 ? "…" : ""}`;
 }
 
+// MANIFOLD_AGENT_EMOJI ("<agent>=<emoji>,...") opts an agent into its own
+// marker; the same neutral one otherwise.
 function agentEmojiFor(agent) {
-  return ({
-    scorer: "⚖️", "content-writer": "✍️", "proposal-sender": "📤",
-    "marketplace-scout": "🔭", "agent-forger": "🔨",
-  })[agent] ?? "🤖";
+  const configured = String(process.env.MANIFOLD_AGENT_EMOJI ?? "")
+    .split(",")
+    .map((pair) => pair.split("="))
+    .find(([name]) => name?.trim() === agent);
+  return configured?.[1]?.trim() || "🤖";
 }

@@ -838,7 +838,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
           kind: "code",
           run: () => {
             attempts++;
-            if (attempts === 1) throw new NodeFailure("landing page unresolved", { errorType: "infra_unavailable" });
+            if (attempts === 1) throw new NodeFailure("landing page unresolved", { errorType: "provider-5xx" });
             return { CODE: { ok: true } };
           },
         },
@@ -858,7 +858,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
 
     assert.equal(attempts, 2);
     assert.equal(store.get(r.flowId).status, "succeeded");
-    assert.deepEqual(receivedOnRetry, { message: "landing page unresolved", errorType: "infra_unavailable" });
+    assert.deepEqual(receivedOnRetry, { message: "landing page unresolved", errorType: "provider-5xx" });
   });
 
   it("a 2-arg edge distinguishes errorType to pick a specific fallback leg, not a generic one", async () => {
@@ -866,18 +866,18 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
       kind: "cascade",
       nodes: {
         CODE: { kind: "code", run: () => { throw new NodeFailure("bad creds", { errorType: "blocked" }); } },
-        INFRA_RETRY: { kind: "code", run: () => ({ INFRA_RETRY: { ok: true } }) },
+        PROVIDER_RETRY: { kind: "code", run: () => ({ PROVIDER_RETRY: { ok: true } }) },
         AGENT_FALLBACK: { kind: "code", run: () => ({ AGENT_FALLBACK: { ok: true } }) },
       },
       edges: {
         __start__: "CODE",
         CODE: (state, error) => {
           if (state.CODE?.ok) return "__end__";
-          if (error?.errorType === "infra_unavailable") return "INFRA_RETRY";
+          if (error?.errorType === "provider-5xx") return "PROVIDER_RETRY";
           if (error?.errorType === "blocked") return null;
           return "AGENT_FALLBACK";
         },
-        INFRA_RETRY: () => "CODE",
+        PROVIDER_RETRY: () => "CODE",
         AGENT_FALLBACK: "__end__",
       },
     });
@@ -887,9 +887,9 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
     await executor.runFlow(r.flowId, "fresh");
 
     const flow = store.get(r.flowId);
-    assert.equal(flow.status, "failed", "errorType:'blocked' must give up directly, never touch INFRA_RETRY or AGENT_FALLBACK");
+    assert.equal(flow.status, "failed", "errorType:'blocked' must give up directly, never touch PROVIDER_RETRY or AGENT_FALLBACK");
     const flowState = await assembleState(flow.flowId, { runStore: store, nodeExecutionsStore, baseState: flow.stateJson });
-    assert.equal(flowState.INFRA_RETRY, undefined);
+    assert.equal(flowState.PROVIDER_RETRY, undefined);
     assert.equal(flowState.AGENT_FALLBACK, undefined);
   });
 
@@ -944,7 +944,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
           kind: "code",
           run: () => {
             attempts++;
-            if (attempts === 1) throw new LookalikeNodeFailure("cross-registry infra failure", { errorType: "infra_unavailable" });
+            if (attempts === 1) throw new LookalikeNodeFailure("cross-registry provider failure", { errorType: "provider-5xx" });
             return { CODE: { ok: true } };
           },
         },
@@ -963,7 +963,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
     await executor.runFlow(r.flowId, "fresh");
 
     assert.equal(store.get(r.flowId).status, "succeeded");
-    assert.equal(receivedOnRetry.errorType, "infra_unavailable", "errorType must survive even though LookalikeNodeFailure is NOT instanceof the real NodeFailure class");
+    assert.equal(receivedOnRetry.errorType, "provider-5xx", "errorType must survive even though LookalikeNodeFailure is NOT instanceof the real NodeFailure class");
   });
 
   it("_cascadeError does not leak to a DIFFERENT node's edge call — scoped to the exact node that threw", async () => {
@@ -992,7 +992,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
     const pipeline = makePipeline({
       kind: "cascade",
       nodes: {
-        CODE: { kind: "code", run: () => { throw new NodeFailure("infra hiccup", { errorType: "infra_unavailable" }); } },
+        CODE: { kind: "code", run: () => { throw new NodeFailure("provider hiccup", { errorType: "provider-5xx" }); } },
         AGENT: { kind: "code", run: () => ({ AGENT: { ok: true } }) },
       },
       edges: {
@@ -1008,8 +1008,8 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
     await executor.runFlow(r.flowId, "fresh");
 
     assert.equal(recordedCalls.length, 1, "CODE's throw must record immediately, even though the flow goes on to succeed via AGENT");
-    assert.equal(recordedCalls[0].message, "infra hiccup");
-    assert.equal(recordedCalls[0].errorType, "infra_unavailable");
+    assert.equal(recordedCalls[0].message, "provider hiccup");
+    assert.equal(recordedCalls[0].errorType, "provider-5xx");
     assert.equal(recordedCalls[0].failureNode, "CODE");
   });
 
@@ -1023,7 +1023,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
           kind: "code",
           run: () => {
             attempts++;
-            if (attempts === 1) throw new NodeFailure("first attempt failed", { errorType: "infra_unavailable" });
+            if (attempts === 1) throw new NodeFailure("first attempt failed", { errorType: "provider-5xx" });
             return { CODE: { ok: true } };
           },
         },
@@ -1043,7 +1043,7 @@ describe("runFlow — cascade-kind flow: NodeFailure carries errorType to a 2-ar
 
     assert.equal(store.get(r.flowId).status, "succeeded");
     assert.equal(seenErrors.length, 2, "CODE's edge is consulted once after the throw (retry) and once after the success (advance)");
-    assert.deepEqual(seenErrors[0], { message: "first attempt failed", errorType: "infra_unavailable" });
+    assert.deepEqual(seenErrors[0], { message: "first attempt failed", errorType: "provider-5xx" });
     assert.equal(seenErrors[1], null, "the 2nd edge call, made after CODE succeeded, must not see attempt 1's stale error");
   });
 });
@@ -1058,7 +1058,7 @@ describe("runFlow — cascade-kind flow: failure_events persistence", () => {
           kind: "code",
           run: () => {
             attempts++;
-            if (attempts === 1) throw new NodeFailure("transient", { errorType: "infra_unavailable" });
+            if (attempts === 1) throw new NodeFailure("transient", { errorType: "provider-5xx" });
             return { WORK: { ok: true } };
           },
         },
@@ -1073,7 +1073,7 @@ describe("runFlow — cascade-kind flow: failure_events persistence", () => {
 
     assert.equal(store.get(r.flowId).status, "succeeded");
     assert.equal(recordedCalls.length, 1, "the transient throw must persist immediately, independent of the eventual success");
-    assert.equal(recordedCalls[0].errorType, "infra_unavailable");
+    assert.equal(recordedCalls[0].errorType, "provider-5xx");
   });
 
   it("escalation-then-exhaustion: the give-up call reuses the last leg's own invocationId/executionId, not a fabricated new one", async () => {

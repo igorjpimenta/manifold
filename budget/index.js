@@ -23,48 +23,6 @@ function runtimeSibling(dbPath) {
     : `${dbPath}.runtime.sqlite`;
 }
 
-const MOCK_ITEMS = [
-  {
-    label: "SCORE × 12 listings",
-    agent: "scorer",
-    agentEmoji: "⚖️",
-    trigger: "cron",
-    pipeline: "workana-proposal",
-    node: "score",
-    tokenEstimate: 10800,
-    costLow: 0.0018,
-    costHigh: 0.0054,
-    brief: "Score 12 new Workana listings against PROFILE.md rubric (python, typescript, api, automation categories)",
-    modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
-  },
-  {
-    label: "DRAFT × 3 listings",
-    agent: "content-writer",
-    agentEmoji: "✍️",
-    trigger: "cron",
-    pipeline: "workana-proposal",
-    node: "propose.draft",
-    tokenEstimate: 33000,
-    costLow: 0.067,
-    costHigh: 0.2,
-    brief: "Draft proposals for: sistema-de-automacao-rpa-python, api-integracao-whatsapp-crm, dashboard-analytics-react-typescript",
-    modelChain: ["zai/glm-5.1", "openrouter/deepseek/deepseek-v4-pro"],
-  },
-  {
-    label: "SUBMIT × 1 proposal",
-    agent: "proposal-sender",
-    agentEmoji: "📤",
-    trigger: "cron",
-    pipeline: "workana-proposal",
-    node: "submit",
-    tokenEstimate: 3200,
-    costLow: 0.0005,
-    costHigh: 0.0016,
-    brief: "Submit approved draft for: sistema-de-automacao-rpa-python (score 87, budget R$2.400)",
-    modelChain: ["zai/glm-4.5-flash", "openrouter/deepseek/deepseek-v4-flash"],
-  },
-];
-
 // getSharedDb() rather than a fresh openDb(): first call does the real work
 // (open + migrate); every call after — including a new registerBudgetRoutes
 // closure from a plugin reload — returns the SAME cached connection
@@ -253,37 +211,6 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify({ items: rows.map(deserialize) }));
-      return true;
-    },
-  });
-
-  api.registerHttpRoute({
-    path: "/manifold/budget/mock",
-    auth: "plugin",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
-      const body = (await readBody(req)) ?? {};
-      const count = Math.min(Number(body.count ?? MOCK_ITEMS.length), MOCK_ITEMS.length);
-      const now = Date.now();
-      const created = [];
-      for (let i = 0; i < count; i++) {
-        const t = MOCK_ITEMS[i];
-        const id = randomUUID();
-        await withSharedWrite(runtimeDbPath, () => runtimeClient.execute({
-          sql: `INSERT OR REPLACE INTO queue_items
-                  (id, label, agent, agent_emoji, trigger, cost_low, cost_high, brief, model_chain, pipeline, node, token_estimate, kind, status, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'node', 'pending', ?)`,
-          args: [id, t.label, t.agent, t.agentEmoji, t.trigger,
-                 t.costLow, t.costHigh, t.brief, JSON.stringify(t.modelChain),
-                 t.pipeline ?? null, t.node ?? null, t.tokenEstimate ?? null,
-                 now],
-        }));
-        created.push(id);
-      }
-      res.statusCode = 201;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: true, created }));
       return true;
     },
   });

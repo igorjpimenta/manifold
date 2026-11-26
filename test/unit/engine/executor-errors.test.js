@@ -82,8 +82,8 @@ describe("NodeFailure", () => {
   });
 
   it("sets errorType from the options bag", () => {
-    const e = new NodeFailure("infra hiccup", { errorType: "infra_unavailable" });
-    assert.equal(e.errorType, "infra_unavailable");
+    const e = new NodeFailure("provider hiccup", { errorType: "provider-5xx" });
+    assert.equal(e.errorType, "provider-5xx");
   });
 
   it("defaults errorType to null when omitted", () => {
