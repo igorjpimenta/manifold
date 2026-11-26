@@ -165,15 +165,15 @@ export async function createRealOps({ dbPath = null, pipelinesDir = null, config
     async deliverResult({ session, runId, agentId, kind, payload }) {
       // The turn that consumes this lives in the harness process, so the
       // result is posted there; the core never buffers one.
-      const url = String(process.env.MANIFOLD_TOOL_RESULT_URL ?? "").trim();
+      const url = String(process.env.MANIFOLD_TURN_URL ?? "").trim();
       const token = String(process.env.MANIFOLD_TURN_TOKEN ?? "").trim();
       if (!url || !token) {
-        return { ok: false, error: "no harness tool-result endpoint (MANIFOLD_TOOL_RESULT_URL/MANIFOLD_TURN_TOKEN unset)" };
+        return { ok: false, error: "no harness turn endpoint (MANIFOLD_TURN_URL/MANIFOLD_TURN_TOKEN unset)" };
       }
       const res = await fetch(url, {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: JSON.stringify({ session, runId, agentId, kind, payload }),
+        body: JSON.stringify({ kind: "tool-result", session, runId, agentId, payload }),
       }).catch((err) => ({ ok: false, status: 0, text: async () => String(err?.message ?? err) }));
       if (!res.ok) {
         const detail = await res.text?.().catch(() => "");

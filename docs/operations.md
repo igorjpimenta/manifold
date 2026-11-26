@@ -26,7 +26,7 @@ entry, so there is no per-tool wiring:
 | `manifold_runs` | optional filters | List flows. |
 | `manifold_approve` | `flowId`, `itemId`, `decision` | Resolve a gate item. |
 | `manifold_cancel` | `flowId`, optional `reason` | Cancel a non-terminal flow. |
-| `manifold_deliver_result` | JSON `payload`, optional `kind`/`runId` | Posts the result to the harness's turn endpoint (`MANIFOLD_TOOL_RESULT_URL`), where the waiting dispatch picks it up. |
+| `manifold_deliver_result` | JSON `payload`, optional `kind`/`runId` | Posts `{kind: "tool-result", …}` to the harness's turn endpoint (`MANIFOLD_TURN_URL`), where the waiting dispatch picks it up. |
 
 Agents reach them through a harness that connects MCP (`manifold serve
 --mcp stdio|http`); identity is stamped per call — see

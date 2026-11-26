@@ -121,10 +121,10 @@ describe("cancelFlow", () => {
 
 describe("deliverResult", () => {
   const realFetch = globalThis.fetch;
-  afterEach(() => { globalThis.fetch = realFetch; delete process.env.MANIFOLD_TOOL_RESULT_URL; delete process.env.MANIFOLD_TURN_TOKEN; });
+  afterEach(() => { globalThis.fetch = realFetch; delete process.env.MANIFOLD_TURN_URL; delete process.env.MANIFOLD_TURN_TOKEN; });
 
   test("posts the result to the harness endpoint", async () => {
-    process.env.MANIFOLD_TOOL_RESULT_URL = "http://127.0.0.1:18789/api/manifold/tool-result";
+    process.env.MANIFOLD_TURN_URL = "http://127.0.0.1:18789/api/manifold/turn";
     process.env.MANIFOLD_TURN_TOKEN = "turn-secret";
     const seen = [];
     globalThis.fetch = async (url, init) => {
@@ -136,19 +136,19 @@ describe("deliverResult", () => {
     const out = await ops.deliverResult({ session, runId: "r1", agentId: "a1", kind: "result", payload });
     assert.deepEqual(out, { ok: true, session });
     assert.equal(seen.length, 1);
-    assert.equal(seen[0].url, process.env.MANIFOLD_TOOL_RESULT_URL);
+    assert.equal(seen[0].url, process.env.MANIFOLD_TURN_URL);
     assert.equal(seen[0].headers.authorization, "Bearer turn-secret");
-    assert.deepEqual(seen[0].body, { session, runId: "r1", agentId: "a1", kind: "result", payload });
+    assert.deepEqual(seen[0].body, { kind: "tool-result", session, runId: "r1", agentId: "a1", payload });
   });
 
   test("refuses when the harness endpoint is unknown", async () => {
     const out = await ops.deliverResult({ session: "s", payload: {} });
     assert.equal(out.ok, false);
-    assert.match(out.error, /TOOL_RESULT_URL|TURN_TOKEN/);
+    assert.match(out.error, /TURN_URL|TURN_TOKEN/);
   });
 
   test("reports a refusal from the harness", async () => {
-    process.env.MANIFOLD_TOOL_RESULT_URL = "http://127.0.0.1:18789/api/manifold/tool-result";
+    process.env.MANIFOLD_TURN_URL = "http://127.0.0.1:18789/api/manifold/turn";
     process.env.MANIFOLD_TURN_TOKEN = "turn-secret";
     globalThis.fetch = async () => ({ ok: false, status: 401, text: async () => "unauthorized" });
     const out = await ops.deliverResult({ session: "s", payload: {} });
