@@ -103,9 +103,9 @@ examples.
 | `editableFields` | Optional `[ { id, label, type, value, options?, prefix?, helper? } ]` — pipeline-declared structured fields rendered as tappable chips above the prose body. Clients pick input UI from `type`. |
 | `references` | Array of `{ id, label, body }` chips on the gate row + DiscussView |
 
-**Prose body (`editableText`)**: pipelines with a free-form editable surface (workana-reply, touch-cadence, workana-proposal's prose) set this. The full-prose edit sheet renders + commits its content. If omitted (`undefined`), the executor auto-fills from the subflow's prior code-node outputs — the last `{ ..., text: "…" }` shape wins. Set `editableText: ""` explicitly to opt OUT.
+**Prose body (`editableText`)**: pipelines with a free-form editable surface (a reply draft, a cadence note, a proposal's prose) set this. The full-prose edit sheet renders + commits its content. If omitted (`undefined`), the executor auto-fills from the subflow's prior code-node outputs — the last `{ ..., text: "…" }` shape wins. Set `editableText: ""` explicitly to opt OUT.
 
-**Structured fields (`editableFields`)**: pipelines that store metadata alongside the prose (workana-proposal's frontmatter: budget / timeframe / language) parse it once at builder time and expose each value as one entry. Clients render a chip per entry; tap → focused single-field editor matching `type`; save → `apply-draft` `fields:` payload → server's `persistRevisedMeta` writes back. Pipelines without structured metadata omit the array.
+**Structured fields (`editableFields`)**: pipelines that store metadata alongside the prose (e.g. a proposal's frontmatter: budget / timeframe / language) parse it once at builder time and expose each value as one entry. Clients render a chip per entry; tap → focused single-field editor matching `type`; save → `apply-draft` `fields:` payload → server's `persistRevisedMeta` writes back. Pipelines without structured metadata omit the array.
 
 Field-entry shape:
 
@@ -120,7 +120,7 @@ Field-entry shape:
 | `helper` | optional | Footer hint shown in the single-field editor. No hardcoded copy on clients — pipelines own the wording. |
 | `editable` | optional, default `true` | When `false`, the chip renders read-only (no tap target, muted styling). Useful for display-only context fields the operator should see but not edit (e.g. `source-listing`, `drafted-at`). |
 
-Example (workana-proposal):
+Example (proposal pipeline):
 
 ```js
 return {

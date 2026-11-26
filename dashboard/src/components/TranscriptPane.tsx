@@ -2,7 +2,7 @@
 // spawned. Reads parsed messages from `/api/runs/:flowId/transcripts`.
 //
 // Each transcript is one (agent, node, item) trio — corresponds to one
-// session JSONL file under `~/.openclaw/agents/<agent>/sessions/`. The
+// session JSONL file in the harness's own agent session directory. The
 // pane groups them by agent, lists them collapsed, expands to a
 // user→assistant chat view on click. Thinking content (when present)
 // is rendered subdued in a separate block from the assistant's reply.

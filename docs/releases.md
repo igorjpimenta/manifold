@@ -73,7 +73,7 @@ The adapter resolves the core from its own dependency; the core package
 carries the dashboard build (`prepare` runs when the core is packed), so
 there is no post-install build step.
 
-oc-config consumers: bump the `#<version>` pins in the npm git-deps
+Downstream consumers: bump the `#<version>` pins in the npm git-deps
 (`workspace/*`, `extensions/*`) and regen their lockfiles — one chore PR
 per release.
 

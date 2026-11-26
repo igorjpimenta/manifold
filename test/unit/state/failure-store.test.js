@@ -190,6 +190,18 @@ describe("classifyRecoveryHint — via get() (computed at read time)", () => {
     assert.equal(await hintFor({ errorType: null }), "retry-step");
   });
 
+  test("infra_unavailable → retry-step", async () => {
+    assert.equal(await hintFor({ errorType: "infra_unavailable", summary: "browser down" }), "retry-step");
+  });
+
+  test("blocked + a declared benign marker → skip-only", async () => {
+    assert.equal(await hintFor({ errorType: "blocked", summary: "benign-refusal: HTTP 403" }), "skip-only");
+  });
+
+  test("blocked + unrecognized reason → investigate", async () => {
+    assert.equal(await hintFor({ errorType: "blocked", summary: "something weird happened" }), "investigate");
+  });
+
   test("pipeline-authored error_type → investigate, not silently routed", async () => {
     assert.equal(await hintFor({ errorType: "my-own-outcome" }), "investigate");
   });
