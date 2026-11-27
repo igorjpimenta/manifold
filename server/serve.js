@@ -1,8 +1,8 @@
 // `manifold serve`: the core application as its own process. Harness-specific
 // wiring arrives via env: turns to MANIFOLD_TURN_URL, dispatch session ids to
 // MANIFOLD_SESSION_URL (the adapter mints them; core cannot know a harness's
-// id format), discuss ids minted locally, elevation looped back to this
-// process's own API port. Loopback only by default; MANIFOLD_BEARER required.
+// id format), discuss ids minted locally. Loopback only by default;
+// MANIFOLD_BEARER required.
 
 import http from "node:http";
 import { createRouteRegistry } from "./registry.js";
@@ -94,29 +94,6 @@ export function createHttpSessionId({ url, token, timeoutMs = 5_000, fetchImpl =
   };
 }
 
-// Elevation loopback against this process: the `_elev` handlers are mounted on
-// the same server, so the operator-scope crossing the gateway needed collapses
-// to a localhost call carrying the shared bearer.
-export function createLocalElevation({ port, host, token, fetchImpl = globalThis.fetch }) {
-  return async function invokeElevated(path, payload, opts = {}) {
-    const timeoutMs = opts.timeoutMs ?? 30_000;
-    if (!token) {
-      return { ok: false, status: 503, body: JSON.stringify({ ok: false, code: "no_bearer", error: "MANIFOLD_BEARER unset" }), error: "MANIFOLD_BEARER unset" };
-    }
-    try {
-      const res = await fetchImpl(`http://${host}:${port}${path}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify(payload ?? {}),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      return { ok: res.ok, status: res.status, body: await res.text() };
-    } catch (err) {
-      return { ok: false, status: 0, body: "", error: err?.message ?? String(err) };
-    }
-  };
-}
-
 export function resolveServeConfig({ env = process.env } = {}) {
   const storePaths = resolveStorePaths({ env });
   const pipelineDirsStore = createPipelineDirsStore({ dbPath: storePaths.runtimeDb, logger: createLogger("manifold") });
@@ -166,7 +143,6 @@ export async function serve({ env = process.env, logger: injectedLogger = null }
     logger,
     registerHttpRoute: registry.registerHttpRoute,
     runTurn: createHttpRunTurn({ url: cfg.turnUrl, token: cfg.turnToken, logger }),
-    invokeElevated: createLocalElevation({ port: cfg.apiPort, host: cfg.apiHost, token: cfg.bearer }),
     // A harness that advertises a session bridge mints dispatch ids; without
     // one, agent nodes must declare their own session or the dispatch refuses.
     sessions: createHostSessions({ sessionUrl: cfg.sessionUrl, token: cfg.turnToken }),

@@ -150,35 +150,29 @@ function writeState(next) {
   } catch { /* best-effort */ }
 }
 
-const _GW_PORT = Number(process.env.OPENCLAW_GATEWAY_PORT) || 18789;
-
-async function _lockGate(logger) {
-  const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
+// gate_state is this module's to write as much as budget/index.js's: same
+// physical file (DB_PATH above), each module owning its own rows. Written
+// in-process — a threshold crossing must not depend on an HTTP round-trip to
+// a route that only this process serves.
+async function _setGateLocked(locked, logger) {
   try {
-    await fetch(`http://127.0.0.1:${_GW_PORT}/manifold/budget/gate/lock`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: "{}",
-      signal: AbortSignal.timeout(3000),
-    });
+    const client = await _getClient();
+    const today = localDayKey();
+    await withSharedWrite(_dbPath, () => client.execute(
+      "INSERT OR IGNORE INTO gate_state (id, locked) VALUES ('singleton', 0)"
+    ));
+    await withSharedWrite(_dbPath, () => client.execute({
+      sql: "UPDATE gate_state SET locked=?, day=? WHERE id='singleton'",
+      args: [locked ? 1 : 0, today],
+    }));
   } catch (err) {
-    logger?.warn?.(`lineage[budget-alert] gate lock failed: ${err?.message ?? err}`);
+    logger?.warn?.(`lineage[budget-alert] gate ${locked ? "lock" : "unlock"} failed: ${err?.message ?? err}`);
   }
 }
 
-async function _unlockGate(logger) {
-  const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
-  try {
-    await fetch(`http://127.0.0.1:${_GW_PORT}/manifold/budget/gate/unlock`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: "{}",
-      signal: AbortSignal.timeout(3000),
-    });
-  } catch (err) {
-    logger?.warn?.(`lineage[budget-alert] gate unlock failed: ${err?.message ?? err}`);
-  }
-}
+function _lockGate(logger) { return _setGateLocked(true, logger); }
+
+function _unlockGate(logger) { return _setGateLocked(false, logger); }
 
 function localDayKey(d = new Date()) {
   // Local-time YYYY-MM-DD: spend rolls over at local midnight, not UTC.

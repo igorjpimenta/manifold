@@ -1,8 +1,9 @@
 // HTTP surface over failure-store: GET list + POST .../retry. "Ignore" is
 // client-local only and has no route here by design.
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
+import { missingIdentityFields, refuseMissingIdentity } from "./operator.js";
 
-export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
+export function registerFailureRoutes({ api, failureStore, retryFailureElevated }) {
   api.registerHttpRoute({
     path: "/manifold/failures",
     auth: "plugin",
@@ -69,14 +70,19 @@ export function registerFailureRoutes({ api, failureStore, invokeElevated }) {
         const retryMatch = tail.match(/^([^/]+)\/retry$/);
         if (retryMatch) {
           const id = decodeURIComponent(retryMatch[1]);
-          try {
-            const elev = await invokeElevated("/manifold/_elev/retry-failure", {
-              id, via,
-              session: body?.session, agentId: body?.agentId,
-            });
-            res.statusCode = elev.status || 500;
+          if (!id) {
+            res.statusCode = 400;
             res.setHeader("Content-Type", "application/json");
-            res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
+            res.end(JSON.stringify({ ok: false, error: "id required" }));
+            return true;
+          }
+          try {
+            const missingIdentity = missingIdentityFields(body, ["session", "agentId"]);
+            if (missingIdentity.length > 0) { refuseMissingIdentity(res, missingIdentity); return true; }
+            const result = await retryFailureElevated({ id, via });
+            res.statusCode = result.status;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify(result.body));
           } catch (err) {
             api.logger.warn(`manifold retry handler error: ${err?.message ?? err}`);
             res.statusCode = 500;

@@ -11,6 +11,7 @@ import { deserialize, isGateLocked, resolveNodeDecision, classifyDecisionStatus,
 import { migrateDatabase, OPS_MIGRATIONS_FOLDER, RUNTIME_MIGRATIONS_FOLDER } from "../state/migrate.js";
 import { ensureSessionKeys } from "../state/session-keys.js";
 import { ensurePipelineNodes } from "../state/attribution-registries.js";
+import { authorizeBearerRequest, sendUnauthorized } from "../routes/bearer-auth.js";
 
 const DB_PATH = resolveStorePaths().opsDb;
 
@@ -56,26 +57,21 @@ async function readBody(req) {
   catch { return null; }
 }
 
-const _GW_PORT = Number(process.env.OPENCLAW_GATEWAY_PORT) || 18789;
-
-async function _loopback(path, body, extraHeaders = {}) {
-  const token = process.env.OPENCLAW_GATEWAY_TOKEN ?? "";
-  try {
-    await fetch(`http://127.0.0.1:${_GW_PORT}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...extraHeaders },
-      body: JSON.stringify(body ?? {}),
-      signal: AbortSignal.timeout(8000),
-    });
-  } catch { /* best-effort fire-and-forget */ }
-}
-
-export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume } = {}) {
+export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume, onStartGateStart } = {}) {
   // onFlowResume({flowId, nodeId, decision}) resumes a flow-bound approval
   // in-process (routes/operator-resume.js, injected by index.js) — no HTTP
   // loopback. Absent (tests), per-node resume is skipped but the decision
-  // still commits and broadcasts.
+  // still commits and broadcasts. onStartGateStart has the same contract for
+  // a start-gate approval: it starts the queued pipeline in-process.
   const { emit } = createEmitter({ getBroadcast, logger: api.logger });
+
+  // The registry does not enforce a route's `auth` field (server/registry.js),
+  // so every budget write guards itself with the shared bearer.
+  function requireBearer(req, res) {
+    const authz = authorizeBearerRequest(req, { logger: api.logger });
+    if (!authz.ok) { sendUnauthorized(res, authz.reason); return false; }
+    return true;
+  }
   let runtimeDbPath = runtimeSibling(DB_PATH);
   let client;
   let runtimeClient;
@@ -125,6 +121,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "GET") { res.statusCode = 405; res.end("method not allowed"); return true; }
+      if (!requireBearer(req, res)) return true;
       const { rows } = await runtimeClient.execute(
         "SELECT * FROM queue_items WHERE status='pending' ORDER BY created_at ASC"
       );
@@ -141,6 +138,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
+      if (!requireBearer(req, res)) return true;
       const body = await readBody(req);
       if (!body) { res.statusCode = 400; res.end("invalid json"); return true; }
       const { ids, decision } = body;
@@ -167,23 +165,27 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
         });
         for (const row of decided) {
           if (row.flow_id) {
-            // In-process resume (routes/operator-resume.js). The start-gate
-            // branch below still loops back: elevation needs gateway scope.
+            // In-process resume (routes/operator-resume.js). Absent (tests),
+            // per-node resume is skipped but the decision still commits.
             if (onFlowResume) {
               try { await onFlowResume({ flowId: row.flow_id, nodeId: row.node, decision }); } catch {}
             }
             api.logger.info(`[manifold/budget] ${decision} per-node — resuming flow=${String(row.flow_id).slice(0,8)} node=${row.node}`);
           } else if (decision === "approve" && row.pipeline_id) {
-            _loopback(
-              "/manifold/_elev/start",
-              {
-                pipelineId: row.pipeline_id,
-                args: row.pipeline_args ? JSON.parse(row.pipeline_args) : {},
-                via: "approval",
-                ...(row.enqueuer_session_key ? { parentSessionKey: row.enqueuer_session_key } : {}),
-              },
-              { "x-skip-gate": "1" }
-            );
+            if (onStartGateStart) {
+              try {
+                await onStartGateStart({
+                  pipelineId: row.pipeline_id,
+                  args: row.pipeline_args ? JSON.parse(row.pipeline_args) : {},
+                  via: "approval",
+                  parentSessionKey: row.enqueuer_session_key ?? null,
+                });
+              } catch (err) {
+                api.logger.warn(`[manifold/budget] start-gate fire failed: ${err?.message ?? err}`);
+              }
+            } else {
+              api.logger.warn(`[manifold/budget] start-gate approval for ${row.pipeline_id} skipped: no start handler bound`);
+            }
             api.logger.info(`[manifold/budget] approve start-gate — firing pipeline=${row.pipeline_id}`);
           }
         }
@@ -205,6 +207,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "GET") { res.statusCode = 405; res.end("method not allowed"); return true; }
+      if (!requireBearer(req, res)) return true;
       const { rows } = await runtimeClient.execute(
         "SELECT * FROM queue_items WHERE status != 'pending' ORDER BY decided_at DESC LIMIT 50"
       );
@@ -221,6 +224,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "GET") { res.statusCode = 405; res.end("method not allowed"); return true; }
+      if (!requireBearer(req, res)) return true;
       const { rows } = await client.execute("SELECT locked, day FROM gate_state WHERE id='singleton'");
       const row = rows[0] ?? null;
       const today = todayLocal();
@@ -242,6 +246,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
+      if (!requireBearer(req, res)) return true;
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=1, day=? WHERE id='singleton'", args: [today] }));
       api.logger.info(`[manifold/budget] gate locked day=${today}`);
@@ -259,6 +264,7 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
+      if (!requireBearer(req, res)) return true;
       const today = todayLocal();
       await withSharedWrite(DB_PATH, () => client.execute({ sql: "UPDATE gate_state SET locked=0, day=? WHERE id='singleton'", args: [today] }));
       api.logger.info(`[manifold/budget] gate unlocked day=${today}`);
@@ -272,10 +278,11 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
 
   api.registerHttpRoute({
     path: "/manifold/budget/items",
-    auth: "gateway",
+    auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.end("method not allowed"); return true; }
+      if (!requireBearer(req, res)) return true;
       const body = await readBody(req);
       if (!body) { res.statusCode = 400; res.end("invalid json"); return true; }
       const { label, agent = "manifold", agentEmoji = "🔁", trigger = "manual",

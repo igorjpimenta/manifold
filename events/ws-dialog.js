@@ -15,10 +15,9 @@
 // the query string because WebSocket clients cannot set headers).
 // Bearer secrets travel in URLs: prefer wss:// and note proxy access logs.
 //
-// The turn runs through injected runTurn (the adapter closes over
-// invokeElevated → /manifold/_elev/discuss, the same elevation the HTTP
-// route uses). No pending files — discussStore's turn_status is the live
-// record.
+// The turn runs through injected runTurn (the adapter calls the same discuss
+// turn the HTTP route uses). No pending files — discussStore's turn_status is
+// the live record.
 import http from "node:http";
 import crypto from "node:crypto";
 import { randomUUID } from "node:crypto";

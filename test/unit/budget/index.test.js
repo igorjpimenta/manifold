@@ -1,4 +1,4 @@
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
 import os from "node:os";
@@ -6,6 +6,14 @@ import { randomUUID } from "node:crypto";
 import { registerBudgetRoutes, openStore } from "../../../budget/index.js";
 import { createRunStore } from "../../../state/run-store.js";
 import { todayLocal } from "../../../budget/lib.js";
+
+const TEST_BEARER = "test-bearer-budget";
+const SAVED_BEARER = process.env.MANIFOLD_BEARER;
+process.env.MANIFOLD_BEARER = TEST_BEARER;
+after(() => {
+  if (SAVED_BEARER === undefined) delete process.env.MANIFOLD_BEARER;
+  else process.env.MANIFOLD_BEARER = SAVED_BEARER;
+});
 
 
   async function seedFlow(dbPath, flowId, pipelineId = "p") {
@@ -133,7 +141,7 @@ describe("registerBudgetRoutes — real openStore(), connection reuse across gen
 
     const today = todayLocal();
     const gen1Route = gen1Api._routes.find((r) => r.path === "/manifold/budget/gate/lock");
-    await gen1Route.handler({ method: "POST" }, fakeRes());
+    await gen1Route.handler(barePostReq(), fakeRes());
 
     const gen2Api = makeFakeApi();
     registerBudgetRoutes(gen2Api, { openStore: realOpenStoreAt(dbPath) });
@@ -149,12 +157,17 @@ function fakeRes() {
   return res;
 }
 
-function postReq(body) {
+function postReq(body, { bearer = true } = {}) {
   const chunks = [Buffer.from(JSON.stringify(body))];
   return {
     method: "POST",
+    headers: bearer ? { authorization: `Bearer ${TEST_BEARER}` } : {},
     [Symbol.asyncIterator]: async function* () { for (const c of chunks) yield c; },
   };
+}
+
+function barePostReq() {
+  return { method: "POST", headers: { authorization: `Bearer ${TEST_BEARER}` } };
 }
 
 
@@ -257,9 +270,9 @@ describe("registerBudgetRoutes — canonical emissions", () => {
     await api.runtime.approvalQueue.isGateLocked();
 
     const lockRoute = api._routes.find((r) => r.path === "/manifold/budget/gate/lock");
-    await lockRoute.handler({ method: "POST" }, fakeRes());
+    await lockRoute.handler(barePostReq(), fakeRes());
     const unlockRoute = api._routes.find((r) => r.path === "/manifold/budget/gate/unlock");
-    await unlockRoute.handler({ method: "POST" }, fakeRes());
+    await unlockRoute.handler(barePostReq(), fakeRes());
 
     const locked = calls.filter((c) => c.name === "plugin.budget.lock.changed");
     assert.equal(locked.length, 2);
@@ -269,5 +282,89 @@ describe("registerBudgetRoutes — canonical emissions", () => {
       assert.equal(c.payload.kind, "budget.lock.changed");
       assert.equal(typeof c.payload.day, "string");
     }
+  });
+});
+
+describe("registerBudgetRoutes — bearer guard", () => {
+  function tmpDbPath() {
+    return path.join(os.tmpdir(), `budget-auth-test-${randomUUID()}.sqlite`);
+  }
+
+  it("rejects a budget write without the shared bearer", async () => {
+    const api = makeFakeApi();
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath() }) });
+    await api.runtime.approvalQueue.isGateLocked();
+
+    const route = api._routes.find((r) => r.path === "/manifold/budget/decide");
+    const res = fakeRes();
+    await route.handler(postReq({ ids: ["anything"], decision: "approve" }, { bearer: false }), res);
+
+    assert.equal(res.statusCode, 401);
+    assert.equal(JSON.parse(res.body).error, "unauthorized");
+  });
+
+  it("rejects a read without the shared bearer", async () => {
+    const api = makeFakeApi();
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath: tmpDbPath() }) });
+    await api.runtime.approvalQueue.isGateLocked();
+
+    const route = api._routes.find((r) => r.path === "/manifold/budget/pending");
+    const res = fakeRes();
+    await route.handler({ method: "GET", headers: {} }, res);
+
+    assert.equal(res.statusCode, 401);
+  });
+});
+
+describe("registerBudgetRoutes — start-gate approval", () => {
+  function tmpDbPath() {
+    return path.join(os.tmpdir(), `budget-startgate-test-${randomUUID()}.sqlite`);
+  }
+
+  it("fires the injected start handler in-process with the queue row's pipeline + enqueuer", async () => {
+    const api = makeFakeApi();
+    const starts = [];
+    const onStartGateStart = async (args) => { starts.push(args); return { status: 200, body: { ok: true } }; };
+    const dbPath = tmpDbPath();
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), onStartGateStart });
+    await api.runtime.approvalQueue.isGateLocked();
+    // queue_items.pipeline_id is a real FK — seeding a flow is what puts the
+    // pipeline row in the registry.
+    await seedFlow(dbPath, "flow-1");
+
+    const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
+      flowId: null, nodeId: null, pipelineId: "p", label: "START p",
+      kind: "run-start", enqueuerSessionKey: "agent:main:k1",
+    });
+
+    const route = api._routes.find((r) => r.path === "/manifold/budget/decide");
+    const res = fakeRes();
+    await route.handler(postReq({ ids: [itemId], decision: "approve" }), res);
+
+    assert.equal(res.statusCode, 200);
+    assert.equal(JSON.parse(res.body).updated, 1);
+    assert.equal(starts.length, 1, "an approved start-gate row must fire a start");
+    assert.equal(starts[0].pipelineId, "p");
+    assert.deepEqual(starts[0].args, {});
+    assert.equal(starts[0].via, "approval");
+    assert.equal(starts[0].parentSessionKey, "agent:main:k1");
+  });
+
+  it("a rejected start-gate row starts nothing", async () => {
+    const api = makeFakeApi();
+    const starts = [];
+    const onStartGateStart = async (args) => { starts.push(args); };
+    const dbPath = tmpDbPath();
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), onStartGateStart });
+    await api.runtime.approvalQueue.isGateLocked();
+    await seedFlow(dbPath, "flow-1");
+
+    const itemId = await api.runtime.approvalQueue.enqueueNodeApproval({
+      flowId: null, nodeId: null, pipelineId: "p", label: "START p", kind: "run-start",
+    });
+    const route = api._routes.find((r) => r.path === "/manifold/budget/decide");
+    await route.handler(postReq({ ids: [itemId], decision: "reject" }), fakeRes());
+
+    assert.equal(starts.length, 0);
   });
 });

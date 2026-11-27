@@ -1,22 +1,29 @@
 import { createRetryFailure } from "./operator-retry.js";
-import { createDiscussHandler } from "./operator-discuss.js";
 import { createStateStore } from "../state/state-store.js";
 import { completeCancellation } from "../engine/executor-cancel.js";
 import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { resumeFlowFromGate } from "./operator-resume.js";
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 
-// Elevated handlers run with ambient operator scope, so the stamped harness
-// identity in the body is the only per-call check available: refuse unstamped
-// calls here rather than letting them run unauthenticated.
-function elevIdentityMissing(body, fields) {
+// An operator action carries a stamped harness identity (session + agentId)
+// so it can be attributed; refuse unstamped calls instead of letting them run
+// with nothing. The guard belongs on the HTTP boundary, not inside the work
+// functions, so in-process callers (the budget queue) never have to invent a
+// stamp.
+export function missingIdentityFields(body, fields) {
   return fields.filter((f) => typeof body?.[f] !== "string" || !body[f].trim());
 }
 
-function refuseElevIdentity(res, missing) {
+export function refuseMissingIdentity(res, missing) {
   res.statusCode = 400;
   res.setHeader("Content-Type", "application/json");
   res.end(JSON.stringify({ ok: false, code: "missing_identity", error: `${missing.join(", ")} required` }));
+}
+
+function sendJson(res, status, body) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "application/json");
+  res.end(JSON.stringify(body));
 }
 
 export function registerOperatorRoutes({
@@ -28,16 +35,11 @@ export function registerOperatorRoutes({
   failureStore,
   pipelinesRef,
   ensurePipelinesLoaded,
-  invokeElevated,
   ownerSessionKey,
   runStore,
   admissionQueueStore,
     resumeParentRef,
-    discussStore,
     getBroadcast,
-  // Injected gateway adapter, not core state: session reads go through
-  // here so core never imports the gateway's session store.
-  sessions,
 }) {
   const { retryFailureBranch } = createRetryFailure({
     store, readStore, failureStore, pipelinesRef, executor, runStore, ownerSessionKey,
@@ -46,9 +48,108 @@ export function registerOperatorRoutes({
     api,
   });
 
-    const { handleDiscuss } = createDiscussHandler({
-      api, discussStore, sessions,
+  // Work the public routes (and in-process callers such as the budget queue)
+  // run directly — the caller owns the HTTP shape, the identity guard and the
+  // bearer check.
+  async function gateResolveElevated({ flowId, itemId, decision, source, editedText, reason }) {
+    try {
+      const result = await gateResolver.recordItemDecision({ flowId, itemId, decision, source, editedText, reason });
+      const status = result.ok ? 200 : (result.code === "flow_not_found" ? 404 : 409);
+      return { status, body: result };
+    } catch (err) {
+      api.logger.warn(`manifold gate-resolve handler error: ${err?.message ?? err}`);
+      return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
+    }
+  }
+
+  async function startElevated({ pipelineId, args, via, parentSessionKey }) {
+    const effectiveVia = typeof via === "string" ? via : "operator";
+    try {
+      await ensurePipelinesLoaded?.();
+      if (!pipelinesRef.value.has(pipelineId)) {
+        return { status: 404, body: { ok: false, error: `unknown pipeline: ${pipelineId}`, known: [...pipelinesRef.value.keys()] } };
+      }
+      const triggeredBy = {
+        kind: effectiveVia.includes("app") ? "operator_http" : effectiveVia.includes("cron") ? "cron" : "operator_http",
+        label: `via ${effectiveVia}`,
+        ts: Date.now(),
+      };
+      const record = await executor.start(pipelineId, args ?? {}, triggeredBy);
+      try {
+        if (parentSessionKey) {
+          await api.runtime?.lineage?.recordTrigger?.({
+            flowId: record.flowId,
+            runId: record.stateJson?.runId ?? null,
+            pipelineId,
+            parentSessionKey,
+          });
+        } else {
+          const source = triggeredBy.kind === "operator_http" ? "app" : "operator";
+          const synthSession = `agent:operator:${source}:${record.flowId}`;
+          await api.runtime?.lineage?.recordTrigger?.({
+            flowId: record.flowId,
+            runId: record.stateJson?.runId ?? null,
+            pipelineId,
+            parentSessionKey: synthSession,
+            rootKind: "explicit",
+            rootLabel: pipelineId,
+          });
+        }
+      } catch (err) {
+        api.logger.warn(`manifold start: lineage edge skipped: ${err?.message ?? err}`);
+        try {
+          const freshForLineage = await store.get(record.flowId);
+          if (freshForLineage) {
+            await store.setRunning({
+              flowId: record.flowId,
+              expectedRevision: freshForLineage.revision,
+              lastStep: freshForLineage.lastStep,
+              stateJson: { ...freshForLineage.stateJson, _lineageError: { ts: Date.now(), message: err?.message ?? String(err) } },
+            });
+          }
+        } catch { /* non-fatal; lineage attribution already lost */ }
+      }
+      setImmediate(() => {
+        executor.runFlow(record.flowId, "fresh").catch((err) => {
+          api.logger.warn(`manifold start: runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+        });
+      });
+      if (triggeredBy.kind === "cron") {
+        try { getBroadcast?.()?.("cron.job.fired", { flowId: record.flowId, pipelineId, firedAt: Date.now() }); } catch {}
+      }
+      api.logger.info(`manifold start: pipeline=${pipelineId} flow=${record.flowId.slice(0, 8)} via=${effectiveVia}`);
+      return { status: 200, body: { ok: true, pipelineId, flowId: record.flowId } };
+    } catch (err) {
+      api.logger.warn(`manifold start handler error: ${err?.message ?? err}`);
+      return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
+    }
+  }
+
+  async function rerunElevated({ sourceFlow, argsOverride }) {
+    let record;
+    try {
+      record = executor.rerunFromSource(sourceFlow, argsOverride);
+    } catch (err) {
+      const msg = err?.message ?? String(err);
+      if (msg.includes("active flow")) return { status: 409, body: { ok: false, error: msg } };
+      if (msg.includes("not found")) return { status: 404, body: { ok: false, error: msg } };
+      api.logger.warn(`manifold rerun handler error: ${msg}`);
+      return { status: 500, body: { ok: false, code: "internal", error: msg } };
+    }
+    setImmediate(() => {
+      executor.runFlow(record.flowId, "fresh").catch((err) => {
+        api.logger.warn(`manifold rerun: runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
+      });
     });
+    api.logger.info(`manifold rerun: source=${sourceFlow.flowId.slice(0, 8)} → new=${record.flowId.slice(0, 8)} pipeline=${record.stateJson?.pipelineId ?? "?"}`);
+    return { status: 200, body: { ok: true, flowId: record.flowId, pipelineId: record.stateJson?.pipelineId ?? null, rerunOf: sourceFlow.flowId } };
+  }
+
+  async function retryFailureElevated({ id, via }) {
+    const result = await retryFailureBranch({ id, via });
+    const status = result.code === "ok" ? 200 : result.code === "not_found" ? 404 : result.code === "conflict" ? 409 : 500;
+    return { status, body: result };
+  }
 
   api.registerHttpRoute({
     path: "/manifold/gate/resolve",
@@ -67,66 +168,20 @@ export function registerOperatorRoutes({
       try { body = raw ? JSON.parse(raw) : {}; }
       catch { res.statusCode = 400; res.end("invalid json"); return true; }
       try {
-        // recordItemDecision can dispatch a kind:"agent" node needing
-        // operator.write scope, which this auth:"plugin" route never has
-        // ambient — loop through invokeElevated to the auth:"gateway"
-        // sibling, same pattern as /manifold/start.
-        const elev = await invokeElevated("/manifold/_elev/gate-resolve", {
+        const missingGateIdentity = missingIdentityFields(body, ["flowId", "session", "agentId"]);
+        if (missingGateIdentity.length > 0) { refuseMissingIdentity(res, missingGateIdentity); return true; }
+        const result = await gateResolveElevated({
           flowId: body.flowId,
           itemId: body.itemId,
           decision: body.decision,
           source: body.source,
           editedText: body.editedText,
           reason: body.reason,
-          session: body.session,
-          agentId: body.agentId,
         });
-        res.statusCode = elev.status || 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
+        sendJson(res, result.status, result.body);
       } catch (err) {
         api.logger.warn(`manifold gate/resolve handler error: ${err?.message ?? err}`);
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
-      }
-      return true;
-    },
-  });
-
-  api.registerHttpRoute({
-    path: "/manifold/_elev/gate-resolve",
-    auth: "gateway",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
-      }
-      let raw = "";
-      for await (const chunk of req) raw += chunk;
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; }
-      catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const missingGateIdentity = elevIdentityMissing(body, ["flowId", "session", "agentId"]);
-      if (missingGateIdentity.length > 0) { refuseElevIdentity(res, missingGateIdentity); return true; }
-      try {
-        const result = await gateResolver.recordItemDecision({
-          flowId: body.flowId,
-          itemId: body.itemId,
-          decision: body.decision,
-          source: body.source,
-          editedText: body.editedText,
-          reason: body.reason,
-        });
-        const status = result.ok ? 200 : (result.code === "flow_not_found" ? 404 : 409);
-        res.statusCode = status;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify(result));
-      } catch (err) {
-        api.logger.warn(`manifold gate-resolve (elev) handler error: ${err?.message ?? err}`);
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
+        sendJson(res, 500, { ok: false, code: "internal", error: err?.message ?? String(err) });
       }
       return true;
     },
@@ -250,115 +305,19 @@ export function registerOperatorRoutes({
           res.end(JSON.stringify({ ok: false, error: `unknown pipeline: ${pipelineId}`, known: [...pipelinesRef.value.keys()] }));
           return true;
         }
-        const args = (body.args && typeof body.args === "object") ? body.args : {};
-        const elev = await invokeElevated("/manifold/_elev/start", {
-          pipelineId, args, via: authz.via,
-          session: body.session, agentId: body.agentId,
+        const missingStartIdentity = missingIdentityFields(body, ["session", "agentId"]);
+        if (missingStartIdentity.length > 0) { refuseMissingIdentity(res, missingStartIdentity); return true; }
+        const result = await startElevated({
+          pipelineId,
+          args: (body.args && typeof body.args === "object") ? body.args : {},
+          via: authz.via,
+          parentSessionKey: typeof body.parentSessionKey === "string" && body.parentSessionKey.trim()
+            ? body.parentSessionKey.trim() : null,
         });
-        res.statusCode = elev.status || 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
+        sendJson(res, result.status, result.body);
       } catch (err) {
         api.logger.warn(`manifold start handler error: ${err?.message ?? err}`);
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
-      }
-      return true;
-    },
-  });
-
-  api.registerHttpRoute({
-    path: "/manifold/_elev/start",
-    auth: "gateway",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
-      }
-      let raw = "";
-      for await (const chunk of req) raw += chunk;
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; }
-      catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const pipelineId = typeof body.pipelineId === "string" ? body.pipelineId.trim() : "";
-      const args = (body.args && typeof body.args === "object") ? body.args : {};
-      const via = typeof body.via === "string" ? body.via : "elev";
-      const parentSessionKey = typeof body.parentSessionKey === "string" && body.parentSessionKey.trim()
-        ? body.parentSessionKey.trim() : null;
-      if (!pipelineId) {
-        res.statusCode = 400;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, error: "pipelineId required" }));
-        return true;
-      }
-      const missingStartIdentity = elevIdentityMissing(body, ["session", "agentId"]);
-      if (missingStartIdentity.length > 0) { refuseElevIdentity(res, missingStartIdentity); return true; }
-      try {
-        await ensurePipelinesLoaded?.();
-        if (!pipelinesRef.value.has(pipelineId)) {
-          res.statusCode = 404;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ ok: false, error: `unknown pipeline: ${pipelineId}`, known: [...pipelinesRef.value.keys()] }));
-          return true;
-        }
-        const triggeredBy = {
-          kind: via.includes("app") ? "operator_http" : via.includes("cron") ? "cron" : "operator_http",
-          label: `via ${via}`,
-          ts: Date.now(),
-        };
-        const record = await executor.start(pipelineId, args, triggeredBy);
-        try {
-          if (parentSessionKey) {
-            await api.runtime?.lineage?.recordTrigger?.({
-              flowId: record.flowId,
-              runId: record.stateJson?.runId ?? null,
-              pipelineId,
-              parentSessionKey,
-            });
-          } else {
-            const source = triggeredBy.kind === "operator_http" ? "app" : "operator";
-            const synthSession = `agent:operator:${source}:${record.flowId}`;
-            await api.runtime?.lineage?.recordTrigger?.({
-              flowId: record.flowId,
-              runId: record.stateJson?.runId ?? null,
-              pipelineId,
-              parentSessionKey: synthSession,
-              rootKind: "explicit",
-              rootLabel: pipelineId,
-            });
-          }
-        } catch (err) {
-          api.logger.warn(`manifold start: lineage edge skipped: ${err?.message ?? err}`);
-          try {
-            const freshForLineage = await store.get(record.flowId);
-            if (freshForLineage) {
-              await store.setRunning({
-                flowId: record.flowId,
-                expectedRevision: freshForLineage.revision,
-                lastStep: freshForLineage.lastStep,
-                stateJson: { ...freshForLineage.stateJson, _lineageError: { ts: Date.now(), message: err?.message ?? String(err) } },
-              });
-            }
-          } catch { /* non-fatal; lineage attribution already lost */ }
-        }
-        setImmediate(() => {
-          executor.runFlow(record.flowId, "fresh").catch((err) => {
-            api.logger.warn(`manifold start: runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
-          });
-        });
-        if (triggeredBy.kind === "cron") {
-          try { getBroadcast?.()?.("cron.job.fired", { flowId: record.flowId, pipelineId, firedAt: Date.now() }); } catch {}
-        }
-        api.logger.info(`manifold start: pipeline=${pipelineId} flow=${record.flowId.slice(0, 8)} via=${via} (elev)`);
-        res.statusCode = 200;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: true, pipelineId, flowId: record.flowId }));
-      } catch (err) {
-        api.logger.warn(`manifold start (elev) handler error: ${err?.message ?? err}`);
-        res.statusCode = 500;
-        res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, code: "internal", error: err?.message ?? String(err) }));
+        sendJson(res, 500, { ok: false, code: "internal", error: err?.message ?? String(err) });
       }
       return true;
     },
@@ -366,10 +325,12 @@ export function registerOperatorRoutes({
 
   api.registerHttpRoute({
     path: "/manifold/resume-from-gate",
-    auth: "gateway",
+    auth: "plugin",
     match: "exact",
     handler: async (req, res) => {
       if (req.method !== "POST") { res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true; }
+      const authz = authorizeBearerRequest(req, { logger: api.logger });
+      if (!authz.ok) { sendUnauthorized(res, authz.reason); return true; }
       let raw = "";
       for await (const chunk of req) raw += chunk;
       let body;
@@ -405,107 +366,5 @@ export function registerOperatorRoutes({
     },
   });
 
-  api.registerHttpRoute({
-    path: "/manifold/_elev/rerun",
-    auth: "gateway",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
-      }
-      let raw = "";
-      for await (const chunk of req) raw += chunk;
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; }
-      catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const sourceFlowId = typeof body.sourceFlowId === "string" ? body.sourceFlowId.trim() : "";
-      if (!sourceFlowId) {
-        res.statusCode = 400; res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, error: "sourceFlowId required" })); return true;
-      }
-      const argsOverride = (body && "args" in body) ? body.args : undefined;
-      if (argsOverride !== undefined && (argsOverride === null || typeof argsOverride !== "object" || Array.isArray(argsOverride))) {
-        res.statusCode = 400; res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, error: "args must be a JSON object" })); return true;
-      }
-      const missingRerunIdentity = elevIdentityMissing(body, ["session", "agentId"]);
-      if (missingRerunIdentity.length > 0) { refuseElevIdentity(res, missingRerunIdentity); return true; }
-      const sourceFlow = await readStore.get(sourceFlowId);
-      if (!sourceFlow) {
-        res.statusCode = 404; res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, error: `source flow not found: ${sourceFlowId}` })); return true;
-      }
-      let record;
-      try {
-        record = executor.rerunFromSource(sourceFlow, argsOverride);
-      } catch (err) {
-        const msg = err?.message ?? String(err);
-        if (msg.includes("active flow")) { res.statusCode = 409; res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ok: false, error: msg })); return true; }
-        if (msg.includes("not found")) { res.statusCode = 404; res.setHeader("Content-Type", "application/json"); res.end(JSON.stringify({ ok: false, error: msg })); return true; }
-        api.logger.warn(`manifold rerun (elev) handler error: ${msg}`);
-        res.statusCode = 500; res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, code: "internal", error: msg })); return true;
-      }
-      setImmediate(() => {
-        executor.runFlow(record.flowId, "fresh").catch((err) => {
-          api.logger.warn(`manifold rerun (elev): runFlow [${record.flowId.slice(0, 8)}] error: ${err?.message ?? err}`);
-        });
-      });
-      api.logger.info(`manifold rerun (elev): source=${sourceFlow.flowId.slice(0, 8)} → new=${record.flowId.slice(0, 8)} pipeline=${record.stateJson?.pipelineId ?? "?"}`);
-      res.statusCode = 200; res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify({ ok: true, flowId: record.flowId, pipelineId: record.stateJson?.pipelineId ?? null, rerunOf: sourceFlow.flowId }));
-      return true;
-    },
-  });
-
-  api.registerHttpRoute({
-    path: "/manifold/_elev/retry-failure",
-    auth: "gateway",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
-      }
-      let raw = "";
-      for await (const chunk of req) raw += chunk;
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; }
-      catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const id = typeof body.id === "string" ? body.id.trim() : "";
-      if (!id) {
-        res.statusCode = 400; res.setHeader("Content-Type", "application/json");
-        res.end(JSON.stringify({ ok: false, error: "id required" })); return true;
-      }
-      const missingRetryIdentity = elevIdentityMissing(body, ["session", "agentId"]);
-      if (missingRetryIdentity.length > 0) { refuseElevIdentity(res, missingRetryIdentity); return true; }
-      const via = typeof body.via === "string" ? body.via : "elev";
-      const result = await retryFailureBranch({ id, via });
-      res.statusCode = result.code === "ok" ? 200 : result.code === "not_found" ? 404 : result.code === "conflict" ? 409 : 500;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(result));
-      return true;
-    },
-  });
-
-  api.registerHttpRoute({
-    path: "/manifold/_elev/discuss",
-    auth: "gateway",
-    match: "exact",
-    handler: async (req, res) => {
-      if (req.method !== "POST") {
-        res.statusCode = 405; res.setHeader("Allow", "POST"); res.end("method not allowed"); return true;
-      }
-      let raw = "";
-      for await (const chunk of req) raw += chunk;
-      let body;
-      try { body = raw ? JSON.parse(raw) : {}; }
-      catch { res.statusCode = 400; res.end("invalid json"); return true; }
-      const { status, body: responseBody } = await handleDiscuss(body);
-      res.statusCode = status;
-      res.setHeader("Content-Type", "application/json");
-      res.end(JSON.stringify(responseBody));
-      return true;
-    },
-  });
-
+  return { gateResolveElevated, startElevated, rerunElevated, retryFailureElevated };
 }

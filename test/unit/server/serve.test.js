@@ -6,7 +6,6 @@ import {
   createHttpRunTurn,
   createHttpSessionId,
   createHostSessions,
-  createLocalElevation,
   localSessions,
   DEFAULT_API_PORT,
 } from "../../../server/serve.js";
@@ -88,31 +87,6 @@ describe("createHttpRunTurn", () => {
       fetchImpl: async () => ({ ok: false, status: 502, json: async () => ({ ok: false, error: "agent exploded" }) }),
     });
     await assert.rejects(() => runTurn({ text: "x" }), /agent exploded/);
-  });
-});
-
-describe("createLocalElevation", () => {
-  it("fails closed when the shared bearer is unset", async () => {
-    const elevate = createLocalElevation({ port: 44301, host: "127.0.0.1", token: null });
-    const result = await elevate("/manifold/_elev/start", {});
-    assert.equal(result.ok, false);
-    assert.equal(result.status, 503);
-    assert.match(result.body, /no_bearer/);
-  });
-
-  it("loops back to this process with the bearer", async () => {
-    let seen;
-    const elevate = createLocalElevation({
-      port: 44301, host: "127.0.0.1", token: "shared",
-      fetchImpl: async (url, init) => {
-        seen = { url, init };
-        return { ok: true, status: 200, text: async () => '{"ok":true}' };
-      },
-    });
-    const result = await elevate("/manifold/_elev/start", { flowId: "f1" });
-    assert.equal(result.ok, true);
-    assert.equal(seen.url, "http://127.0.0.1:44301/manifold/_elev/start");
-    assert.equal(seen.init.headers.authorization, "Bearer shared");
   });
 });
 

@@ -37,7 +37,7 @@ function makeDeps(api, overrides = {}) {
     runStore: {},
     pipelinesRef: { value: new Map() },
     pipelineRegistryStore: {},
-    invokeElevated: async () => ({}),
+    rerunElevated: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
     discussStore: { listForFlow: async () => [] },
     failureStore: { queryErrorsByFlow: async () => [] },
     sessionIndex: { listForFlow: async () => [] },

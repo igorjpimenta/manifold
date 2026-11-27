@@ -58,7 +58,8 @@ core — core keeps only the harness-agnostic surface.
 ```bash
 curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" \
   -H 'Content-Type: application/json' \
-  -d '{"pipelineId":"my-pipeline","args":{"someInput":"x"}}' \
+  -d '{"pipelineId":"my-pipeline","args":{"someInput":"x"},
+       "session":"<caller session>","agentId":"<caller agent>"}' \
   http://127.0.0.1:44301/manifold/start
 ```
 
@@ -191,6 +192,8 @@ Three escalating strategies. Use the lowest one that fits.
 
 ```bash
 curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" \
+  -H 'Content-Type: application/json' \
+  -d '{"session":"<caller session>","agentId":"<caller agent>"}' \
   http://127.0.0.1:44301/manifold/runs/<flowId>/rerun
 ```
 
@@ -211,7 +214,7 @@ failures flow, pointed at the CHILD's own flowId instead of the parent's:
 
 ```bash
 curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" -H "Content-Type: application/json" \
-  -d '{"via":"app"}' \
+  -d '{"via":"app","session":"<caller session>","agentId":"<caller agent>"}' \
   http://127.0.0.1:44301/manifold/failures/<id>/retry
 ```
 

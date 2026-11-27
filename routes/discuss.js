@@ -33,7 +33,7 @@ export function registerDiscussHandlers({
   pipelinesRef,
   emit,
   discussDefaultAgent,
-  invokeElevated,
+  runDiscussTurn,
   discussStore,
   runStore,
   nodeExecutionsStore,
@@ -205,7 +205,7 @@ export function registerDiscussHandlers({
 
     setImmediate(async () => {
       try {
-        const elev = await invokeElevated("/manifold/_elev/discuss", {
+        const result = await runDiscussTurn({
           flowId: sourceFlow.flowId,
           session: target.session,
           agentId: target.agent,
@@ -214,10 +214,9 @@ export function registerDiscussHandlers({
           text,
           itemId: target.itemId,
           systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,
-        }, { timeoutMs: 360_000 });
-        let payload;
-        try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
-        const succeeded = elev.ok && payload.ok;
+        });
+        const payload = result.body ?? {};
+        const succeeded = result.status === 200 && payload.ok === true;
         try {
           if (succeeded) {
             await discussStore.appendMessage(sourceFlow.flowId, target.itemId, {
@@ -230,7 +229,7 @@ export function registerDiscussHandlers({
             await discussStore.clearPending(sourceFlow.flowId, target.itemId);
             await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "idle", null);
           } else {
-            const errText = payload.error || payload.code || elev.error || `HTTP ${elev.status}`;
+            const errText = payload.error || payload.code || `HTTP ${result.status}`;
             await discussStore.stampMessageError(sourceFlow.flowId, target.itemId, turnId, errText);
             await discussStore.setTurnStatus(sourceFlow.flowId, target.itemId, "error", null);
           }
@@ -253,7 +252,7 @@ export function registerDiscussHandlers({
               turnId,
               flowId: sourceFlow.flowId,
               itemId: target.itemId,
-              error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
+              error: payload.error || payload.code || `HTTP ${result.status}`,
               emittedAtMs: Date.now(),
             });
         if (!emitRes.ok) {
@@ -328,7 +327,7 @@ export function registerDiscussHandlers({
     if (transcriptStatus !== "completed") return;
 
     try {
-      const elev = await invokeElevated("/manifold/_elev/discuss", {
+      const result = await runDiscussTurn({
         flowId: sourceFlow.flowId,
         session: target.session,
         agentId: target.agent,
@@ -337,13 +336,11 @@ export function registerDiscussHandlers({
         text: transcript,
         itemId: target.itemId,
         systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,
-      }, { timeoutMs: 360_000 });
-      let payload;
-      try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
-      const turnKind = elev.ok && payload.ok
-        ? "session.transcript.completed"
-        : "session.transcript.failed";
-      const emitRes = await emit(turnKind, elev.ok && payload.ok
+      });
+      const payload = result.body ?? {};
+      const succeeded = result.status === 200 && payload.ok === true;
+      const turnKind = succeeded ? "session.transcript.completed" : "session.transcript.failed";
+      const emitRes = await emit(turnKind, succeeded
         ? {
             scope: "discuss",
             turnId,
@@ -360,7 +357,7 @@ export function registerDiscussHandlers({
             turnId,
             flowId: sourceFlow.flowId,
             itemId: target.itemId,
-            error: payload.error || payload.code || elev.error || `HTTP ${elev.status}`,
+            error: payload.error || payload.code || `HTTP ${result.status}`,
             operatorAudioUrl: audioUrl,
             operatorTranscript: transcript,
             emittedAtMs: Date.now(),

@@ -10,10 +10,10 @@ after(() => {
   else process.env.MANIFOLD_BEARER = SAVED_BEARER;
 });
 
-function createMockReqWithBody(method, path, body) {
+function createMockReqWithBody(method, path, body, { bearer = true } = {}) {
   const chunks = body != null ? [Buffer.from(typeof body === "string" ? body : JSON.stringify(body))] : [];
   return {
-    ...createMockReq(method, path, { authorization: `Bearer ${TEST_BEARER}` }),
+    ...createMockReq(method, path, bearer ? { authorization: `Bearer ${TEST_BEARER}` } : {}),
     [Symbol.asyncIterator]: async function* () { for (const c of chunks) yield c; },
   };
 }
@@ -63,60 +63,43 @@ function makeDeps(api, overrides = {}) {
     failureStore: { get: () => null, list: () => [], recordRetry: () => {} },
     pipelinesRef: { value: new Map() },
     ensurePipelinesLoaded: async () => {},
-    invokeElevated: async () => ({}),
-    discussStore: {
-      readPending: async () => null,
-      mergePendingFields: async () => {},
-      setPending: async () => {},
-      clearPending: async () => {},
-    },
-    sessions: {
-      resolveAgentEffectiveModelPrimary: async () => null,
-      isProviderCooldown: () => false,
-    },
     ...overrides,
   };
 }
 
+function route(routes, path) {
+  const r = routes.find((r) => r.path === path);
+  assert.ok(r, `route ${path} registered`);
+  return r;
+}
+
 describe("registerOperatorRoutes — registration", { skip: SKIP_MSG }, () => {
-  test("registers 10 routes total", () => {
+  test("registers 4 routes total", () => {
     const { api, routes } = createMockApi();
     registerOperatorRoutes(makeDeps(api));
-    assert.equal(routes.length, 10, `expected 10 routes, got ${routes.length}: ${routes.map((r) => r.path).join(", ")}`);
+    assert.equal(routes.length, 4, `expected 4 routes, got ${routes.length}: ${routes.map((r) => r.path).join(", ")}`);
   });
 
-  for (const { path, auth } of [
-    { path: "/manifold/gate/resolve", auth: "plugin" },
-    { path: "/manifold/cancel",        auth: "plugin" },
-    { path: "/manifold/start",         auth: "plugin" },
+  for (const path of [
+    "/manifold/gate/resolve",
+    "/manifold/cancel",
+    "/manifold/start",
+    "/manifold/resume-from-gate",
   ]) {
-    test(`${path}: auth=${auth}, match=exact`, () => {
+    test(`${path}: auth=plugin, match=exact`, () => {
       const { api, routes } = createMockApi();
       registerOperatorRoutes(makeDeps(api));
-      const r = routes.find((r) => r.path === path);
-      assert.ok(r, `route ${path} registered`);
-      assert.equal(r.auth, auth);
+      const r = route(routes, path);
+      assert.equal(r.auth, "plugin");
       assert.equal(r.match, "exact");
     });
   }
 
-  for (const path of [
-    "/manifold/_elev/start",
-    "/manifold/_elev/gate-resolve",
-    "/manifold/resume-from-gate",
-    "/manifold/_elev/rerun",
-    "/manifold/_elev/retry-failure",
-    "/manifold/_elev/discuss",
-  ]) {
-    test(`${path}: auth=gateway, match=exact`, () => {
-      const { api, routes } = createMockApi();
-      registerOperatorRoutes(makeDeps(api));
-      const r = routes.find((r) => r.path === path);
-      assert.ok(r, `route ${path} registered`);
-      assert.equal(r.auth, "gateway");
-      assert.equal(r.match, "exact");
-    });
-  }
+  test("no /manifold/_elev/* route is registered — the work runs in the public handler", () => {
+    const { api, routes } = createMockApi();
+    registerOperatorRoutes(makeDeps(api));
+    assert.deepEqual(routes.filter((r) => r.path.includes("/_elev/")), []);
+  });
 
   test("all handlers are functions", () => {
     const { api, routes } = createMockApi();
@@ -130,80 +113,40 @@ describe("registerOperatorRoutes — method guards", { skip: SKIP_MSG }, () => {
     test(`${path}: GET → 405`, async () => {
       const { api, routes } = createMockApi();
       registerOperatorRoutes(makeDeps(api));
-      const { handler } = routes.find((r) => r.path === path);
       const res = createMockRes();
-      await handler(createMockReq("GET", path), res);
+      await route(routes, path).handler(createMockReq("GET", path), res);
       assert.equal(res.statusCode, 405);
     });
   }
 });
 
 describe("registerOperatorRoutes — gate/resolve handler", { skip: SKIP_MSG }, () => {
-  test("loops back via invokeElevated instead of calling recordItemDecision directly", async () => {
-    const { api, routes } = createMockApi();
-    const recordItemDecision = mock.fn(async () => { throw new Error("should not be called directly"); });
-    const invokeElevated = mock.fn(async (path, body) => ({
-      ok: true, status: 200, body: JSON.stringify({ ok: true, status: "applied", echo: { path, body } }),
-    }));
-    registerOperatorRoutes(makeDeps(api, {
-      gateResolver: { recordItemDecision },
-      invokeElevated,
-    }));
-    const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
-    const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", ...STAMP,
-    });
-    const res = createMockRes();
-    await handler(req, res);
-    assert.equal(recordItemDecision.mock.calls.length, 0);
-    assert.equal(invokeElevated.mock.calls.length, 1);
-    const [path, body] = invokeElevated.mock.calls[0].arguments;
-    assert.equal(path, "/manifold/_elev/gate-resolve");
-    assert.equal(body.flowId, "f1");
-    assert.equal(body.itemId, "i1");
-    assert.equal(body.decision, "approve");
-    assert.equal(body.session, STAMP.session);
-    assert.equal(body.agentId, STAMP.agentId);
-    assert.equal(res.statusCode, 200);
-    assert.deepEqual(JSON.parse(res.body).echo.path, "/manifold/_elev/gate-resolve");
-  });
+  const body = { flowId: "f1", itemId: "i1", decision: "approve", source: "ws", ...STAMP };
 
-  test("propagates the elevated route's status/body verbatim", async () => {
-    const { api, routes } = createMockApi();
-    const invokeElevated = mock.fn(async () => ({
-      ok: false, status: 409, body: JSON.stringify({ ok: false, code: "already-decided" }),
-    }));
-    registerOperatorRoutes(makeDeps(api, { invokeElevated }));
-    const { handler } = routes.find((r) => r.path === "/manifold/gate/resolve");
-    const req = createMockReqWithBody("POST", "/manifold/gate/resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", ...STAMP,
-    });
-    const res = createMockRes();
-    await handler(req, res);
-    assert.equal(res.statusCode, 409);
-    assert.deepEqual(JSON.parse(res.body), { ok: false, code: "already-decided" });
-  });
-});
-
-describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_MSG }, () => {
   test("calls gateResolver.recordItemDecision with the request body", async () => {
     const { api, routes } = createMockApi();
     const recordItemDecision = mock.fn(async () => ({ ok: true, status: "applied" }));
     registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
-    const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
-    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve", source: "ws", editedText: "revised", ...STAMP,
-    });
     const res = createMockRes();
-    await handler(req, res);
+    await route(routes, "/manifold/gate/resolve").handler(createMockReqWithBody("POST", "/manifold/gate/resolve", body), res);
     assert.equal(recordItemDecision.mock.calls.length, 1);
     const call = recordItemDecision.mock.calls[0].arguments[0];
     assert.equal(call.flowId, "f1");
     assert.equal(call.itemId, "i1");
     assert.equal(call.decision, "approve");
-    assert.equal(call.editedText, "revised");
     assert.equal(res.statusCode, 200);
     assert.deepEqual(JSON.parse(res.body), { ok: true, status: "applied" });
+  });
+
+  test("propagates the decision result's status", async () => {
+    const { api, routes } = createMockApi();
+    registerOperatorRoutes(makeDeps(api, {
+      gateResolver: { recordItemDecision: async () => ({ ok: false, code: "already-decided" }) },
+    }));
+    const res = createMockRes();
+    await route(routes, "/manifold/gate/resolve").handler(createMockReqWithBody("POST", "/manifold/gate/resolve", body), res);
+    assert.equal(res.statusCode, 409);
+    assert.deepEqual(JSON.parse(res.body), { ok: false, code: "already-decided" });
   });
 
   test("flow_not_found → 404", async () => {
@@ -211,39 +154,34 @@ describe("registerOperatorRoutes — _elev/gate-resolve handler", { skip: SKIP_M
     registerOperatorRoutes(makeDeps(api, {
       gateResolver: { recordItemDecision: async () => ({ ok: false, code: "flow_not_found" }) },
     }));
-    const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
-    const req = createMockReqWithBody("POST", "/manifold/_elev/gate-resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "ws", ...STAMP });
     const res = createMockRes();
-    await handler(req, res);
+    await route(routes, "/manifold/gate/resolve").handler(createMockReqWithBody("POST", "/manifold/gate/resolve", { flowId: "missing", itemId: "i1", decision: "approve", source: "ws", ...STAMP }), res);
     assert.equal(res.statusCode, 404);
   });
 
-  test("GET → 405", async () => {
+  test("editedText is threaded through", async () => {
     const { api, routes } = createMockApi();
-    registerOperatorRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/manifold/_elev/gate-resolve");
+    const recordItemDecision = mock.fn(async () => ({ ok: true, status: "applied" }));
+    registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
     const res = createMockRes();
-    await handler(createMockReq("GET", "/manifold/_elev/gate-resolve"), res);
-    assert.equal(res.statusCode, 405);
+    await route(routes, "/manifold/gate/resolve").handler(
+      createMockReqWithBody("POST", "/manifold/gate/resolve", { ...body, editedText: "revised" }), res);
+    assert.equal(recordItemDecision.mock.calls[0].arguments[0].editedText, "revised");
   });
 });
 
-describe("registerOperatorRoutes — elevated identity guards", { skip: SKIP_MSG }, () => {
-  async function elevRes(path, body) {
+describe("registerOperatorRoutes — identity guards", { skip: SKIP_MSG }, () => {
+  async function gateRes(body) {
     const { api, routes } = createMockApi();
     const recordItemDecision = mock.fn(async () => { throw new Error("must not run unstamped"); });
     registerOperatorRoutes(makeDeps(api, { gateResolver: { recordItemDecision } }));
-    const { handler } = routes.find((r) => r.path === path);
-    const req = createMockReqWithBody("POST", path, body);
     const res = createMockRes();
-    await handler(req, res);
+    await route(routes, "/manifold/gate/resolve").handler(createMockReqWithBody("POST", "/manifold/gate/resolve", body), res);
     return { res, recordItemDecision };
   }
 
-  test("_elev/gate-resolve: missing identity → 400 missing_identity, no side effects", async () => {
-    const { res, recordItemDecision } = await elevRes("/manifold/_elev/gate-resolve", {
-      flowId: "f1", itemId: "i1", decision: "approve",
-    });
+  test("gate/resolve: missing identity → 400 missing_identity, no side effects", async () => {
+    const { res, recordItemDecision } = await gateRes({ flowId: "f1", itemId: "i1", decision: "approve" });
     assert.equal(res.statusCode, 400);
     assert.deepEqual(JSON.parse(res.body), {
       ok: false, code: "missing_identity",
@@ -252,73 +190,78 @@ describe("registerOperatorRoutes — elevated identity guards", { skip: SKIP_MSG
     assert.equal(recordItemDecision.mock.calls.length, 0);
   });
 
-  test("_elev/gate-resolve: empty identity fields are missing too", async () => {
-    const { res } = await elevRes("/manifold/_elev/gate-resolve", {
-      flowId: "f1", session: "  ", agentId: "main",
-    });
+  test("gate/resolve: empty identity fields are missing too", async () => {
+    const { res } = await gateRes({ flowId: "f1", session: "  ", agentId: "main" });
     assert.equal(res.statusCode, 400);
-    const body = JSON.parse(res.body);
-    assert.equal(body.code, "missing_identity");
-    assert.ok(body.error.includes("session") && body.error.includes("agentId"), body.error);
+    const parsed = JSON.parse(res.body);
+    assert.equal(parsed.code, "missing_identity");
+    assert.ok(parsed.error.includes("session") && parsed.error.includes("agentId"), parsed.error);
   });
 
-  test("_elev/start: missing identity → 400 missing_identity", async () => {
-    const { res } = await elevRes("/manifold/_elev/start", { pipelineId: "p1" });
+  test("gate/resolve: missing flowId is reported alongside the identity fields", async () => {
+    const { res } = await gateRes({ decision: "approve" });
+    assert.equal(res.statusCode, 400);
+    const parsed = JSON.parse(res.body);
+    assert.equal(parsed.code, "missing_identity");
+    assert.ok(parsed.error.includes("flowId"), parsed.error);
+  });
+
+  test("start: missing identity → 400 missing_identity", async () => {
+    const { api, routes } = createMockApi();
+    registerOperatorRoutes(makeDeps(api, { pipelinesRef: { value: new Map([["p1", {}]]) } }));
+    const res = createMockRes();
+    await route(routes, "/manifold/start").handler(createMockReqWithBody("POST", "/manifold/start", { pipelineId: "p1" }), res);
     assert.equal(res.statusCode, 400);
     assert.equal(JSON.parse(res.body).code, "missing_identity");
   });
 
-  test("_elev/start: stamped call passes the guard (reaches the pipeline check)", async () => {
-    const { res } = await elevRes("/manifold/_elev/start", { pipelineId: "p1", ...STAMP });
+  test("start: an unknown pipeline still 404s before the identity guard", async () => {
+    const { api, routes } = createMockApi();
+    registerOperatorRoutes(makeDeps(api));
+    const res = createMockRes();
+    await route(routes, "/manifold/start").handler(createMockReqWithBody("POST", "/manifold/start", { pipelineId: "nope", ...STAMP }), res);
     assert.equal(res.statusCode, 404);
     assert.match(JSON.parse(res.body).error, /unknown pipeline/);
-  });
-
-  test("_elev/rerun: missing identity → 400 missing_identity", async () => {
-    const { res } = await elevRes("/manifold/_elev/rerun", { sourceFlowId: "s1" });
-    assert.equal(res.statusCode, 400);
-    assert.equal(JSON.parse(res.body).code, "missing_identity");
-  });
-
-  test("_elev/rerun: stamped call passes the guard (reaches the source-flow read)", async () => {
-    const { res } = await elevRes("/manifold/_elev/rerun", { sourceFlowId: "s1", ...STAMP });
-    assert.equal(res.statusCode, 404);
-    assert.match(JSON.parse(res.body).error, /source flow not found/);
-  });
-
-  test("_elev/retry-failure: missing identity → 400 missing_identity", async () => {
-    const { res } = await elevRes("/manifold/_elev/retry-failure", { id: "f1" });
-    assert.equal(res.statusCode, 400);
-    assert.equal(JSON.parse(res.body).code, "missing_identity");
-  });
-
-  test("_elev/retry-failure: stamped call passes the guard (reaches the failure read)", async () => {
-    const { res } = await elevRes("/manifold/_elev/retry-failure", { id: "f1", ...STAMP });
-    assert.equal(res.statusCode, 404);
   });
 });
 
 describe("registerOperatorRoutes — start handler", { skip: SKIP_MSG }, () => {
-  test("forwards stamped caller identity to _elev/start", async () => {
+  test("stamped start runs the pipeline and answers with the new flowId", async () => {
     const { api, routes } = createMockApi();
-    const invokeElevated = mock.fn(async () => ({
-      ok: true, status: 200, body: JSON.stringify({ ok: true }),
-    }));
+    const start = mock.fn(async () => ({ flowId: "flow-new", stateJson: { runId: "r1" } }));
     registerOperatorRoutes(makeDeps(api, {
-      invokeElevated,
+      executor: { start, runFlow: async () => {}, resume: async () => {} },
       pipelinesRef: { value: new Map([["p1", {}]]) },
     }));
-    const { handler } = routes.find((r) => r.path === "/manifold/start");
-    const req = createMockReqWithBody("POST", "/manifold/start", { pipelineId: "p1", ...STAMP });
     const res = createMockRes();
-    await handler(req, res);
-    assert.equal(invokeElevated.mock.calls.length, 1);
-    const [path, body] = invokeElevated.mock.calls[0].arguments;
-    assert.equal(path, "/manifold/_elev/start");
-    assert.equal(body.pipelineId, "p1");
-    assert.equal(body.session, STAMP.session);
-    assert.equal(body.agentId, STAMP.agentId);
+    await route(routes, "/manifold/start").handler(createMockReqWithBody("POST", "/manifold/start", { pipelineId: "p1", args: { a: 1 }, ...STAMP }), res);
+    assert.equal(start.mock.calls.length, 1);
+    const [pipelineId, args, triggeredBy] = start.mock.calls[0].arguments;
+    assert.equal(pipelineId, "p1");
+    assert.deepEqual(args, { a: 1 });
+    assert.equal(triggeredBy.kind, "operator_http");
     assert.equal(res.statusCode, 200);
+    assert.deepEqual(JSON.parse(res.body), { ok: true, pipelineId: "p1", flowId: "flow-new" });
+  });
+
+  test("parentSessionKey in the body reaches the lineage trigger", async () => {
+    const { api, routes } = createMockApi();
+    const recorded = [];
+    api.runtime = {
+      lineage: {
+        recordTrigger: async (edge) => { recorded.push(edge); },
+      },
+    };
+    registerOperatorRoutes(makeDeps(api, {
+      executor: { start: async () => ({ flowId: "flow-new", stateJson: {} }), runFlow: async () => {}, resume: async () => {} },
+      pipelinesRef: { value: new Map([["p1", {}]]) },
+    }));
+    const res = createMockRes();
+    await route(routes, "/manifold/start").handler(
+      createMockReqWithBody("POST", "/manifold/start", { pipelineId: "p1", parentSessionKey: "agent:parent:k9", ...STAMP }), res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(recorded.length, 1);
+    assert.equal(recorded[0].parentSessionKey, "agent:parent:k9");
   });
 });
 
@@ -326,14 +269,8 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
   test("missing flowId → 400", async () => {
     const { api, routes } = createMockApi();
     registerOperatorRoutes(makeDeps(api));
-    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
-    const req = {
-      ...createMockReq("POST", "/manifold/cancel", { authorization: `Bearer ${TEST_BEARER}` }),
-      body: "{}",
-      [Symbol.asyncIterator]: async function* () { yield Buffer.from("{}"); },
-    };
     const res = createMockRes();
-    await handler(req, res);
+    await route(routes, "/manifold/cancel").handler(createMockReqWithBody("POST", "/manifold/cancel", {}), res);
     assert.ok(res.statusCode === 400 || res.statusCode === 422, `expected 4xx, got ${res.statusCode}`);
   });
 
@@ -346,10 +283,8 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
         cancel: async (flowId, reason) => { cancelArgs = [flowId, reason]; return { cancelled: true }; },
       },
     }));
-    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
-    const req = createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-1", reason: "cancelled by operator" });
     const res = createMockRes();
-    await handler(req, res);
+    await route(routes, "/manifold/cancel").handler(createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-1", reason: "cancelled by operator" }), res);
     assert.deepEqual(cancelArgs, ["flow-1", "cancelled by operator"]);
   });
 
@@ -362,10 +297,8 @@ describe("registerOperatorRoutes — cancel handler", { skip: SKIP_MSG }, () => 
         cancel: async (flowId, reason) => { cancelArgs = [flowId, reason]; return { cancelled: true }; },
       },
     }));
-    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
-    const req = createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-1" });
     const res = createMockRes();
-    await handler(req, res);
+    await route(routes, "/manifold/cancel").handler(createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-1" }), res);
     assert.deepEqual(cancelArgs, ["flow-1", null]);
   });
 });
@@ -398,10 +331,8 @@ describe("registerOperatorRoutes — cancel handler ownerKey mismatch fallback",
       pipelinesRef: sentinelPipelinesRef,
       failureStore: sentinelFailureStore,
     }));
-    const { handler } = routes.find((r) => r.path === "/manifold/cancel");
-    const req = createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-legacy-1" });
     const res = createMockRes();
-    await handler(req, res);
+    await route(routes, "/manifold/cancel").handler(createMockReqWithBody("POST", "/manifold/cancel", { flowId: "flow-legacy-1" }), res);
 
     assert.equal(createStateStoreCalls.length, 1, "expected the ownerKey-mismatch fallback to construct exactly one cancelStore");
     const { ownerKey, opts } = createStateStoreCalls[0];
@@ -412,5 +343,25 @@ describe("registerOperatorRoutes — cancel handler ownerKey mismatch fallback",
     assert.equal(opts.pipelinesRef, sentinelPipelinesRef);
     assert.equal(opts.failureStore, sentinelFailureStore);
     assert.ok(opts.nodeExecutionsStore, "nodeExecutionsStore must be present so cascade-cancel/parent-resume can inspect subflow children");
+  });
+});
+
+describe("registerOperatorRoutes — resume-from-gate handler", { skip: SKIP_MSG }, () => {
+  test("rejects a request without the bearer", async () => {
+    const { api, routes } = createMockApi();
+    registerOperatorRoutes(makeDeps(api));
+    const res = createMockRes();
+    await route(routes, "/manifold/resume-from-gate").handler(
+      createMockReqWithBody("POST", "/manifold/resume-from-gate", { flowId: "f1" }, { bearer: false }), res);
+    assert.equal(res.statusCode, 401);
+  });
+
+  test("missing flowId → 400", async () => {
+    const { api, routes } = createMockApi();
+    registerOperatorRoutes(makeDeps(api));
+    const res = createMockRes();
+    await route(routes, "/manifold/resume-from-gate").handler(
+      createMockReqWithBody("POST", "/manifold/resume-from-gate", {}), res);
+    assert.equal(res.statusCode, 400);
   });
 });

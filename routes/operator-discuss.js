@@ -150,15 +150,15 @@ export function createDiscussHandler({
           }
         }
       }
-    // Thread identity is recorded by core before the elev call (session
-    // roster); nothing is stamped here and the session id is never parsed.
+    // Thread identity is recorded by the caller (session roster) before this
+    // runs; nothing is stamped here and the session id is never parsed.
       let replyText = result?.meta?.finalAssistantVisibleText
         ?? result?.meta?.finalAssistantRawText
         ?? (Array.isArray(result?.payloads)
             ? result.payloads.map((p) => p?.text?.trim?.() ?? "").filter(Boolean).join("\n")
             : "");
       if (!replyText) {
-        api.logger.warn(`manifold discuss (elev) [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
+        api.logger.warn(`manifold discuss [${flowId.slice(0, 8)}]: runEmbeddedAgent returned no assistant text`);
         return { status: 500, body: { ok: false, code: "no_reply_text", error: "agent ran but no assistant text found" } };
       }
       // Core never scans harness transcripts for pipeline tool calls —
@@ -172,11 +172,11 @@ export function createDiscussHandler({
       }
       const durationMs = Date.now() - startedAt;
       api.logger.info(
-        `manifold discuss (elev) [${flowId.slice(0, 8)}]: ok in ${durationMs}ms (reply=${replyText.length} chars, proposedDraft=${proposedDraft ? proposedDraft.length + " chars" : "none"}, proposedMeta=${proposedMeta ? JSON.stringify(Object.keys(proposedMeta)) : "none"})`
+        `manifold discuss [${flowId.slice(0, 8)}]: ok in ${durationMs}ms (reply=${replyText.length} chars, proposedDraft=${proposedDraft ? proposedDraft.length + " chars" : "none"}, proposedMeta=${proposedMeta ? JSON.stringify(Object.keys(proposedMeta)) : "none"})`
       );
       return { status: 200, body: { ok: true, reply: replyText, durationMs, editDraftUpdated: false, proposedDraft, proposedMeta } };
     } catch (err) {
-      api.logger.warn(`manifold discuss (elev) handler error: ${err?.message ?? err}`);
+      api.logger.warn(`manifold discuss handler error: ${err?.message ?? err}`);
       return { status: 500, body: { ok: false, code: "internal", error: err?.message ?? String(err) } };
     }
   }

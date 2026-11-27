@@ -1,9 +1,8 @@
 // createManifoldApp() assembles the app outside any harness: stores,
 // executor, pipelines watcher, revival, HTTP routes, dashboard — returned as
 // an ordered service list. Host supplies what only a harness has: logger,
-// runTurn, sessions, invokeElevated (defaults to elevation.js loopback),
-// getBroadcast, recordSpawn. Core never touches a gateway API object, so the
-// same code boots inside the openclaw plugin and as a standalone `manifold serve`.
+// runTurn, sessions, getBroadcast, recordSpawn. Core never touches a gateway
+// API object, so `manifold serve` boots it with no knowledge of a harness.
 
 import { createPipelinesLoader } from "../engine/loader.js";
 import { createStateStore } from "../state/state-store.js";
@@ -25,7 +24,6 @@ import { createDashboardServer } from "../dashboard/server.js";
 import { costForAllPipelines } from "../dashboard/cost.js";
 import { createPipelinesWatcher } from "../engine/pipelines-watcher.js";
 import { flushAll as flushBatchWriter } from "../state/batch-writer.js";
-import { invokeElevated as invokeElevatedLoopback } from "../elevation.js";
 import { createDialogServer, DEFAULT_DIALOG_PORT } from "../events/ws-dialog.js";
 import { flowStateEmitter, gateEmitter } from "../events.js";
 import { createEmitter } from "../events/emit.js";
@@ -34,6 +32,7 @@ import { createCatalogPublisher } from "../events/catalog.js";
 import { registerDiscussHandlers } from "../routes/discuss.js";
 import { registerRunRoutes } from "../routes/runs.js";
 import { registerOperatorRoutes } from "../routes/operator.js";
+import { createDiscussHandler } from "../routes/operator-discuss.js";
 import { resumeFlowFromGate } from "../routes/operator-resume.js";
 import { registerFailureRoutes } from "../routes/failures.js";
 import { registerGraphqlRoutes } from "../routes/graphql.js";
@@ -68,7 +67,6 @@ export function createManifoldApp({ host, config = {} } = {}) {
   if (!host?.logger) throw new Error("createManifoldApp: host.logger is required");
   if (typeof host.runTurn !== "function") throw new Error("createManifoldApp: host.runTurn is required");
   const logger = host.logger;
-  const invokeElevated = host.invokeElevated ?? invokeElevatedLoopback;
   const getBroadcast = host.getBroadcast ?? (() => null);
 
   const storePaths = resolveStorePaths();
@@ -242,13 +240,37 @@ export function createManifoldApp({ host, config = {} } = {}) {
 
   service("manifold-read-store", async () => {}, async () => { sessionIndex?.close?.(); });
 
+  // The agent-facing half of a discuss turn: it takes no HTTP shape of its
+  // own, so the discuss routes and the WS dialog both call it directly.
+  const { handleDiscuss: runDiscussTurn } = createDiscussHandler({
+    api: routeHost,
+    discussStore,
+    sessions: host.sessions,
+  });
+
+  const { startElevated, rerunElevated, retryFailureElevated } = registerOperatorRoutes({
+    api: routeHost,
+    store,
+    readStore,
+    executor,
+    gateResolver,
+    failureStore,
+    pipelinesRef,
+    ensurePipelinesLoaded,
+    ownerSessionKey,
+    runStore,
+    admissionQueueStore,
+    resumeParentRef,
+    getBroadcast,
+  });
+
   const discussHandlers = registerDiscussHandlers({
     api: routeHost,
     store,
     pipelinesRef,
     emit: emitCanonical,
     discussDefaultAgent,
-    invokeElevated,
+    runDiscussTurn,
     discussStore,
     runStore,
     nodeExecutionsStore,
@@ -264,7 +286,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
     runStore,
     pipelinesRef,
     pipelineRegistryStore,
-    invokeElevated,
+    rerunElevated,
     discussStore,
     failureStore,
     sessionIndex,
@@ -276,26 +298,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
     handleDiscussAudioRetry: discussHandlers.handleDiscussAudioRetry,
   });
 
-  registerOperatorRoutes({
-    api: routeHost,
-    store,
-    readStore,
-    executor,
-    gateResolver,
-    failureStore,
-    pipelinesRef,
-    ensurePipelinesLoaded,
-    invokeElevated,
-    ownerSessionKey,
-    runStore,
-    admissionQueueStore,
-    resumeParentRef,
-    discussStore,
-    getBroadcast,
-    sessions: host.sessions,
-  });
-
-  registerFailureRoutes({ api: routeHost, failureStore, invokeElevated });
+  registerFailureRoutes({ api: routeHost, failureStore, retryFailureElevated });
   registerGraphqlRoutes({ api: routeHost, failureStore, runStore });
   registerHealthRoutes({ api: routeHost });
   registerPipelineRoutes({ api: routeHost, pipelinesRef, readStore, ensurePipelinesLoaded });
@@ -309,6 +312,8 @@ export function createManifoldApp({ host, config = {} } = {}) {
       store, readStore, admissionQueueStore, runStore, executor,
       logger, flowId, nodeId, decision,
     }),
+    // In-process start for an approved start-gate item (no HTTP loopback).
+    onStartGateStart: (args) => startElevated(args),
   });
   registerTelemetry(routeHost, { getBroadcast, _dbPath: storePaths.opsDb });
 
@@ -322,14 +327,13 @@ export function createManifoldApp({ host, config = {} } = {}) {
       readFlow: (flowId) => readStore.get(flowId),
       resolveTarget: discussHandlers.resolveDiscussTarget,
       runTurn: async ({ flowId, session, agentId, gateNodeId, modelOverride, itemId, text, systemPrompt }) => {
-        const elev = await invokeElevated("/manifold/_elev/discuss", {
+        const result = await runDiscussTurn({
           flowId, session, agentId, gateNodeId, modelOverride, text, itemId,
           systemPrompt: typeof systemPrompt === "string" ? systemPrompt : null,
-        }, { timeoutMs: 360_000 });
-        let payload;
-        try { payload = JSON.parse(elev.body || "{}"); } catch { payload = {}; }
-        if (!(elev.ok && payload.ok)) {
-          return { ok: false, code: payload.code ?? "elev_failed", error: payload.error ?? payload.code ?? elev.error ?? `HTTP ${elev.status}` };
+        });
+        const payload = result.body ?? {};
+        if (result.status !== 200 || payload.ok !== true) {
+          return { ok: false, code: payload.code ?? "discuss_failed", error: payload.error ?? payload.code ?? `HTTP ${result.status}` };
         }
         return {
           ok: true, reply: payload.reply ?? "", proposedDraft: payload.proposedDraft ?? null,
