@@ -11,17 +11,6 @@
     "type": "git",
     "url": "git+https://github.com/igorjpimenta/manifold.git"
   },
-  "files": [
-    "README.md",
-    "gateway-readiness.js",
-    "index.js",
-    "meta.js",
-    "openclaw.plugin.json",
-    "run-turn.js",
-    "session-keys.js",
-    "sessions.js",
-    "telemetry.js"
-  ],
   "openclaw": {
     "extensions": [
       "./index.js"
