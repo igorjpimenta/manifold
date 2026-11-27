@@ -24,9 +24,13 @@ test("the adapter is publishable as its own openclaw plugin package", () => {
   const pkg = JSON.parse(readFileSync(path.join(adapter, "package.json"), "utf8"));
   assert.equal(pkg.name, "@igorjpimenta/manifold-openclaw");
   assert.deepEqual(pkg.openclaw?.extensions, ["./index.js"]);
-  assert.ok(pkg.files.includes("openclaw.plugin.json"), "plugin manifest ships in the tarball");
-  assert.ok(existsSync(path.join(adapter, "openclaw.plugin.json")));
   assert.equal(pkg.private, undefined, "publishable, not a private workspace package");
+  const pack = JSON.parse(
+    execFileSync("npm", ["pack", "--dry-run", "--json"], { cwd: adapter, encoding: "utf8" })
+  );
+  const shipped = pack[0].files.map((f) => f.path);
+  assert.ok(shipped.includes("openclaw.plugin.json"), "plugin manifest ships in the tarball");
+  assert.ok(shipped.includes("tool-results.js"), "turn rendezvous ships in the tarball");
 });
 
 test("the adapter opts into startup activation", () => {
