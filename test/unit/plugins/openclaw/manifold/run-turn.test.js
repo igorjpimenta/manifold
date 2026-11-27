@@ -173,6 +173,31 @@ describe("createRunTurn — the turn", () => {
     assert.equal(toolResults.read(session), null);
   });
 
+  test("waits out the grace window for a POST still in flight when the run ends", async () => {
+    const session = `sk-grace-${randomUUID()}`;
+    const raw = makeRuntime({
+      getSessionMessages: async () => {
+        // The tool's POST trails the run's end by a few milliseconds.
+        setTimeout(() => toolResults.write({ session, kind: "score", payload: { score: 63 } }), 15);
+        return { messages: [{ role: "assistant", content: "scored." }] };
+      },
+    });
+    const { runTurn } = createRunTurn({ getRuntime: () => raw, logger, toolResults, toolResultGraceMs: 500 });
+    const out = await runTurn({ session, message: "x" });
+    assert.deepEqual(out.toolResult, { kind: "score", payload: { score: 63 } });
+    assert.equal(toolResults.read(session), null, "the consumed row is cleared");
+  });
+
+  test("a text-only turn returns its reply once the grace window expires", async () => {
+    const session = `sk-text-${randomUUID()}`;
+    const started = Date.now();
+    const { runTurn } = createRunTurn({ getRuntime: () => makeRuntime(), logger, toolResults, toolResultGraceMs: 60 });
+    const out = await runTurn({ session, message: "x" });
+    assert.equal(out.toolResult ?? null, null);
+    assert.ok(Date.now() - started >= 50, "it waited for the window before giving up");
+    assert.ok(out.text.length > 0, "the model's own reply is the fallback");
+  });
+
   test("never resurrects a row stamped before the turn started", async () => {
     const session = `sk-stale-${randomUUID()}`;
     toolResults.write({ session, kind: "score", payload: { score: 1 } });

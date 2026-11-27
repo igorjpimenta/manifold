@@ -26,8 +26,12 @@ export function createToolResults({ now = Date.now } = {}) {
       rows.set(key, row);
       const pending = waiters.get(key);
       if (pending) {
-        waiters.delete(key);
-        for (const resolve of pending) resolve(row);
+        for (const [resolve, since] of pending) {
+          if (row.updatedAt < since) continue;
+          pending.delete(resolve);
+          resolve(row);
+        }
+        if (pending.size === 0) waiters.delete(key);
       }
       return true;
     },
@@ -46,26 +50,39 @@ export function createToolResults({ now = Date.now } = {}) {
     },
 
     /**
-     * { promise, cancel }: resolves with an existing row immediately, otherwise
-     * with the next write for that session. The caller MUST cancel() when its
-     * own race decides, or the promise keeps a waiter entry alive.
+     * { promise, cancel }: resolves with an existing row for the session,
+     * otherwise with the next write. `since` ignores rows stamped earlier
+     * (a previous attempt's result must not answer this turn), and
+     * `timeoutMs` settles the promise with null instead of waiting forever.
+     * The caller MUST cancel() a wait its own race no longer needs.
      */
-    wait(session) {
+    wait(session, { since = 0, timeoutMs = 0 } = {}) {
       const key = keyOf(session);
+      let timer = null;
       let settle;
-      const promise = new Promise((resolve) => { settle = resolve; });
-      if (!key) return { promise, cancel: () => {} };
+      const promise = new Promise((resolve) => {
+        settle = (row) => {
+          if (timer) { clearTimeout(timer); timer = null; }
+          resolve(row);
+        };
+      });
+      if (!key) { settle(null); return { promise, cancel: () => {} }; }
       const existing = rows.get(key);
-      if (existing) { settle(existing); return { promise, cancel: () => {} }; }
-      const pending = waiters.get(key) ?? new Set();
-      pending.add(settle);
+      if (existing && existing.updatedAt >= since) { settle(existing); return { promise, cancel: () => {} }; }
+      const pending = waiters.get(key) ?? new Map();
+      pending.set(settle, since);
       waiters.set(key, pending);
       const cancel = () => {
+        if (timer) { clearTimeout(timer); timer = null; }
         const set = waiters.get(key);
         if (!set) return;
         set.delete(settle);
         if (set.size === 0) waiters.delete(key);
       };
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => { cancel(); settle(null); }, timeoutMs);
+        timer.unref?.();
+      }
       return { promise, cancel };
     },
   };
