@@ -21,6 +21,9 @@ import { GatewayHandoffNeeded, isRequestScopedSubagentError, fetchSessionError }
 // thing that settles the wait; the runtime's agents.defaults.timeoutSeconds
 // still bounds the run itself.
 const WAIT_UNTIL_RUN_ENDS_MS = 2_147_483_647;
+// A tool's POST trails the run's own end by milliseconds (the harness ends the
+// run at the call). Bounded so a text-only turn is not delayed beyond this.
+const TOOL_RESULT_GRACE_MS = 2_000;
 
 // This gateway lowercases session keys. Node ids arrive SCREAMING_CASE, so the
 // turn must address the runtime, the tool's ctx.sessionKey and the hand-off row
@@ -60,7 +63,7 @@ export function createGatewaySubagentGate({ whenGatewayReady } = {}) {
 // Builds the turn function core injects. getRuntime resolves the harness's
 // agent runtime per call (it can appear late — the gateway binds it during
 // startup) and may return null.
-export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = null, toolResults }) {
+export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = null, toolResults, toolResultGraceMs = TOOL_RESULT_GRACE_MS }) {
   const gate = createGatewaySubagentGate({ whenGatewayReady });
 
   async function runTurn({ session, message, skill, agentId }) {
@@ -137,12 +140,13 @@ export function createRunTurn({ getRuntime, whenGatewayReady = null, logger = nu
         if (text) { lastText = text; break; }
       }
     }
-    // A tool call can land after the run's own end (the model retries a
-    // rejected call); the race above only covers up to that end. Read one last
-    // time, and only accept a row stamped at or after this turn's start — an
-    // older stamp belongs to a previous attempt and must not be resurrected.
-    const late = toolResults.read(sessionKey);
-    if (late && (late.updatedAt ?? 0) >= startedAt) {
+    // A tool call can land after the run's own end: the harness ends the run
+    // at the call and the tool's POST arrives milliseconds later, so a plain
+    // read here loses a result that was already on its way. Wait a bounded
+    // grace period for a row stamped at or after this turn's start — an older
+    // stamp belongs to a previous attempt and must not be resurrected.
+    const late = await toolResults.wait(sessionKey, { since: startedAt, timeoutMs: toolResultGraceMs }).promise;
+    if (late) {
       toolResults.clear(sessionKey);
       return {
         text: "",
