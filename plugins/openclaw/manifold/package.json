@@ -20,7 +20,8 @@
     "run-turn.js",
     "session-keys.js",
     "sessions.js",
-    "telemetry.js"
+    "telemetry.js",
+    "tool-results.js"
   ],
   "openclaw": {
     "extensions": [
