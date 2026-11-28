@@ -52,7 +52,8 @@ Versioning, tagging and publishing: [Releases](docs/releases.md).
 
        curl -X POST -H "Authorization: Bearer $MANIFOLD_BEARER" \
          -H 'Content-Type: application/json' \
-         -d '{"pipelineId":"<id>"}' http://127.0.0.1:44301/manifold/start
+         -d '{"pipelineId":"<id>","session":"<caller session>","agentId":"<caller agent>"}' \
+         http://127.0.0.1:44301/manifold/start
 
 4. Watch it: the dashboard at `http://127.0.0.1:44300`
    ([Dashboard](docs/dashboard.md)) or `GET /manifold/runs` on the API.

@@ -45,7 +45,7 @@ function makeDeps(api, overrides = {}) {
     pipelinesRef: { value: new Map() },
     emit: async () => ({ ok: true }),
     discussDefaultAgent: null,
-    invokeElevated: async () => ({}),
+    runDiscussTurn: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
     sessions,
     discussStore: {
       getComponent: () => null,
@@ -290,7 +290,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     const deps = makeDeps(api, {
       pipelinesRef,
       emit,
-      invokeElevated: async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, reply: "agent reply" }) }),
+      runDiscussTurn: async () => ({ status: 200, body: { ok: true, reply: "agent reply" } }),
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 
@@ -365,7 +365,7 @@ describe("registerDiscussHandlers — handleDiscussAudioRetry", () => {
     const deps = makeDeps(api, {
       pipelinesRef,
       emit,
-      invokeElevated: async () => ({ ok: true, status: 200, body: JSON.stringify({ ok: true, reply: "agent reply" }) }),
+      runDiscussTurn: async () => ({ status: 200, body: { ok: true, reply: "agent reply" } }),
     });
     const { handleDiscussAudioRetry } = registerDiscussHandlers(deps);
 

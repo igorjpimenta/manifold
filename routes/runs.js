@@ -2,6 +2,7 @@ import { getNodeExecutionsStore } from "../state/node-executions.js";
 import { getAllSubflowGroups } from "../state/subflow-state.js";
 import { assembleState } from "../engine/executor-helpers.js";
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
+import { missingIdentityFields, refuseMissingIdentity } from "./operator.js";
 
 export function registerRunRoutes({
   api,
@@ -10,7 +11,7 @@ export function registerRunRoutes({
   runStore,
   pipelinesRef,
   pipelineRegistryStore,
-  invokeElevated,
+  rerunFlow,
   discussStore,
   failureStore,
   sessionIndex,
@@ -974,15 +975,12 @@ export function registerRunRoutes({
       return true;
     }
     try {
-      const elev = await invokeElevated("/manifold/_elev/rerun", {
-        sourceFlowId: sourceFlow.flowId,
-        args: argsOverride,
-        session: body.session,
-        agentId: body.agentId,
-      });
-      res.statusCode = elev.status || 500;
+      const missingIdentity = missingIdentityFields(body, ["session", "agentId"]);
+      if (missingIdentity.length > 0) { refuseMissingIdentity(res, missingIdentity); return true; }
+      const result = await rerunFlow({ sourceFlow, argsOverride });
+      res.statusCode = result.status;
       res.setHeader("Content-Type", "application/json");
-      res.end(elev.body || JSON.stringify({ ok: false, code: "elevation_no_body" }));
+      res.end(JSON.stringify(result.body));
     } catch (err) {
       api.logger.warn(`manifold rerun handler error: ${err?.message ?? err}`);
       res.statusCode = 500;

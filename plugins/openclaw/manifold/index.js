@@ -231,8 +231,7 @@ export default definePluginEntry({
     // and an `auth: "plugin"` handler carries no scope at all — so the public
     // route, which the core calls with the per-boot token, loops back through
     // the env-var Bearer to the `auth: "gateway"` sibling, whose handler runs
-    // with CLI_DEFAULT_OPERATOR_SCOPES ambient (the same crossing
-    // manifold's own elevation.js documents for gate resolution).
+    // with CLI_DEFAULT_OPERATOR_SCOPES ambient.
     api.registerHttpRoute({
       path: ELEV_TURN_PATH,
       auth: "gateway",

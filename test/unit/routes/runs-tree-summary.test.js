@@ -40,7 +40,7 @@ function makeDeps(api, overrides = {}) {
     costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
     runStore: { listForParentInvocations: () => [] },
     pipelinesRef: { value: new Map() },
-    invokeElevated: async () => ({}),
+    rerunFlow: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
     failureStore: { queryErrorsByFlow: async () => [], queryErrorsByFlowIds: async () => new Map() },
     discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
     handleDiscuss:           async () => {},

@@ -82,7 +82,7 @@ function makeDeps(api, overrides = {}) {
     runStore: { listForParentInvocations: () => [] },
     pipelinesRef,
     pipelineRegistryStore: makeMockPipelineRegistryStore(pipelinesRef),
-    invokeElevated: async () => ({}),
+    rerunFlow: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
     failureStore: { queryErrorsByFlow: async (flowId) => queryErrorsByFlowImpl(flowId) },
     discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
     handleDiscuss:           async () => {},
