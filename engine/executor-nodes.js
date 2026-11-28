@@ -58,19 +58,14 @@ export function createNodeRunner({
     });
   }
 
-  // Shared by the plain "agent" branch and cascade sub-nodes of kind
-  // "agent". `nodeId` scopes session-key derivation, lineage and budget.
-  //
-  // No admission here: the pool governs flow RUNS, and this run already
-  // holds its own slot for as long as it runs — one node at a time, so the
-  // run cap already bounds concurrent agent dispatches. A second slot taken
-  // mid-node made hold-and-wait deadlock (keeping the run slot) or churn
-  // (giving it back) possible.
-  //
-  // Circuit breaker: `entry.circuitBreaker: true` opts in; checked here
-  // regardless of flow kind. Fails fast before any prompt build or session
-  // spawn when already blocked; a block has no expiry, so the error names
-  // the reset command.
+  // Shared by the plain "agent" branch and cascade sub-nodes of kind "agent".
+  // `nodeId` scopes session-key derivation, lineage and budget. No admission
+  // here: the pool governs flow RUNS and this run already holds its slot for
+  // as long as it runs (one node at a time), so the run cap already bounds
+  // concurrent agent dispatches — a second slot mid-node risks hold-and-wait
+  // deadlock or churn. Circuit breaker: `entry.circuitBreaker: true` opts in,
+  // checked here regardless of flow kind; fails fast before prompt build or
+  // session spawn, naming the reset command (block has no expiry).
   async function dispatchAgentEntry(entry, nodeId, { state, flowId, reviveMessage, invocationId }) {
     const pipelineId = state?.pipelineId ?? null;
     // Refused loudly: every agent turn is keyed to its agent for session
@@ -90,27 +85,23 @@ export function createNodeRunner({
     });
     if (gate.skip) return {};
     if (gate.pause) {
-      // NodeBlocked's constructor only keeps {reason, needed, hint} — the
-      // budget-gate pause's _kind drives downstream wait_json routing, so
-      // preserve the full object on top.
+      // NodeBlocked keeps only {reason, needed, hint}; the budget-gate pause's
+      // _kind drives wait_json routing, so preserve the full object.
       const err = new NodeBlocked(gate.blockedInfo ?? {});
       err._blocked = { ...(gate.blockedInfo ?? {}) };
       throw err;
     }
-    // promptBuilder reads via assembleState (not raw state) so
-    // _subflowGroups is visible; needs ctx rides as its 2nd arg (a
-    // single-arg promptBuilder ignores it). A thrown NodeBlocked here is
-    // deliberately outside the try/catch below — it propagates to
-    // executeNodeBody's agent-branch catch, which converts it to
-    // blockedInfo.
+    // promptBuilder reads via assembleState (not raw state) so _subflowGroups
+    // is visible; needs ctx rides as its 2nd arg (single-arg builders ignore
+    // it). A thrown NodeBlocked here stays outside the try/catch below — it
+    // propagates to executeNodeBody's agent-branch catch → blockedInfo.
     const enrichedState = await assembleState(flowId, { runStore, nodeExecutionsStore, baseState: state });
     const message = reviveMessage ?? await Promise.resolve(entry.promptBuilder(enrichedState, { needs: makeNeedsCtx({ node: entry, flowId, runStore, nodeExecutionsStore, pipelinesRef }) }));
     // Session ids belong to the harness, not manifold: entry.session /
     // sessionBuilder pass through verbatim; otherwise the harness adapter
     // mints one so pipelines carry no harness key syntax. A refused
-    // dispatch means no mint function was injected — the harness's tool
-    // result, the session index and the lineage ledger all key off this
-    // value, so neither core nor a silent default may invent one.
+    // dispatch (no mint function) is fatal — tool result, session index and
+    // lineage ledger all key off this value; core may not invent one.
     let session = entry.session ?? entry.sessionBuilder?.(state, flowId) ?? null;
     // The mint may be a bridge call to the harness process, so it's
     // awaited and type-checked before anything keys off it.
