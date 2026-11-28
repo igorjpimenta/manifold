@@ -18,16 +18,13 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
   const now = Date.now();
   const admittedRows = await admissionQueueStore.listByStatus("admitted");
 
-  // Admitted rows of kinds this engine can't resume are permanent pool
-  // leaks, not safe skips: resumePromotedAdmission refuses non-resumable
-  // kinds and releaseByFlow matches the flow's CURRENT admission kind, so
-  // nothing can ever drive such a row — while admit()'s and fillFreeSlots()'
-  // admitted-count queries have no kind filter, so zombie rows count against
-  // the ceiling forever and wedge both shut. release() frees the slot and
-  // promotes the oldest queued row, putting the capacity back to work in the
-  // same pass. A QUEUED row of such a kind holds no slot and is left alone
-  // here; fillFreeSlots() can promote one, and this pass reclaims it after
-  // the same grace window.
+  // Admitted rows of kinds this engine can't resume are permanent pool leaks:
+  // resumePromotedAdmission refuses them and releaseByFlow matches the flow's
+  // CURRENT kind, so nothing drives such a row, while admit()/fillFreeSlots()
+  // count admitted rows without a kind filter — zombies wedge the ceiling
+  // forever. release() frees the slot and promotes the oldest queued row in the
+  // same pass. QUEUED rows of such a kind hold no slot and are left here;
+  // fillFreeSlots() may promote one, reclaimed after the grace window.
   let retiredKindReaped = 0;
   const resumableRows = [];
   for (const row of admittedRows) {
@@ -56,12 +53,9 @@ export async function reconcileStuckAdmissions({ admissionQueueStore, runStore, 
     }
   }
 
-  // Filter candidates with cheap sequential reads, then drive them in
-  // parallel: flipToRunningAndResume can block unboundedly (it may resolve
-  // the flow to a fresh admission request that waits on another slot), so
-  // driving candidates one at a time lets a single flow stuck behind real
-  // contention stall every other candidate — defeating a sweep that exists
-  // to recover exactly those flows under load.
+  // Filter candidates with cheap sequential reads, then drive them in parallel:
+  // flipToRunningAndResume can block unboundedly (a flow may wait on another
+  // slot), so serial driving lets one stuck flow stall every other candidate.
   const candidates = [];
   for (const row of resumableRows) {
     if (row.admittedAt && now - row.admittedAt < minAgeMs) continue;
@@ -113,12 +107,11 @@ export async function reviveOrphanFlows({
   // process, so the default is trivially satisfied there).
   stuckAdmissionMinAgeMs,
 }) {
-  // store.cancel() writes cancel_requested_at first, then status='cancelled',
-  // in two separate SQL statements. A crash between them leaves a flow with
-  // cancelRequestedAt set but status still 'running'/'blocked'/'waiting'.
-  // Re-cancel those before reviving anything else so they don't land in toRevive.
-  // f.revision is already the post-requestCancel value — pass it directly to
-  // completeCancellation as the expectedRevision for setRunning.
+  // store.cancel() writes cancel_requested_at then status='cancelled' in two
+  // statements; a crash between leaves cancelRequestedAt set but status
+  // running/blocked/waiting. Re-cancel those first so they don't land in
+  // toRevive. f.revision is already post-requestCancel — pass it straight to
+  // completeCancellation as expectedRevision.
   const cancelledByRevival = new Set();
   const terminalStatuses = new Set(["cancelled", "failed", "succeeded"]);
   const cancelStores = new Map();
@@ -148,34 +141,15 @@ export async function reviveOrphanFlows({
     cancelledByRevival.add(f.flowId);
   }
 
-  // isAgent decides HOW to revive an agent-kind node: reviveAgentKindOrphan()
-  // resumes the SAME session with REVIVAL_MSG, a continuation prompt, sent
-  // UNCONDITIONALLY even to a session with zero prior turns (executor-nodes.js:
-  // `reviveMessage ?? promptBuilder(...)` with no branch on prior
-  // invocations). So isAgent is only correct when a dispatch genuinely
-  // started — REVIVAL_MSG as the first-ever message to a node that was only
-  // queued would be a "continue where you left off" with nothing to continue.
-  //
-  // Running: targetNodeId comes from nodeExecutionsStore.findCurrentStep(),
-  // race-free proof a dispatch entered the node — nodeExecutions.enter()
-  // creates the invocation row BEFORE executeNode() runs, well before
-  // flow_sessions is written (session-index.js) or subagent.run() is called.
-  // The 'running' case must not REQUIRE a session record: a crash past enter()
-  // but before that write leaves correct targetNodeId with
-  // hasSessionForNode()===false, and requiring it would misroute the dispatch
-  // into resolveEdge()/runFlow(), which fails with "edge <NODE> returned no
-  // next node". A running flow with no invocation row yet (findCurrentStep()
-  // -> null) correctly falls through to resolveEdge(lastStep), and
-  // hasSessionForNode() still decides isAgent for it.
-  //
-  // Queued: targetNodeId comes from waitJson.nodeId — set by the admission
-  // wait before it acquires a slot, proving the node was ABOUT to be
-  // dispatched, not that dispatch began — so hasSessionForNode() still gates
-  // isAgent there.
-  //
-  // f.lastStep is the last COMPLETED node, never the one in flight; the real
-  // target is waitJson.nodeId (queued) or findCurrentStep() (running, falling
-  // back to resolveEdge(lastStep) for a brand-new flow with no invocations).
+  // isAgent: whether the in-flight node already dispatched (so revival sends
+  // REVIVAL_MSG on the original session instead of re-running promptBuilder).
+  // Running → targetNodeId from findCurrentStep() (enter() row proves dispatch
+  // began; session record not required, since a crash between enter() and the
+  // session write must still route to reviveAgentKindOrphan). No invocation
+  // row → falls through to resolveEdge(lastStep), with hasSessionForNode()
+  // deciding isAgent. Queued → targetNodeId from waitJson.nodeId (about to be
+  // dispatched, not dispatched), so hasSessionForNode() gates isAgent. lastStep
+  // is the last COMPLETED node, never the in-flight one.
   const orphans = [];
   for (const f of all) {
     if (f.status !== "running" && f.status !== "queued") continue;
@@ -196,20 +170,13 @@ export async function reviveOrphanFlows({
     orphans.push({ flow: f, isAgent, targetNodeId, nodeKind });
   }
 
-  // A 'queued' orphan on kind:"flow-start" or "child-dispatch" is already
-  // tracked in the DURABLE combined admission pool, which reflected who was
-  // admitted vs queued the moment the gateway died — nothing to re-derive. A
-  // live queued flow of these kinds is never dispatched directly either
-  // (executor.js runFlow() isQueued guard): the same release()/promotion
-  // cycle that wakes it wakes a boot-revived one once some other flow goes
-  // blocked or terminal.
-  //
-  // A 'queued' orphan on waitJson.kind:"agent-dispatch" — a kind this engine
-  // does not admit (its rows are deleted by migration) — gave its run slot
-  // back when it queued, so it holds nothing; re-entering it directly would
-  // run outside the pool. flipToRunningAndResume makes it re-request its own
-  // slot instead (admitted → resumed; pool full → queued for the normal
-  // promotion cycle).
+  // A 'queued' orphan on kind "flow-start"/"child-dispatch" is already tracked
+  // in the durable admission pool (admitted vs queued frozen at crash); a live
+  // queued flow of these kinds is never dispatched directly (runFlow's isQueued
+  // guard), so the normal release/promotion cycle wakes it. A 'queued' orphan
+  // on waitJson.kind "agent-dispatch" — a kind this engine does not admit
+  // (rows deleted by migration) — gave its slot back when it queued and holds
+  // nothing; flipToRunningAndResume makes it re-request its own slot instead.
   const toRevive = [];
   let queuedForAdmission = 0;
   let readmitted = 0;
@@ -262,12 +229,10 @@ export async function reviveOrphanFlows({
     }
   }
 
-  // The resume-trigger (state-store.js's finish/skip/fail/cancel) fires on
-  // the LAST sibling's terminal write — a crash at exactly that moment loses
-  // the fire. Re-check every blocked parent against its children's current
-  // terminal state: same idempotent-recheck shape as gate-resolver.js's
-  // maybeResolveFlow. No-op when the stores aren't wired in (older callers,
-  // tests).
+  // The resume-trigger fires on the LAST sibling's terminal write; a crash
+  // at that moment loses the fire. Re-check every blocked parent against its
+  // children's terminal state (same idempotent shape as gate-resolver's
+  // maybeResolveFlow). No-op when stores aren't wired (older callers, tests).
   let childrenReconciled = 0;
   if (runStore && nodeExecutionsStore) {
     for (const f of all) {
@@ -302,12 +267,11 @@ export async function reviveOrphanFlows({
     }
   }
 
-  // A gate decision is recorded in two steps: write approvalPending[itemId]
-  // durably, then maybeResolveFlow → applyResolutionsAndResume moves it into
-  // approvedIds/rejectedIds and resumes the flow. A crash between them leaves
-  // approvalPending showing a real decision never applied and nothing else
-  // re-drives step two — the flow stays blocked forever. Same idempotent
-  // recheck as above; no-op when maybeResolveFlow isn't wired in.
+  // A gate decision lands in two steps: approvalPending[itemId] durably,
+  // then maybeResolveFlow → applyResolutionsAndResume moves it into
+  // approvedIds/rejectedIds and resumes. A crash between leaves an unapplied
+  // decision and nothing re-drives step two — flow stays blocked forever.
+  // Same idempotent recheck; no-op when maybeResolveFlow isn't wired.
   let gatesReconciled = 0;
   if (maybeResolveFlow) {
     for (const f of all) {
@@ -331,17 +295,13 @@ export async function reviveOrphanFlows({
   }
 
   // A flow_admission_queue row should exist only while its owning flow is
-  // non-terminal — every terminal transition releases it via state-store.js's
-  // triggerAdmissionRelease, which silently no-ops if the caller's state-store
-  // was built without admissionQueueStore wired in, leaving the row "admitted"
-  // forever and shrinking the one gateway-wide shared pool for the rest of
-  // uptime. Sweep the invariant itself every boot rather than trust every
-  // future release call site: a terminal flow can never legitimately hold a
-  // live admission entry, whatever bug produced it. statusByFlowId is built
-  // from `all` plus cancelledByRevival (flows just re-cancelled, whose status
-  // in `all` is stale). Own terminal-status set — the narrower
-  // `terminalStatuses` above (scoped to the re-cancel check) misses "skipped"
-  // (run-store.js's TERMINAL_STATUSES), which can equally hold a leak.
+  // non-terminal — terminal transitions release via state-store's
+  // triggerAdmissionRelease, which no-ops if admissionQueueStore wasn't wired,
+  // leaking an "admitted" row and shrinking the shared pool for uptime. Sweep
+  // the invariant every boot instead of trusting every release call site.
+  // statusByFlowId from `all` plus cancelledByRevival (just re-cancelled, stale
+  // status in `all`); own terminal set — the narrower `terminalStatuses` above
+  // misses "skipped" (run-store's TERMINAL_STATUSES), which leaks too.
   const admissionTerminalStatuses = new Set(["succeeded", "failed", "cancelled", "skipped"]);
   let admissionLeaksReleased = 0;
   if (admissionQueueStore) {

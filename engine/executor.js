@@ -144,10 +144,10 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
         logger.info(`manifold [${flowId.slice(0, 8)}] ${flow.status} at ${flow.lastStep} on ${flow.waitJson?.kind ?? "?"}`);
         return;
       }
-      // A flow queued for flow-start or child-dispatch admission is not yet
-      // cleared to run; its admission check lives outside this loop, so a
-      // fresh call here would dispatch lastStep's edge and bypass the pool.
-      // Return — admission-queue-store's release/promotion wakes it later.
+      // A flow queued for flow-start/child-dispatch admission isn't cleared to
+      // run; its admission check lives outside this loop, so a fresh call here
+      // would dispatch lastStep's edge and bypass the pool. Return — the
+      // admission queue's release/promotion wakes it later.
       if (isQueued(flow.status) && (flow.waitJson?.kind === "flow-start" || flow.waitJson?.kind === "child-dispatch")) {
         logger.info(`manifold [${flowId.slice(0, 8)}] queued at ${flow.lastStep} on ${flow.waitJson?.kind}`);
         return;
@@ -175,9 +175,9 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       }
 
       const lastStep = flow.lastStep ?? "__start__";
-      // Transient cascade-leg error, persisted in state_json so it survives a
-      // gateway restart; the nodeId===lastStep guard stops a stale marker
-      // from an earlier loop-back being read after lastStep moved past it.
+      // Transient cascade-leg error, persisted in state_json to survive a
+      // restart; the nodeId===lastStep guard stops a stale marker from an
+      // earlier loop-back being read after lastStep moved past it.
       const cascadeError = state?._cascadeError?.nodeId === lastStep ? state._cascadeError : null;
       // Separate local: `state` is what gets persisted below; only the value
       // handed to the edge function changes.
@@ -482,7 +482,7 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
       if (!resultWrite || !resultWrite.ok) {
         const reason = resultWrite?.reason ?? "threw";
         // Only "race" means a concurrent writer already committed this
-        // invocation's content — advancing is correct. Any other reason means
+        // invocation's content (advancing is correct). Any other reason means
         // nobody wrote: advancing would let resolveEdge dead-end with "no
         // next node" on the next iteration, hiding the real cause.
         if (reason !== "race") {
@@ -595,14 +595,12 @@ export function createExecutor({ api, config, approvalQueue, pipelinesDir, store
     });
   }
 
-  // Unlike a code-kind orphan (safe to re-enter via runFlow — no side effect
-  // yet), an agent-kind node may have already dispatched a completed or
-  // partial turn; re-running promptBuilder() would give the agent no way to
-  // know, risking a duplicate side effect. Send REVIVAL_MSG on the original
-  // deterministic session key instead so it can check its own prior turns.
-  //
-  // nodeId is the in-flight node (flow.lastStep is the last COMPLETED node);
-  // callers that omit it get the lastStep fallback.
+  // Unlike a code-kind orphan (safe to re-enter via runFlow), an agent-kind
+  // node may have already dispatched a completed/partial turn; re-running
+  // promptBuilder() risks a duplicate side effect. Send REVIVAL_MSG on the
+  // original session key so it can check its own prior turns. nodeId is the
+  // in-flight node (lastStep is the last COMPLETED node); omitting it falls
+  // back to lastStep.
   async function reviveAgentKindOrphan(flow, nodeId = flow.lastStep) {
     const flowId = flow.flowId;
     const flowId8 = flowId.slice(0, 8);
