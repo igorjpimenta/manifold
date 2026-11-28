@@ -57,11 +57,11 @@ async function readBody(req) {
   catch { return null; }
 }
 
-export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume, onStartGateStart } = {}) {
+export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn = openStore, onFlowResume, onStartGateApproved } = {}) {
   // onFlowResume({flowId, nodeId, decision}) resumes a flow-bound approval
   // in-process (routes/operator-resume.js, injected by index.js) — no HTTP
   // loopback. Absent (tests), per-node resume is skipped but the decision
-  // still commits and broadcasts. onStartGateStart has the same contract for
+  // still commits and broadcasts. onStartGateApproved has the same contract for
   // a start-gate approval: it starts the queued pipeline in-process.
   const { emit } = createEmitter({ getBroadcast, logger: api.logger });
 
@@ -172,9 +172,9 @@ export function registerBudgetRoutes(api, { getBroadcast, openStore: openStoreFn
             }
             api.logger.info(`[manifold/budget] ${decision} per-node — resuming flow=${String(row.flow_id).slice(0,8)} node=${row.node}`);
           } else if (decision === "approve" && row.pipeline_id) {
-            if (onStartGateStart) {
+            if (onStartGateApproved) {
               try {
-                await onStartGateStart({
+                await onStartGateApproved({
                   pipelineId: row.pipeline_id,
                   args: row.pipeline_args ? JSON.parse(row.pipeline_args) : {},
                   via: "approval",

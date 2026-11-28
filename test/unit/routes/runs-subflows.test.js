@@ -35,7 +35,7 @@ function authReq(method, path) {
 const FULL_DEPS_BASE = {
   costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
   pipelinesRef: { value: new Map() },
-  rerunElevated: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
+  rerunFlow: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
   discussStore: { getComponent: () => null, listComponents: () => [], getBulkSummaries: () => ({}) },
   handleDiscuss:           async () => {},
   handleDiscussHistory:    async () => {},

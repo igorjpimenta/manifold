@@ -11,7 +11,7 @@ export function registerRunRoutes({
   runStore,
   pipelinesRef,
   pipelineRegistryStore,
-  rerunElevated,
+  rerunFlow,
   discussStore,
   failureStore,
   sessionIndex,
@@ -977,7 +977,7 @@ export function registerRunRoutes({
     try {
       const missingIdentity = missingIdentityFields(body, ["session", "agentId"]);
       if (missingIdentity.length > 0) { refuseMissingIdentity(res, missingIdentity); return true; }
-      const result = await rerunElevated({ sourceFlow, argsOverride });
+      const result = await rerunFlow({ sourceFlow, argsOverride });
       res.statusCode = result.status;
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(result.body));

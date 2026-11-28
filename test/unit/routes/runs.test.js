@@ -43,7 +43,7 @@ function makeDeps(api, overrides = {}) {
     readStore: { listStatusCounts: () => ({}), listRunsPage: () => [], listCostSnapshot: () => [], get: () => null, listQueued: () => [] },
     costForAllPipelines: async () => ({ pipelines: [], sinceMs: null }),
     pipelinesRef: { value: new Map() },
-    rerunElevated: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
+    rerunFlow: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
     failureStore: {
       queryErrorsByFlow: async (flowId) => queryErrorsByFlowImpl(flowId),
       queryErrorsByFlowIds: async (flowIds) => queryErrorsByFlowIdsImpl(flowIds),
@@ -502,9 +502,9 @@ describe("registerRunRoutes — sendFullRun assembleState()/gate_records", () =>
 
 describe("registerRunRoutes — rerun handler", () => {
   const sourceFlow = { flowId: "flow-1" };
-  function rerunDeps(api, rerunElevated) {
+  function rerunDeps(api, rerunFlow) {
     return makeDeps(api, {
-      rerunElevated,
+      rerunFlow,
       readStore: {
         listStatusCounts: () => ({}), listRunsPage: () => [], listCostSnapshot: () => [],
         get: (id) => id === "flow-1" ? sourceFlow : null, listQueued: () => [],
@@ -514,8 +514,8 @@ describe("registerRunRoutes — rerun handler", () => {
 
   test("passes the source flow to the rerun work once the identity stamp is present", async () => {
     const { api, routes } = createMockApi();
-    const rerunElevated = mock.fn(async () => ({ status: 200, body: { ok: true, flowId: "flow-2" } }));
-    registerRunRoutes(rerunDeps(api, rerunElevated));
+    const rerunFlow = mock.fn(async () => ({ status: 200, body: { ok: true, flowId: "flow-2" } }));
+    registerRunRoutes(rerunDeps(api, rerunFlow));
     const body = { session: "agent:main:k1", agentId: "main" };
     const req = {
       ...authReq("POST", "/manifold/runs/flow-1/rerun"),
@@ -523,8 +523,8 @@ describe("registerRunRoutes — rerun handler", () => {
     };
     const res = createMockRes();
     await prefixHandler(routes)(req, res);
-    assert.equal(rerunElevated.mock.calls.length, 1);
-    const [args] = rerunElevated.mock.calls[0].arguments;
+    assert.equal(rerunFlow.mock.calls.length, 1);
+    const [args] = rerunFlow.mock.calls[0].arguments;
     assert.equal(args.sourceFlow.flowId, "flow-1");
     assert.equal(res.statusCode, 200);
     assert.equal(JSON.parse(res.body).flowId, "flow-2");
@@ -532,8 +532,8 @@ describe("registerRunRoutes — rerun handler", () => {
 
   test("unstamped call → 400 missing_identity, rerun work never runs", async () => {
     const { api, routes } = createMockApi();
-    const rerunElevated = mock.fn(async () => ({ status: 200, body: { ok: true } }));
-    registerRunRoutes(rerunDeps(api, rerunElevated));
+    const rerunFlow = mock.fn(async () => ({ status: 200, body: { ok: true } }));
+    registerRunRoutes(rerunDeps(api, rerunFlow));
     const req = {
       ...authReq("POST", "/manifold/runs/flow-1/rerun"),
       [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify({})); },
@@ -542,6 +542,6 @@ describe("registerRunRoutes — rerun handler", () => {
     await prefixHandler(routes)(req, res);
     assert.equal(res.statusCode, 400);
     assert.equal(JSON.parse(res.body).code, "missing_identity");
-    assert.equal(rerunElevated.mock.calls.length, 0);
+    assert.equal(rerunFlow.mock.calls.length, 0);
   });
 });

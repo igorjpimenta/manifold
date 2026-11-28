@@ -3,7 +3,7 @@
 import { authorizeBearerRequest, sendUnauthorized } from "./bearer-auth.js";
 import { missingIdentityFields, refuseMissingIdentity } from "./operator.js";
 
-export function registerFailureRoutes({ api, failureStore, retryFailureElevated }) {
+export function registerFailureRoutes({ api, failureStore, retryFailure }) {
   api.registerHttpRoute({
     path: "/manifold/failures",
     auth: "plugin",
@@ -79,7 +79,7 @@ export function registerFailureRoutes({ api, failureStore, retryFailureElevated 
           try {
             const missingIdentity = missingIdentityFields(body, ["session", "agentId"]);
             if (missingIdentity.length > 0) { refuseMissingIdentity(res, missingIdentity); return true; }
-            const result = await retryFailureElevated({ id, via });
+            const result = await retryFailure({ id, via });
             res.statusCode = result.status;
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify(result.body));

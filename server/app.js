@@ -248,7 +248,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
     sessions: host.sessions,
   });
 
-  const { startElevated, rerunElevated, retryFailureElevated } = registerOperatorRoutes({
+  const { startPipeline, rerunFlow, retryFailure } = registerOperatorRoutes({
     api: routeHost,
     store,
     readStore,
@@ -286,7 +286,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
     runStore,
     pipelinesRef,
     pipelineRegistryStore,
-    rerunElevated,
+    rerunFlow,
     discussStore,
     failureStore,
     sessionIndex,
@@ -298,7 +298,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
     handleDiscussAudioRetry: discussHandlers.handleDiscussAudioRetry,
   });
 
-  registerFailureRoutes({ api: routeHost, failureStore, retryFailureElevated });
+  registerFailureRoutes({ api: routeHost, failureStore, retryFailure });
   registerGraphqlRoutes({ api: routeHost, failureStore, runStore });
   registerHealthRoutes({ api: routeHost });
   registerPipelineRoutes({ api: routeHost, pipelinesRef, readStore, ensurePipelinesLoaded });
@@ -313,7 +313,7 @@ export function createManifoldApp({ host, config = {} } = {}) {
       logger, flowId, nodeId, decision,
     }),
     // In-process start for an approved start-gate item (no HTTP loopback).
-    onStartGateStart: (args) => startElevated(args),
+    onStartGateApproved: (args) => startPipeline(args),
   });
   registerTelemetry(routeHost, { getBroadcast, _dbPath: storePaths.opsDb });
 

@@ -20,7 +20,7 @@ function makeDeps(api, overrides = {}) {
   return {
     api,
     failureStore: { list: () => [], get: () => null },
-    retryFailureElevated: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
+    retryFailure: async () => ({ status: 500, body: { ok: false, code: "not_bound" } }),
     ...overrides,
   };
 }
@@ -95,8 +95,8 @@ describe("registerFailureRoutes — list handler", () => {
 describe("registerFailureRoutes — retry handler", () => {
   test("passes id + via to the retry work once the identity stamp is present", async () => {
     const { api, routes } = createMockApi();
-    const retryFailureElevated = mock.fn(async () => ({ status: 200, body: { ok: true } }));
-    registerFailureRoutes(makeDeps(api, { retryFailureElevated }));
+    const retryFailure = mock.fn(async () => ({ status: 200, body: { ok: true } }));
+    registerFailureRoutes(makeDeps(api, { retryFailure }));
     const { handler } = routes.find((r) => r.match === "prefix");
     const body = { via: "app", session: "agent:main:k1", agentId: "main" };
     const req = {
@@ -105,8 +105,8 @@ describe("registerFailureRoutes — retry handler", () => {
     };
     const res = createMockRes();
     await handler(req, res);
-    assert.equal(retryFailureElevated.mock.calls.length, 1);
-    const [args] = retryFailureElevated.mock.calls[0].arguments;
+    assert.equal(retryFailure.mock.calls.length, 1);
+    const [args] = retryFailure.mock.calls[0].arguments;
     assert.equal(args.id, "f1");
     assert.equal(args.via, "app");
     assert.equal(res.statusCode, 200);
@@ -114,8 +114,8 @@ describe("registerFailureRoutes — retry handler", () => {
 
   test("unstamped call → 400 missing_identity, retry work never runs", async () => {
     const { api, routes } = createMockApi();
-    const retryFailureElevated = mock.fn(async () => ({ status: 200, body: { ok: true } }));
-    registerFailureRoutes(makeDeps(api, { retryFailureElevated }));
+    const retryFailure = mock.fn(async () => ({ status: 200, body: { ok: true } }));
+    registerFailureRoutes(makeDeps(api, { retryFailure }));
     const { handler } = routes.find((r) => r.match === "prefix");
     const req = {
       ...authedReq("POST", "/manifold/failures/f1/retry"),
@@ -125,7 +125,7 @@ describe("registerFailureRoutes — retry handler", () => {
     await handler(req, res);
     assert.equal(res.statusCode, 400);
     assert.equal(JSON.parse(res.body).code, "missing_identity");
-    assert.equal(retryFailureElevated.mock.calls.length, 0);
+    assert.equal(retryFailure.mock.calls.length, 0);
   });
 });
 

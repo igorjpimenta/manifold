@@ -51,7 +51,7 @@ export function registerOperatorRoutes({
   // Work the public routes (and in-process callers such as the budget queue)
   // run directly — the caller owns the HTTP shape, the identity guard and the
   // bearer check.
-  async function gateResolveElevated({ flowId, itemId, decision, source, editedText, reason }) {
+  async function resolveGate({ flowId, itemId, decision, source, editedText, reason }) {
     try {
       const result = await gateResolver.recordItemDecision({ flowId, itemId, decision, source, editedText, reason });
       const status = result.ok ? 200 : (result.code === "flow_not_found" ? 404 : 409);
@@ -62,7 +62,7 @@ export function registerOperatorRoutes({
     }
   }
 
-  async function startElevated({ pipelineId, args, via, parentSessionKey }) {
+  async function startPipeline({ pipelineId, args, via, parentSessionKey }) {
     const effectiveVia = typeof via === "string" ? via : "operator";
     try {
       await ensurePipelinesLoaded?.();
@@ -125,7 +125,7 @@ export function registerOperatorRoutes({
     }
   }
 
-  async function rerunElevated({ sourceFlow, argsOverride }) {
+  async function rerunFlow({ sourceFlow, argsOverride }) {
     let record;
     try {
       record = executor.rerunFromSource(sourceFlow, argsOverride);
@@ -145,7 +145,7 @@ export function registerOperatorRoutes({
     return { status: 200, body: { ok: true, flowId: record.flowId, pipelineId: record.stateJson?.pipelineId ?? null, rerunOf: sourceFlow.flowId } };
   }
 
-  async function retryFailureElevated({ id, via }) {
+  async function retryFailure({ id, via }) {
     const result = await retryFailureBranch({ id, via });
     const status = result.code === "ok" ? 200 : result.code === "not_found" ? 404 : result.code === "conflict" ? 409 : 500;
     return { status, body: result };
@@ -170,7 +170,7 @@ export function registerOperatorRoutes({
       try {
         const missingGateIdentity = missingIdentityFields(body, ["flowId", "session", "agentId"]);
         if (missingGateIdentity.length > 0) { refuseMissingIdentity(res, missingGateIdentity); return true; }
-        const result = await gateResolveElevated({
+        const result = await resolveGate({
           flowId: body.flowId,
           itemId: body.itemId,
           decision: body.decision,
@@ -307,7 +307,7 @@ export function registerOperatorRoutes({
         }
         const missingStartIdentity = missingIdentityFields(body, ["session", "agentId"]);
         if (missingStartIdentity.length > 0) { refuseMissingIdentity(res, missingStartIdentity); return true; }
-        const result = await startElevated({
+        const result = await startPipeline({
           pipelineId,
           args: (body.args && typeof body.args === "object") ? body.args : {},
           via: authz.via,
@@ -366,5 +366,5 @@ export function registerOperatorRoutes({
     },
   });
 
-  return { gateResolveElevated, startElevated, rerunElevated, retryFailureElevated };
+  return { resolveGate, startPipeline, rerunFlow, retryFailure };
 }

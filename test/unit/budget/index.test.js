@@ -324,9 +324,9 @@ describe("registerBudgetRoutes — start-gate approval", () => {
   it("fires the injected start handler in-process with the queue row's pipeline + enqueuer", async () => {
     const api = makeFakeApi();
     const starts = [];
-    const onStartGateStart = async (args) => { starts.push(args); return { status: 200, body: { ok: true } }; };
+    const onStartGateApproved = async (args) => { starts.push(args); return { status: 200, body: { ok: true } }; };
     const dbPath = tmpDbPath();
-    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), onStartGateStart });
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), onStartGateApproved });
     await api.runtime.approvalQueue.isGateLocked();
     // queue_items.pipeline_id is a real FK — seeding a flow is what puts the
     // pipeline row in the registry.
@@ -353,9 +353,9 @@ describe("registerBudgetRoutes — start-gate approval", () => {
   it("a rejected start-gate row starts nothing", async () => {
     const api = makeFakeApi();
     const starts = [];
-    const onStartGateStart = async (args) => { starts.push(args); };
+    const onStartGateApproved = async (args) => { starts.push(args); };
     const dbPath = tmpDbPath();
-    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), onStartGateStart });
+    registerBudgetRoutes(api, { openStore: () => openStore({ dbPath }), onStartGateApproved });
     await api.runtime.approvalQueue.isGateLocked();
     await seedFlow(dbPath, "flow-1");
 
